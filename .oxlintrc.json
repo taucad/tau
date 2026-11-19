@@ -1039,7 +1039,25 @@
     {
       // Generated standalone CAD projects must keep relative imports when copied outside this workspace.
       "files": ["packages/warehouse/parts/**/*.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // The compiler reports a real redeclaration (ts(2451)); the core rule only misreads a
@@ -1132,7 +1150,23 @@
       "files": ["apps/ui/react-router.config.ts"],
       "rules": {
         "import/extensions": "off",
-        "no-restricted-imports": "off"
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -1418,7 +1452,23 @@
         "libs/tau-examples/src/standalone/**/*.{ts,tsx,mjs}"
       ],
       "rules": {
-        "no-restricted-imports": "off",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ],
         "tau-lint/no-impl-in-index": "off",
         "react/react-in-jsx-scope": "off",
         "@typescript-eslint/restrict-plus-operands": "warn",
@@ -1560,7 +1610,25 @@
     {
       // Current auth component inversion. -- W5
       "files": ["apps/ui/app/utils/magic-link-plugin.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // Current graphics inversions. -- W3
@@ -1570,12 +1638,48 @@
         "apps/ui/app/machines/screenshot-capability.machine.ts",
         "apps/ui/app/machines/screenshot-capability.utils.test.ts"
       ],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // Current file/telemetry inversion. -- W4
       "files": ["apps/ui/app/utils/workspace-telemetry.utils.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // Current chat inversions. -- W6
@@ -1587,17 +1691,71 @@
         "apps/ui/app/utils/chat.utils.test.ts",
         "apps/ui/app/utils/chat.utils.ts"
       ],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // Current publish/import inversions. -- W9
       "files": ["apps/ui/app/lib/github-api.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // Current settings inversion. -- W10
       "files": ["apps/ui/app/constants/route.constants.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       // libcascade exposes generated OCCT/Emscripten names whose constructor
@@ -1641,7 +1799,23 @@
        */
       "files": ["examples/**/*.{ts,tsx,mts,cts}"],
       "rules": {
-        "no-restricted-imports": "off",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ],
         "import/extensions": "off",
         "unicorn-js/prevent-abbreviations": [
           "warn",
@@ -1705,7 +1879,23 @@
       // Type-aware rules produce false positives in .js files (JSON.parse → any, ESTree AST types).
       "files": ["libs/oxlint/src/**/*.js"],
       "rules": {
-        "no-restricted-imports": "off",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              }
+            ]
+          }
+        ],
         "@typescript-eslint/no-unsafe-assignment": "off",
         "@typescript-eslint/no-unsafe-argument": "off",
         "@typescript-eslint/no-unsafe-call": "off",

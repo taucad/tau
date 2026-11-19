@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/tooltip.js';
 import { Button } from '#components/button.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
+import { copyText } from '#utils/clipboard.js';
 
 /**
  * Properties of {@link CopyButton}.
@@ -60,13 +61,12 @@ export function CopyButton({
   const copied = ticked && outcome === 'copied';
   const failed = ticked && outcome === 'failed';
 
+  /* The write starts inside the press, before any await, so a browser that needs the gesture still allows it; text
+     still being made goes into a pending clipboard item (`copyText`). */
   const handleCopy = useCallback(async () => {
     try {
-      /* `navigator.clipboard` is absent on an insecure origin, so the member
-         access throws there and lands in the same failure state as a refusal —
-         no `isSecureContext` branch, and no silent `console.warn`. */
-      await navigator.clipboard.writeText(await getText());
-      setOutcome('copied');
+      const { isCopied } = await copyText(getText());
+      setOutcome(isCopied ? 'copied' : 'failed');
     } catch {
       setOutcome('failed');
     }

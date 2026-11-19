@@ -295,10 +295,10 @@ export const PortableShareSurface = (): React.JSX.Element => {
       <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
         <div className='max-w-md rounded-xl border bg-card p-6 text-center'>
           <Heading level={1} variant='title'>
-            GitHub Gist unpublished
+            Gist deleted
           </Heading>
           <p className='mt-2 text-sm text-muted-foreground'>
-            This Tau share and its GitHub Gist link no longer resolve.
+            The Gist is gone from GitHub, so this link and its GitHub link no longer open.
           </p>
         </div>
       </main>
@@ -391,6 +391,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
               locator={parseShareSlug(slug)}
               protection={protection}
               collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
+              shareUrl={sourceUrl}
               onRepublished={(url) => {
                 globalThis.location.assign(url);
               }}

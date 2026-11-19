@@ -1226,6 +1226,8 @@ export const picovoxelKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: picovoxelDetectPattern,
   builtinModuleNames: [...picovoxelBuiltinModuleNames],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: { picovoxel: picovoxelPackage },
   name: 'PicovoxelKernel',
   version: kernelVersion,

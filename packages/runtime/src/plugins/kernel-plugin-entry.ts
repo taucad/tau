@@ -62,6 +62,7 @@ export type {
 export type { KernelPlugin } from '#plugins/plugin-types.js';
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 export {
+  bindKernelModuleCode,
   convertRawIssuesToKernelIssues,
   createKernelParameterDeclaration,
   createKernelModuleShim,
@@ -69,6 +70,7 @@ export {
   extractDefaultParameters,
   isRecordObject,
   loadBinaryFile,
+  portableKernelModuleCode,
   registerKernelModule,
   toVmEntryPath,
 } from '#kernels/kernel-module-helpers.js';

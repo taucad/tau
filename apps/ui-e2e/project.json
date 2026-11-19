@@ -94,7 +94,7 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",
@@ -102,6 +102,26 @@
         "commands": [
           "pnpm exec nx run ui:build",
           "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts --environment=node"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:service-worker": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The web app's service worker on a built app (progressive loading PL7). service-worker.test.ts serves one ui:build as one deploy and checks the worker's offline opens of Home and a local project, their cross-origin isolation, that API, auth, data and marketing requests pass through, and its precache list (shell invariants 8 and 9). service-worker-deploy.test.ts serves it as two deploys (src/support/two-deploys.ts) and checks that a tab the worker controls keeps working and opens the new deploy once the update rule fires (ruling OD3), and that one deploy of the kill switch (TAU_SERVICE_WORKER_KILL_SWITCH) retires an installed worker. A new suite: e2e-nightly.yml runs it, and it joins test:e2e:queue only after five consecutive green nightlies (the end-to-end ratchet). Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/service-worker.test.ts apps/ui-e2e/src/service-worker-deploy.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",

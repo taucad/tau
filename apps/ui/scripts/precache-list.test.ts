@@ -1,10 +1,14 @@
 /**
- * The allowlist is generated, never hand-maintained (B5 R3): it must resolve to
- * real build output and fail the build when it cannot.
+ * The precache list is generated, never hand-maintained (progressive loading PL7): it must resolve to real build
+ * output and fail the build when it cannot.
  */
 import { expect, it } from 'vitest';
-import { collectOfflineShellAssets, offlineShellVersion } from '#scripts/generate-offline-shell.js';
-import type { ClientBuildView, ViteManifest } from '#scripts/generate-offline-shell.js';
+import { collectPrecacheFiles, precacheEntries } from '#scripts/precache-list.js';
+import type { ClientBuildView, PrecacheDocument, ViteManifest } from '#scripts/precache-list.js';
+
+const usage: PrecacheDocument = { document: '/usage/index.html', roots: [] };
+const collect = (build: ClientBuildView, documents: readonly PrecacheDocument[] = [usage]): string[] =>
+  collectPrecacheFiles(documents, build);
 
 const manifest: ViteManifest = {
   'app/entry.client.tsx': {
@@ -15,6 +19,13 @@ const manifest: ViteManifest = {
   '_shared-ddd.js': { file: 'assets/shared-ddd.js', dynamicImports: ['app/kernel.ts'] },
   'app/kernel.ts': { file: 'assets/kernel-eee.js', assets: ['assets/kernel-fff.wasm'] },
   'app/styles/global.css': { file: 'assets/app-bbb.css' },
+  'app/routes/w.$workspace.$project/route.tsx?__react-router-build-client-route': {
+    file: 'assets/route-ggg.js',
+    imports: ['_shared-ddd.js'],
+    css: ['assets/route-hhh.css'],
+    assets: ['assets/thumbnail-iii.webp'],
+    dynamicImports: ['app/kernel.ts'],
+  },
 };
 
 const files = new Map<string, string>([
@@ -35,6 +46,11 @@ const files = new Map<string, string>([
   ['fonts/Geist-Variable.woff2', 'font'],
   ['fonts/GeistMono-Variable.woff2', 'mono font'],
   ['favicon.svg', '<svg/>'],
+  ['w/__shell/__shell/index.html', '<link rel="modulepreload" href="/assets/entry-aaa.js"/>'],
+  ['assets/route-ggg.js', 'route'],
+  ['assets/route-hhh.css', "@font-face{src:url('/assets/KaTeX_Main-jjj.woff') format('woff')}"],
+  ['assets/thumbnail-iii.webp', 'image'],
+  ['assets/KaTeX_Main-jjj.woff', 'font fallback'],
 ]);
 
 const build: ClientBuildView = {
@@ -44,7 +60,7 @@ const build: ClientBuildView = {
 };
 
 it('resolves every entry the prerendered document needs to an existing build asset', () => {
-  const assets = collectOfflineShellAssets(['/usage'], build);
+  const assets = collect(build);
 
   expect(assets).toStrictEqual([
     '/assets/app-bbb.css',
@@ -53,7 +69,47 @@ it('resolves every entry the prerendered document needs to an existing build ass
     '/favicon.svg',
     '/fonts/Geist-Variable.woff2',
     '/fonts/GeistMono-Variable.woff2',
+    '/usage/index.html',
   ]);
+});
+
+it('adds a class’s interactive roots and their static closure, never a dynamic import', () => {
+  const files = collect(build, [
+    { document: '/w/__shell/__shell/index.html', roots: ['routes/w.$workspace.$project/route.tsx'] },
+  ]);
+
+  // The chunk's image and the stylesheet's hashed font fallback load when rendered, so they are cached on first use.
+  expect(files).toStrictEqual([
+    '/assets/app-bbb.css',
+    '/assets/entry-aaa.js',
+    '/assets/route-ggg.js',
+    '/assets/route-hhh.css',
+    '/assets/shared-ddd.js',
+    '/fonts/GeistMono-Variable.woff2',
+    '/w/__shell/__shell/index.html',
+  ]);
+});
+
+it('fails when a class names a root the build manifest does not have', () => {
+  expect(() => collect(build, [{ document: '/usage/index.html', roots: ['routes/renamed/route.tsx'] }])).toThrow(
+    /no entry for app\/routes\/renamed\/route.tsx/u,
+  );
+});
+
+it('revisions documents and other unhashed files by content and leaves hashed files unrevisioned', () => {
+  const bytes = (path: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(files.get(path) ?? '');
+  const entries = precacheEntries(['/assets/entry-aaa.js', '/usage/index.html', '/favicon.svg'], bytes);
+
+  expect(entries.map((entry) => entry.revision === null)).toStrictEqual([true, false, false]);
+  expect(entries[1]?.revision).toMatch(/^[\da-f]{32}$/u);
+  expect(Object.keys(entries[0] ?? {}).toSorted()).toStrictEqual(['revision', 'url']);
+
+  const changed = new Map(files);
+  changed.set('usage/index.html', `${files.get('usage/index.html') ?? ''}<!-- redeploy -->`);
+  const redeployed = precacheEntries(['/usage/index.html'], (path) =>
+    new TextEncoder().encode(changed.get(path) ?? ''),
+  );
+  expect(redeployed[0]?.revision).not.toBe(entries[1]?.revision);
 });
 
 it('ignores query strings and fragments when resolving same-origin assets', () => {
@@ -68,11 +124,12 @@ it('ignores query strings and fragments when resolving same-origin assets', () =
     exists: (relativePath) => decoratedFiles.has(relativePath),
   };
 
-  expect(collectOfflineShellAssets(['/usage'], decoratedBuild)).toStrictEqual([
+  expect(collect(decoratedBuild)).toStrictEqual([
     '/assets/app-bbb.css',
     '/assets/entry-aaa.js',
     '/assets/shared-ddd.js',
     '/fonts/GeistMono-Variable.woff2',
+    '/usage/index.html',
   ]);
 });
 
@@ -86,12 +143,12 @@ it.each(['/assets/kernel.wasm?v=1#x', '/assets/kernel.js.map?debug=1#x', String.
       manifest: {},
     };
 
-    expect(collectOfflineShellAssets(['/usage'], referenceBuild)).toStrictEqual([]);
+    expect(collect(referenceBuild)).toStrictEqual(['/usage/index.html']);
   },
 );
 
 it('excludes cross-origin references, dynamic imports and kernel binaries', () => {
-  const assets = collectOfflineShellAssets(['/usage'], build);
+  const assets = collect(build);
 
   expect(assets).not.toContain('https://docs.tau.new/');
   expect(assets).not.toContain('/assets/kernel-eee.js');
@@ -104,7 +161,7 @@ it('fails when a referenced asset is missing from the build output', () => {
     exists: (relativePath) => relativePath !== 'assets/shared-ddd.js' && files.has(relativePath),
   };
 
-  expect(() => collectOfflineShellAssets(['/usage'], withoutShared)).toThrow(/missing build asset/u);
+  expect(() => collect(withoutShared)).toThrow(/missing build file/u);
 });
 
 it('collects a directly linked hashed stylesheet absent from the build manifest', () => {
@@ -116,9 +173,10 @@ it('collects a directly linked hashed stylesheet absent from the build manifest'
     manifest: {},
   };
 
-  expect(collectOfflineShellAssets(['/usage'], directCssBuild)).toStrictEqual([
+  expect(collect(directCssBuild)).toStrictEqual([
     '/assets/app-bbb.css',
     '/fonts/GeistMono-Variable.woff2',
+    '/usage/index.html',
   ]);
 });
 
@@ -132,21 +190,11 @@ it('fails when a hashed asset is absent from the build manifest', () => {
     manifest,
   };
 
-  expect(() => collectOfflineShellAssets(['/usage'], unlisted)).toThrow(/absent from the build manifest/u);
+  expect(() => collect(unlisted)).toThrow(/absent from the build manifest/u);
 });
 
 it('fails when the shell document was not prerendered', () => {
-  expect(() => collectOfflineShellAssets(['/nowhere'], build)).toThrow(/was not prerendered/u);
-});
-
-it('changes the version when the shell content changes', () => {
-  const assets = collectOfflineShellAssets(['/usage'], build);
-  const changedFiles = new Map(files);
-  changedFiles.set('usage/index.html', `${files.get('usage/index.html') ?? ''}<!-- redeploy -->`);
-  const changed: ClientBuildView = { ...build, readText: (path) => changedFiles.get(path) };
-
-  expect(offlineShellVersion(['/usage'], assets, build)).toBe(offlineShellVersion(['/usage'], assets, build));
-  expect(offlineShellVersion(['/usage'], assets, changed)).not.toBe(offlineShellVersion(['/usage'], assets, build));
+  expect(() => collect(build, [{ document: '/nowhere/index.html', roots: [] }])).toThrow(/was not prerendered/u);
 });
 
 it('ignores navigation links in the useful server-rendered shell', () => {
@@ -155,10 +203,5 @@ it('ignores navigation links in the useful server-rendered shell', () => {
     'usage/index.html',
     `${files.get('usage/index.html')}<a href="/projects">Projects</a><link rel="canonical" href="/usage"><a download href="/private/export">Export</a>`,
   );
-  expect(
-    collectOfflineShellAssets(['/usage'], {
-      ...build,
-      readText: (path) => linkedFiles.get(path),
-    }),
-  ).toEqual(collectOfflineShellAssets(['/usage'], build));
+  expect(collect({ ...build, readText: (path) => linkedFiles.get(path) })).toEqual(collect(build));
 });

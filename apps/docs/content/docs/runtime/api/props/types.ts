@@ -44,6 +44,7 @@ export type {
   OptionDependency,
   ParameterDependency,
   AssetDependency,
+  BundleDependency,
   Dependency,
   BundlerDefinition,
   KernelBundler,

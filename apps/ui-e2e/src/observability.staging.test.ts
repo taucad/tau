@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  diagnoseMissingDesktopSignals,
   observeHarnessPage,
   harnessNavigationTimeout,
   harnessPath,
@@ -176,7 +177,9 @@ describe('Later staging signal acceptance — pending implementation', () => {
  * the first looks for each signal on its own, logs what it found for each, and asserts each arrived exactly once and
  * carries no path; the second that the alert filtering on its `tau_event` tag fired for it. No published staging
  * release emits both events yet, and I1 is not applied, so both rows land as `it.fails`; each mark goes when its row
- * passes on a dispatched run. Only ids, tag names and counts are asserted or logged.
+ * passes on a dispatched run. Only ids, tag names and counts are asserted or logged. When a signal is missing the
+ * first row also logs `diagnoseMissingDesktopSignals`: the signal under any environment, every event and session of
+ * the release, whether Sentry lists the release, and the project's error outcomes at ingest over the window.
  */
 const desktopBootSignals = ['file_service.start_failed', 'desktop-boot-unhealthy'] as const;
 type DesktopBootSignal = (typeof desktopBootSignals)[number];
@@ -302,6 +305,13 @@ describe('R9 desktop boot signals on staging (T-R9.3)', () => {
         return { signal, count: ids.length, readableId, carriesPath };
       }),
     );
+    /* A missing signal explains itself: where else it, or anything of the release, landed, and what ingest did with
+     * the project's errors over the window. Counts and Sentry's own names only. */
+    const missing = findings.filter(({ count }) => count === 0).map(({ signal }) => signal);
+    if (missing.length > 0) {
+      const diagnostics = await diagnoseMissingDesktopSignals(missing, { ...inputs, until: new Date().toISOString() });
+      console.info('Desktop boot signal diagnostics', JSON.stringify(diagnostics));
+    }
     const problems = findings.flatMap(({ signal, count, readableId, carriesPath }) => {
       if (count !== 1) {
         return [`${signal}: ${String(count)} events since the forcing, expected exactly one`];

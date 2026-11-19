@@ -176,6 +176,10 @@ describe('Vitest Browser test-runner ownership', () => {
       // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
       // document reload, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // The PL7 service worker checks install a worker, take the browser offline and switch deploys under one page
+      // across document loads, which Browser Mode's iframe cannot host.
+      'apps/ui-e2e/src/service-worker.test.ts',
+      'apps/ui-e2e/src/service-worker-deploy.test.ts',
       // The hosted staging observability gate owns isolated browser contexts and cross-document failure
       // scenarios, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/observability.staging.test.ts',

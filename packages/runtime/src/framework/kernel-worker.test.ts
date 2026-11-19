@@ -2370,6 +2370,9 @@ public static class Params
         issues: [],
         success: true,
       });
+      // ...built with the same script globals (none narrowed: no kernel is selected).
+      // @ts-expect-error - accessing private for test verification
+      worker.bundleGlobalsKeys.set('main.ts', 'null');
 
       const mockBundlerDefinition = {
         name: 'MockBundler',

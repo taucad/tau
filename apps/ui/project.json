@@ -67,6 +67,9 @@
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
+          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
+        },
+        {
           "env": "TAU_BILLING_ENVIRONMENT"
         },
         {
@@ -211,8 +214,13 @@
         "{projectRoot}/scripts/check-critical-budget.mts",
         "{projectRoot}/scripts/critical-path.mts",
         "{projectRoot}/critical-budget.json",
+        "{projectRoot}/scripts/precache-list.ts",
+        "{projectRoot}/build-environment.ts",
         {
-          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
+          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,service-worker-precache.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
         }
       ],
       "outputs": [],

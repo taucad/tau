@@ -366,7 +366,6 @@
     "app/hooks/use-project.graphics.test.tsx": 0.3,
     "app/hooks/use-project.lease.test.tsx": 3.3,
     "app/hooks/use-project.manifest-change.test.ts": 4.1,
-    "app/hooks/use-publish-cloud-project-preview.test.ts": 0.6,
     "app/hooks/use-resolved-auth.test.tsx": 0.3,
     "app/hooks/use-revision-status.github-credential.test.tsx": 9.2,
     "app/hooks/use-revision-status.role.test.tsx": 0.8,

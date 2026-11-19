@@ -11,6 +11,8 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { ShareError } from '@taucad/share/provider';
+import type { ShareProvider, ShareProviderContext } from '@taucad/share/provider';
+import { mock } from 'vitest-mock-extended';
 import type { PublishDraft, RevisionRow, RevisionStatusProjection, RevisionTag } from '@taucad/revisions';
 import {
   ProjectSharePanel,
@@ -24,22 +26,22 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 const portableProviderPublish = vi.hoisted(() => vi.fn());
 const portableProviderRepublish = vi.hoisted(() => vi.fn());
 const portableProviderUnpublish = vi.hoisted(() => vi.fn());
-const portableProviderLoad = vi.hoisted(() =>
-  vi.fn(async () => ({
-    publish: portableProviderPublish,
-    republish: portableProviderRepublish,
-    unpublish: portableProviderUnpublish,
-  })),
-);
 const getGithubGistConnectionStatus = vi.hoisted(() => vi.fn(async () => 'not-connected'));
 const connectGithubGist = vi.hoisted(() => vi.fn());
 const awaitGithubGistConnection = vi.hoisted(() => vi.fn<(signal: AbortSignal) => Promise<boolean>>());
 const portableContextDispose = vi.hoisted(() => vi.fn());
-const portableContext = {
+const portableContext = mock<ShareProviderContext>({
   origin: 'https://tau.example',
   artifactCodec: {},
   fetch: globalThis.fetch,
-};
+});
+/* Each load hands out the one provider, whose publish verbs are the scripted handlers above. */
+const portableProvider = mock<ShareProvider>({
+  publish: portableProviderPublish,
+  republish: portableProviderRepublish,
+  unpublish: portableProviderUnpublish,
+});
+const portableProviderLoad = vi.fn(async (_providerId: string): Promise<ShareProvider> => portableProvider);
 
 /* The remembered sharing method (R8): the app keeps it in a cookie, which outlives one mount of the panel. */
 const shareMethodPreference = new Map<'method', unknown>();
@@ -147,11 +149,11 @@ const services: ProjectShareServices = {
       { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
       { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
     ],
-    load: portableProviderLoad as unknown as ProjectShareServices['shareProviderRegistry']['load'],
+    load: portableProviderLoad,
   },
   withBrowserShareProviderContext: async (operation) => {
     try {
-      return await operation(portableContext as unknown as Parameters<typeof operation>[0]);
+      return await operation(portableContext);
     } finally {
       portableContextDispose();
     }

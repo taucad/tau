@@ -7,7 +7,7 @@ import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { consumeBranchControl, getBranchControlRequest } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { consumeBranchControl, getBranchControlRequest } from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 let registeredItems: CommandPaletteItem[] = [];

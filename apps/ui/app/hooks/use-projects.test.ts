@@ -1,10 +1,15 @@
 import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChatStorage } from '#types/storage.types.js';
+import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@taucad/chat';
-import type { ProjectCommands, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type {
+  ProjectCommands,
+  ProjectCommandsServices,
+  ProjectLibraryChatSessions,
+} from '@taucad/files-ui/runtime/project-library-commands';
+import type { ProjectLibraryWorker } from '@taucad/files-ui/types/project-library-io.types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 
@@ -117,11 +122,12 @@ vi.mock('@taucad/agent-host/browser', () => ({
 }));
 
 vi.mock('#hooks/use-project-manager.js', async () => {
-  const commandsModule = await import('#runtime/project-library-commands.js');
+  const commandsModule = await import('@taucad/files-ui/runtime/project-library-commands');
+  const { selectCaughtUp } = await import('#machines/chat-projection.logic.js');
   const notCalled = async (): Promise<never> => {
     throw new Error('not called in this test');
   };
-  const chatStore = mock<ProjectLibraryChatSessions>({
+  const chatStore = mock<ProjectLibraryChatSessions<ChatProjection>>({
     observedChatIdsOf: () => chats.observed,
     getProjection: () => (chats.projection === undefined ? undefined : mock<ChatProjection>(chats.projection)),
     getProjectClosePlan: async () => mock<ProjectClosePlan>(chats.plan),
@@ -133,7 +139,8 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     },
     readChatLog: async (chatId) => new TextEncoder().encode(chats.logs.get(chatId) ?? ''),
   });
-  const built = new commandsModule.ProjectCommands({
+  const built = new commandsModule.ProjectCommands<ProjectLibraryWorker, ChatProjection>({
+    services: mock<ProjectCommandsServices<ChatProjection>>({ isCaughtUp: selectCaughtUp }),
     facade: notCalled,
     chatStore: () => undefined,
     readChats: async (operation) => operation(chatSource),

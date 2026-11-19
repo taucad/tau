@@ -8,6 +8,34 @@ type PageChannel = ReturnType<typeof connectAgentWorkerChannel<AgentHostWorkerPr
 /* Records evaluations of the host implementation, the module a `provide` needs. */
 const implementation = vi.hoisted(() => ({ evaluations: 0 }));
 
+/* A `provide` the wire accepts; each call transfers fresh ports. */
+const provideArgs = (
+  hostId: string,
+): Readonly<{ value: AgentHostWorkerProtocol['calls']['provide']['args']; transferables: MessagePort[] }> => {
+  const fileSystem = new MessageChannel();
+  const projectRoot = new MessageChannel();
+  const placement = new MessageChannel();
+  return {
+    value: {
+      projectId: 'project-1',
+      hostId,
+      fileSystemPort: fileSystem.port1,
+      projectRootPort: projectRoot.port1,
+      placementPort: placement.port1,
+      projectStorage: { projectId: 'project-1', backend: 'opfs', providerBasePath: '/projects' },
+      authority: { projectId: 'project-1', workspaceId: 'workspace-1' },
+      gatewayBaseUrl: 'http://localhost:4000',
+      systemPrompt: '',
+      systemPromptBlocks: [
+        { type: 'text', text: 'static' },
+        { type: 'text', text: 'dynamic' },
+      ],
+      runtimeConfig: { tauApiUrl: 'http://localhost:4000', tauWebSocketUrl: 'ws://localhost:4001' },
+    },
+    transferables: [fileSystem.port1, projectRoot.port1, placement.port1],
+  };
+};
+
 /* A lower bound, not a guarantee: long enough for a load started at the connection to have evaluated (the mock
    evaluates within a few ticks), so a regression to loading at connect turns the zero check red on a normal run. */
 const settle = async (): Promise<void> => {
@@ -90,5 +118,43 @@ describe('agent-host worker', () => {
     await vi.waitFor(() => {
       expect(implementation.evaluations).toBe(1);
     });
+  });
+
+  /* STO-25 SP6: the page sends its connect right behind its provide, so the worker answers it in the project's order. */
+  it('connects a connect that arrives while its provide is still opening the host, opening it once', async () => {
+    const opening = Promise.withResolvers<void>();
+    const connected: MessagePort[] = [];
+    const openBrowserProjectHost = vi.fn(async (args: { hostId: string }) => {
+      await opening.promise;
+      return {
+        hostId: args.hostId,
+        connect: (port: MessagePort) => {
+          connected.push(port);
+        },
+        rebridge: vi.fn(async () => undefined),
+        drain: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        needsRebridge: () => false,
+      };
+    });
+    vi.doMock('#workers/agent-host.impl.js', () => ({ openBrowserProjectHost }));
+    channel = await connectWorker();
+    await channel.call('init', { tabId: 'tab-1' });
+
+    const provide = channel.call('provide', provideArgs('host-1'));
+    const stream = new MessageChannel();
+    const connect = channel.call('connect', {
+      value: { projectId: 'project-1', hostId: 'host-1', port: stream.port1 },
+      transferables: [stream.port1],
+    });
+    await vi.waitFor(() => {
+      expect(openBrowserProjectHost).toHaveBeenCalledOnce();
+    });
+    opening.resolve();
+
+    await expect(provide).resolves.toEqual({});
+    await expect(connect).resolves.toEqual({ status: 'connected' });
+    expect(openBrowserProjectHost).toHaveBeenCalledOnce();
+    expect(connected).toHaveLength(1);
   });
 });

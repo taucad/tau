@@ -24,7 +24,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionWiring } from '#services/sessions-store.js';

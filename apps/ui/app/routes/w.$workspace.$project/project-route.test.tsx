@@ -7,7 +7,7 @@ import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';

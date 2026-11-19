@@ -3,7 +3,7 @@ title: 'Progressive Loading Policy'
 description: 'How Tau web documents are delivered and loaded: route classes, neutral static shells, client facts, load tiers, budgets, the hand-off contract and the service worker.'
 status: active
 created: '2026-11-16'
-updated: '2026-11-16'
+updated: '2026-11-19'
 related:
   - docs/research/progressive-loading-architecture.md
   - docs/research/loading-states-ux-blueprint.md
@@ -130,7 +130,7 @@ A surface that a richer one replaces follows the hand-off contract (`apps/ui/app
 
 ### 9. Draw a deferred region's real frame and start it on a fact
 
-A deferred region draws its real frame at final size in the document, and its content replaces the frame in place (loading follows [Page Composition Policy](page-composition-policy.md) rule 11 and [UI Policy](ui-policy.md) §5). The load starts on a fact an existing owner reports (composer ready, canvas visible, a pane admitted), never on a timer, and a failed load shows a retry, as `DeferredProjectChatRoute` in `routes/w.$workspace.$project/route.tsx` does.
+A deferred region draws its real frame at final size in the document, and its content replaces the frame in place (loading follows [Page Composition Policy](page-composition-policy.md) rule 11 and [UI Policy](ui-policy.md) §5). The load starts on a fact an existing owner reports (composer ready, canvas visible, a pane admitted), never on a timer, and a failed load offers Reload (rule 15), as `DeferredProjectChatRoute` in `routes/w.$workspace.$project/route.tsx` does.
 
 **Pending (P3)**: a shared `Deferred` boundary (`tier`, `startOn`, `frame`) and the lint rule that requires it are not built; until then each deferred site states its start fact in code.
 
@@ -162,6 +162,28 @@ A change to a class's delivery (a new class, a route moving between classes, a s
 
 **Why**: a wrong rewrite serves the wrong document to every URL of a class, and operators verify delivery from the handbook.
 
+### 15. Load code through the one owner, and recover a failed load with a new realm
+
+A JavaScript realm keeps a module that failed to load, and one whose static dependency failed, for its whole life, and `React.lazy` keeps its rejection: asking again in the same page fails again. Route modules keep React Router's patched loader. Every other `import()` in the page realm goes through `load` from `apps/ui/app/lib/code-loading.ts`, and every lazy component through `lazy` from `apps/ui/app/lib/lazy-component.ts`. A failure of required code goes to the stale-build recovery: on a replaced build as before, and on the build the server still runs as a transient failure that reloads once into the same build under the same guard, budget and no-input window, else offers the reload; a failure that repeats after that reload is genuine. A panel whose code failed offers Reload, never an in-place Try again. Optional code (decoration, analytics, the error tracker) loads with `{ optional: true }`, never reloads the page, and a lazy component of it declares a `fallback` it degrades to. Worker realms are not covered here.
+
+CORRECT:
+
+```ts
+const module = await load(async () => import('#components/cad-preview.js'));
+const Spinner = lazy(async () => load(async () => import('./spinner.js'), { optional: true }), { fallback: Flat });
+```
+
+INCORRECT:
+
+```ts
+const module = await import('#components/cad-preview.js');
+<Button onClick={() => setLoader(() => loadAgain)}>Try again</Button>;
+```
+
+**Why**: an in-place retry of failed code can never succeed (PL7 service worker staging defects blueprint, Finding 9), and a decorative chunk must not take down the panel that holds it.
+
+**Enforced by**: `tau-lint/no-unowned-code-load` (error, `.oxlintrc.json`; exempts tests, `*.server.*` and worker realms); `app/lib/code-loading.test.tsx`; the live-build rows of `app/lib/stale-build-recovery.test.ts`; row 9 of `apps/ui-e2e/src/stale-deploy-recovery.test.ts`.
+
 ## Anti-Patterns
 
 - Adding a root-loader field that varies by visitor; it breaks rule 2 for every shell.
@@ -180,6 +202,7 @@ A change to a class's delivery (a new class, a route moving between classes, a s
 - [ ] Replaced native surfaces pass `describeHandOffContract`
 - [ ] No kernel, wasm or worker preload or precache
 - [ ] Delivery changes update the cloud handbook and go-live checklist
+- [ ] Every page-realm `import()` and lazy component goes through the code-load owner; no in-place Try again for code
 
 ## References
 

@@ -37,9 +37,17 @@
  * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
  * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
  *
+ * Gate G1 of the adaptive app deployment mode charter (I10, I11): the build's ceiling is read from the ceiling module
+ * the alias rule chose. A pinned build (`cloud`, `self-host`) may hold no adaptive-only module. An `adaptive` build has
+ * no entry of its own: each class must stay within +2 requests, 1 % of total bytes and 1 % of the largest chunk of the
+ * same run's `self-host` build (`--baseline`), and what it adds over that build must fit the same allowance taken from
+ * the checked-in `self-host` entry (drift of `main` above the entry is the self-host check's concern). `--write`
+ * refuses an adaptive build.
+ *
  * Usage (after `nx build ui`):
  *   node apps/ui/scripts/check-critical-budget.mts           # check
  *   node apps/ui/scripts/check-critical-budget.mts --write   # rebaseline this build's variant
+ *   node apps/ui/scripts/check-critical-budget.mts --build build-adaptive --baseline build   # gate G1
  *
  * Exit codes:
  *   0  Every class within budget, no early kernel and no split route module
@@ -75,6 +83,9 @@ export type ClassBudget = {
 
 export type BuildVariant = 'cloud' | 'self-host';
 
+/** A build's ceiling (adaptive app deployment mode charter D1). `adaptive` has no budget entry of its own (I11). */
+export type BuildCeiling = BuildVariant | 'adaptive';
+
 export type BudgetFile = {
   $comment?: string;
   /** Growth allowed before a check fails: a fraction of the budget for bytes, a count for requests. */
@@ -99,9 +110,21 @@ export type ClassMeasure = {
 
 const scriptDirectory = fileURLToPath(new URL('.', import.meta.url));
 const appDirectory = join(scriptDirectory, '..');
-const clientDirectory = join(appDirectory, 'build', 'client');
-const moduleIdsPath = join(appDirectory, 'build', 'client-module-ids.json');
 const budgetPath = join(appDirectory, 'critical-budget.json');
+
+/** The paths of one web build under `apps/ui`. */
+type BuildPaths = Readonly<{ root: string; client: string; moduleIds: string }>;
+
+const buildPaths = (directory: string): BuildPaths => {
+  const root = resolve(appDirectory, directory);
+  return { root, client: join(root, 'client'), moduleIds: join(root, 'client-module-ids.json') };
+};
+
+/** The value of `--name <value>` in the arguments, if given. */
+const argumentValue = (name: string): string | undefined => {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+};
 
 /**
  * Measure one route class.
@@ -443,7 +466,36 @@ export const findPrecacheProblems = (input: {
 };
 
 /**
- * Which variant a build is: each `#cloud/…` boundary module resolves to its `.cloud` or its `.self-host` file.
+ * Which ceiling a build is (adaptive app deployment mode charter W2): the ceiling module the alias rule chose
+ * (`apps/ui/app/cloud/deployment-ceiling.<ceiling>.ts`); when the bundler left it out of the manifest, an adaptive
+ * facade (`*.adaptive.ts(x)`) marks an adaptive build, else each `#cloud/…` boundary's `.cloud` or `.self-host` file.
+ *
+ * @param moduleIds - The module-id manifest.
+ * @returns The ceiling.
+ * @throws When the build cannot be told apart.
+ */
+export const buildCeilingOf = (moduleIds: ModuleIdManifest): BuildCeiling => {
+  const ids = moduleIds.chunks.flatMap((chunk) => chunk.modules.map((module) => module.id));
+  const ceilings = new Set(
+    ids.flatMap(
+      (id) => /^apps\/ui\/app\/cloud\/deployment-ceiling\.(cloud|self-host|adaptive)\.ts$/u.exec(id)?.[1] ?? [],
+    ),
+  );
+  if (ceilings.size > 1) {
+    throw new Error(`check-critical-budget: the build holds more than one ceiling (${[...ceilings].join(', ')})`);
+  }
+  const [named] = ceilings;
+  if (named !== undefined) {
+    return named as BuildCeiling;
+  }
+  if (ids.some((id) => /^apps\/ui\/app\/.+\.adaptive\.tsx?$/u.test(id))) {
+    return 'adaptive';
+  }
+  return buildVariantOf(moduleIds);
+};
+
+/**
+ * Which variant a pinned build is: each `#cloud/…` boundary module resolves to its `.cloud` or its `.self-host` file.
  *
  * @param moduleIds - The module-id manifest.
  * @returns The variant.
@@ -459,6 +511,118 @@ export const buildVariantOf = (moduleIds: ModuleIdManifest): BuildVariant => {
   return cloud ? 'cloud' : 'self-host';
 };
 
+/** Module ids only an adaptive build may hold: the mode owner, its utilities and the facades (I10). */
+const adaptiveOnlyModule =
+  /^(?:apps\/ui\/app\/runtime\/deployment(?:\.machine)?\.ts|apps\/ui\/app\/.+\.adaptive\.tsx?|apps\/ui\/app\/cloud\/cloud-(?:port|loader|surface|mode)\.tsx?)$/u;
+
+/**
+ * The adaptive-only modules a pinned build holds (adaptive app deployment mode I10): none may.
+ *
+ * @param input - The module-id manifest and the build's ceiling.
+ * @returns One message per offender; empty for an adaptive build.
+ */
+export const findPinnedCeilingLeaks = (input: { moduleIds: ModuleIdManifest; ceiling: BuildCeiling }): string[] =>
+  input.ceiling === 'adaptive'
+    ? []
+    : [
+        ...new Set(
+          input.moduleIds.chunks.flatMap((chunk) =>
+            chunk.modules.map((module) => module.id).filter((id) => adaptiveOnlyModule.test(id)),
+          ),
+        ),
+      ].map((id) => `ceiling: the ${input.ceiling} build holds ${id}, which only an adaptive build may (I10)`);
+
+/** The bounds an adaptive build keeps against a self-host baseline (I11): +2 requests, 1 % bytes, 1 % largest chunk. */
+export const adaptiveBounds = { requests: 2, bytes: 0.01, largestChunkBytes: 0.01 } as const;
+
+/** One class's three numbers. */
+export type ClassNumbers = Pick<ClassBudget, 'brotliBytes' | 'requests' | 'largestChunkBrotliBytes'>;
+
+/**
+ * Gate G1's amended bound (1): what the adaptive build adds over the same run's self-host build, held to the
+ * checked-in entry's allowance (+2 requests, 1 % of the entry's total bytes, 1 % of the entry's largest chunk). Drift of
+ * the self-host build above its entry is the self-host check's concern: it neither spends nor widens this allowance.
+ *
+ * @param input - The label, what the adaptive build measured, the same run's self-host build and the entry.
+ * @returns One message per bound the excess exceeds; empty when it fits.
+ */
+export const compareExcessWithEntry = (input: {
+  label: string;
+  measure: ClassNumbers;
+  sameRun: ClassNumbers | undefined;
+  entry: ClassNumbers | undefined;
+}): string[] => {
+  const { label, measure, sameRun, entry } = input;
+  if (sameRun === undefined || entry === undefined) {
+    return [`${label}: gate G1 needs both the self-host entry and the same-run self-host build for this class`];
+  }
+  const excess = {
+    requests: measure.requests - sameRun.requests,
+    brotliBytes: measure.brotliBytes - sameRun.brotliBytes,
+    largestChunkBrotliBytes: measure.largestChunkBrotliBytes - sameRun.largestChunkBrotliBytes,
+  };
+  const allowance = {
+    requests: adaptiveBounds.requests,
+    brotliBytes: Math.round(entry.brotliBytes * adaptiveBounds.bytes),
+    largestChunkBrotliBytes: Math.round(entry.largestChunkBrotliBytes * adaptiveBounds.largestChunkBytes),
+  };
+  const problems: string[] = [];
+  if (excess.requests > allowance.requests) {
+    problems.push(
+      `${label}: adds ${excess.requests} requests over the same-run self-host build; the allowance is ${allowance.requests}`,
+    );
+  }
+  if (excess.brotliBytes > allowance.brotliBytes) {
+    problems.push(
+      `${label}: adds ${excess.brotliBytes} B over the same-run self-host build; the allowance is ${allowance.brotliBytes} B (1% of the self-host entry)`,
+    );
+  }
+  if (excess.largestChunkBrotliBytes > allowance.largestChunkBrotliBytes) {
+    problems.push(
+      `${label}: grows the largest chunk by ${excess.largestChunkBrotliBytes} B over the same-run self-host build; the allowance is ${allowance.largestChunkBrotliBytes} B (1% of the self-host entry)`,
+    );
+  }
+  return problems;
+};
+
+/**
+ * Compare an adaptive class with one self-host baseline on all three bounds (gate G1).
+ *
+ * @param input - The label, what the adaptive build measured, the baseline and its name.
+ * @returns One message per bound exceeded; empty when the class holds.
+ */
+export const compareWithSelfHostBaseline = (input: {
+  label: string;
+  measure: ClassNumbers;
+  baseline: ClassNumbers | undefined;
+  baselineName: string;
+}): string[] => {
+  const { label, measure, baseline, baselineName } = input;
+  if (baseline === undefined) {
+    return [`${label}: no ${baselineName} baseline for this class`];
+  }
+  const problems: string[] = [];
+  if (measure.requests > baseline.requests + adaptiveBounds.requests) {
+    problems.push(
+      `${label}: ${measure.requests} requests exceed the ${baselineName} ${baseline.requests} by more than ${adaptiveBounds.requests}`,
+    );
+  }
+  if (measure.brotliBytes > Math.round(baseline.brotliBytes * (1 + adaptiveBounds.bytes))) {
+    problems.push(
+      `${label}: ${measure.brotliBytes} B exceeds the ${baselineName} ${baseline.brotliBytes} B by more than ${adaptiveBounds.bytes * 100}%`,
+    );
+  }
+  if (
+    measure.largestChunkBrotliBytes >
+    Math.round(baseline.largestChunkBrotliBytes * (1 + adaptiveBounds.largestChunkBytes))
+  ) {
+    problems.push(
+      `${label}: largest chunk ${measure.largestChunkBrotliBytes} B exceeds the ${baselineName} ${baseline.largestChunkBrotliBytes} B by more than ${adaptiveBounds.largestChunkBytes * 100}%`,
+    );
+  }
+  return problems;
+};
+
 function readJson<T>(path: string): T {
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as T;
@@ -467,7 +631,7 @@ function readJson<T>(path: string): T {
   }
 }
 
-const readRouterManifest = (): RouterManifest => {
+const readRouterManifest = (clientDirectory: string): RouterManifest => {
   const assets = join(clientDirectory, 'assets');
   const candidates = readdirSync(assets).filter((name) => /^manifest-[\w-]+\.js$/u.test(name));
   for (const name of candidates) {
@@ -486,8 +650,8 @@ const htmlFiles = (directory: string): string[] =>
     .map((entry) => join(entry.parentPath, entry.name));
 
 /** Every file a document may preload, by origin. */
-const documentPreloads = (): Map<string, string[]> => {
-  const router = readRouterManifest();
+const documentPreloads = (clientDirectory: string): Map<string, string[]> => {
+  const router = readRouterManifest(clientDirectory);
   const preloads = new Map<string, string[]>([['entry', [router.entry.module, ...router.entry.imports]]]);
   for (const [id, route] of Object.entries(router.routes)) {
     preloads.set(`route ${id}`, [route.module, ...(route.imports ?? []), ...(route.css ?? [])]);
@@ -530,34 +694,81 @@ const attribution = (measure: ClassMeasure): string[] => {
   ];
 };
 
-const main = (): void => {
-  const write = process.argv.includes('--write');
-  const manifest = readJson<ViteManifest>(join(clientDirectory, '.vite', 'manifest.json'));
-  const moduleIds = readJson<ModuleIdManifest>(moduleIdsPath);
-  const budgetFile = readJson<BudgetFile>(budgetPath);
-  const variant = buildVariantOf(moduleIds);
+/** One build read for measuring: its manifests, its ceiling and a brotli size reader. */
+const readBuild = (paths: BuildPaths) => {
+  const manifest = readJson<ViteManifest>(join(paths.client, '.vite', 'manifest.json'));
+  const moduleIds = readJson<ModuleIdManifest>(paths.moduleIds);
   const chunksByFile = new Map(moduleIds.chunks.map((chunk) => [chunk.fileName, chunk]));
   const sizes = new Map<string, number>();
   const brotliSize = (file: string): number => {
     let size = sizes.get(file);
     if (size === undefined) {
-      size = brotliCompressSync(readFileSync(join(clientDirectory, file)), {
+      size = brotliCompressSync(readFileSync(join(paths.client, file)), {
         params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
       }).length;
       sizes.set(file, size);
     }
     return size;
   };
+  return { manifest, moduleIds, chunksByFile, brotliSize, ceiling: buildCeilingOf(moduleIds) };
+};
+
+/**
+ * Gate G1's second baseline (adaptive app deployment mode I11): the self-host build of the same run, measured class
+ * by class, against which an adaptive build is held on all three bounds.
+ */
+const measureSelfHostBaseline = (directory: string): Map<string, ClassNumbers> => {
+  const baseline = readBuild(buildPaths(directory));
+  if (baseline.ceiling !== 'self-host') {
+    throw new Error(
+      `check-critical-budget: the baseline build ${directory} is ${baseline.ceiling}; gate G1 needs a self-host build`,
+    );
+  }
+  return new Map(
+    criticalRouteClasses.map((routeClass) => {
+      const { brotliBytes, requests, largestChunkBrotliBytes } = measureClass({
+        manifest: baseline.manifest,
+        chunksByFile: baseline.chunksByFile,
+        roots: routeClass.roots,
+        brotliSize: baseline.brotliSize,
+      });
+      return [routeClass.id, { brotliBytes, requests, largestChunkBrotliBytes }];
+    }),
+  );
+};
+
+const main = (): void => {
+  const write = process.argv.includes('--write');
+  const paths = buildPaths(argumentValue('--build') ?? 'build');
+  const clientDirectory = paths.client;
+  const { manifest, moduleIds, chunksByFile, brotliSize, ceiling } = readBuild(paths);
+  const budgetFile = readJson<BudgetFile>(budgetPath);
+  if (write && ceiling === 'adaptive') {
+    console.error(
+      'check-critical-budget: --write refuses an adaptive build; the self-host entry is rewritten only from a self-host build (I11)',
+    );
+    process.exit(1);
+  }
+  /* An adaptive build has no entry of its own: it is held to the self-host entry (I11). */
+  const variant: BuildVariant = ceiling === 'adaptive' ? 'self-host' : ceiling;
+  const baselineDirectory = argumentValue('--baseline');
+  const sameRun = baselineDirectory === undefined ? undefined : measureSelfHostBaseline(baselineDirectory);
+  if (ceiling === 'adaptive' && sameRun === undefined) {
+    console.error(
+      "check-critical-budget: an adaptive build is checked with --baseline <the same run's self-host build>",
+    );
+    process.exit(1);
+  }
+  const problems: string[] = [...findPinnedCeilingLeaks({ moduleIds, ceiling })];
 
   const budgets = budgetFile.variants[variant] ?? {};
-  const problems: string[] = [];
   const measured: Record<string, ClassBudget> = {};
   const closures = new Map<string, readonly string[]>();
   for (const routeClass of criticalRouteClasses) {
     const measure = measureClass({ manifest, chunksByFile, roots: routeClass.roots, brotliSize });
     closures.set(routeClass.id, measure.files);
     const budget = budgets[routeClass.id];
-    const label = `${routeClass.label} (${variant})`;
+    const label = `${routeClass.label} (${ceiling})`;
     console.info(
       `${label}: ${formatBytes(measure.brotliBytes)} brotli in ${measure.requests} requests; largest chunk ${measure.largestChunk} ${formatBytes(measure.largestChunkBrotliBytes)}; heavy: ${[...measure.heavy.keys()].join(', ') || 'none'}`,
     );
@@ -571,16 +782,43 @@ const main = (): void => {
           .map((family) => [family, budget?.knownHeavy[family] ?? 'unowned: name the work package that removes it']),
       ),
     };
-    const classProblems = compareWithBudget({ label, measure, budget, limits: budgetFile });
+    const classProblems =
+      ceiling === 'adaptive'
+        ? [
+            /* G1 bound (1), as amended (charter ab4e173d3): the excess over the same run's self-host build fits the
+             * entry's allowance. Bound (2): within +2 requests, 1 % bytes and 1 % of the largest chunk of the same
+             * run's self-host build. Landing under either is never a failure here: the entry is not its own. */
+            ...compareExcessWithEntry({ label, measure, sameRun: sameRun?.get(routeClass.id), entry: budget }),
+            ...compareWithSelfHostBaseline({
+              label,
+              measure,
+              baseline: sameRun?.get(routeClass.id),
+              baselineName: 'same-run self-host build',
+            }),
+            ...compareWithBudget({ label, measure, budget, limits: budgetFile }).filter((problem) =>
+              problem.includes('heavy'),
+            ),
+          ]
+        : compareWithBudget({ label, measure, budget, limits: budgetFile });
+    if (ceiling === 'adaptive') {
+      const entry =
+        budget === undefined
+          ? 'none'
+          : `${budget.brotliBytes} B, ${budget.requests} requests, largest ${budget.largestChunkBrotliBytes} B`;
+      const run = sameRun?.get(routeClass.id);
+      console.info(
+        `  G1 ${routeClass.id}: adaptive ${measure.brotliBytes} B, ${measure.requests} requests, largest ${measure.largestChunkBrotliBytes} B; self-host entry ${entry}; same-run self-host ${run === undefined ? 'none' : `${run.brotliBytes} B, ${run.requests} requests, largest ${run.largestChunkBrotliBytes} B`}`,
+      );
+    }
     if (classProblems.length > 0 && !write) {
       problems.push(...classProblems, ...attribution(measure));
     }
   }
 
-  problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(), moduleIds }));
-  problems.push(...findSplitRouteModules(readRouterManifest()));
+  problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(clientDirectory), moduleIds }));
+  problems.push(...findSplitRouteModules(readRouterManifest(clientDirectory)));
 
-  const precacheListPath = join(appDirectory, 'build', precacheListFile);
+  const precacheListPath = join(paths.root, precacheListFile);
   const killSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
   const precache = existsSync(precacheListPath) ? readJson<WrittenPrecacheEntry[]>(precacheListPath) : undefined;
   const workerClasses = workerRouteClasses().filter(

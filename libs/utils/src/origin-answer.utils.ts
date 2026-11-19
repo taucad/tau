@@ -150,9 +150,11 @@ const timedOut = Symbol('timed-out');
 
 /**
  * `GET` an answer without credentials and classify it: `404` is `absent`; another non-2xx status, a body that is not
- * JSON or that `parse` refuses, a thrown fetch and a timeout are `failed`. Never throws.
+ * JSON or that `parse` refuses, a thrown fetch, an abort and a timeout are `failed`. Never throws.
  *
- * @param input - The fetch, the URL, the body parser and an optional timeout in milliseconds.
+ * @param input - The fetch, the URL, the body parser, an optional timeout in milliseconds, an optional HTTP cache mode
+ *   (the fetch default when omitted; a page reader passes `no-store` so it never reads an old answer) and an optional
+ *   signal the caller aborts the request with.
  * @returns The classified response.
  * @public
  */
@@ -162,15 +164,19 @@ export const requestAnswer = async <B>(
     url: string;
     parse: (body: unknown) => B | undefined;
     requestTimeout?: number;
+    cache?: RequestCache;
+    signal?: AbortSignal;
   }>,
 ): Promise<AnswerResponse<B>> => {
   const exchange = async (signal: AbortSignal | undefined): Promise<AnswerResponse<B>> => {
     let response: Response;
     try {
-      response = await input.fetch(
-        input.url,
-        signal === undefined ? { method: 'GET', credentials: 'omit' } : { method: 'GET', credentials: 'omit', signal },
-      );
+      response = await input.fetch(input.url, {
+        method: 'GET',
+        credentials: 'omit',
+        ...(input.cache === undefined ? {} : { cache: input.cache }),
+        ...(signal === undefined ? {} : { signal }),
+      });
     } catch {
       return { kind: 'failed', reason: 'network' };
     }
@@ -188,9 +194,17 @@ export const requestAnswer = async <B>(
     }
   };
   if (input.requestTimeout === undefined) {
-    return exchange(undefined);
+    return exchange(input.signal);
   }
   const controller = new AbortController();
+  const forward = (): void => {
+    controller.abort();
+  };
+  if (input.signal?.aborted === true) {
+    controller.abort();
+  } else {
+    input.signal?.addEventListener('abort', forward, { once: true });
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<typeof timedOut>((resolve) => {
     timer = setTimeout(() => {
@@ -207,6 +221,7 @@ export const requestAnswer = async <B>(
     return outcome;
   } finally {
     clearTimeout(timer);
+    input.signal?.removeEventListener('abort', forward);
   }
 };
 

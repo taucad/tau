@@ -10,7 +10,7 @@ import {
 import type { FinancialSessionIdentity } from '#providers/financial-session-provider.js';
 
 const purgeSavedUsage = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage }));
+vi.mock('#db/billing-snapshot-database.js', () => ({ purgeSavedUsage }));
 
 beforeEach(() => {
   purgeSavedUsage.mockClear();

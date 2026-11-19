@@ -256,7 +256,7 @@ describe('ci.yml affected-only lanes', () => {
     const lane = ci.jobs['affected-lane'];
     const targets = lane?.env?.['BUILD_TARGETS'] ?? '';
     expect(targets).toBe(
-      'build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch',
+      'build size check-desktop-payload check-critical-budget check-critical-budget-adaptive check-static-shells check-server-output check-route-module-patch',
     );
     // Both build shards take their projects from one `nx affected` over these targets, and run them all.
     const pins = steps.find((step) => step.id === 'pins')?.run ?? '';

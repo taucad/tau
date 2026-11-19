@@ -30,15 +30,48 @@ export const unstampedBuildRelease = '@TAU_RELEASE';
 /** Whether a value is a stamped release label (12 hex, as {@link resolveTauBuildRelease} gives). */
 export const isStampedBuildRelease = (value: string): boolean => /^[\da-f]{12}$/u.test(value);
 
-/** Resolve the deployment mode before Vite constructs any client, worker or SSR graph. */
-export const resolveTauCloudBuildEnabled = (value: string | undefined): boolean => {
+/** A build's deployment ceiling (adaptive app deployment mode charter D1): which display modes it can show. */
+export type TauDeploymentCeiling = 'cloud' | 'self-host' | 'adaptive';
+
+/**
+ * Resolve `TAU_CLOUD_ENABLED` to the build's ceiling before Vite constructs any client, worker or SSR graph (D1):
+ * `true` is `cloud` (pinned funded), `false` is `self-host` (pinned unfunded) and `adaptive` reads the API's
+ * deployment answer at run time. Unset is `self-host` until the flip (W8). Any other value fails the build.
+ *
+ * @param value - The variable's value.
+ * @returns The ceiling.
+ */
+export const resolveTauDeploymentCeiling = (value: string | undefined): TauDeploymentCeiling => {
   if (value === undefined || value === 'false') {
-    return false;
+    return 'self-host';
   }
   if (value === 'true') {
-    return true;
+    return 'cloud';
   }
-  throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
+  if (value === 'adaptive') {
+    return 'adaptive';
+  }
+  throw new Error('TAU_CLOUD_ENABLED must be exactly true, false or adaptive.');
+};
+
+/** The variable naming the web build's output directory under `apps/ui` (`build` by default; W2's adaptive build). */
+export const uiBuildDirectoryVariable = 'TAU_UI_BUILD_DIRECTORY';
+
+/**
+ * The web build's output directory, relative to `apps/ui`: `build`, or the name `TAU_UI_BUILD_DIRECTORY` gives, so CI
+ * can keep a second build (`ui:build-adaptive`) beside the first (gate G1).
+ *
+ * @param value - The variable's value.
+ * @returns A directory name.
+ */
+export const resolveUiBuildDirectory = (value: string | undefined): string => {
+  if (value === undefined || value === '') {
+    return 'build';
+  }
+  if (!/^[\w-]+$/u.test(value)) {
+    throw new Error(`${uiBuildDirectoryVariable} must be one directory name under apps/ui.`);
+  }
+  return value;
 };
 
 /** The build variable that ships the service worker kill switch ({@link resolveServiceWorkerKillSwitch}). */

@@ -7,7 +7,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
   cacheDir: '../../node_modules/.cache/code-editor-browser',
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   resolve: { dedupe: ['react', 'react-dom'] },
   plugins: [tailwindcss(), tauRuntime()],
   optimizeDeps: {

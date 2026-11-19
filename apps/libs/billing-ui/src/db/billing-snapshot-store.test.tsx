@@ -10,7 +10,6 @@ import { useCredits } from '@taucad/billing/hooks/use-credits';
 import type { UsageSnapshotQuery } from '@taucad/billing/hooks/use-usage-snapshot';
 import {
   canonicalUsageQueryKey,
-  purgeSavedUsage,
   readBillingRevisionMinimum,
   readSavedUsage,
   recordBillingRevisionMinimum,
@@ -18,6 +17,7 @@ import {
   useSavedUsage,
   writeSavedUsage,
 } from '#db/billing-snapshot-store.js';
+import { purgeSavedUsage } from '#db/billing-snapshot-database.js';
 import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
 
 const timestamp = '2026-09-12T00:00:00.000Z';

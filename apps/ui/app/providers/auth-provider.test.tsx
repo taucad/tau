@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
 const { routerLink } = mocks;
 
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: mocks.resolvedAuth }));
-vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
 
 vi.mock('react-router', () => ({
   Link: ({ to, children, ...rest }: { readonly to: string } & React.ComponentProps<'a'>) => {

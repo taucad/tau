@@ -28,6 +28,19 @@ export const setReportedUserId = (id: string | undefined): void => {
   reportedUserId = id === '' ? undefined : id;
 };
 
+/** The display mode and its basis or problem (adaptive app deployment mode W1), or `undefined` before it is known. */
+let reportedDeploymentMode: string | undefined;
+
+/**
+ * Set the `deployment_mode` tag events carry: the display mode and its basis or problem, such as `funded/confirmed`
+ * or `unknown/unreachable` (adaptive app deployment mode charter W1).
+ *
+ * @param mode - The tag's value, or `undefined` to clear it.
+ */
+export const setReportedDeploymentMode = (mode: string | undefined): void => {
+  reportedDeploymentMode = mode;
+};
+
 /**
  * The desktop manifest (`apps/ui/desktop/app/routes.ts`) reads the web routes from outside its own app
  * directory, so its ids carry a `../../app/` prefix; the tag drops it so desktop and web ids match.
@@ -125,7 +138,8 @@ const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Re
   Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, Value>;
 
 /**
- * The tags every UI event carries: `route`, `route.pattern`, `device_class`, `build_id` and `deploy_context`.
+ * The tags every UI event carries: `route`, `route.pattern`, `device_class`, `build_id`, `deploy_context` and
+ * `deployment_mode`.
  *
  * @returns The known tags.
  */
@@ -138,6 +152,7 @@ const readTauEventTags = (): Record<string, string> => {
     device_class: isMemoryConstrainedDevice() ? 'constrained' : 'standard',
     build_id: buildId === 0 ? undefined : String(buildId),
     deploy_context: ENV.TAU_DEPLOY_CONTEXT,
+    deployment_mode: reportedDeploymentMode,
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
 };

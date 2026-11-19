@@ -1,7 +1,7 @@
 import { flatRoutes } from '@react-router/fs-routes';
 import type { RouteConfigEntry } from '@react-router/dev/routes';
 // oxlint-disable-next-line eslint/no-restricted-imports -- route generation runs outside the app alias root.
-import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
+import { resolveTauDeploymentCeiling } from '../../build-environment.js';
 
 /**
  * Desktop route manifest: the web route tree minus every module SPA mode
@@ -27,7 +27,10 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     '../../app/routes/**/*.test.{ts,tsx}',
     '../../app/routes/**/*.spec.{ts,tsx}',
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-    ...(resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']) ? [] : ['../../app/routes/usage/**']),
+    /* `/usage` exists in the adaptive desktop build and guards itself by mode (adaptive app deployment mode D8). */
+    ...(resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']) === 'self-host'
+      ? ['../../app/routes/usage/**']
+      : []),
 
     // Web-only: the desktop sign-in callback lands in the system browser, not
     // in the shell (see `desktop-auth-signin-blueprint.md`).

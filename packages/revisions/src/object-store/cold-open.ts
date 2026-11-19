@@ -337,7 +337,7 @@ const batchesOf = (
  * set does, and never its bytes.
  */
 type Stage = Readonly<{
-  entries: Map<string, { object: StoredObject | undefined; names: readonly string[] }>;
+  entries: Map<string, { object: CopiedObject | undefined; names: readonly string[] }>;
   held: { objects: number; bytes: number };
   peak: { objects: number; bytes: number };
 }>;
@@ -380,16 +380,20 @@ const checkGoing = (importer: Importer): void => {
 const stageObject = (
   importer: Importer,
   oid: string,
-  staged: Readonly<{ object: StoredObject; names: readonly string[] }>,
+  staged: Readonly<{ object: CopiedObject; names: readonly string[] }>,
 ): void => {
   const { stage, limits } = importer;
   const { names } = staged;
   if (stage.entries.has(oid)) {
     return;
   }
-  /* Held by its body alone: a deflated body is a view into the Range read it came from, which staging would pin. */
-  const object: StoredObject = { type: staged.object.type, data: staged.object.data };
-  const bytes = object.data.byteLength;
+  /*
+   * Held with the deflated body it was read as, so it is kept as those bytes and not deflated again: a read hands
+   * that body over as its own bytes, never a view that pins the Range read behind it. Both count against the bound.
+   */
+  const { type, data, compressed } = staged.object;
+  const object: CopiedObject = compressed === undefined ? { type, data } : { type, data, compressed };
+  const bytes = data.byteLength + (compressed?.byteLength ?? 0);
   const fits = stage.held.objects < limits.batchObjects && stage.held.bytes + bytes <= limits.batchBytes;
   stage.entries.set(oid, { object: fits ? object : undefined, names });
   if (fits) {
@@ -520,7 +524,7 @@ const keepStaged = async (importer: Importer): Promise<void> => {
   for (const batch of batchesOf(stagedOrder(entries), importer.sizeOf, importer.limits)) {
     const unread = batch.filter((oid) => entries.get(oid)?.object === undefined);
     // oxlint-disable-next-line no-await-in-loop -- one batch read again at a time.
-    const reread = unread.length === 0 ? new Map<string, StoredObject>() : await importer.readAll(unread);
+    const reread = unread.length === 0 ? new Map<string, CopiedObject>() : await importer.readAll(unread);
     const objects = new Map(batch.map((oid) => [oid, entries.get(oid)?.object ?? reread.get(oid)!]));
     // oxlint-disable-next-line no-await-in-loop -- a batch is kept only after the batches it names.
     await importer.keep(objects);
@@ -528,7 +532,7 @@ const keepStaged = async (importer: Importer): Promise<void> => {
       const entry = entries.get(oid)!;
       if (entry.object !== undefined) {
         held.objects -= 1;
-        held.bytes -= entry.object.data.byteLength;
+        held.bytes -= entry.object.data.byteLength + (entry.object.compressed?.byteLength ?? 0);
       }
       entries.delete(oid);
     }
@@ -538,8 +542,8 @@ const keepStaged = async (importer: Importer): Promise<void> => {
 /* The ids of `oids` the store does not hold yet. */
 const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<string[]> => {
   const unique = [...new Set(oids)];
-  const held = await Promise.all(unique.map(async (oid) => store.has(oid)));
-  return unique.filter((_oid, at) => !held[at]);
+  const held = await store.heldOf(unique);
+  return unique.filter((oid) => !held.has(oid));
 };
 
 /*
@@ -609,7 +613,7 @@ const importHeadsAhead = async (
   known: Readonly<{ tips: readonly string[]; listed: readonly string[] }>,
 ): Promise<string[]> => {
   const { tips } = known;
-  const tipObjects = new Map<string, StoredObject>();
+  const tipObjects = new Map<string, CopiedObject>();
   await readBatches([...new Set(tips)], importer, async (objects) => {
     for (const [oid, object] of objects) {
       tipObjects.set(oid, object);

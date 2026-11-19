@@ -22,6 +22,7 @@ import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-stor
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
+import type { FocusMachine } from '#machines/focus.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
 import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
@@ -53,6 +54,7 @@ import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import {
   createSessionRootSync,
+  createSessionsOpenAhead,
   createSessionsRegistryLogic,
   sessionFileManagerOpener,
   sessionsRegistryInput,
@@ -67,7 +69,14 @@ import {
 } from '#lib/agent-host-placement.js';
 import { createChoicesLogic, readChoices } from '#runtime/choices.js';
 import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
-import type { SessionRuntimeOpener, SessionWiring, SessionsObservable } from '#services/sessions-store.js';
+import type {
+  SessionRuntimeOpener,
+  SessionWiring,
+  SessionsAheadFocusView,
+  SessionsAheadRegistryView,
+  SessionsObservable,
+  SessionsOpenAhead,
+} from '#services/sessions-store.js';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { getAllFlags } from '#flags/feature-flags.js';
@@ -155,6 +164,8 @@ type AppRuntimeServices = Readonly<{
   /** Focus and the bindings its ports read (A5b). */
   focus: FocusHandle;
   rootFileFacade: RootFileFacade;
+  /** The *Open* gesture's early open, owned by the registry's composition (STO-25 SP6). */
+  openAhead: SessionsOpenAhead;
 }>;
 
 /** The desktop bridge's quit seam: a no-op outside the desktop build. Read when `environment` starts, not on import. */
@@ -302,6 +313,8 @@ const lateObservable = <T>(initial: T): LateObservable<T> => {
  * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
  */
 const loadSessionRuntimeModule = async () => import('#runtime/project-runtime.session.js');
+/* The session's `revisions` module (D5): one loader for its children and the registry's early open (STO-25 SP6). */
+const loadSessionRevisions = async () => import('#runtime/session-revisions.js');
 
 /**
  * How each session builds its project runtime (A6d): the lazy module, over the library, the chat store, the query
@@ -435,7 +448,7 @@ export const createAppRuntime = ({
   const choicesPorts = createChoicesPorts(queryClient);
   /* A7b: what each session's facts are wired to. Each port is a closure over the composition, never machine context. */
   const sessionWiring: SessionWiring = {
-    loadRevisions: async () => import('#runtime/session-revisions.js'),
+    loadRevisions: loadSessionRevisions,
     loadHostConnector: async () => import('#runtime/host-connector.js'),
     registerCloseCut: (cut) => unload.register('session', cut),
     /* A7c: each live session's runtime writes what it owes at the producer stage, before any close cut (D26). */
@@ -589,6 +602,12 @@ export const createAppRuntime = ({
     unload,
     rootFileFacade,
     focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
+    /* STO-25 SP6: through the session module's own loader and the shared worker its sessions use. */
+    openAhead: createSessionsOpenAhead({
+      loadRevisions: loadSessionRevisions,
+      worker: host.sharedWorker,
+      ...openAheadPorts(focus, registry),
+    }),
   });
   composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
@@ -716,6 +735,63 @@ export const selectRuntimeIdleFileManagers = (runtime: AppRuntime): boolean | un
  * @public
  */
 export const selectRuntimeSafeMode = (runtime: AppRuntime): boolean => safeModeRuntimes.has(runtime);
+
+/**
+ * Focus and the registry as the early open reads them (STO-25 SP6): the route's request, the project focus is focused
+ * on, the project it holds on an answer that opens nothing, and the registry's sessions. Exported for the composition
+ * row that drives it over a real focus and registry.
+ *
+ * @param focus - The runtime's focus.
+ * @param registry - The runtime's sessions registry.
+ * @returns The early open's focus and registry ports.
+ * @public
+ */
+export const openAheadPorts = (
+  focus: ActorRefFrom<FocusMachine>,
+  registry: ActorRefFrom<typeof sessionsMachine>,
+): Readonly<{
+  focus: SessionsObservable<SessionsAheadFocusView>;
+  registry: SessionsObservable<SessionsAheadRegistryView>;
+}> => ({
+  focus: {
+    get: () => {
+      const snapshot = focus.getSnapshot();
+      const { answer, request } = snapshot.context;
+      return {
+        ...(request === undefined ? {} : { request }),
+        ...(snapshot.hasTag('focused') && answer?.projectId !== undefined ? { focusedOn: answer.projectId } : {}),
+        ...(snapshot.hasTag('held') && answer?.projectId !== undefined && answer.answer.status !== 'ready'
+          ? { heldOn: answer.projectId }
+          : {}),
+      };
+    },
+    subscribe: (listener) => {
+      const subscription = focus.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+  registry: {
+    get: () => registry.getSnapshot().context,
+    subscribe: (listener) => {
+      const subscription = registry.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+});
+
+/**
+ * The runtime's early open for the *Open* gesture (STO-25 SP6): start a project's revision client and Tau Cloud open
+ * before its route loads; its session takes them.
+ *
+ * @param runtime - The app runtime.
+ * @returns The gesture's entry point.
+ * @public
+ */
+export const selectRuntimeOpenAhead = (runtime: AppRuntime): SessionsOpenAhead => servicesOf(runtime).openAhead;
 
 /** The file manager for `/`, which the root spawned with itself and never replaces. @public */
 export const selectRootFiles = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): FileManagerRef =>

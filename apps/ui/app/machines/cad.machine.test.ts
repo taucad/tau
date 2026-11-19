@@ -878,3 +878,106 @@ describe('cadMachine heap recycle', () => {
     f.actor.stop();
   });
 });
+
+describe('cadMachine after a refused engine delivery', () => {
+  it('renders on the next initializeModel once the engine host answers, with no reload', async () => {
+    /* The host is down for the first evaluation and back for the next, as a kernel that fetches its engine
+     * on demand (cadmpeg) sees it; the refusal carries its issue the way `CadmpegEngineError` does. */
+    let hostReachable = false;
+    const evaluations = vi.fn();
+    const refusal: KernelIssue = {
+      message: 'cadmpeg could not load the sldprt engine from dependencies.taucad.dev: the host could not be reached.',
+      code: 'KERNEL_BINDING_FAILED',
+      type: 'kernel',
+      severity: 'error',
+      details: { producer: 'cadmpeg', engineFailure: 'unreachable', format: 'sldprt', host: 'dependencies.taucad.dev' },
+    };
+    const kernel = defineKernel({
+      id: 'engine-on-demand',
+      name: 'Engine on demand',
+      version: '1.0.0',
+      extensions: ['sldprt'],
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({
+          parameters: {
+            schema: {
+              $schema: 'https://json-structure.org/meta/extended/v0/#',
+              $id: 'urn:taucad:test:engine-on-demand',
+              $uses: ['JSONSchemaUnits'],
+              name: 'EngineOnDemandParameters',
+              type: 'object',
+            },
+            defaults: {},
+          },
+        });
+      },
+      async evaluate() {
+        evaluations();
+        if (!hostReachable) {
+          throw Object.assign(new Error(refusal.message), { issues: [refusal] });
+        }
+        return { handle: {} };
+      },
+      async render() {
+        return {
+          content: writeGlb({
+            nodes: [
+              { primitives: [{ mode: 4, positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), material: {} }] },
+            ],
+          }),
+        };
+      },
+    })();
+    const runtime: AnyRuntimeDefinition = defineRuntime({ kernels: [kernel] });
+    const clients: AppRuntimeClient[] = [];
+    const actor = createActor(
+      cadMachine.provide({
+        actors: {
+          // Each connect is a fresh client, as a reconnect is a fresh worker in the app.
+          connectKernelActor: fromSafeAsync(
+            async (): Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }> => {
+              const client = createRuntimeClient({
+                transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({ 'part.sldprt': 'native' }) }),
+              });
+              clients.push(client);
+              await client.connect();
+              return { type: 'kernelConnected', client, cleanups: [] };
+            },
+          ),
+        },
+      }),
+      {
+        input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '', kernelOptionsFactory, operationTimeout: 0 },
+      },
+    );
+    actor.start();
+    try {
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+      actor.send({ type: 'initializeModel', entryPath: 'part.sldprt' });
+      const failed = await waitFor(actor, (snapshot) => snapshot.value === 'error');
+      expect(selectCadFailureIssues(failed)).toEqual([expect.objectContaining({ details: refusal.details })]);
+      expect(evaluations).toHaveBeenCalledOnce();
+
+      hostReachable = true;
+      actor.send({ type: 'initializeModel', entryPath: 'part.sldprt' });
+      const recovered = await waitFor(
+        actor,
+        (snapshot) => snapshot.value === 'idle' && snapshot.context.latestRenderingOutcome === 'success',
+      );
+      expect(recovered.context.rendering?.success).toBe(true);
+      expect(selectCadFailureIssues(recovered)).toBeUndefined();
+      expect(evaluations).toHaveBeenCalledTimes(2);
+      expect(clients).toHaveLength(2);
+    } finally {
+      actor.stop();
+    }
+  });
+});

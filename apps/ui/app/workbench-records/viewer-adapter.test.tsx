@@ -591,6 +591,50 @@ describe('viewer adapter (A8d)', () => {
     expect(project.sent).toEqual([]);
   });
 
+  /* Cloud open loading states, option C: the stage mounts while the project opens, so the view gets its graphics owner,
+     but its entry waits for the project to be here: main is the open's placeholder until then. */
+  it('should create a view graphics owner while the project opens, and bind its entry only once the project is here', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const setViewEntryPath = vi.fn();
+    const viewEdit = vi.fn(async () => true);
+    const facts = createViewerAdapterFactsPort(
+      baseFacts({
+        mainEntryPath: 'main.scad',
+        setViewEntryPath,
+        viewCommands: { edit: viewEdit, remove: vi.fn(async () => true) },
+      }),
+    );
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+    });
+
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsStage: true });
+    });
+    expect(project.sent.map((event) => event.type)).toEqual(['createViewGraphics']);
+    expect(setViewEntryPath).not.toHaveBeenCalled();
+    expect(viewEdit).not.toHaveBeenCalled();
+
+    /* The project is here: the view is bound to the main the open landed, and its graphics owner is not made again. */
+    project.sent.length = 0;
+    await act(async () => {
+      facts.set({ ...facts.get(), mainEntryPath: 'models/main.ts', admitsView: true, admitsGeometry: true });
+    });
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', 'models/main.ts');
+    expect(setViewEntryPath).not.toHaveBeenCalledWith('front', 'main.scad');
+    expect(project.sent.map((event) => event.type)).not.toContain('createViewGraphics');
+  });
+
   /* D21 round 2, D2: a view with no recorded entry is not bound to main, nor main persisted, while the files are
      checked: main can still change, and the record is not written in the middle of the tree write. */
   it('should bind and persist main for a view without an entry only once the files settle, to the main they settle on', async () => {

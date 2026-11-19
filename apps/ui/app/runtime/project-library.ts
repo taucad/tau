@@ -18,7 +18,7 @@ import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { clearLegacyProjectListing } from '#lib/legacy-project-listing.lib.js';
+import { clearLegacyProjectListing } from '@taucad/files-ui/lib/legacy-project-listing.lib';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { reportProjectLibraryWorkerFailed } from '#lib/file-service-reports.js';
 import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';

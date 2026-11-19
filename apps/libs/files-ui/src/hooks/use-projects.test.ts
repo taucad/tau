@@ -1,17 +1,21 @@
 import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
+import type { ChatStorage } from '#types/chat-storage.types.js';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@taucad/chat';
 import type {
   ProjectCommands,
   ProjectCommandsServices,
   ProjectLibraryChatSessions,
-} from '@taucad/files-ui/runtime/project-library-commands';
-import type { ProjectLibraryWorker } from '@taucad/files-ui/types/project-library-io.types';
-import type { ChatProjection } from '#machines/chat-projection.logic.js';
-import type { ProjectClosePlan } from '#services/chat-session-store.js';
+} from '#runtime/project-library-commands.js';
+import type { ProjectLibraryWorker } from '#types/project-library-io.types.js';
+import type { ProjectsInputs } from '#hooks/use-projects.js';
+
+/** A chat projection as far as the catch-up reads it: caught up once its ledger reaches the log's end. */
+type Projection = Readonly<{ ledger: Readonly<{ position: Readonly<{ cursor: number }> }>; endCursor: number }>;
+type ProjectClosePlan = Awaited<ReturnType<ProjectLibraryChatSessions<Projection>['getProjectClosePlan']>>;
+const isCaughtUp = (projection: Projection): boolean => projection.ledger.position.cursor >= projection.endCursor;
 
 const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(() => {
   const listeners = new Set<
@@ -121,15 +125,14 @@ vi.mock('@taucad/agent-host/browser', () => ({
   },
 }));
 
-vi.mock('#hooks/use-project-manager.js', async () => {
-  const commandsModule = await import('@taucad/files-ui/runtime/project-library-commands');
-  const { selectCaughtUp } = await import('#machines/chat-projection.logic.js');
+const projectManagerDouble = await (async () => {
+  const commandsModule = await import('#runtime/project-library-commands.js');
   const notCalled = async (): Promise<never> => {
     throw new Error('not called in this test');
   };
-  const chatStore = mock<ProjectLibraryChatSessions<ChatProjection>>({
+  const chatStore = mock<ProjectLibraryChatSessions<Projection>>({
     observedChatIdsOf: () => chats.observed,
-    getProjection: () => (chats.projection === undefined ? undefined : mock<ChatProjection>(chats.projection)),
+    getProjection: () => (chats.projection === undefined ? undefined : mock<Projection>(chats.projection)),
     getProjectClosePlan: async () => mock<ProjectClosePlan>(chats.plan),
   });
   const chatSource = mock<ChatStorage>({
@@ -139,8 +142,8 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     },
     readChatLog: async (chatId) => new TextEncoder().encode(chats.logs.get(chatId) ?? ''),
   });
-  const built = new commandsModule.ProjectCommands<ProjectLibraryWorker, ChatProjection>({
-    services: mock<ProjectCommandsServices<ChatProjection>>({ isCaughtUp: selectCaughtUp }),
+  const built = new commandsModule.ProjectCommands<ProjectLibraryWorker, Projection>({
+    services: mock<ProjectCommandsServices<Projection>>({ isCaughtUp }),
     facade: notCalled,
     chatStore: () => undefined,
     readChats: async (operation) => operation(chatSource),
@@ -163,8 +166,9 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     leaseQuiescentProject: built.leaseQuiescentProject,
     closeProjectSession: built.closeProjectSession,
   };
-  return {
-    useProjectManager: () => ({
+  /* The project manager as `useProjectManager()` hands it down on each render: only the members these rows read. */
+  return (): ProjectsInputs['projectManager'] =>
+    ({
       ...commands.current,
       getProjectListing: projectManager.getProjectListing,
       getChatsForResource: projectManager.getChatsForResource,
@@ -176,19 +180,23 @@ vi.mock('#hooks/use-project-manager.js', async () => {
       duplicateProject: vi.fn(),
       isLoading: worker.isLoading,
       projectListingQuery: listingQuery,
-    }),
-  };
-});
+    }) as unknown as ProjectsInputs['projectManager'];
+})();
 
-vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({
-    removeProject: async (projectId: string) => {
-      registry.operations.push(`remove-composers:${projectId}`);
-    },
-  }),
-}));
+/* The chat session store stops a project's live composer records; the view exceptions drop its rows. */
+const chatSessions: ProjectsInputs['chatSessions'] = {
+  removeProject: async (projectId: string) => {
+    registry.operations.push(`remove-composers:${projectId}`);
+  },
+};
+const viewExceptions: ProjectsInputs['viewExceptions'] = { dropProject: () => undefined };
 
-const { useProjects } = await import('#hooks/use-projects.js');
+const { useProjects: useProjectListing } = await import('#hooks/use-projects.js');
+
+/** The hook as the app's binding calls it, over the doubles above. */
+// oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- the hook's inferred result
+const useProjects = (options?: Parameters<typeof useProjectListing>[1]) =>
+  useProjectListing({ projectManager: projectManagerDouble(), chatSessions, viewExceptions }, options);
 
 const listingQueryOptions = (): Record<string, unknown> => {
   useQuery.mockClear();

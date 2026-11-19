@@ -28,7 +28,7 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
         actions: machineActions(machines),
         tables: hashFiles(specs, ['expected.json', ...configs]),
         sources: hashFiles(workspace, [
-          'apps/ui/app/hooks/use-project-manager.tsx',
+          'apps/libs/files-ui/src/hooks/project-manager-provider.tsx',
           'apps/libs/files-ui/src/machines/library-discovery.machine.ts',
           'apps/libs/files-ui/src/machines/library-recovery.machine.ts',
           'apps/libs/files-ui/src/machines/library-access.machine.ts',

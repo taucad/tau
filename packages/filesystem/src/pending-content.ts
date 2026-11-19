@@ -72,7 +72,7 @@ export class PendingContentError extends Error {
   public readonly object: PendingObject;
 
   public constructor(path: string, object: PendingObject, options?: { cause?: unknown }) {
-    super(`The large object of ${path} is not on this device yet.`, options);
+    super(`${path} is still downloading.`, options);
     this.name = 'PendingContentError';
     this.path = path;
     this.object = object;

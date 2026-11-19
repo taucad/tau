@@ -28,11 +28,11 @@ const backupStatus = (): Locator =>
   selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="Backup status"]`);
 
 /** What the Backup line says of a GitHub link with nothing pushed yet (C1, 13ae1b6fab). */
-const notPushed = /Saved · Not pushed to GitHub/u;
+const notPushed = /Saved · Not on GitHub yet/u;
 
 /**
  * Open the Backup line's Manage, which holds the repository's writes, its push
- * and *Fetch latest* (C4, M8, dbee175fd2), unless it is open already.
+ * and *Get latest changes* (C4, M8, dbee175fd2), unless it is open already.
  */
 const openManage = async (): Promise<void> => {
   const popover = selectors.getByRole('dialog', { name: 'Manage backup' });
@@ -84,17 +84,17 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
   const linkedState = await target.commands.uiReadLinkedGithubFixture();
   expect(linkedState.pushes).toBe(0);
   await openManage();
-  await target.click(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
   await target.expectVisible(selectors.getByRole('alertdialog'));
   await target.screenshot(undefined, 'github-enable-writes');
-  await target.click(selectors.getByRole('button', { name: 'Enable repository writes', exact: true }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Allow backups', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Stop allowing backups', exact: true }));
   const approved = await target.commands.uiReadLinkedGithubFixture();
   expect(approved.pushes).toBe(0);
   expect(approved.writeTokens).toBe(0);
   await target.screenshot(undefined, 'github-ready-to-push');
-  await target.click(selectors.getByRole('button', { name: 'Push to GitHub', exact: true }));
-  await target.expectVisible(selectors.getByText('Push completed.', { exact: true }), 60_000);
+  await target.click(selectors.getByRole('button', { name: 'Back up to GitHub', exact: true }));
+  await target.expectVisible(selectors.getByText('Backed up to GitHub.', { exact: true }), 60_000);
   const pushed = await target.commands.uiReadLinkedGithubFixture();
   expect(pushed.pushes).toBeGreaterThan(0);
   expect(pushed.commits).toBeGreaterThan(0);
@@ -118,9 +118,9 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
   await target.click(revisionChip());
   await target.expectVisible(selectors.getByCss(visibleRevisionsPanel), 30_000);
   await openManage();
-  await target.click(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
-  await target.click(selectors.getByRole('button', { name: 'Fetch latest', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Stop allowing backups', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Get latest changes', exact: true }));
   await awaitBackup(notPushed);
   const disabled = await target.commands.uiReadLinkedGithubFixture();
   expect(disabled.writeEnabled).toBe(false);
@@ -160,26 +160,26 @@ test('shows independent GitHub connections and repository approval at desktop an
   await target.emulateColorScheme('light');
   await target.screenshot(undefined, 'github-repositories-light');
   await target.click(selectors.getByRole('button', { name: `Manage ${linked.repositoryFullName}`, exact: true }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
   await target.screenshot(undefined, 'github-repository-write-settings.png');
-  await target.click(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
   await target.expectVisible(selectors.getByRole('alertdialog'));
   await target.keyboardPress('Escape');
   await target.expectHidden(selectors.getByRole('alertdialog'));
   const cancelled = await target.commands.uiReadLinkedGithubFixture();
   expect(cancelled.writeEnabled).toBe(false);
   await target.setViewport({ width: 390, height: 844 });
-  await target.click(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
   await target.screenshot(undefined, 'github-repository-approval-mobile.png');
-  await target.click(selectors.getByRole('button', { name: 'Enable repository writes', exact: true }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Allow backups', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Stop allowing backups', exact: true }));
   const approved = await target.commands.uiReadLinkedGithubFixture();
   expect(approved.writeEnabled).toBe(true);
   expect(approved.writeTokens).toBe(0);
   expect(approved.pushes).toBe(0);
   await target.screenshot(undefined, 'github-repository-enabled-mobile.png');
-  await target.click(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Stop allowing backups', exact: true }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Allow backups to this repository', exact: true }));
 });
 
 test('keeps the Share pane in sync with Gist use without publishing or exposing a token', async () => {

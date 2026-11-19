@@ -64,7 +64,7 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
   id: 'direct',
   label: 'Direct link',
   icon: directIcon,
-  description: 'Create a self-contained link that works without a Tau account or storage.',
+  description: 'Create a link that carries the whole project. No account needed.',
   notice: {
     icon: createElement(ShieldCheck, { className: 'mt-0.5 size-5 text-primary', 'aria-hidden': true }),
     title: 'No upload through Tau',

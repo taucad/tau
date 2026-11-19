@@ -215,7 +215,7 @@ export function ErrorPage(): React.JSX.Element {
             Couldn’t reach Tau
           </Heading>
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
-            Check your connection, then try again. Tau retries when your device is back online.
+            Check your connection, then try again. Tau tries again when this device is back online.
           </p>
         </div>
         <div className='flex flex-wrap items-center justify-center gap-2'>

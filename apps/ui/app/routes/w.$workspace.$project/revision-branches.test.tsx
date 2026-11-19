@@ -478,7 +478,7 @@ describe('another device’s conflict, on its card (D3, D14)', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Only the project’s owner can remove another device’s decision.',
+      'Only the project’s owner can dismiss another device’s conflict.',
     );
     expect(revisionStatusHarness.commands.syncNow).not.toHaveBeenCalled();
   });

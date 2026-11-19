@@ -183,7 +183,7 @@ describe('AcceptInvitation', () => {
     answerWith({ status: 403, body: { code: 'SOMETHING_NEW' } });
     mountRoute();
 
-    expect(await screen.findByText('The invitation could not be accepted.')).toBeDefined();
+    expect(await screen.findByText('Couldn’t accept the invitation')).toBeDefined();
   });
 
   /* N6: a spinner with no name is a spinner a screen reader cannot report. */

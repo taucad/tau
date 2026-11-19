@@ -234,7 +234,7 @@ export const openBackupChooser = async (): Promise<void> => {
   const strip = revisionStrip();
   const chooser = backupChooser();
   const connected = line.getByRole('status', { name: /^Backup (?:status|connection progress)$/u });
-  const backUp = line.getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  const backUp = line.getByRole('button', { name: 'Back up to the cloud', exact: true });
   const save = strip.getByRole('button', { name: 'Save', exact: true });
   const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
   type Offer = 'chooser' | 'connected' | 'unsaved' | 'nothingSaved' | 'backUp';

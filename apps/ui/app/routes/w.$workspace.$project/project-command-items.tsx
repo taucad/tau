@@ -222,7 +222,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
           return `Downloaded ${filename}`;
         },
         error(error) {
-          let message = `Failed to download ${filename}`;
+          let message = `Couldn’t download ${filename}`;
           if (error instanceof Error) {
             message = `${message}: ${error.message}`;
           }
@@ -299,7 +299,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
         : [
             {
               id: 'connect-tau-cloud',
-              label: 'Back up to Tau Cloud',
+              label: 'Back up to the cloud',
               group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,

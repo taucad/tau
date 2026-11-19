@@ -290,8 +290,19 @@ function SheetAgentGlyph({
   );
 }
 
+/*
+ * A host's label is a label ("Cloud" for the cloud host); in a sentence the cloud host is "the cloud" (naming
+ * blueprint rule 10), so `where` carries its own preposition and `hostSubject` names a host that starts a sentence.
+ */
 const hostWhere = (placement: AgentHostPlacementTarget): string =>
-  placement.hostId === 'desktop' ? 'this computer' : placement.label;
+  placement.hostId === 'desktop'
+    ? 'on this computer'
+    : placement.cloudProjectId === undefined
+      ? `on ${placement.label}`
+      : 'in the cloud';
+
+const hostSubject = (placement: AgentHostPlacementTarget): string =>
+  placement.cloudProjectId === undefined ? placement.label : 'The cloud agent';
 
 const acpKey = (hostId: TauAgentHostId, agentId: string): string =>
   `acp:${encodeURIComponent(hostId)}:${encodeURIComponent(agentId)}`;
@@ -311,7 +322,7 @@ const acpAgent = (
           command: descriptor.fixCommand,
           where,
         }
-    : { reason: `${placement.label} is offline`, code: 'HOST_OFFLINE', command: undefined, where };
+    : { reason: `${hostSubject(placement)} is offline`, code: 'HOST_OFFLINE', command: undefined, where };
   return {
     kind: 'acp',
     key: acpKey(placement.hostId, descriptor.id),
@@ -773,7 +784,7 @@ const useRunsOn = (
           ? browserHost.caveat
           : undefined
       : placement?.online === false
-        ? `${placement.label} is offline`
+        ? `${hostSubject(placement)} is offline`
         : undefined);
   const setting: Setting | undefined =
     options.length < 2
@@ -815,7 +826,7 @@ function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly ref
     <div data-slot='agent-unavailable' className='flex flex-col gap-2 px-3 py-4'>
       <p className='flex items-start gap-2 text-sm font-medium'>
         <CircleAlert aria-hidden='true' className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
-        {agent.name} can&apos;t start on {refusal.where}
+        {agent.name} can&apos;t start {refusal.where}
       </p>
       <p className='pl-6 text-xs text-muted-foreground'>
         {refusal.reason}. <span className='font-mono text-[11px]'>{refusal.code}</span>
@@ -823,7 +834,7 @@ function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly ref
       {refusal.command === undefined ? null : (
         <>
           <p className='pl-6 text-xs text-muted-foreground'>
-            Run <code className='rounded-xs bg-muted px-1 font-mono text-foreground'>{refusal.command}</code> on{' '}
+            Run <code className='rounded-xs bg-muted px-1 font-mono text-foreground'>{refusal.command}</code>{' '}
             {refusal.where}, then reopen this menu.
           </p>
           <div className='pl-6'>
@@ -1182,7 +1193,7 @@ function AgentList({
         <CommandEmpty className='mx-2'>No agents match “{query}”.</CommandEmpty>
         <CommandGroup>{agents.filter((agent) => agent.kind === 'tau').map((agent) => row(agent))}</CommandGroup>
         {hosts.map(([hostId, where]) => (
-          <CommandGroup key={hostId} heading={`On ${where}`}>
+          <CommandGroup key={hostId} heading={`${where.charAt(0).toUpperCase()}${where.slice(1)}`}>
             {agents.filter((agent) => agent.kind === 'acp' && agent.hostId === hostId).map((agent) => row(agent))}
           </CommandGroup>
         ))}

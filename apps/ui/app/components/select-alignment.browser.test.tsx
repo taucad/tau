@@ -77,7 +77,7 @@ afterEach(() => {
 const sites = [
   'Invitation role',
   'Role for teammate@example.test',
-  'General access',
+  'Who can open the link',
   'Account choice',
   'Workspace recovery',
   'Items per page',
@@ -103,7 +103,7 @@ it.each(
   const child =
     site === 'Invitation role' || site === 'Role for teammate@example.test' ? (
       <RevisionCollaborators projectId='fixture' />
-    ) : site === 'General access' ? (
+    ) : site === 'Who can open the link' ? (
       <PublicationAccessPanel
         apiBaseUrl='http://localhost:4000'
         publicationId='fixture'
@@ -153,10 +153,10 @@ it.each(
       ? 'Can edit'
       : site === 'Role for teammate@example.test'
         ? 'Can view'
-        : site === 'General access'
+        : site === 'Who can open the link'
           ? narrow
-            ? 'Public'
-            : 'Private'
+            ? 'Anyone with the link'
+            : 'Only people you invite'
           : site === 'Account choice'
             ? narrow
               ? 'A much longer account choice than the available space'

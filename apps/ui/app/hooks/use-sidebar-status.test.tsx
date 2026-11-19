@@ -835,7 +835,7 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
 
     liveProject('gearbox', { state: 'failed' });
     expect(rowOf('gearbox').glyph).toBe('failed');
-    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Failed to open' });
+    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Couldn’t open' });
   });
 
   it('says whether every project is live (D12)', () => {

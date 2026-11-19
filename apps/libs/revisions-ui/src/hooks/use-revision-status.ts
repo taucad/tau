@@ -201,7 +201,7 @@ const replacesRecordedRemote = (recorded: RemoteFacet | undefined, pick: RemoteP
   (recorded.phase === 'connected' || recorded.phase === 'reconnectRequired') &&
   !isSameDestination(recorded, pick);
 /** The sentence a GitHub-bound project's Sync region shows while nobody is signed in to Tau. */
-const signedOutGithubReason = 'Sign in to Tau to sync with GitHub.';
+const signedOutGithubReason = 'Sign in to Tau to back up to GitHub.';
 /** The verbs the page sends to its revision root. @public */
 export type RevisionCommands = Readonly<{
   restore: (revisionId: string) => void;

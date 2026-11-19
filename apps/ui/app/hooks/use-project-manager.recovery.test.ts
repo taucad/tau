@@ -467,7 +467,7 @@ describe('useProjectManager recovery (I8)', () => {
             files: {},
             location: { kind: 'home' },
           }),
-        ).rejects.toThrow(`An earlier creation of this project has not finished on this device: ${fakeProject.id}`);
+        ).rejects.toThrow('This project is still being set up on this device. Try again in a moment.');
       });
 
       expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
@@ -679,7 +679,7 @@ describe('useProjectManager recovery (I8)', () => {
         location: { kind: 'home' },
       });
       // Observed before the replay is released, so its refusal is never unhandled.
-      const refused = expect(creation).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      const refused = expect(creation).rejects.toThrow('This project is already on this device.');
       await settle();
       // Held behind the replay: it has read nothing of the journal since bootstrap.
       expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();

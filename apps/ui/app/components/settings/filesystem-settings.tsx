@@ -107,8 +107,8 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
   return (
     <SettingsGroup>
       <SettingsRow
-        title='Tau Cloud projects'
-        description='Where your cloud projects appear when you sign in'
+        title='Cloud projects'
+        description='Where they appear on this device when you sign in'
         info='Each project downloads the first time you open it.'
         control={
           <Select
@@ -118,7 +118,7 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
               materializeOnSignIn.set(options.find((option) => option.key === key)?.location);
             }}
           >
-            <SelectTrigger aria-label='Tau Cloud projects' className='w-40'>
+            <SelectTrigger aria-label='Cloud projects' className='w-40'>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

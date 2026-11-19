@@ -187,7 +187,7 @@ const mintAgentGrant = (
  * Every cloud host wears the same name, because there is only ever one per
  * project and the row it produces is what the selector renders.
  */
-const cloudHostLabel = 'Tau Cloud';
+const cloudHostLabel = 'Cloud';
 /** How many directory rows one host lists; a page has no use for more. */
 const runListLimit = 200;
 const newDeviceId = (): string => `agent_${randomUUID().replaceAll('-', '')}`;
@@ -391,7 +391,7 @@ export class HostsService implements OnModuleDestroy {
     if (registered === undefined) {
       throw new ConflictException({
         code: 'PROJECT_NOT_ON_TAU_CLOUD',
-        message: 'Back this project up to Tau Cloud before running its agent there.',
+        message: 'Back this project up to the cloud before running its agent there.',
       });
     }
     const existing = await this.findCloudHost(options.userId, options.projectId);

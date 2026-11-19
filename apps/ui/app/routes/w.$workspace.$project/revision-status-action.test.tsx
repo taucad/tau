@@ -172,7 +172,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CloudAlert,
       'attention',
-      'Not backed up · Your Git host refused access',
+      'Not backed up · Your Git host asked for a sign-in',
     ],
     [
       'GitHub refusing its credential after acknowledging everything (D68)',
@@ -504,7 +504,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open History. You are on main. Saved, Cloud copy unavailable.',
+      name: 'Open History. You are on main. Saved, Backup unavailable.',
     });
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
   });

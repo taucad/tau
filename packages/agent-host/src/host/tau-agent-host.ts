@@ -2440,7 +2440,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (funding.type !== 'funded') {
       throw coded(
         'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
-        "A Tau account funded this chat's last model request; sign in to that account to continue it.",
+        "Another account funded this chat's last model request; sign in to that account to continue it.",
         { details: { attemptId: open[0]! } },
       );
     }
@@ -2449,7 +2449,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (foreign !== undefined) {
       throw coded(
         'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
-        "Another Tau account funded this chat's last model request; sign in to that account to continue it.",
+        "Another account funded this chat's last model request; sign in to that account to continue it.",
         { details: { attemptId: foreign } },
       );
     }

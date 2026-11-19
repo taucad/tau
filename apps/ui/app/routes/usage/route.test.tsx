@@ -433,7 +433,7 @@ describe('UsagePage', () => {
     renderPage();
 
     expect(screen.getByTestId('usage-freshness')).toHaveTextContent(
-      /Offline — saved usage for a@example.test, last updated .+\. Reconnect for the latest usage\./u,
+      /Offline — saved usage for a@example.test, last updated .+\. Go online for the latest usage\./u,
     );
     expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     expect(screen.queryByRole('button', { name: /Models/u })).not.toBeInTheDocument();

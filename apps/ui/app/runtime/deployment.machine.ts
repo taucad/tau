@@ -10,7 +10,7 @@ import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
  * It starts from this install's record of the last explicit answer for the page's API origin (`recalling`), asks the
  * API's `GET /v1/deployment` once per page load (`asking`), and then again at the answer's `maxAge` while the page is
  * visible (`fresh`, `due`), or with a capped backoff after a failure, on `online`, on window focus and on the person's
- * Retry (`backoff`). Each ask has a deadline on the runtime's clock; leaving `asking` stops the ask, which aborts the
+ * Retry (`backoff`, then `stalled` when the backoff ends on a hidden page). Each ask has a deadline on the runtime's clock; leaving `asking` stops the ask, which aborts the
  * request. Every change of the mode is told to the parent as `deploymentChanged`; nothing awaits it (I1).
  *
  * The machine is pure (MC-R6): reading and asking are named actors and writing the record is a named effect, all
@@ -135,7 +135,8 @@ export type DeploymentChangedReport = Readonly<{
 /** Arguments of the effects the composition provides. @public */
 export type DeploymentEffectArgs = Readonly<{
   writeRecord: Readonly<{ record: DeploymentRecord }>;
-  dropRecord: Readonly<Record<string, never>>;
+  /** The confirmation time of the record that expired: a newer one another tab wrote stays. */
+  dropRecord: Readonly<{ confirmedAt: number }>;
 }>;
 
 const notProvided = (name: string): never => {
@@ -403,8 +404,8 @@ export const deploymentMachine = setup({
           tellParent(context, fold.mode, enq);
           if (fold.effect === 'write' && fold.record !== undefined) {
             enq(actions.writeRecord, { record: fold.record });
-          } else if (fold.effect === 'drop') {
-            enq(actions.dropRecord, {});
+          } else if (fold.effect === 'drop' && context.record !== undefined) {
+            enq(actions.dropRecord, { confirmedAt: context.record.confirmedAt });
           }
           return fold.next === 'fresh'
             ? {
@@ -475,10 +476,21 @@ export const deploymentMachine = setup({
         retry: { target: 'asking' },
       },
     },
+    /* Failed, with the backoff spent while the page was hidden: ask once it is visible, and still at once on
+     * `online`, on focus and on the person's Retry, so a failed ask is never left waiting for visibility alone. */
+    stalled: {
+      on: {
+        visibilityChanged: ({ event }) =>
+          event.visible ? { target: 'asking', context: { visible: true } } : { context: { visible: false } },
+        windowFocused: { target: 'asking' },
+        online: { target: 'asking' },
+        retry: { target: 'asking' },
+      },
+    },
     /* Failed: retry after the backoff while visible, and at once on `online`, on focus and on the person's Retry. */
     backoff: {
       after: {
-        backoff: ({ context }) => (context.visible ? { target: 'asking' } : { target: 'due' }),
+        backoff: ({ context }) => (context.visible ? { target: 'asking' } : { target: 'stalled' }),
       },
       on: {
         visibilityChanged: ({ event }) => ({

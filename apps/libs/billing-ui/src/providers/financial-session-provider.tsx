@@ -23,7 +23,14 @@ export type FinancialSessionPurgeReason = 'closure' | 'logout' | 'owner_changed'
 type FinancialSessionController = {
   readonly capture: () => FinancialSessionRequest;
   readonly purge: (reason: FinancialSessionPurgeReason) => void;
+  /** An owner's change (sign-in, sign-out, account switch): purge, keep the new owner's saved usage, tell other tabs. */
   readonly bind: (identity: FinancialSessionIdentity | undefined) => void;
+  /**
+   * The same owner's identity changed for another reason (the API stopped answering funded, or named another billing
+   * environment): drop this tab's billing queries and abort requests in flight, keep every saved usage and tell no
+   * other tab (adaptive app deployment mode D17 b).
+   */
+  readonly rebind: (identity: FinancialSessionIdentity | undefined) => void;
 };
 
 const FinancialSessionContext = createContext<FinancialSessionController | undefined>(undefined);
@@ -80,6 +87,13 @@ export function FinancialSessionProvider({ children }: { readonly children: Reac
     },
     [queryClient],
   );
+  /** Drops this tab's billing queries and requests in flight; saved usage stays (D17 b). */
+  const dropHere = useCallback((): void => {
+    generation.current += 1;
+    abort.current.abort();
+    abort.current = new AbortController();
+    removeBillingState(queryClient);
+  }, [queryClient]);
   const announce = useCallback((keep?: SavedUsageScope): void => {
     channel.current?.postMessage({ keep: keep ?? null });
   }, []);
@@ -125,6 +139,15 @@ export function FinancialSessionProvider({ children }: { readonly children: Reac
     },
     [announce, purgeHere],
   );
+  const rebind = useCallback(
+    (next: FinancialSessionIdentity | undefined): void => {
+      if (!sameIdentity(identity.current, next)) {
+        dropHere();
+        identity.current = next;
+      }
+    },
+    [dropHere],
+  );
   const capture = useCallback((): FinancialSessionRequest => {
     const capturedGeneration = generation.current;
     const { signal } = abort.current;
@@ -134,7 +157,7 @@ export function FinancialSessionProvider({ children }: { readonly children: Reac
       isCurrent: () => !signal.aborted && generation.current === capturedGeneration,
     };
   }, []);
-  const value = useMemo(() => ({ bind, capture, purge }), [bind, capture, purge]);
+  const value = useMemo(() => ({ bind, capture, purge, rebind }), [bind, capture, purge, rebind]);
   return <FinancialSessionContext.Provider value={value}>{children}</FinancialSessionContext.Provider>;
 }
 
@@ -150,32 +173,55 @@ export const useOptionalFinancialSession = (): FinancialSessionController | unde
   useContext(FinancialSessionContext);
 
 /**
- * Prevents a newly observed identity from rendering until the previous owner's
- * financial scope is purged. Only a previous owner is gated, for one commit:
- * owner A to owner B, or an owner to none, remounts the children, which resets
- * the billing consumers' own React state. A first owner after no identity has
- * no previous owner's React state to reset by remount, so its children stay
- * mounted. The layout effect still binds it, which purges billing query state
- * and other accounts' saved usage and tells the other tabs.
+ * Scopes the billing consumers to one financial identity (adaptive app deployment mode charter D17). Three causes are
+ * kept apart:
+ *
+ * - (a) The owner of a bound identity changes or signs out: today's rule. The previous owner's financial scope is
+ *   purged (keeping the new owner's saved usage), the other tabs are told, and the children are withheld for one
+ *   commit, which remounts them and resets the billing consumers' own React state.
+ * - (b) The same owner's identity changes for another reason (the mode left `funded`, or the billing environment
+ *   changed): this tab drops its billing queries and aborts requests in flight; saved usage is kept, no other tab is
+ *   told and nothing remounts.
+ * - (c) The owner changes while no identity is bound: nothing remounts and nothing is purged here, as in a self-host
+ *   build (sign-out and account switch purge through their own path).
+ *
+ * A first identity after none binds without a remount: it purges billing query state and other accounts' saved usage
+ * and tells the other tabs. In a pinned `cloud` build every identity names its owner, so only (a) occurs.
+ *
+ * @param props - The identity, the signed-in owner (the identity's owner by default) and the children.
+ * @returns The children, or nothing for the one commit a cause (a) change withholds them.
  */
 export function FinancialSessionScope({
   identity,
+  ownerId = identity?.ownerId,
   children,
 }: {
   readonly identity: FinancialSessionIdentity | undefined;
+  /** The signed-in owner, bound or not; `undefined` when signed out. */
+  readonly ownerId?: string | undefined;
   readonly children: React.ReactNode;
 }): React.ReactNode {
   const controller = useFinancialSession();
-  const [committed, setCommitted] = useState(identity);
-  const changed = !sameIdentity(committed, identity);
-  const gated = changed && committed !== undefined;
+  const [committed, setCommitted] = useState<{
+    identity: FinancialSessionIdentity | undefined;
+    ownerId: string | undefined;
+  }>({ identity, ownerId });
+  const identityChanged = !sameIdentity(committed.identity, identity);
+  const ownerChanged = committed.ownerId !== ownerId;
+  const changed = identityChanged || ownerChanged;
+  /* (a): only a bound owner's change remounts. */
+  const gated = changed && committed.identity !== undefined && ownerChanged;
   useLayoutEffect(() => {
-    controller.bind(identity);
+    if (changed && committed.identity !== undefined && !ownerChanged) {
+      controller.rebind(identity); // (b)
+    } else {
+      controller.bind(identity); // (a), a first identity, or no change (a no-op); (c) binds nothing to nothing
+    }
     if (changed) {
       // oxlint-disable-next-line react/set-state-in-effect -- children stay gated until the old owner is synchronously purged
-      setCommitted(identity);
+      setCommitted({ identity, ownerId });
     }
-  }, [changed, controller, identity]);
+  }, [changed, committed.identity, controller, identity, ownerChanged, ownerId]);
   return gated ? undefined : children;
 }
 

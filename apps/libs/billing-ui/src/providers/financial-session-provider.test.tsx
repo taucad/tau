@@ -324,4 +324,98 @@ describe('FinancialSessionScope', () => {
     expect(stale).toEqual([]);
     expect(seen.at(-1)).toEqual({ identity: undefined, cached: undefined, held: undefined });
   });
+
+  describe('D17: three causes (adaptive app deployment mode)', () => {
+    /** Counts mounts of the subtree, so a remount shows. */
+    const mounts = { count: 0 };
+    const Counted = (): undefined => {
+      useEffect(() => {
+        mounts.count += 1;
+      }, []);
+      return undefined;
+    };
+    const tree = (identity: FinancialSessionIdentity | undefined, ownerId: string | undefined): React.JSX.Element => (
+      <FinancialSessionScope identity={identity} ownerId={ownerId}>
+        <Counted />
+      </FinancialSessionScope>
+    );
+    const setup = (identity: FinancialSessionIdentity | undefined, ownerId: string | undefined) => {
+      mounts.count = 0;
+      const queryClient = new QueryClient();
+      const posted: unknown[] = [];
+      vi.spyOn(BroadcastChannel.prototype, 'postMessage').mockImplementation((message: unknown) => {
+        posted.push(message);
+      });
+      const view = render(tree(identity, ownerId), { wrapper: wrap(queryClient) });
+      queryClient.setQueryData(['billing', 'credits'], { balance: 'x' });
+      purgeSavedUsage.mockClear();
+      posted.length = 0;
+      return { queryClient, posted, rerender: view.rerender };
+    };
+
+    it('(b) keeps the tree and saved usage, drops billing queries and tells no tab when the mode leaves funded', async () => {
+      const { queryClient, posted, rerender } = setup(owner('a'), 'a');
+      await waitFor(() => {
+        expect(mounts.count).toBe(1);
+      });
+      rerender(tree(undefined, 'a'));
+      expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
+      expect(purgeSavedUsage).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(mounts.count).toBe(1);
+    });
+
+    it('(b) keeps the tree when the same owner moves to another billing environment', async () => {
+      const { posted, rerender } = setup(owner('a'), 'a');
+      await waitFor(() => {
+        expect(mounts.count).toBe(1);
+      });
+      rerender(tree({ ...owner('a'), environment: 'staging' }, 'a'));
+      expect(purgeSavedUsage).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(mounts.count).toBe(1);
+    });
+
+    it('(a) remounts, purges and tells other tabs when a bound owner signs out, as today', async () => {
+      const { posted, rerender } = setup(owner('a'), 'a');
+      await waitFor(() => {
+        expect(mounts.count).toBe(1);
+      });
+      rerender(tree(undefined, undefined));
+      await waitFor(() => {
+        expect(mounts.count).toBe(2);
+      });
+      expect(purgeSavedUsage).toHaveBeenCalledWith(undefined);
+      expect(posted).toEqual([{ keep: null }]);
+    });
+
+    it('(c) neither remounts nor purges when the owner changes while no identity is bound', async () => {
+      const { posted, rerender } = setup(undefined, 'a');
+      await waitFor(() => {
+        expect(mounts.count).toBe(1);
+      });
+      rerender(tree(undefined, 'b'));
+      rerender(tree(undefined, undefined));
+      expect(purgeSavedUsage).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+      expect(mounts.count).toBe(1);
+    });
+
+    it('keeps the pinned cloud rule: with no owner prop, an account switch remounts and purges', async () => {
+      mounts.count = 0;
+      const queryClient = new QueryClient();
+      const cloudTree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+        <FinancialSessionScope identity={identity}>
+          <Counted />
+        </FinancialSessionScope>
+      );
+      const { rerender } = render(cloudTree(owner('a')), { wrapper: wrap(queryClient) });
+      purgeSavedUsage.mockClear();
+      rerender(cloudTree(owner('b')));
+      await waitFor(() => {
+        expect(mounts.count).toBe(2);
+      });
+      expect(purgeSavedUsage).toHaveBeenCalledWith({ environment: 'development', ownerId: 'b' });
+    });
+  });
 });

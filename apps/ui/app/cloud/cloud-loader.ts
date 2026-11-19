@@ -1,6 +1,7 @@
 import { Topic } from '@taucad/events';
 import { reportUiError } from '#lib/error-reporting.js';
 import { recoverFromCaughtError } from '#lib/stale-build-recovery.js';
+import { onceBootStage } from '#lib/boot-signals.js';
 
 /**
  * The one owner of a Cloud chunk's `import()` (adaptive app deployment mode charter D6, I8, I15, BA10, BA25).
@@ -43,7 +44,23 @@ export type CloudLoaderOptions<Module> = Readonly<{
   /** Hand a failure to the stale-build recovery. */
   recover?: (error: unknown) => void;
   setTimer?: (callback: () => void, milliseconds: number) => () => void;
+  /**
+   * When the first load may start: after `home-ready` and the next task, by default, so no Cloud chunk competes with
+   * the shell (I1). Returns a cancel.
+   */
+  whenReady?: (start: () => void) => () => void;
 }>;
+
+const afterHomeReady = (start: () => void): (() => void) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = onceBootStage('home-ready', () => {
+    timer = setTimeout(start, 0);
+  });
+  return () => {
+    cancel();
+    clearTimeout(timer);
+  };
+};
 
 const browserTimer = (callback: () => void, milliseconds: number): (() => void) => {
   const id = globalThis.setTimeout(callback, milliseconds);
@@ -75,7 +92,9 @@ export const createCloudLoader = <Module>({
   },
   recover = recoverFromCaughtError,
   setTimer = browserTimer,
+  whenReady = afterHomeReady,
 }: CloudLoaderOptions<Module>): CloudLoader<Module> => {
+  let waiting = false;
   let state: CloudLoadState<Module> = { status: 'idle' };
   let attempt = 0;
   let failures = 0;
@@ -126,8 +145,14 @@ export const createCloudLoader = <Module>({
   return {
     state: () => state,
     load: () => {
-      if (state.status === 'idle') {
-        start();
+      if (state.status === 'idle' && !waiting) {
+        waiting = true;
+        whenReady(() => {
+          waiting = false;
+          if (state.status === 'idle') {
+            start();
+          }
+        });
       }
     },
     retry: () => {

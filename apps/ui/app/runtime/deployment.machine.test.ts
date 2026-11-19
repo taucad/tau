@@ -7,6 +7,7 @@
  * 2. starting → recalling → asking → fresh (an answer) → asking (revalidation while visible)
  * 3. fresh → due (revalidation while hidden) → asking (visible again)
  * 4. asking → backoff (a failure, a timeout, a trusted 404) → asking (backoff, online, focus, Retry)
+ * 5. backoff → stalled (the backoff ends on a hidden page) → asking (visible, online, focus, Retry)
  */
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -436,6 +437,38 @@ describe('deployment: revalidation', () => {
     h.reply(funded('staging'));
     await h.clock.advanceAsync(1);
     expect(h.requests).toHaveLength(3);
+  });
+
+  it('should still retry a failed ask on online after its backoff ended on a hidden page', async () => {
+    const h = await started(harness({ replies: [new TypeError('offline')] }));
+    h.actor.send({ type: 'visibilityChanged', visible: false });
+    await h.clock.advanceAsync(deploymentBackoffMilliseconds(1));
+    expect(h.state()).toBe('stalled');
+    expect(h.requests).toHaveLength(1);
+    h.reply(funded('staging'));
+    h.online();
+    await flush();
+    await flush();
+    expect(h.mode()).toEqual({ state: 'funded', basis: 'confirmed', environment: 'staging' });
+  });
+
+  it('should keep a newer confirmation another tab wrote when a 404 drops an expired record', async () => {
+    const key = deploymentRecordKey(origin);
+    const h = harness({
+      replies: [absent()],
+      stored: { [key]: recordOf({ state: 'funded', environment: 'staging', confirmedAt: start - 15 * day }) },
+    });
+    h.actor.start();
+    /* Another tab confirms the origin after this tab read the record and before its 404 arrives. */
+    h.storage.items.set(key, recordOf({ state: 'funded', environment: 'staging', confirmedAt: start }));
+    await flush();
+    await flush();
+    expect(h.mode()).toEqual({ state: 'unfunded', basis: 'absent' });
+    expect(parseDeploymentRecord(JSON.parse(h.storage.items.get(key)!))).toEqual({
+      state: 'funded',
+      environment: 'staging',
+      confirmedAt: start,
+    });
   });
 
   it('should wait for a visible page to revalidate', async () => {

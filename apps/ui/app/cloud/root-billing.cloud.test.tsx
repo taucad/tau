@@ -1,5 +1,6 @@
 import type * as BillingSessionModule from '@taucad/billing/hooks/billing-session';
 import type * as FinancialSessionModule from '@taucad/billing-ui/providers/financial-session-provider';
+import type * as CloudFinancialSessionModule from '#cloud/cloud-financial-session.js';
 import { renderToString } from 'react-dom/server';
 import type { ReactNode } from 'react';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
@@ -44,6 +45,14 @@ const financial = vi.hoisted(() => ({
 vi.mock('@taucad/billing-ui/providers/financial-session-provider', async (loadOriginal) => {
   const original = await loadOriginal<typeof FinancialSessionModule>();
   return { ...original, useFinancialSession: () => (boundary.enabled ? original.useFinancialSession() : financial) };
+});
+/* The payment return reads the session Core hands the Cloud surfaces; outside the boundary, the same stand-in. */
+vi.mock('#cloud/cloud-financial-session.js', async (loadOriginal) => {
+  const original = await loadOriginal<typeof CloudFinancialSessionModule>();
+  return {
+    ...original,
+    useCloudFinancialSession: () => (boundary.enabled ? original.useCloudFinancialSession() : financial),
+  };
 });
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }) }));
 

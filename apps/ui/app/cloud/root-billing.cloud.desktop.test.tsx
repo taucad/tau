@@ -23,8 +23,8 @@ vi.mock('#lib/build-target.js', () => ({ isDesktopTarget: () => true }));
 vi.mock('@taucad/billing/hooks/billing-session', () => ({
   useBillingSession: () => ({ apiBaseUrl: 'https://api.tau.new', environment: 'development', userId: 'user-a' }),
 }));
-vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
-  useFinancialSession: () => ({
+vi.mock('#cloud/cloud-financial-session.js', () => ({
+  useCloudFinancialSession: () => ({
     capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
   }),
 }));

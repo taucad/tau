@@ -4,11 +4,17 @@ import { useModels } from '#hooks/use-models.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatMessageUsage, sumUsageTokens } from '@taucad/billing-ui/components/usage/chat-message-usage';
 
-/** Self-host has no receipts: the same button and card, without a credits line. */
+/**
+ * Self-host has no receipts: the same button and card, without a credits line. An adaptive build's facade passes the
+ * line from the Cloud chunk's receipt leaf while funded, so the card itself stays in Core (gate G1).
+ */
 export function ChatMessageDataUsage({
   usageParts,
+  credits,
 }: {
   readonly usageParts: readonly UsageData[];
+  /** The Tau credits line, when a funded mode supplies one. */
+  readonly credits?: string | undefined;
 }): React.JSX.Element | undefined {
   const { resolveModel } = useModels();
   const lastUsage = usageParts.at(-1);
@@ -22,6 +28,7 @@ export function ChatMessageDataUsage({
       agent={lastUsage.agent === undefined ? undefined : externalAgentDisplayName(lastUsage.agent)}
       totals={sumUsageTokens(usageParts)}
       turns={usageParts.length}
+      credits={credits}
       reference={lastUsage.attemptId}
     />
   );

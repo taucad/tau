@@ -1,4 +1,10 @@
 import { useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
+import { BillingLegalLinksProvider } from '@taucad/billing-ui/providers/billing-legal-links-provider';
+import type { BillingLegalLinks } from '@taucad/billing-ui/providers/billing-legal-links-provider';
+import { cloudLegalUrl } from '#cloud/cloud-legal-url.js';
+import { CloudFinancialSessionProvider } from '#cloud/cloud-financial-session.js';
+import type { CloudFinancialSession } from '#cloud/cloud-financial-session.js';
 import { isKernelAllowed, storageLimitBytesByTier } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
@@ -19,13 +25,40 @@ export { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.cloud.js';
 export { CommercialUpgradeLabel } from '#cloud/commercial-features.cloud.js';
 export { KernelCommercialBadge } from '#cloud/kernel-commerce.cloud.js';
 export { ChatModelSelector } from '#components/chat/chat-model-selector.js';
-export { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
-export { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
-export { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
-export { ChatMessageDataUsage, ReceiptCreditsSummary } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+/* Credit leaves only: the facades render their own cards and tables in Core (gate G1, one-way dependency). */
+export {
+  ProjectCreditsLine,
+  ReceiptCreditsSummary,
+  ReceiptCreditsText,
+} from '#routes/w.$workspace.$project/chat-receipt-credits.js';
+export { AddCreditsAction } from '#routes/w.$workspace.$project/chat-error-add-credits.js';
 /** The payment and portal return (I7): the existing handler's body and latch, mounted where the hook was called. */
-export { CloudPaymentReturn as PaymentReturn, DesktopPaymentFollowUp } from '#cloud/root-billing.cloud.js';
+export { CloudPaymentReturn as PaymentReturn, DesktopPaymentFollowUp } from '#cloud/payment-return.js';
 /* oxlint-enable no-barrel-files/no-barrel-files */
+
+/** The billing surfaces link Tau's legal pages on this deployment's website (the chunk's own `cloudLegalUrl`). */
+const billingLegalLinks: BillingLegalLinks = { legalUrl: cloudLegalUrl };
+
+/**
+ * The context every Cloud surface renders in, applied by `CloudSurface` around each one: the billing legal links, here
+ * rather than in Core (charter G1 shrink order, step one), and the financial session Core hands in (one-way dependency).
+ *
+ * @param props - The surface.
+ * @returns The surface inside its providers.
+ */
+export function CloudProviders({
+  financialSession,
+  children,
+}: {
+  readonly financialSession: CloudFinancialSession | undefined;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  return (
+    <CloudFinancialSessionProvider value={financialSession}>
+      <BillingLegalLinksProvider links={billingLegalLinks}>{children}</BillingLegalLinksProvider>
+    </CloudFinancialSessionProvider>
+  );
+}
 
 /** The payment artwork the billing surfaces draw; the base sprite is Core. */
 export function PaymentSprite(): React.JSX.Element {

@@ -3,12 +3,15 @@ import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 /**
  * The payment actions a desktop opened in the system browser (adaptive app deployment mode D14): their ids, not secret,
  * per financial identity, for 24 hours, so a restart does not lose an outcome. The owner's purge clears them; nothing
- * here moves money. Never throws: a blocked or corrupt store reads as empty.
+ * here moves money. Never throws: a blocked or corrupt store reads as empty. The purge lives apart, in Core
+ * (`pending-payment-actions-purge.ts`).
  */
 
 /** How long a stored action is followed. Milliseconds. @public */
 export const pendingPaymentActionLifetimeMilliseconds = 24 * 60 * 60 * 1000;
 
+/* `pending-payment-actions-purge.ts` repeats this key: the purge is Core and this store is the Cloud chunk's, so they
+ * share no module (gate G1). Its test holds the two together. */
 const storageKey = `${appMetaConfig.databasePrefix}pending-payment-actions`;
 
 /** One stored action. @public */
@@ -91,14 +94,4 @@ export const pendingPaymentActions = (
  */
 export const forgetPendingPaymentAction = (actionId: string): void => {
   write(read().filter((entry) => entry.actionId !== actionId));
-};
-
-/**
- * The owner's purge: forget every action but `keep`'s (I5), as saved usage is purged.
- *
- * @param keep - The account namespace to keep; omit to forget every one.
- * @public
- */
-export const purgePendingPaymentActions = (keep?: Readonly<{ environment: string; ownerId: string }>): void => {
-  write(read().filter((entry) => entry.environment === keep?.environment && entry.ownerId === keep.ownerId));
 };

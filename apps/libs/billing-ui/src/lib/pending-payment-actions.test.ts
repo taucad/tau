@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { purgePendingPaymentActions } from '#lib/pending-payment-actions-purge.js';
 import {
   forgetPendingPaymentAction,
   pendingPaymentActionLifetimeMilliseconds,
   pendingPaymentActions,
-  purgePendingPaymentActions,
   rememberPendingPaymentAction,
 } from '#lib/pending-payment-actions.js';
 
@@ -31,6 +31,7 @@ describe('pending payment actions', () => {
     expect(pendingPaymentActions(alice, pendingPaymentActionLifetimeMilliseconds)).toEqual([]);
   });
 
+  /* The Core purge repeats the store's key (gate G1): this row holds the two together. */
   it("should be cleared by the owner's purge, keeping only the new owner's", () => {
     rememberPendingPaymentAction({ actionId: 'pa_1', ...alice, openedAt: 1 });
     rememberPendingPaymentAction({ actionId: 'pa_2', ...bob, openedAt: 1 });

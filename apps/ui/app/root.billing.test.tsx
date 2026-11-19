@@ -32,8 +32,8 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
 const financialSession = vi.hoisted(() => ({
   capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
 }));
-vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
-  useFinancialSession: () => financialSession,
+vi.mock('#cloud/cloud-financial-session.js', () => ({
+  useCloudFinancialSession: () => financialSession,
 }));
 
 function Harness(): React.JSX.Element {

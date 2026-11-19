@@ -57,6 +57,7 @@
     "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",
     "./lib/billing-payment-client": "./src/lib/billing-payment-client.ts",
     "./lib/pending-payment-actions": "./src/lib/pending-payment-actions.ts",
+    "./lib/pending-payment-actions-purge": "./src/lib/pending-payment-actions-purge.ts",
     "./providers/billing-legal-links-provider": "./src/providers/billing-legal-links-provider.tsx",
     "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
     "./package.json": "./package.json"

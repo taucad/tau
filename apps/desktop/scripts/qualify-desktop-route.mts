@@ -27,7 +27,11 @@ import {
 } from './qualification-tls.mjs';
 import { observeLinuxCleanHost, startLinuxConsumer } from './qualification-linux-consumer.mjs';
 import type { LinuxConsumer } from './qualification-linux-consumer.mjs';
-import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
+import {
+  createWindowsQualificationDriver,
+  observeWindowsConsumerHost,
+  windowsQualificationInstallationPath,
+} from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver, isAptLockRefusal } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
@@ -433,7 +437,7 @@ const main = async (): Promise<void> => {
     : route.startsWith('macos-')
       ? join(homedir(), 'Applications', `tau-qualification-${nonce}`, 'Tau.app')
       : route === 'windows-nsis'
-        ? join(required('LOCALAPPDATA'), 'Programs', `tau-qualification-${nonce}`)
+        ? windowsQualificationInstallationPath(required('LOCALAPPDATA'), nonce)
         : linuxInstallation(channel, route === 'linux-appimage').launcher;
   const candidate = (index: number): QualificationCandidate => ({ ...candidates[index]!, route });
   let tls: Awaited<ReturnType<typeof prepareQualificationTls>> | undefined;

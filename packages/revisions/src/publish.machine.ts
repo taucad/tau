@@ -151,7 +151,17 @@ export type PublishVersionsActorOutput = Readonly<{
  * What `createTag` is asked to name: a new version, or with `number` the
  * existing version on this revision, renamed to `name` (B6). @public
  */
-export type PublishTagActorInput = Readonly<{ name: string; revisionId: string; note?: string; number?: number }>;
+export type PublishTagActorInput = Readonly<{
+  /**
+   * The new version's name. Absent with {@link PublishTagActorInput.number}: the version keeps the name it has where
+   * the tag is written, so a rename that landed after the names were read is never undone.
+   */
+  name?: string;
+  revisionId: string;
+  note?: string;
+  /** The number of the version being published as it is; absent for a new version. */
+  number?: number;
+}>;
 
 /** What `push` is asked to offer: the history set, tag included. @public */
 export type PublishPushActorInput = Readonly<{
@@ -229,18 +239,6 @@ const existingVersion = (context: PublishMachineContext): RevisionTag | undefine
     }
     return draft?.isAutoNamed === true || tag.name === draft?.tag;
   });
-};
-
-/*
- * The name `tagging` gives the version: a republish and an auto-named publish
- * of an entry that already is a version keep its stored name; otherwise the
- * draft's name.
- */
-const taggedName = (context: PublishMachineContext): string => {
-  const kept =
-    republished(context.draft, context.tags) ??
-    (context.draft?.isAutoNamed === true ? existingVersion(context) : undefined);
-  return kept?.name ?? context.draft?.tag ?? '';
 };
 
 /*
@@ -445,11 +443,11 @@ const publishMachineDefinition = setup({
         input: ({ context }) => {
           const existing = existingVersion(context);
           return {
-            /* A republish keeps the version's stored name; only a new publish names it. */
-            name: taggedName(context),
+            /* Only a new version is named here. A version published as it is keeps the name it has where the tag
+             * is written, not the one read when the dialog opened: a publish never renames a version. */
+            ...(existing === undefined ? { name: context.draft?.tag ?? '' } : { number: existing.number }),
             revisionId: context.revisionId ?? '',
             ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
-            ...(existing === undefined ? {} : { number: existing.number }),
           };
         },
         onDone: ({ event }) => ({

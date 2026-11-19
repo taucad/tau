@@ -173,7 +173,7 @@ const start = (
     createTag: record<RevisionTag, PublishTagActorInput>('createTag', (input) => ({
       id: '3'.repeat(32),
       number: input.number ?? 3,
-      name: input.name,
+      name: input.name ?? tagV2.name,
       revisionId: revisionId(input.revisionId),
       note: input.note,
       actor: undefined,
@@ -394,7 +394,7 @@ describe('publishMachine', () => {
   it('7: fails at once when it has no root to push for it', async () => {
     const actors: PublishActors = {
       listVersions: versions(head),
-      createTag: createAsyncLogic({ run: async ({ input }) => ({ ...tagV2, name: input.name }) }),
+      createTag: createAsyncLogic({ run: async ({ input }) => ({ ...tagV2, name: input.name ?? tagV2.name }) }),
       push: createAsyncLogic<PublishPushActorOutput, PublishPushActorInput>({
         run: async () => ({ pushId: 'push-1', remote: 'tau' }),
       }),
@@ -493,7 +493,7 @@ describe('publishMachine', () => {
     await settle();
 
     /* The version on this revision with this name is published as it is: no new number. */
-    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls[0]?.input).toStrictEqual({ revisionId: 'rev-1', number: 2 });
     const push = calls.find((call) => call.name === 'push');
     expect(push?.input).toMatchObject({ tag: 'v2', expected: 'rev-1', expectedTag: 'tag-v2' });
     actor.stop();
@@ -509,7 +509,7 @@ describe('publishMachine', () => {
     await settle();
 
     /* V2 names rev-1 and is called "Ready for print": neither the head nor the title changes it. */
-    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls[0]?.input).toStrictEqual({ revisionId: 'rev-1', number: 2 });
     expect(calls.find((call) => call.name === 'push')?.input).toMatchObject({ tag: 'v2', expectedTag: 'tag-v2' });
     expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({
       tag: 'v2',
@@ -528,7 +528,7 @@ describe('publishMachine', () => {
     settler.resolve(head);
     await settle();
 
-    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls[0]?.input).toStrictEqual({ revisionId: 'rev-1', number: 2 });
     expect(actor.getSnapshot().matches('success')).toBe(true);
     actor.stop();
   });
@@ -580,7 +580,7 @@ describe('publishMachine', () => {
     await settle();
 
     /* V2 is on rev-1 and called "Ready for print": no second version, no rename. */
-    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls[0]?.input).toStrictEqual({ revisionId: 'rev-1', number: 2 });
     expect(calls.find((call) => call.name === 'push')?.input).toMatchObject({ tag: 'v2', expectedTag: 'tag-v2' });
     expect(emitted).toContainEqual(expect.objectContaining({ type: 'published', tag: 'v2', name: 'Ready for print' }));
     actor.stop();
@@ -636,7 +636,7 @@ describe('publishMachine', () => {
     actor.send({ type: 'confirm', draft: { ...draft, tag: 'Ready for print' } });
     await settle();
 
-    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls[0]?.input).toStrictEqual({ revisionId: 'rev-1', number: 2 });
     actor.stop();
   });
 

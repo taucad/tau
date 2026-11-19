@@ -2384,16 +2384,18 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * chat's ensure would make) opens on that completeness while the remote's tree is still to come (I7, SP2h).
    */
   it('should not carry a no-remote project’s completeness across a Tau Cloud remote attach (I7)', async () => {
+    /* Tau Cloud holds a tree for the project, which this open has not fetched yet. */
+    let advertised = [{ name: 'refs/heads/main', head: revisionId('a'.repeat(40)) }];
     let releaseFetch: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
     const fixture = harness(['alpha'], (port) => ({
       ...port,
-      /* Tau Cloud holds a tree for the project, which this open has not fetched yet. */
-      listRemoteRefs: async () => [{ name: 'refs/heads/main', head: revisionId('a'.repeat(40)) }],
-      fetch: async (input) => {
-        await new Promise<void>((resolve) => {
-          releaseFetch = resolve;
-        });
-        return port.fetch(input);
+      listRemoteRefs: async () => advertised,
+      fetch: async () => {
+        await held;
+        return { refs: [] };
       },
     }));
     const alpha = await fixture.open('alpha');
@@ -2415,11 +2417,18 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       });
       await alpha.settle();
       const attached = statuses().slice(before);
-      for (const status of attached.filter((candidate) => candidate.remote.phase !== 'none')) {
+      for (const status of attached) {
         expect(status.readiness).not.toBe('filled');
         expect(mayCreateChat(status, true, true)).toBe(false);
       }
       expect(attached.at(-1)?.readiness).toBe('connected');
+
+      /* The remote turns out to hold nothing: the open applies that, and the project is complete again. */
+      advertised = [];
+      releaseFetch?.();
+      await vi.waitFor(() => {
+        expect(statuses().at(-1)).toMatchObject({ remote: { kind: 'tau', phase: 'connected' }, readiness: 'filled' });
+      });
     } finally {
       releaseFetch?.();
       globalThis.fetch = original;

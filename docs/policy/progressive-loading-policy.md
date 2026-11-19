@@ -116,7 +116,7 @@ The app runtime's entry imports only what is needed to accept the first input. A
 
 ### 7. Stay within the interactive-tier budget
 
-Each guarded class's T1 closure stays within its brotli bytes, request count and largest-chunk numbers in `apps/ui/critical-budget.json`, per build variant (`cloud`, `self-host`). The file is a ratchet: growth past the tolerance fails, landing under by more than the ratchet margin fails until the budget is lowered (`--write`), and a heavy family in a class's closure fails unless listed under its `knownHeavy` with the package that removes it. Raising a budget is a one-line change whose commit states the reason.
+Each guarded class's T1 closure stays within its brotli bytes, request count and largest-chunk numbers in `apps/ui/critical-budget.json`, per build variant (`cloud`, `self-host`). An `adaptive` build (the third UI ceiling, adaptive app deployment mode D1) has no entry of its own: `ui:check-critical-budget-adaptive` holds it within +2 requests, 1 % of total bytes and 1 % of the largest chunk of both the `self-host` entry and the same CI run's `self-host` build, and `--write` refuses it. The file is a ratchet: growth past the tolerance fails, landing under by more than the ratchet margin fails until the budget is lowered (`--write`), and a heavy family in a class's closure fails unless listed under its `knownHeavy` with the package that removes it. Raising a budget is a one-line change whose commit states the reason.
 
 **Why**: only the build output sees bundler merges and packages reached through other packages.
 

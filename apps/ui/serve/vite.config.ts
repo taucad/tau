@@ -20,8 +20,6 @@ import {
   uiSsrOptions,
 } from '../vite.config';
 /* oxlint-enable eslint/no-restricted-imports, import/extensions */
-// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
-import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
@@ -34,8 +32,6 @@ import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-p
 import { createAssetIntegrity } from '../asset-integrity.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
 const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
@@ -67,7 +63,6 @@ export default defineConfig({
     tauBuildId: JSON.stringify(Date.now()),
     /* Never reported: a `tau serve` bundle composes no runtime telemetry reporter. */
     tauBuildRelease: JSON.stringify(''),
-    tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
     /* A `tau serve` bundle is never a Tau Cloud host, whatever `TAU_TELEMETRY_HOST` says. */
     tauTelemetryHostCloudBuild: 'false',
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
@@ -82,7 +77,8 @@ export default defineConfig({
     picogkAssets.plugin,
     csharpAssets.plugin,
     openscadLanguage.plugin,
-    createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+    /* A `tau serve` bundle pins `self-host`, whatever `TAU_CLOUD_ENABLED` says (adaptive app deployment mode D12). */
+    createUiSourceAliasPlugin({ emitModuleGraph: true, deploymentCeiling: 'self-host' }),
     createAssetIntegrity({ receipt: true }),
     tauRuntime(),
     base64Loader,
@@ -93,7 +89,7 @@ export default defineConfig({
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
     plugins: () => [
-      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      createUiSourceAliasPlugin({ emitModuleGraph: true, deploymentCeiling: 'self-host' }),
       createAssetIntegrity({ receipt: false }),
     ],
   },

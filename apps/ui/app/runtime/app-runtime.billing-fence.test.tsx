@@ -30,7 +30,7 @@ vi.mock('#runtime/project-runtime.session.js', async () => {
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
-vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({ purgeSavedUsage: async () => undefined }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: async () => undefined }));
 /* A6c: the session builds its file manager through the runtime's host once `rootFiles` holds the shared worker. jsdom
  * has no worker, so the host reports an inert one and a ready stand-in opens. */
 vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {

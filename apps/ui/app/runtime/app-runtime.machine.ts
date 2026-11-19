@@ -14,6 +14,8 @@ import type { FocusPortInput } from '#runtime/app-runtime-focus.js';
 import type { ChoicesActorEvent, ChoicesChangedEvent, ChoicesLogic, ProjectChoices } from '#runtime/choices.js';
 import { fileManagerHostMachine } from '#runtime/file-manager-host.machine.js';
 import { leasesMachine } from '#runtime/leases.machine.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
+import type { DeploymentOwnerLogic } from '#runtime/deployment.js';
 
 /**
  * The app runtime root (app state orchestration charter D5, D23).
@@ -45,6 +47,7 @@ export const appRuntimeChildren = [
   'chatSessions',
   'sessions',
   'focus',
+  'deployment',
 ] as const;
 
 /** One static child's name. @public */
@@ -75,6 +78,13 @@ export type AppRuntimeInput = Readonly<{
   rootFiles: InputFrom<typeof fileManagerMachine>;
   /** The library epoch focus starts at; 0 by default. */
   focusEpoch?: number;
+  /**
+   * The display mode before `deployment` reports (adaptive app deployment mode charter I13): the pinned constant of a
+   * `cloud` or `self-host` build, `unknown` in an adaptive one. Unfunded and pinned by default.
+   */
+  deployment?: DeploymentModeSnapshot;
+  /** This page load runs in safe mode (D0): `deployment` reads nothing and asks nothing (D10). */
+  safeMode?: boolean;
 }>;
 
 /** Serializable state owned by the runtime root, plus the registry's ref. @public */
@@ -97,12 +107,32 @@ export type AppRuntimeContext = Readonly<{
   focus: ActorRefFrom<FocusMachine>;
   /** The desktop quit hold (D31), as `environment` runs it. */
   quitHold: AppRuntimeQuitHold;
+  /** The display mode as `deployment` last reported it, or the initial one (adaptive app deployment mode D2). */
+  deployment: DeploymentModeSnapshot;
+  /** This page load runs in safe mode (D0). */
+  safeMode: boolean;
   /** The first effect or child failure no transition modelled; later ones are usually its consequences (D23). */
   fault: string | undefined;
 }>;
 
-/** Events accepted by the runtime root: what `environment` and `choices` report, and the person's quit retry. @public */
-export type AppRuntimeEvent = EnvironmentEvent | ChoicesChangedEvent | EnvironmentCommand;
+/** What `deployment` reports: the display mode changed. @public */
+export type DeploymentChangedEvent = Readonly<{ type: 'deploymentChanged'; mode: DeploymentModeSnapshot }>;
+
+/** The person asked to check the deployment again (a Retry beside a "can't check" state, I15). @public */
+export type DeploymentRetriedEvent = Readonly<{ type: 'deploymentRetried' }>;
+
+/**
+ * Events accepted by the runtime root: what `environment`, `choices` and `deployment` report, and the person's quit
+ * and deployment retries.
+ *
+ * @public
+ */
+export type AppRuntimeEvent =
+  | EnvironmentEvent
+  | ChoicesChangedEvent
+  | EnvironmentCommand
+  | DeploymentChangedEvent
+  | DeploymentRetriedEvent;
 
 /** Events the runtime root emits: each page change `environment` reported. @public */
 export type AppRuntimeEmitted = Exclude<EnvironmentEvent, { type: 'quitHoldChanged' }>;
@@ -119,6 +149,8 @@ export const appRuntimeEventTypes = [
   'quitHoldChanged',
   'choicesChanged',
   'quitRetried',
+  'deploymentChanged',
+  'deploymentRetried',
 ] as const satisfies ReadonlyArray<AppRuntimeEvent['type']>;
 
 /**
@@ -142,6 +174,10 @@ const eventSchemas = {
   choicesChanged: z.object({
     choices: z.custom<ProjectChoices>((value) => typeof value === 'object' && value !== null),
   }),
+  deploymentChanged: z.object({
+    mode: z.custom<DeploymentModeSnapshot>((value) => typeof value === 'object' && value !== null),
+  }),
+  deploymentRetried: z.object({}),
 } satisfies Record<AppRuntimeEvent['type'], z.ZodType>;
 
 /** The driver default: no page, no listeners. The composition provides the browser's (MC-R8). */
@@ -153,6 +189,25 @@ const noPort = createCallbackLogic<EventObject, FocusPortInput>(() => undefined)
 
 /** The driver default of `choices`: no ports, nothing reported. The composition provides the real ones (A6b). */
 const noChoices: ChoicesLogic = createCallbackLogic<ChoicesActorEvent, undefined>(() => undefined);
+
+/** What the root sends `deployment`: the page's visibility, window focus and the person's retry. @public */
+export type DeploymentCommand =
+  | Readonly<{ type: 'visibilityChanged'; visible: boolean }>
+  | Readonly<{ type: 'windowFocused' }>
+  | Readonly<{ type: 'retry' }>;
+
+/** What the root hands `deployment` when it starts. @public */
+export type DeploymentChildInput = Readonly<{ parentRef: AnyActorRef; visible: boolean; safeMode: boolean }>;
+
+/**
+ * The driver default of `deployment`: nothing asked, nothing reported. A pinned build keeps it, so its mode is the
+ * initial constant for the page's life (I10); an adaptive build provides the owner (`#cloud/deployment-mode.js`).
+ */
+const noDeployment = createCallbackLogic<DeploymentCommand, DeploymentChildInput>(
+  () => undefined,
+  /* Typed as the owner, which a pinned build never imports (I10): the slot then takes the owner as provided. Both take
+   * the same input and the same commands, and the root reads neither's snapshot. */
+) as unknown as DeploymentOwnerLogic;
 
 /**
  * The driver default of `projectLibrary` and `chatSessions`: nothing to start. The composition provides the library's
@@ -196,6 +251,7 @@ export const appRuntimeMachine = setup({
   actors: {
     environment: noEnvironment,
     choices: noChoices,
+    deployment: noDeployment,
     projectLibrary: noService,
     chatSessions: noService,
     rootFiles: fileManagerMachine,
@@ -245,6 +301,8 @@ export const appRuntimeMachine = setup({
       sessions,
       focus,
       quitHold: { held: false, error: undefined },
+      deployment: input.deployment ?? { state: 'unfunded', basis: 'pinned' },
+      safeMode: input.safeMode ?? false,
       fault: undefined,
     };
   },
@@ -261,17 +319,37 @@ export const appRuntimeMachine = setup({
     /* A2: the library and the chat store, held in their callbacks' closures (D4, D9); the library starts with the root. */
     { id: 'projectLibrary', src: 'projectLibrary', onError: keepFirstFault },
     { id: 'chatSessions', src: 'chatSessions', onError: keepFirstFault },
+    /* The display mode's owner (adaptive app deployment mode D2): it reports; nothing waits for it (I1). */
+    {
+      id: 'deployment',
+      src: 'deployment',
+      input: ({ context, self }) => ({
+        parentRef: self,
+        visible: context.environment.visible ?? true,
+        safeMode: context.safeMode,
+      }),
+      onError: keepFirstFault,
+    },
   ],
   on: {
-    visibilityChanged: ({ context, event }, enq) => {
+    visibilityChanged: ({ context, event, children }, enq) => {
       enq.emit({ type: 'visibilityChanged', visible: event.visible });
+      const { deployment } = children;
+      if (deployment !== undefined) {
+        enq.sendTo(deployment, { type: 'visibilityChanged', visible: event.visible });
+      }
       return { context: { environment: { ...context.environment, visible: event.visible } } };
     },
-    focusChanged: ({ context, event }, enq) => {
+    focusChanged: ({ context, event, children }, enq) => {
       enq.emit({ type: 'focusChanged', focused: event.focused });
-      /* Coming back to the window is attention (R16): focus touches the project it is on. */
+      /* Coming back to the window is attention (R16): focus touches the project it is on, and a failed deployment ask
+       * is retried. */
       if (event.focused && context.environment.focused === false) {
         enq.sendTo(context.focus, { type: 'windowFocused' });
+        const { deployment } = children;
+        if (deployment !== undefined) {
+          enq.sendTo(deployment, { type: 'windowFocused' });
+        }
       }
       return { context: { environment: { ...context.environment, focused: event.focused } } };
     },
@@ -289,5 +367,13 @@ export const appRuntimeMachine = setup({
       return { context: { environment: { ...context.environment, constrained: event.constrained } } };
     },
     choicesChanged: ({ event }) => ({ context: { choices: event.choices } }),
+    deploymentChanged: ({ event }) => ({ context: { deployment: event.mode } }),
+    deploymentRetried: ({ children }, enq) => {
+      const { deployment } = children;
+      if (deployment !== undefined) {
+        enq.sendTo(deployment, { type: 'retry' });
+      }
+      return {};
+    },
   },
 });

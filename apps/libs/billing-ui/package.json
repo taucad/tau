@@ -48,6 +48,7 @@
     "./components/usage/reserved-table": "./src/components/usage/reserved-table.tsx",
     "./components/usage/usage-summary-cards": "./src/components/usage/usage-summary-cards.tsx",
     "./components/usage/use-usage-filters": "./src/components/usage/use-usage-filters.ts",
+    "./db/billing-snapshot-database": "./src/db/billing-snapshot-database.ts",
     "./db/billing-snapshot-store": "./src/db/billing-snapshot-store.ts",
     "./hooks/use-auto-reload-enabled": "./src/hooks/use-auto-reload-enabled.ts",
     "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",

@@ -341,7 +341,7 @@ const config: KnipConfig = {
         'app/calibration-preview.tsx',
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
-        'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
+        'app/**/*.{cloud,self-host,adaptive,desktop}.{ts,tsx}',
         // The same resolver substitutes these no-op modules when the staging harness is disabled.
         'app/lib/observability-harness-disabled.ts',
         'app/lib/observability-harness-hydration-disabled.ts',

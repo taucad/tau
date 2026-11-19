@@ -7,7 +7,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
 /** Real Dockview header and viewer bar acceptance at the ruled viewer widths. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   optimizeDeps: {
     include: [

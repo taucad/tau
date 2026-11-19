@@ -20,10 +20,13 @@ import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
 import {
   resolveServiceWorkerKillSwitch,
-  resolveTauCloudBuildEnabled,
+  resolveTauDeploymentCeiling,
+  resolveUiBuildDirectory,
+  uiBuildDirectoryVariable,
   serviceWorkerKillSwitchVariable,
   unstampedBuildRelease,
 } from './build-environment.js';
+import type { TauDeploymentCeiling } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -178,7 +181,11 @@ export const uiResolveAlias = [
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
   readonly observabilityHarnessEnabled?: boolean;
-  readonly tauCloudEnabled?: boolean;
+  /**
+   * The build's ceiling (adaptive app deployment mode charter D1): which file each `#cloud/X.js` boundary and each
+   * self-host override resolves to. `self-host` when omitted, as an unaliased import resolves (I12).
+   */
+  readonly deploymentCeiling?: TauDeploymentCeiling;
   readonly target?: 'web' | 'desktop';
 };
 
@@ -187,8 +194,15 @@ const harnessDisabledOverrides = new Map([
   ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
 ]);
 
+/**
+ * The `#cloud/X.js` boundaries. Each resolves to `X.cloud.*` under the `cloud` ceiling and `X.self-host.*` under
+ * `self-host`; under `adaptive` to `X.adaptive.*` when that file exists, else `X.self-host.*`, so an adaptive build is
+ * valid at every step and each boundary lights up when its facade lands (adaptive app deployment mode D1).
+ */
 const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
+  '#cloud/deployment-ceiling.js',
+  '#cloud/deployment-mode.js',
   '#cloud/environment-billing.js',
   '#cloud/financial-purge.js',
   '#cloud/nav-billing.js',
@@ -237,6 +251,40 @@ const selfHostSourceOverrides = new Map([
   ],
 ]);
 
+/** Whether an `#…` specifier names a source file under `app/` (any of its script extensions). */
+const sourceExists = (specifier: string): boolean => {
+  const base = path.resolve(__dirname, 'app', specifier.slice(1)).replace(/\.js$/u, '');
+  return ['.ts', '.tsx', '.js', '.jsx'].some((extension) => existsSync(`${base}${extension}`));
+};
+
+/**
+ * The specifier a ceiling selects (D1). `cloud`: the boundary's `.cloud` file; overrides do not apply. `self-host`:
+ * the boundary's `.self-host` file, else the self-host override. `adaptive`: the boundary's or the specifier's own
+ * `.adaptive` file when it exists, else what `self-host` selects.
+ *
+ * @param specifier - The requested `#…` specifier.
+ * @param ceiling - The build's ceiling.
+ * @returns The specifier to resolve.
+ */
+export const ceilingSpecifier = (specifier: string, ceiling: TauDeploymentCeiling): string => {
+  const boundary = cloudBoundarySpecifiers.has(specifier);
+  if (ceiling === 'cloud') {
+    return boundary ? specifier.replace(/\.js$/u, '.cloud.js') : specifier;
+  }
+  const override = selfHostSourceOverrides.get(specifier);
+  if (ceiling === 'adaptive' && (boundary || override !== undefined)) {
+    const adaptive = specifier.replace(/\.js$/u, '.adaptive.js');
+    if (sourceExists(adaptive)) {
+      return adaptive;
+    }
+  }
+  return boundary ? specifier.replace(/\.js$/u, '.self-host.js') : (override ?? specifier);
+};
+
+/** The modules of an adaptive build's `cloud-core` chunk: the display-mode owner and its utilities (gate G1). */
+export const cloudCoreModulePattern =
+  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode\.adaptive)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
+
 const normalizeProvenancePath = (moduleId: string): string => {
   const normalized = moduleId.replaceAll('\\', '/');
   const workspaceRoot = `${path.resolve(__dirname, '../..').replaceAll('\\', '/')}/`;
@@ -283,14 +331,8 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           options.target === 'desktop' && harnessSpecifier
             ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
             : harnessSpecifier;
-        const targetSpecifier =
-          options.tauCloudEnabled === false && hostSpecifier
-            ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
-            : hostSpecifier;
-        const specifier =
-          targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
-            ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
-            : targetSpecifier;
+        const ceiling = options.deploymentCeiling ?? 'self-host';
+        const specifier = hostSpecifier === undefined ? undefined : ceilingSpecifier(hostSpecifier, ceiling);
         if (specifier === undefined) {
           return null;
         }
@@ -509,18 +551,21 @@ export const createUiReactCompilerPlugin = (): Plugin => {
  * @param buildId - The build id baked into the server graph.
  * @returns The plugin.
  */
+/* The web build's output directory: `build`, or CI's second build beside it (gate G1). */
+const uiBuildDirectory = resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]);
+
 const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   name: 'tau-sentry-release-record',
   // Production builds only, like the server's `tauBuildId` (a test build carries no release).
   apply: (_config, { command, mode }) => command === 'build' && mode !== 'test',
   applyToEnvironment: (environment) => environment.config.consumer === 'server',
   async writeBundle() {
-    await writeFile(path.resolve(__dirname, 'build/sentry-release'), `tau-ui@${String(buildId)}\n`);
+    await writeFile(path.resolve(__dirname, uiBuildDirectory, 'sentry-release'), `tau-ui@${String(buildId)}\n`);
   },
 });
 
 /** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
-const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+const criticalModuleIdsPath = path.resolve(__dirname, uiBuildDirectory, 'client-module-ids.json');
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
@@ -560,7 +605,8 @@ export default defineConfig(({ command, mode }) => {
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
-  const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+  /* Unit tests run under the `cloud` ceiling; the adaptive project runs its own (`vitest.adaptive.config.ts`). */
+  const deploymentCeiling = isTest ? 'cloud' : resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']);
 
   return {
     root: __dirname,
@@ -577,7 +623,6 @@ export default defineConfig(({ command, mode }) => {
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
       tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
-      tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /*
        * Every web build may report signed-out runtime telemetry; the deployment's own API policy probe is the only
        * gate (unset means off), so a self-hosted UI reports only to an API its operator turned on. Tests stub the module.
@@ -637,13 +682,13 @@ export default defineConfig(({ command, mode }) => {
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
-        tauCloudEnabled,
+        deploymentCeiling,
         observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
       // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
-      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, uiBuildDirectory, 'client') }),
       createSentryReleaseRecordPlugin(buildId),
       /*
        * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
@@ -694,7 +739,7 @@ export default defineConfig(({ command, mode }) => {
       plugins: () => [
         createUiSourceAliasPlugin({
           emitModuleGraph: true,
-          tauCloudEnabled,
+          deploymentCeiling,
           observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
         }),
         createAssetIntegrity({ receipt: false }),
@@ -716,7 +761,18 @@ export default defineConfig(({ command, mode }) => {
           rolldownOptions: {
             output: {
               codeSplitting: {
-                groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
+                groups: [
+                  { name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u },
+                  /*
+                   * Adaptive app deployment mode D6, gate G1: an adaptive build's display-mode owner and its utilities
+                   * go in one named chunk, out of Home's largest chunk. React Router keeps entry signatures exact, so a
+                   * group always takes its modules' dependencies too (here xstate and zod, which the shell loads
+                   * anyway). The financial session providers, the purge and the facades stay in the chunks automatic
+                   * splitting gives them: a group around them took the app runtime with it. Pinned builds keep today's
+                   * chunking (I10).
+                   */
+                  ...(deploymentCeiling === 'adaptive' ? [{ name: 'cloud-core', test: cloudCoreModulePattern }] : []),
+                ],
               },
             },
           },

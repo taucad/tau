@@ -65,6 +65,8 @@
       "apps/ui/app/runtime/converter-client-options.desktop.ts",
       "apps/ui/app/runtime/converter-client-options.ts",
       "apps/ui/app/runtime/deferred-child.ts",
+      "apps/ui/app/runtime/deployment.machine.ts",
+      "apps/ui/app/runtime/deployment.ts",
       "apps/ui/app/runtime/environment.fixture.ts",
       "apps/ui/app/runtime/environment.ts",
       "apps/ui/app/runtime/file-manager-facade.ts",

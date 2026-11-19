@@ -3,8 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
-import { purgeSavedUsage } from '#db/billing-snapshot-store.js';
-import type { SavedUsageScope } from '#db/billing-snapshot-store.js';
+import { purgeSavedUsage } from '#db/billing-snapshot-database.js';
+import type { SavedUsageScope } from '#db/billing-snapshot-database.js';
 
 export type FinancialSessionIdentity = {
   readonly apiBaseUrl: string;

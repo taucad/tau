@@ -24,6 +24,7 @@ import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import type { FocusMachine } from '#machines/focus.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
@@ -84,6 +85,9 @@ import { getAllFlags } from '#flags/feature-flags.js';
 import { subscribeFeatureFlags } from '#flags/use-feature.js';
 import { modelsQueryKey } from '#lib/model-catalog.js';
 import type { Model } from '#lib/model-catalog.js';
+import { createDeploymentOwner, initialDeploymentMode } from '#cloud/deployment-mode.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
+import { setReportedDeploymentMode } from '#lib/sentry-context.lib.js';
 
 /** The app runtime root actor. @public */
 export type AppRuntime = Actor<typeof appRuntimeMachine>;
@@ -475,81 +479,88 @@ export const createAppRuntime = ({
         telemetry: workspaceTelemetry,
       }),
   };
-  const runtime = createActor(
-    appRuntimeMachine.provide({
-      actors: {
-        /* A7c (D26 as amended): `beforeunload` runs the producer stage while a record write is owed. */
-        environment: createEnvironmentLogic(environment, {
-          sequencer: unload,
-          owedWrites: owedRecordWrites,
-          desktopQuit,
-        }),
-        focusLibrary: focusComposition.logics.library,
-        focusRegistry: focusComposition.logics.registry,
-        focusFlush: focusComposition.logics.flush,
-        focusModule: focusComposition.logics.module,
-        focusRoute: focusComposition.logics.route,
-        /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
-        choices: createChoicesLogic(choicesPorts),
-        /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
-         * which mounts no `ProjectManagerProvider`) starts no worker. */
-        projectLibrary: createCallbackLogic<EventObject>(() => {
-          if (idleFileManagers) {
-            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
-            return () => {
-              composed.rootFiles?.close();
-            };
-          }
-          projectLibrary.start();
-          return () => {
-            projectLibrary.stop();
-            composed.rootFiles?.close();
-          };
-        }),
-
-        fileManagerHost: host.logic,
-        leases: table.logic,
-        /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
-         * file manager through the host, and waits for it on this runtime's clock. */
-        sessions: createSessionsRegistryLogic({
-          sharedWorker: host.sharedWorker,
-          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
-          openFileManager: sessionFileManagerOpener({
-            build: (spec) => {
-              if (builtHost.current === undefined) {
-                throw new Error('A session opened its file manager before the app runtime was created');
-              }
-              return host.build(builtHost.current, spec, options);
-            },
-            awaitServices: async (fileManager, gone) =>
-              awaitFileManager(fileManager, 'services', {
-                reason: 'services-timeout',
-                gone,
-                ...(options.clock === undefined ? {} : { clock: options.clock }),
-              }),
-          }),
-          /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
-          openRuntime: createSessionRuntimeOpener({
-            projectLibrary,
-            chatSessions,
-            queryClient,
-            choicesPorts,
-            runtime: () => composed.runtime,
-            options,
-          }),
-          wiring: sessionWiring,
-        }),
-      },
+  /* Adaptive app deployment mode D2: the display mode's owner, in an adaptive build only (I10). Its clock is the
+   * runtime's, so a test's simulated time also ages the record (D5). */
+  const clockNow = (options.clock as { now?: () => number } | undefined)?.now?.bind(options.clock);
+  const deploymentOwner = createDeploymentOwner?.(clockNow === undefined ? {} : { now: clockNow });
+  const runtimeActors = {
+    /* A7c (D26 as amended): `beforeunload` runs the producer stage while a record write is owed. */
+    environment: createEnvironmentLogic(environment, {
+      sequencer: unload,
+      owedWrites: owedRecordWrites,
+      desktopQuit,
     }),
-    {
-      ...options,
-      input: {
-        sessions: sessionsRegistryInput(),
-        rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
-        focusEpoch: focusComposition.epoch(),
-      },
+    focusLibrary: focusComposition.logics.library,
+    focusRegistry: focusComposition.logics.registry,
+    focusFlush: focusComposition.logics.flush,
+    focusModule: focusComposition.logics.module,
+    focusRoute: focusComposition.logics.route,
+    /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
+    choices: createChoicesLogic(choicesPorts),
+    /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
+     * which mounts no `ProjectManagerProvider`) starts no worker. */
+    projectLibrary: createCallbackLogic<EventObject>(() => {
+      if (idleFileManagers) {
+        /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+        return () => {
+          composed.rootFiles?.close();
+        };
+      }
+      projectLibrary.start();
+      return () => {
+        projectLibrary.stop();
+        composed.rootFiles?.close();
+      };
+    }),
+
+    fileManagerHost: host.logic,
+    leases: table.logic,
+    /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
+     * file manager through the host, and waits for it on this runtime's clock. */
+    sessions: createSessionsRegistryLogic({
+      sharedWorker: host.sharedWorker,
+      fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
+      openFileManager: sessionFileManagerOpener({
+        build: (spec) => {
+          if (builtHost.current === undefined) {
+            throw new Error('A session opened its file manager before the app runtime was created');
+          }
+          return host.build(builtHost.current, spec, options);
+        },
+        awaitServices: async (fileManager, gone) =>
+          awaitFileManager(fileManager, 'services', {
+            reason: 'services-timeout',
+            gone,
+            ...(options.clock === undefined ? {} : { clock: options.clock }),
+          }),
+      }),
+      /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
+      openRuntime: createSessionRuntimeOpener({
+        projectLibrary,
+        chatSessions,
+        queryClient,
+        choicesPorts,
+        runtime: () => composed.runtime,
+        options,
+      }),
+      wiring: sessionWiring,
+    }),
+  } satisfies Partial<MachineActors<typeof appRuntimeMachine>>;
+  /* A whole map either way: `provide` rejects a slot that may be `undefined`. */
+  const adaptiveActors =
+    deploymentOwner === undefined
+      ? undefined
+      : ({ ...runtimeActors, deployment: deploymentOwner } satisfies Partial<MachineActors<typeof appRuntimeMachine>>);
+  const runtime = createActor(appRuntimeMachine.provide({ actors: adaptiveActors ?? runtimeActors }), {
+    ...options,
+    input: {
+      sessions: sessionsRegistryInput(),
+      rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
+      focusEpoch: focusComposition.epoch(),
+      deployment: initialDeploymentMode,
+      safeMode,
     },
-  );
+  });
   const { fileManagerHost, leases, focus } = runtime.getSnapshot().context;
   focus.subscribe((snapshot) => {
     const next = selectFocusTarget(snapshot).target;
@@ -575,6 +586,15 @@ export const createAppRuntime = ({
   runtime.on('visibilityChanged', (event) => {
     documentVisible.set(event.visible);
     documentVisible.notify();
+  });
+  /* Adaptive app deployment mode W1: the mode and its basis tag every error event, from the first report on. */
+  let taggedMode: DeploymentModeSnapshot | undefined;
+  runtime.subscribe((snapshot) => {
+    const mode = selectDeploymentMode(snapshot);
+    if (mode !== taggedMode) {
+      taggedMode = mode;
+      setReportedDeploymentMode(describeDeploymentMode(mode));
+    }
   });
   builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
@@ -847,6 +867,25 @@ export const selectAppEnvironment = (snapshot: SnapshotFrom<typeof appRuntimeMac
  */
 export const selectAppChoices = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): ProjectChoices | undefined =>
   snapshot.context.choices;
+
+/**
+ * The display mode (adaptive app deployment mode D2): the pinned constant of a pinned build, else what `deployment`
+ * last reported, `unknown` until it does (I13).
+ *
+ * @public
+ */
+export const selectDeploymentMode = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): DeploymentModeSnapshot =>
+  snapshot.context.deployment;
+
+/**
+ * The display mode as one tag value: the state and its basis, or `unknown` and its problem.
+ *
+ * @param mode - The mode.
+ * @returns Such as `funded/confirmed` or `unknown/unreachable`.
+ * @public
+ */
+export const describeDeploymentMode = (mode: DeploymentModeSnapshot): string =>
+  `${mode.state}/${mode.state === 'unknown' ? mode.problem : mode.basis}`;
 
 /** The runtime root's first fault, if any (D23). @public */
 export const selectAppRuntimeFault = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): string | undefined =>

@@ -14,7 +14,7 @@ import { uiResolveAlias } from '../../vite.config.js';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tauRuntime()],
   resolve: { alias: uiResolveAlias },
   // Vite's optimizer hash excludes entries; keep this suite's pre-bundle separate from other browser configs.

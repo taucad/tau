@@ -65,7 +65,10 @@ describe('nightly watchdog', () => {
   it('should find every scheduled workflow in the repository, including itself', async () => {
     const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
     const files = found.map((workflow) => workflow.file);
-    expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'formal-nightly.yml', 'nightly-watchdog.yml']));
+    expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'nightly-watchdog.yml', 'release-gate.yml']));
+    // Retired nightlies (§ 5b): the release gate and the drift check replace them, so the watchdog skips them.
+    expect(files).not.toContain('formal-nightly.yml');
+    expect(files).not.toContain('shell-conformance.yml');
   });
 
   describe('a workflow scheduled more than once a day (release gate, C3)', () => {

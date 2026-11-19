@@ -139,44 +139,63 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   Toaster: () => null,
 }));
 
+const invitedFriend = {
+  id: 'sga_1',
+  recipientEmail: 'friend@example.com',
+  status: 'active',
+  createdAt: '2026-01-03T00:00:00.000Z',
+  revokedAt: null,
+};
+
+/** The project's one link, showing V2 (the entry `rev_v2`). */
+const sharedLink = {
+  id: 'shr_ui',
+  url: 'https://tau.example/s/tau~shr_ui',
+  visibility: 'private',
+  status: 'active',
+  stoppedAt: null,
+  publishedAt: '2026-01-02T00:00:00.000Z',
+  currentVersion: { publicationId: 'pub_ui', tag: 'v2', revisionId: 'rev_v2' },
+  access: { grants: [invitedFriend] },
+};
+
 const unpublishedEnvelope = {
   project: { id: 'proj_ui', name: null, description: null },
-  currentPublication: null,
-  snapshot: { state: 'unpublished' },
+  share: null,
 };
 
 const publishedEnvelope = {
   project: { id: 'proj_ui', name: 'Demo', description: 'a beautiful model' },
-  currentPublication: {
-    id: 'pub_ui',
-    tag: 'v2',
-    title: 'Demo',
-    description: 'a beautiful model',
-    visibility: 'private',
-    createdAt: '2026-01-02T00:00:00.000Z',
-    urls: { share: 'https://tau.example/s/tau~pub_ui' },
-    access: {
-      grants: [
-        {
-          id: 'pva_1',
-          publicationId: 'pub_ui',
-          recipientEmail: 'friend@example.com',
-          status: 'active',
-          createdAt: '2026-01-03T00:00:00.000Z',
-          revokedAt: null,
-        },
-      ],
-    },
-  },
-  snapshot: { state: 'published-current', lastPublishedAt: '2026-01-02T00:00:00.000Z' },
+  share: sharedLink,
 };
 
-const publicEnvelope = {
+const publicEnvelope = { ...publishedEnvelope, share: { ...sharedLink, visibility: 'public' } };
+
+const stoppedEnvelope = {
   ...publishedEnvelope,
-  currentPublication: {
-    ...publishedEnvelope.currentPublication,
-    visibility: 'public',
-  },
+  share: { ...sharedLink, status: 'stopped', stoppedAt: '2026-01-04T00:00:00.000Z' },
+};
+
+/** The link after Publish changes: V3, on the entry `rev_v3`. */
+const republishedEnvelope = {
+  ...publishedEnvelope,
+  share: { ...sharedLink, currentVersion: { publicationId: 'pub_v3', tag: 'v3', revisionId: 'rev_v3' } },
+};
+
+/**
+ * Puts the head of `main` at a revision, as the revision status reports it.
+ *
+ * @param revisionId - The head.
+ */
+const headOfMainAt = (revisionId: string): void => {
+  const { status } = revisionStatusHarness;
+  revisionStatusHarness.status = {
+    ...status,
+    headRevisionId: revisionId as (typeof status)['headRevisionId'],
+    branches: status.branches.map((branch) =>
+      branch.name === 'main' ? { ...branch, head: revisionId as (typeof branch)['head'] } : branch,
+    ),
+  };
 };
 
 const mockJsonResponse = (body: unknown): Response =>
@@ -194,6 +213,17 @@ const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<ty
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
+/** The panel in its providers, a fresh element each time: React skips a rerender handed the same element. */
+const panelElement = (projectId: string): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter>
+      <TooltipProvider>
+        <ProjectSharePanel projectId={projectId} projectName='Demo' entryPath='main.ts' />
+      </TooltipProvider>
+    </MemoryRouter>
+  </QueryClientProvider>
+);
 
 describe('ProjectSharePanel', () => {
   beforeEach(() => {
@@ -734,26 +764,22 @@ describe('ProjectSharePanel', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
-  it('loads unpublished share state with private visibility selected', async () => {
+  it('offers Publish and copy link for a project with no link, private by default and with nothing to name', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    const section = await screen.findByRole('region', { name: 'Publish a version' });
+    const section = await screen.findByRole('region', { name: 'Link' });
     expect(
       within(section).getByText(
-        'People who open the link see this version. Tau keeps a copy so the link works anywhere.',
+        'People who open the link see the version you publish. Tau keeps a copy so the link works anywhere.',
       ),
     ).toBeInTheDocument();
     expect(within(section).getByRole('radiogroup', { name: 'Who can open the link' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeChecked();
-    expect(screen.getByRole('combobox', { name: 'Invite people by email (optional)' })).toHaveAccessibleDescription(
-      "They'll get an email with the link when you publish.",
-    );
-    expect(screen.getByRole('combobox', { name: /version name/i })).toHaveAccessibleDescription(
-      'Names this version in History. A version is permanent; to share later changes, publish a new one.',
-    );
-    expect(screen.getByRole('textbox', { name: /^title$/iu })).toHaveAccessibleDescription(
-      'Shown at the top of the shared page.',
-    );
+    /* One link, named by the project: no version name, title, description or invite field before it exists. */
+    expect(screen.queryByRole('combobox', { name: /version name/iu })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /title|description/iu })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /invite people/iu })).not.toBeInTheDocument();
+    expect(screen.queryByText(/stopped sharing/iu)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeEnabled();
     expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
       credentials: 'include',
@@ -761,62 +787,28 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('prefills the first-publish form from the source project', async () => {
+  it('publishes an auto-named version as one gesture, private on a first publish', async () => {
     renderPanel(
       <ProjectSharePanel
-        projectId='proj_ui'
+        projectId='proj_ok'
         projectName='Demo'
         projectDescription='a beautiful model'
         entryPath='main.ts'
       />,
     );
 
-    expect(await screen.findByRole('textbox', { name: /^title$/iu })).toHaveValue('Demo');
-    expect(screen.getByRole('textbox', { name: /description \(optional\)/iu })).toHaveValue('a beautiful model');
-  });
-
-  it('publishes as one gesture carrying the named version and the draft', async () => {
-    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
-
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
-    /* The name starts from the title: a version's number is its own, never typed (B6). */
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('Demo');
+    /* No name: the worker names it "Shared Nov 19", and an entry that already is a version keeps its own name. */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith();
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith({
-      tag: 'Demo',
+      tag: '',
+      isAutoNamed: true,
       projectName: 'Demo',
+      description: 'a beautiful model',
       entryPath: 'main.ts',
       visibility: 'private',
-      title: 'Demo',
     });
-  });
-
-  it('offers the names the project already has, and takes a name with spaces', async () => {
-    publishFacet({ tags: [tag(2, 'Ready for print'), tag(3, 'Lid fit')] });
-    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
-
-    const field = await screen.findByRole('combobox', { name: /version name/i });
-    await waitFor(() => {
-      expect(field).toHaveValue('Demo');
-    });
-    const options = [...document.querySelectorAll('#share-version-options option')].map((option) =>
-      option.getAttribute('value'),
-    );
-    expect(options).toStrictEqual(['Ready for print', 'Lid fit']);
-
-    await userEvent.clear(field);
-    await userEvent.type(field, 'Ready for print');
-    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
-
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('Ready for print');
-  });
-
-  it('refuses to publish without a version name', async () => {
-    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
-
-    await userEvent.clear(await screen.findByRole('combobox', { name: /version name/i }));
-
-    expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
   });
 
   it('starts the copy inside the publish press, copies the link the machine makes and releases the machine', async () => {
@@ -829,19 +821,11 @@ describe('ProjectSharePanel', () => {
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
 
-    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
-    view.rerender(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter>
-          <TooltipProvider>
-            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
-          </TooltipProvider>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~shr_ui' });
+    view.rerender(panelElement('proj_ok'));
 
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~proj_ok');
+      expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~shr_ui');
     });
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
@@ -855,43 +839,34 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('settles the copy of a second publish that brings the same link', async () => {
+  it('settles a second publish to the same link as Publish changes, with no copy', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
-      .mockResolvedValue(mockJsonResponse(publishedEnvelope));
-    /* A fresh element each time: React skips a rerender handed the same element. */
-    const panel = (): React.JSX.Element => (
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter>
-          <TooltipProvider>
-            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
-          </TooltipProvider>
-        </MemoryRouter>
-      </QueryClientProvider>
-    );
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
+      .mockResolvedValue(mockJsonResponse(republishedEnvelope));
     const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
-    const link = 'https://tau.example/s/tau~proj_ok';
+    const link = 'https://tau.example/s/tau~shr_ui';
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
     publishFacet({ phase: 'success', shareUrl: link });
-    view.rerender(panel());
+    view.rerender(panelElement('proj_ok'));
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
     });
 
-    /* The reset returns the machine to idle and keeps the link it made. */
+    /* The reset returns the machine to idle and keeps the link it made; then the project changes. */
     publishFacet({ phase: 'idle', shareUrl: link });
-    view.rerender(panel());
-    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
-    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    headOfMainAt('rev_v3');
+    view.rerender(panelElement('proj_ok'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));
     publishFacet({ phase: 'success', shareUrl: link });
-    view.rerender(panel());
+    view.rerender(panelElement('proj_ok'));
 
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledTimes(2);
     });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2);
-    expect(toastSuccessMock).toHaveBeenCalledTimes(2);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledOnce();
+    expect(toastSuccessMock).toHaveBeenLastCalledWith('Published V3. The link now shows it.');
   });
 
   it('hands the clipboard a pending link in the publish press, before the machine has made it', async () => {
@@ -926,16 +901,8 @@ describe('ProjectSharePanel', () => {
     const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
-    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
-    view.rerender(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter>
-          <TooltipProvider>
-            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
-          </TooltipProvider>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~shr_ui' });
+    view.rerender(panelElement('proj_ok'));
 
     expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
     expect(toastSuccessMock).toHaveBeenCalledWith('Published');
@@ -945,17 +912,11 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('adds and revokes recipients from the editor Share panel', async () => {
-    const reloadedEnvelope = {
-      ...publishedEnvelope,
-      currentPublication: {
-        ...publishedEnvelope.currentPublication,
-        access: { grants: [] },
-      },
-    };
+  it("invites and removes people on the project's link", async () => {
+    const reloadedEnvelope = { ...publishedEnvelope, share: { ...sharedLink, access: { grants: [] } } };
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
-      .mockResolvedValueOnce(mockJsonResponse({ id: 'pva_2' }))
+      .mockResolvedValueOnce(mockJsonResponse({ id: 'sga_2', email: { status: 'sent' } }))
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
       .mockResolvedValueOnce(mockJsonResponse({ status: 'revoked' }))
       .mockResolvedValueOnce(mockJsonResponse(reloadedEnvelope));
@@ -969,18 +930,21 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/access', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share/access', {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: 'team@example.com', notifyRecipient: true }),
       });
     });
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Invited team@example.com.');
+    });
 
     await userEvent.click(await screen.findByRole('button', { name: /remove access for friend@example.com/i }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/access/pva_1', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share/access/sga_1', {
         method: 'DELETE',
         credentials: 'include',
         headers: { Accept: 'application/json' },
@@ -988,70 +952,78 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('shows stale snapshot copy and editable general access for existing publications', async () => {
+  it('says the project changed since the version the link shows and publishes the changes to the same link', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    headOfMainAt('rev_after_v2');
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    renderPanel(
-      <ProjectSharePanel
-        projectId='proj_ui'
-        projectName='Demo'
-        projectUpdatedAt='2026-01-02T00:00:02.500Z'
-        entryPath='main.ts'
-      />,
+    const notice = await screen.findByText(
+      "You've changed this project since you published V2. People who open the link still see V2.",
     );
-
-    expect(
-      await screen.findByText(
-        "You've changed this project since you published V2. People who open the link still see V2.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Who can open the link' })).toBeInTheDocument();
-    /* The primary stays Copy link: a timestamp is too weak a signal to steer people to publish (F14). */
     expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent(
-      'Only people you invite',
-    );
-    expect(screen.queryByRole('radio', { name: /only people you invite/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Publish changes' }));
+
+    /* The link keeps its setting and its invited people: no visibility, and nothing copied. */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith();
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith({
+      tag: '',
+      isAutoNamed: true,
+      projectName: 'Demo',
+      entryPath: 'main.ts',
+    });
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(notice).toBeInTheDocument();
   });
 
-  it('republishes the exact named version and makes another version explicit', async () => {
+  it('offers only Copy link when the link shows the head of main', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
-    publishFacet({ tags: [tag(2, 'Ready for print')] });
+    headOfMainAt('rev_v2');
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    /* The number comes from the publication's tag and the name from the version, never the tag (B6). */
-    expect(await screen.findByText('V2 · Ready for print')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Republish this version' }));
-    /* The version's own entry, not the branch head, so the snapshot is the one published before. */
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith(
-      'Ready for print',
-      'rev-Ready for print',
-    );
-    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ tag: 'Ready for print', version: 2 }),
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: 'Publish new version' }));
-    expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
+    const section = await screen.findByRole('region', { name: 'Link' });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Copy link']);
+    expect(screen.queryByText(/you've changed this project/iu)).not.toBeInTheDocument();
   });
 
-  it('never offers the publication title as a version name when this page has not read the versions', async () => {
+  it('reads the head of main from the branch list on another branch', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
-    publishFacet({ tags: [] });
+    const { status } = revisionStatusHarness;
+    revisionStatusHarness.status = {
+      ...status,
+      line: { kind: 'branch', name: 'lid-fit' },
+      headRevisionId: 'rev_lid' as (typeof status)['headRevisionId'],
+      branches: [
+        { name: 'main', head: 'rev_v2' as (typeof status)['headRevisionId'], leaseChatIds: [] },
+        { name: 'lid-fit', head: 'rev_lid' as (typeof status)['headRevisionId'], leaseChatIds: [] },
+      ] as unknown as (typeof status)['branches'],
+    };
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Republish this version' }));
-    /* By number alone: the machine reads V2 and keeps its stored name (B6). */
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('');
-    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ tag: '', version: 2, title: 'Demo' }),
-    );
+    await screen.findByRole('region', { name: 'Link' });
+    expect(screen.queryByRole('button', { name: 'Publish changes' })).not.toBeInTheDocument();
   });
 
-  it('switches private publications to public and folds away the invite field and list', async () => {
+  it('offers Publish changes without the sentence when the head of main is not known', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Link' });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Publish changes', 'Copy link']);
+    expect(screen.queryByText(/you've changed this project/iu)).not.toBeInTheDocument();
+  });
+
+  it('switches a private link to public and folds away the invite field and list', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
-      .mockResolvedValueOnce(mockJsonResponse({ id: 'pub_ui', visibility: 'public' }))
+      .mockResolvedValueOnce(mockJsonResponse(publicEnvelope.share))
       .mockResolvedValueOnce(mockJsonResponse(publicEnvelope));
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
@@ -1061,7 +1033,7 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Anyone with the link' }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/visibility', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
         method: 'PATCH',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1079,10 +1051,10 @@ describe('ProjectSharePanel', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Anyone with the link can open it now.');
   });
 
-  it('switches public publications back to private and restores recipient entry', async () => {
+  it('switches a public link back to private and restores recipient entry', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(publicEnvelope))
-      .mockResolvedValueOnce(mockJsonResponse({ id: 'pub_ui', visibility: 'private' }))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope.share))
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
@@ -1092,7 +1064,7 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Only people you invite' }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/visibility', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
         method: 'PATCH',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -1124,16 +1096,81 @@ describe('ProjectSharePanel', () => {
     );
   });
 
-  it('disables publish when a shared email is invalid', async () => {
-    renderPanel(<ProjectSharePanel projectId='proj_invalid_email' projectName='Demo' entryPath='main.ts' />);
+  it('asks before it stops sharing, then says so and offers to publish the same link again', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
+      .mockResolvedValueOnce({ ok: true, status: 204 } as Response)
+      .mockResolvedValueOnce(mockJsonResponse(stoppedEnvelope));
+    headOfMainAt('rev_v2');
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await userEvent.type(
-      await screen.findByRole('combobox', { name: 'Invite people by email (optional)' }),
-      'not-an-email{Enter}',
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop sharing…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Stop sharing this project?' });
+    expect(dialog).toHaveTextContent(
+      'The link stops working for everyone, including people you invited. Anyone who already opened it may still have a copy. Publishing again turns the same link back on.',
     );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stop sharing' }));
 
-    expect(screen.getByText(/enter a valid email/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+    });
+    expect(
+      await screen.findByText(
+        'You stopped sharing this project. Publishing turns the same link back on, for the same people.',
+      ),
+    ).toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Stopped sharing. The link no longer works.');
+    expect(screen.queryByRole('textbox', { name: 'Share link' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /publish and copy link/i })).toHaveFocus();
+    });
+  });
+
+  it('keeps the link when Stop sharing is cancelled or refused', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
+      .mockResolvedValueOnce({ ok: false, status: 500, headers: new Headers() } as Response);
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const stop = await screen.findByRole('button', { name: 'Stop sharing…' });
+    await userEvent.click(stop);
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(stop).toHaveFocus();
+    });
+
+    await userEvent.click(stop);
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop sharing' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith("Couldn't stop sharing. Try again.");
+    });
+    expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveValue('https://tau.example/s/tau~shr_ui');
+  });
+
+  it('turns a stopped link back on by publishing, with its own setting and a copy', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        mockJsonResponse({ ...stoppedEnvelope, share: { ...stoppedEnvelope.share, visibility: 'public' } }),
+      );
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByText(/you stopped sharing this project/iu)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ isAutoNamed: true, visibility: 'public' }),
+    );
   });
 
   it('shows Publishing with a spinner while the machine is working', async () => {
@@ -1144,7 +1181,7 @@ describe('ProjectSharePanel', () => {
     expect(publishingButton).toBeDisabled();
     expect(publishingButton).toHaveAttribute('aria-busy', 'true');
     expect(within(publishingButton).getByText(/publishing/i)).toBeInTheDocument();
-    expect(screen.getByText('Publishing this version…')).toHaveAttribute('role', 'status');
+    expect(screen.getAllByRole('status').some((element) => element.textContent === 'Publishing…')).toBe(true);
   });
 
   it('presents the failure as the one sentence the machine wrote', async () => {
@@ -1173,35 +1210,32 @@ describe('ProjectSharePanel', () => {
     expect(loading).toHaveAttribute('aria-busy', 'true');
     envelope.resolve(mockJsonResponse(publishedEnvelope));
 
-    expect(await screen.findByRole('region', { name: 'Published version' })).toBeInTheDocument();
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Loading cloud link' })).not.toBeInTheDocument();
   });
 
-  it('copies the published link inside the press and names the version and date', async () => {
+  it('copies the link inside the press and names the version it shows and when', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
-    publishFacet({ tags: [tag(2, 'Ready for print')] });
+    publishFacet({ tags: [tag(2, 'Shared Jan 2')] });
+    headOfMainAt('rev_v2');
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    const section = await screen.findByRole('region', { name: 'Published version' });
-    expect(section).toHaveTextContent(/V2 · Ready for print · Published .*2026/u);
+    const section = await screen.findByRole('region', { name: 'Link' });
+    expect(section).toHaveTextContent(/Shows V2 · Shared Jan 2, published .*2026\./u);
     expect(within(section).getByRole('textbox', { name: 'Share link' })).toHaveValue(
-      'https://tau.example/s/tau~pub_ui',
+      'https://tau.example/s/tau~shr_ui',
     );
-    const buttons = within(section)
-      .getAllByRole('button')
-      .map((button) => button.textContent);
-    expect(buttons).toEqual(['Republish this version', 'Publish new version', 'Copy link']);
 
     await userEvent.click(within(section).getByRole('button', { name: 'Copy link' }));
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~pub_ui');
+    expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~shr_ui');
     await waitFor(() => {
       expect(toastSuccessMock).toHaveBeenCalledWith('Link copied');
     });
     expect(revisionStatusHarness.commands.publishProject).not.toHaveBeenCalled();
   });
 
-  it('selects the published link for a manual copy when the clipboard refuses it', async () => {
+  it('selects the link for a manual copy when the clipboard refuses it', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
@@ -1211,26 +1245,6 @@ describe('ProjectSharePanel', () => {
     expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveFocus();
-  });
-
-  it('starts a new version with no invitees, says the old link keeps working, and Cancel returns', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
-    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
-
-    const form = screen.getByRole('region', { name: 'Publish a new version' });
-    expect(form).toHaveTextContent(
-      'A new version gets its own link. The current link keeps working and keeps showing V2. Invite people again for the new link.',
-    );
-    expect(screen.getByRole('combobox', { name: /version name/i })).toHaveFocus();
-    expect(screen.queryByRole('region', { name: 'Who can open the link' })).not.toBeInTheDocument();
-    expect(within(form).queryByText('friend@example.com')).not.toBeInTheDocument();
-
-    await userEvent.click(within(form).getByRole('button', { name: 'Cancel' }));
-
-    expect(await screen.findByRole('region', { name: 'Published version' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish new version' })).toHaveFocus();
   });
 
   it('offers a direct link when the cloud link needs an account the person has not signed in to', async () => {
@@ -1334,7 +1348,7 @@ describe('ProjectSharePanel', () => {
       .getByRole('region', { name: 'Share project' })
       .querySelector('[data-slot=share-pane-scroll]');
     expect(scroller).toContainElement(screen.getByText('People section'));
-    expect(scroller).toContainElement(await screen.findByRole('region', { name: 'Publish a version' }));
+    expect(scroller).toContainElement(await screen.findByRole('region', { name: 'Link' }));
   });
 });
 
@@ -1357,7 +1371,7 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   it('locks the private option and defaults free users to public', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByRole('region', { name: 'Publish a version' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Link' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeDisabled();
     expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
   });
@@ -1366,9 +1380,16 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
     const user = userEvent.setup();
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await screen.findByRole('region', { name: 'Publish a version' });
+    await screen.findByRole('region', { name: 'Link' });
     await user.click(screen.getByRole('button', { name: /upgrade/i }));
 
     expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');
+  });
+
+  it('offers Stop sharing on every plan', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publicEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByRole('button', { name: 'Stop sharing…' })).toBeEnabled();
   });
 });

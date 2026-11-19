@@ -14,6 +14,7 @@ const shareCopyModules = [
   '../../../../../packages/workbench-panes/src/share/share-link-body.tsx',
   '../../../../../packages/ui/src/components/copy-button.tsx',
   './project-share-panel.tsx',
+  '../../../../libs/publish-ui/src/components/publish/publication-access-panel.tsx',
   '../share/publication-topbar.tsx',
   '../../routes/w.$workspace.$project/revision-collaborators.tsx',
 ];

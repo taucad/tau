@@ -26,6 +26,10 @@ vi.mock('#hooks/use-revision-status.js', () => {
   const status = {
     publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
     remote: { kind: 'tau', phase: 'connected' },
+    /* The link shows the head of `main`, so the published state offers Copy link alone. */
+    line: { kind: 'branch', name: 'main' },
+    headRevisionId: 'rev_v2',
+    branches: [],
   };
   return {
     useRevisionStatus: () => status,
@@ -49,8 +53,7 @@ const people = Array.from({ length: 7 }, (_unused, index) => ({
 }));
 
 const grants = Array.from({ length: 12 }, (_unused, index) => ({
-  id: `pva_${String(index)}`,
-  publicationId: 'pub_ui',
+  id: `sga_${String(index)}`,
   recipientEmail: `invited-person-with-a-long-address-${String(index)}@example.test`,
   status: 'active',
   createdAt: '2026-01-03T00:00:00.000Z',
@@ -60,21 +63,20 @@ const grants = Array.from({ length: 12 }, (_unused, index) => ({
 
 const publishedEnvelope = {
   project: { id: 'proj_ui', name: 'Demo', description: 'a model' },
-  currentPublication: {
-    id: 'pub_ui',
-    tag: 'v2',
-    title: 'Demo',
+  share: {
+    id: 'shr_ui',
+    url: 'https://tau.example/s/tau~shr_ui',
     visibility: 'private',
-    createdAt: '2026-01-02T00:00:00.000Z',
-    urls: { share: 'https://tau.example/s/tau~pub_ui' },
+    status: 'active',
+    stoppedAt: null,
+    publishedAt: '2026-01-02T00:00:00.000Z',
+    currentVersion: { publicationId: 'pub_ui', tag: 'v2', revisionId: 'rev_v2' },
     access: { grants },
   },
-  snapshot: { state: 'published-current' },
 };
 const unpublishedEnvelope = {
-  project: { id: 'proj_ui', name: 'Demo' },
-  currentPublication: null,
-  snapshot: { state: 'unpublished' },
+  project: { id: 'proj_ui', name: 'Demo', description: null },
+  share: null,
 };
 
 type State = Readonly<{
@@ -102,7 +104,7 @@ const states: readonly State[] = [
     name: 'cloud link, not published',
     method: 'tau',
     envelope: { status: 200, body: unpublishedEnvelope },
-    ready: async () => screen.findByRole('region', { name: 'Publish a version' }),
+    ready: async () => screen.findByRole('button', { name: 'Publish and copy link' }),
   },
   {
     name: 'cloud link, published, every invited person shown',

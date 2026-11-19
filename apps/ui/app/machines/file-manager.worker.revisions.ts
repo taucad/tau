@@ -33,6 +33,7 @@ import type {
 } from '@taucad/revisions/revision-effects';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
+import { autoVersionName } from '@taucad/revisions/publish-machine';
 import {
   sameRevisionStatus,
   versionedChangePaths as classifiedChangePaths,
@@ -1706,7 +1707,18 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'confirmPublish': {
-          actor.send({ type: 'publish', event: { type: 'confirm', draft: command.draft } });
+          /* Only a host has a locale, so a draft nobody named is named here, as the host's `publish` verb names it. */
+          const { draft } = command;
+          actor.send({
+            type: 'publish',
+            event: {
+              type: 'confirm',
+              draft:
+                draft.isAutoNamed === true && draft.tag.trim() === ''
+                  ? { ...draft, tag: autoVersionName(new Date()) }
+                  : draft,
+            },
+          });
           return;
         }
         case 'cancelPublish': {

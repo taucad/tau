@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
 import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
+import { autoVersionName } from '@taucad/revisions/publish-machine';
 import type { RevisionTreeInput } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
@@ -2487,6 +2488,39 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         async () => {
           const rows = await root.log();
           expect(rows.map((row) => row.tags)).toEqual([[], ['v1']]);
+        },
+        { timeout: 10_000 },
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  }, 20_000);
+
+  /* Stable cloud link P6: the Share pane publishes with no name, and the worker names it in this locale. */
+  it('should name an auto-named publish nobody named, as the host does', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof globalThis.fetch;
+
+    try {
+      alpha.send({ command: 'publishProject', apiBaseUrl: 'https://api.test' });
+      alpha.send({
+        command: 'confirmPublish',
+        draft: { tag: '', isAutoNamed: true, projectName: 'alpha', entryPath: 'main.scad' },
+      });
+      await vi.waitFor(
+        async () => {
+          const [head] = await root.log();
+          expect(head?.tags).toEqual([autoVersionName(new Date())]);
         },
         { timeout: 10_000 },
       );

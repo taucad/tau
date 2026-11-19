@@ -17,7 +17,15 @@ import type { ShareProtection, ShareProviderDescriptor } from '@taucad/share/pro
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
-import { Textarea } from '@taucad/ui/components/textarea';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
@@ -43,14 +51,10 @@ import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/
 import { githubGistServices } from '#components/share/github-gist-services.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { versionNumberOfTag } from '@taucad/revisions';
-import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
+import type { PublishDraft, PublishFacet, PublishVisibility, RevisionStatusProjection } from '@taucad/revisions';
+import type { ProjectShare, ProjectShareEnvelope } from '@taucad/types';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import {
-  PublicationEmailTagsField,
-  getPublicationEmailTagsError,
-} from '@taucad/publish-ui/components/publish/publication-email-tags';
 import { PublicationAccessPanel } from '@taucad/publish-ui/components/publish/publication-access-panel';
-import type { PublicationAccessGrant } from '@taucad/publish-ui/components/publish/publication-access-panel';
 import { ENV } from '#environment.config.js';
 import { shareEnvelopeFailureOf } from '#components/publish/share-envelope-state.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -79,7 +83,6 @@ export type ProjectSharePanelProps = {
   readonly projectId: string;
   readonly projectName: string;
   readonly projectDescription?: string;
-  readonly projectUpdatedAt?: Date | number | string;
   readonly entryPath: string;
   readonly collectSnapshot?: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly initialMethod?: ShareMethod;
@@ -113,7 +116,7 @@ const shareMethodDescriptors = shareProviderRegistry.descriptors.filter(
  * A method named by the link (a GitHub return, a sign-in return) or chosen in
  * this panel wins; otherwise the one this person chose last time (R8), as long
  * as the panel still offers it; otherwise a direct link. A panel that cannot
- * collect a snapshot offers only the Tau Cloud link.
+ * collect a snapshot offers only the cloud link.
  *
  * @param chosen - The method named by the link or picked in this panel.
  * @param remembered - The stored preference, unvalidated.
@@ -153,32 +156,6 @@ function StandaloneShareHost({
   return <WorkbenchPanesHostProvider value={host}>{children}</WorkbenchPanesHostProvider>;
 }
 
-type ProjectShareEnvelope = {
-  project: {
-    id: string;
-    name?: string;
-    description?: string;
-  };
-  currentPublication?: {
-    id: string;
-    tag: string;
-    title: string;
-    description?: string;
-    visibility: PublishVisibility;
-    createdAt: string;
-    urls: {
-      share: string;
-    };
-    access: {
-      grants: PublicationAccessGrant[];
-    };
-  };
-  snapshot: {
-    state: 'unpublished' | 'published-current';
-    lastPublishedAt?: string;
-  };
-};
-
 /** Before the worker has answered, the dialog renders as an idle dialog. */
 const emptyPublishFacet: PublishFacet = {
   phase: 'idle',
@@ -189,12 +166,10 @@ const emptyPublishFacet: PublishFacet = {
 };
 
 /**
- * How the panel names the version a publication points at: `V3 · Ready for
- * print` (B6). The publication records the version's tag, `v<number>`; the
- * number comes from it and the name from the project's own versions, never
- * from the tag itself.
+ * How the panel names the version a link shows: `V3 · Ready for print` (B6). The link records the version's tag,
+ * `v<number>`; the number comes from it and the name from the project's own versions, never from the tag itself.
  *
- * @param tag - The publication's tag.
+ * @param tag - The version's tag.
  * @param versions - The project's versions, as the publish facet read them.
  * @returns The phrase.
  */
@@ -207,118 +182,118 @@ export const publishedVersionLabel = (tag: string, versions: PublishFacet['tags'
   return name === undefined ? `V${String(number)}` : `V${String(number)} · ${name}`;
 };
 
-const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// oxlint-disable-next-line typescript/no-restricted-types -- the cloud link wire format uses null.
+const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+/**
+ * Reads the project's cloud link as `GET`/`PATCH /v1/projects/:id/share` answer it.
+ *
+ * @param value - The parsed body, or its `share`.
+ * @returns The link, or `undefined` when the body is not one.
+ */
+const parseProjectShare = (value: unknown): ProjectShare | undefined => {
+  if (!isRecord(value)) {
     return undefined;
   }
-
-  const envelope = value as Record<string, unknown>;
-  const { project, snapshot, currentPublication: publication } = envelope;
+  const { id, url, visibility, status, stoppedAt, publishedAt, currentVersion, access } = value;
   if (
-    !project ||
-    typeof project !== 'object' ||
-    Array.isArray(project) ||
-    !snapshot ||
-    typeof snapshot !== 'object' ||
-    Array.isArray(snapshot)
+    typeof id !== 'string' ||
+    typeof url !== 'string' ||
+    (visibility !== 'private' && visibility !== 'public') ||
+    (status !== 'active' && status !== 'stopped') ||
+    !isNullableString(stoppedAt) ||
+    !isNullableString(publishedAt) ||
+    !isRecord(access) ||
+    !Array.isArray(access['grants'])
   ) {
     return undefined;
   }
-  const projectRecord = project as Record<string, unknown>;
-  const snapshotRecord = snapshot as Record<string, unknown>;
-  if (
-    typeof projectRecord['id'] !== 'string' ||
-    (snapshotRecord['state'] !== 'unpublished' && snapshotRecord['state'] !== 'published-current') ||
-    (snapshotRecord['lastPublishedAt'] !== undefined && typeof snapshotRecord['lastPublishedAt'] !== 'string')
-  ) {
-    return undefined;
-  }
-
-  let currentPublication: ProjectShareEnvelope['currentPublication'];
-  if (publication !== undefined && publication !== null) {
-    if (typeof publication !== 'object' || Array.isArray(publication)) {
-      return undefined;
-    }
-    const publicationRecord = publication as Record<string, unknown>;
-    const { urls, access } = publicationRecord;
+  let version: ProjectShare['currentVersion'] = null;
+  if (currentVersion !== null && currentVersion !== undefined) {
     if (
-      typeof publicationRecord['id'] !== 'string' ||
-      typeof publicationRecord['tag'] !== 'string' ||
-      typeof publicationRecord['title'] !== 'string' ||
-      (publicationRecord['description'] !== undefined &&
-        publicationRecord['description'] !== null &&
-        typeof publicationRecord['description'] !== 'string') ||
-      (publicationRecord['visibility'] !== 'private' && publicationRecord['visibility'] !== 'public') ||
-      typeof publicationRecord['createdAt'] !== 'string' ||
-      !urls ||
-      typeof urls !== 'object' ||
-      Array.isArray(urls) ||
-      typeof (urls as Record<string, unknown>)['share'] !== 'string' ||
-      !access ||
-      typeof access !== 'object' ||
-      Array.isArray(access) ||
-      !Array.isArray((access as Record<string, unknown>)['grants'])
+      !isRecord(currentVersion) ||
+      typeof currentVersion['publicationId'] !== 'string' ||
+      typeof currentVersion['tag'] !== 'string' ||
+      typeof currentVersion['revisionId'] !== 'string'
     ) {
       return undefined;
     }
-    currentPublication = {
-      id: publicationRecord['id'],
-      tag: publicationRecord['tag'],
-      title: publicationRecord['title'],
-      ...(typeof publicationRecord['description'] === 'string'
-        ? { description: publicationRecord['description'] }
-        : {}),
-      visibility: publicationRecord['visibility'],
-      createdAt: publicationRecord['createdAt'],
-      urls: { share: (urls as Record<string, unknown>)['share'] as string },
-      access: {
-        grants: (access as Record<string, unknown>)['grants'] as PublicationAccessGrant[],
-      },
+    version = {
+      publicationId: currentVersion['publicationId'],
+      tag: currentVersion['tag'],
+      revisionId: currentVersion['revisionId'],
     };
   }
   return {
-    project: {
-      id: projectRecord['id'],
-      ...(typeof projectRecord['name'] === 'string' ? { name: projectRecord['name'] } : {}),
-      ...(typeof projectRecord['description'] === 'string' ? { description: projectRecord['description'] } : {}),
-    },
-    ...(currentPublication ? { currentPublication } : {}),
-    snapshot: {
-      state: snapshotRecord['state'],
-      ...(typeof snapshotRecord['lastPublishedAt'] === 'string'
-        ? { lastPublishedAt: snapshotRecord['lastPublishedAt'] }
-        : {}),
-    },
+    id,
+    url,
+    visibility,
+    status,
+    stoppedAt,
+    publishedAt,
+    currentVersion: version,
+    access: { grants: access['grants'] as ProjectShare['access']['grants'] },
   };
 };
 
-/** Return the project update time in milliseconds. */
-const getProjectUpdatedAtTime = (value: ProjectSharePanelProps['projectUpdatedAt']): number | undefined => {
-  if (value === undefined) {
+/**
+ * Reads `GET /v1/projects/:id/share`: the project and its link, `null` before its first publish.
+ *
+ * @param value - The parsed body.
+ * @returns The envelope, or `undefined` when the body is not one.
+ */
+const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undefined => {
+  if (!isRecord(value) || !isRecord(value['project'])) {
     return undefined;
   }
-
-  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
-  return Number.isNaN(ms) ? undefined : ms;
+  const { project } = value;
+  if (typeof project['id'] !== 'string') {
+    return undefined;
+  }
+  const share = value['share'] === null || value['share'] === undefined ? null : parseProjectShare(value['share']);
+  if (share === undefined) {
+    return undefined;
+  }
+  return {
+    project: {
+      id: project['id'],
+      name: typeof project['name'] === 'string' ? project['name'] : null,
+      description: typeof project['description'] === 'string' ? project['description'] : null,
+    },
+    share,
+  };
 };
 
-const getSnapshotState = (
-  envelope: ProjectShareEnvelope,
-  projectUpdatedAt: ProjectSharePanelProps['projectUpdatedAt'],
-): 'unpublished' | 'published-current' | 'published-stale' => {
-  if (!envelope.currentPublication) {
-    return 'unpublished';
-  }
+/** The branch a publish names the head of (`publish.machine`'s default). */
+const publishedBranch = 'main';
 
-  /** Milliseconds. */
-  const updatedAt = getProjectUpdatedAtTime(projectUpdatedAt);
-  /** Milliseconds. */
-  const publishedAt = new Date(envelope.currentPublication.createdAt).getTime();
-  if (updatedAt !== undefined && !Number.isNaN(publishedAt) && updatedAt > publishedAt + 1000) {
-    return 'published-stale';
+/**
+ * Whether the link shows what a publish would publish now: the head of `main`, compared with the revision the link's
+ * version names. It is exact rather than a timestamp guess. Off `main`, the head comes from the branch list, and when
+ * neither knows it the answer is `unknown`.
+ *
+ * @param status - The project's revision status.
+ * @param publishedRevisionId - The revision the link shows.
+ * @returns `current`, `changed`, or `unknown`.
+ */
+const linkFreshnessOf = (
+  status: RevisionStatusProjection | undefined,
+  publishedRevisionId: string | undefined,
+): 'current' | 'changed' | 'unknown' => {
+  if (status === undefined || publishedRevisionId === undefined) {
+    return 'unknown';
   }
-
-  return 'published-current';
+  const head =
+    status.line.kind === 'branch' && status.line.name === publishedBranch
+      ? status.headRevisionId
+      : status.branches.find((branch) => branch.name === publishedBranch)?.head;
+  if (head === undefined) {
+    return 'unknown';
+  }
+  return head === publishedRevisionId ? 'current' : 'changed';
 };
 
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
@@ -733,7 +708,6 @@ type TauShareOptions = {
   readonly projectId: string;
   readonly projectName: string;
   readonly projectDescription: string;
-  readonly projectUpdatedAt: ProjectSharePanelProps['projectUpdatedAt'];
   readonly entryPath: string;
   readonly isActive: boolean;
   readonly signIn: string;
@@ -742,7 +716,7 @@ type TauShareOptions = {
 };
 
 /** Where focus goes after the control that had it went away. */
-type CloudFocusTarget = 'copy-link' | 'share-link' | 'publish-new-version' | 'version-name';
+type CloudFocusTarget = 'copy-link' | 'share-link' | 'publish';
 
 /**
  * The link a publish press is waiting for. The press starts the copy with a promise of the link (`copyText`), so the
@@ -793,7 +767,7 @@ const startPublishCopy = (): PendingPublishCopy => {
 /**
  * A version's number for a sentence, `V3`, without its name: the name can repeat words around it.
  *
- * @param tag - The publication's tag.
+ * @param tag - The version's tag.
  * @returns `V<number>`, or `undefined` when the tag names no number.
  */
 const versionNumberLabel = (tag: string): string | undefined => {
@@ -802,9 +776,9 @@ const versionNumberLabel = (tag: string): string | undefined => {
 };
 
 /**
- * A publication's date as people read it, `12 Nov 2026`.
+ * A date as people read it, `12 Nov 2026`.
  *
- * @param isoDate - The publication's `createdAt`.
+ * @param isoDate - When the link last changed what it shows.
  * @returns The date, or `undefined` for one that does not parse.
  */
 const publishedDate = (isoDate: string): string | undefined => {
@@ -900,23 +874,72 @@ function CloudLinkSkeleton(): React.JSX.Element {
 }
 
 /**
- * The Tau Cloud link: the project's own `publish.machine` and its publication envelope.
+ * Asks before the link stops working for everyone (UX Rule 4): it cannot be undone from the pane, only turned back on
+ * by publishing again.
  *
- * Its state lives with the panel rather than in the method's body, so a draft survives choosing another method and
+ * @param props - Whether it is open, whether the stop is running, and what each answer does.
+ * @returns The dialog.
+ */
+function StopSharingDialog({
+  isOpen,
+  isStopping,
+  onConfirm,
+  onCancel,
+  onCloseAutoFocus,
+}: {
+  readonly isOpen: boolean;
+  readonly isStopping: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+  readonly onCloseAutoFocus: (event: Event) => void;
+}): React.JSX.Element {
+  return (
+    <AlertDialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open && !isStopping) {
+          onCancel();
+        }
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop sharing this project?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The link stops working for everyone, including people you invited. Anyone who already opened it may still
+            have a copy. Publishing again turns the same link back on.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isStopping}>Cancel</AlertDialogCancel>
+          <Button type='button' variant='destructive' disabled={isStopping} aria-busy={isStopping} onClick={onConfirm}>
+            {isStopping ? <Loader className='size-4' /> : null}
+            Stop sharing
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * The cloud link: the project's one stable link, which always shows the version last published (the project's own
+ * `publish.machine`), who can open it, and Stop sharing.
+ *
+ * Its state lives with the panel rather than in the method's body, so a choice survives choosing another method and
  * coming back, as it did before the pane moved into `@taucad/workbench-panes`.
  *
- * @param options - The project, whether the Tau Cloud link method is the one shown, the sign-in link and how to choose
- * a direct link.
+ * @param options - The project, whether the cloud link method is the one shown, the sign-in link and how to choose a
+ * direct link.
  * @returns What the pane draws for the method.
  */
 function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
-  const { projectId, projectName, projectDescription, projectUpdatedAt, entryPath, isActive, signIn, onUseDirectLink } =
-    options;
+  const { projectId, projectName, projectDescription, entryPath, isActive, signIn, onUseDirectLink } = options;
   /*
    * Publishing is the project's own `publish.machine`, invoked by the revision
    * root in the file-manager worker (A38, S32). This panel holds no actor: it
    * sends the root's events and renders the facet the projection carries, so
-   * `tau publish` and this dialog are one implementation reached two ways.
+   * `tau publish` and this pane are one implementation reached two ways.
    */
   const status = useRevisionStatus();
   const publishFacet = status?.publish ?? emptyPublishFacet;
@@ -926,53 +949,37 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const publishError = publishFacet.error;
 
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
+  const shareEndpoint = `${apiBaseUrl}/v1/projects/${encodeURIComponent(projectId)}/share`;
   const [envelope, setEnvelope] = useState<ProjectShareEnvelope>();
   /* A reload keeps the content on screen; only the invited list says it is refreshing. */
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
   /* Why the envelope read failed, as the cloud state it says (W30): a deleted copy is not a network fault (#2304). */
   const [envelopeFailure, setEnvelopeFailure] = useState<ReturnType<typeof shareEnvelopeFailureOf>>();
-  const [visibility, setVisibility] = useState<PublishVisibility>('private');
+  /* What the person picked before a publish; the link's own setting until they pick. */
+  const [chosenVisibility, setChosenVisibility] = useState<PublishVisibility>();
   const { canCreatePrivateShares, isResolved: isPlanResolved, requestUpgrade } = useCommercialFeatures();
-  // Free tier publishes public-only (T4/T5/AD11); derived so an async
-  // entitlements load never strands a locked selection in form state.
-  const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
-  /*
-   * The version this publication points at (S32, A21, D11, B6).
-   *
-   * The name is free text and its number is the project's next one, so the
-   * field starts from the title until a person types a name. The project's
-   * existing names are offered, so publishing a version again is a choice
-   * rather than a guess. A native `datalist` rather than a combobox widget:
-   * the field accepts a new name as readily as an existing one.
-   */
-  const existingNames = [...new Set(publishFacet.tags.map((tag: PublishFacet['tags'][number]) => tag.name))];
-  const [chosenName, setChosenName] = useState<string>();
-  const [title, setTitle] = useState(projectName);
-  /* Derived, not synchronized: the field shows the title until a person types a name. */
-  const versionName = chosenName ?? title;
-  const [description, setDescription] = useState(projectDescription);
-  const [sharedEmails, setSharedEmails] = useState<string[]>([]);
   const [visibilityMutating, setVisibilityMutating] = useState(false);
-  const [publishingAnother, setPublishingAnother] = useState(false);
+  const [isStopDialogOpen, setIsStopDialogOpen] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [isCopyRefused, setIsCopyRefused] = useState(false);
   const [focusTarget, setFocusTarget] = useState<CloudFocusTarget>();
   const lastHandledShareUrlRef = useRef<string | undefined>(undefined);
   const pendingCopyRef = useRef<PendingPublishCopy | undefined>(undefined);
+  /* Whether the stop dialog closed because the link stopped, so focus goes to the publish button that replaced it. */
+  const hasStoppedRef = useRef(false);
   const linkRef = useRef<HTMLInputElement>(null);
   const copyLinkRef = useRef<HTMLButtonElement>(null);
-  const publishNewVersionRef = useRef<HTMLButtonElement>(null);
-  const versionNameRef = useRef<HTMLInputElement>(null);
+  const publishRef = useRef<HTMLButtonElement>(null);
+  const stopSharingRef = useRef<HTMLButtonElement>(null);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
-  const versionHelpId = useId();
-  const titleHelpId = useId();
   const visibilityLabelId = useId();
 
-  const loadEnvelope = useCallback(async (): Promise<void> => {
+  const loadEnvelope = useCallback(async (): Promise<ProjectShareEnvelope | undefined> => {
     setLoadingEnvelope(true);
     setEnvelopeFailure(undefined);
     let status: number | undefined;
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/projects/${projectId}/share`, {
+      const response = await fetch(shareEndpoint, {
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });
@@ -988,12 +995,14 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       }
 
       setEnvelope(nextEnvelope);
+      return nextEnvelope;
     } catch {
       setEnvelopeFailure(shareEnvelopeFailureOf(status));
+      return undefined;
     } finally {
       setLoadingEnvelope(false);
     }
-  }, [apiBaseUrl, projectId]);
+  }, [shareEndpoint]);
 
   useEffect(() => {
     if (isActive) {
@@ -1004,7 +1013,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     }
   }, [loadEnvelope, isActive]);
 
-  /* Focus follows the gesture only when the control it came from went away: a publish, Cancel, or opening the form. */
+  /* Focus follows the gesture only when the control it came from went away: a publish or a stop. */
   useEffect(() => {
     if (focusTarget === undefined) {
       return;
@@ -1014,9 +1023,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         ? copyLinkRef.current
         : focusTarget === 'share-link'
           ? linkRef.current
-          : focusTarget === 'publish-new-version'
-            ? publishNewVersionRef.current
-            : versionNameRef.current;
+          : publishRef.current;
     if (target !== null) {
       target.focus();
       if (focusTarget === 'share-link') {
@@ -1044,7 +1051,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   useEffect(() => {
     /*
      * One publish is one stay in `success`: the reset after it returns the machine to idle while the link is kept, so the
-     * marker clears outside `success` and the next publish is handled even when it brings the same link.
+     * marker clears outside `success` and the next publish is handled even when it brings the same link — which, with
+     * one link per project, is every publish.
      */
     if (!publishSucceeded || !publishShareUrl) {
       lastHandledShareUrlRef.current = undefined;
@@ -1060,20 +1068,40 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     pending?.resolve(publishShareUrl);
     let cancelled = false;
     const finishPublish = async (): Promise<void> => {
-      const outcome = await (pending?.copying ?? Promise.resolve(undefined));
-      if (!cancelled) {
-        if (outcome?.isCopied === true) {
-          toast.success('Published. Link copied');
-          triggerCopiedTick();
-        } else {
-          toast.success('Published');
+      if (pending === undefined) {
+        /* Publish changes: the link did not change, so nothing is copied; the toast names what it now shows. */
+        const next = await loadEnvelope();
+        if (!cancelled) {
+          const tag = next?.share?.currentVersion?.tag;
+          const version = tag === undefined ? undefined : versionNumberLabel(tag);
+          toast.success(
+            version === undefined
+              ? 'Published. The link now shows it.'
+              : `Published ${version}. The link now shows it.`,
+          );
+          setIsCopyRefused(false);
         }
-        setIsCopyRefused(outcome?.isCopied === false);
-        await loadEnvelope();
+      } else {
+        const outcome = await pending.copying;
+        if (!cancelled) {
+          if (outcome?.isCopied === true) {
+            toast.success('Published. Link copied');
+            triggerCopiedTick();
+          } else {
+            toast.success('Published');
+          }
+          setIsCopyRefused(outcome?.isCopied === false);
+          await loadEnvelope();
+        }
+        if (!cancelled) {
+          setFocusTarget(outcome?.isCopied === false ? 'share-link' : 'copy-link');
+        }
       }
       if (!cancelled) {
-        setPublishingAnother(false);
-        setFocusTarget(outcome?.isCopied === false ? 'share-link' : 'copy-link');
+        if (pending === undefined) {
+          /* The Publish changes button goes away with its notice. */
+          setFocusTarget('copy-link');
+        }
         commands.resetPublish();
       }
     };
@@ -1086,50 +1114,35 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   }, [commands, loadEnvelope, publishShareUrl, publishSucceeded, triggerCopiedTick]);
 
   const busy = publishFacet.phase === 'working';
-  const sharedEmailError = effectiveVisibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;
-  const canPublish = title.trim().length > 0 && versionName.trim().length > 0 && !sharedEmailError && !busy;
-  const snapshotState = useMemo(
-    () => (envelope ? getSnapshotState(envelope, projectUpdatedAt) : 'unpublished'),
-    [envelope, projectUpdatedAt],
-  );
 
   /**
-   * Publish is one gesture: open the dialog's machine on this project's names
-   * and confirm the draft. The machine holds the confirm until it has read the
-   * names, so nothing here waits.
+   * Publish is one gesture: open the machine on this project's names and confirm the draft. The machine holds the
+   * confirm until it has read the names, so nothing here waits. The version is never named here: the worker names it
+   * (`Shared Nov 19`), and an entry that already is a version is published under its own name.
    *
-   * @param draft - Everything only a person decides.
-   * @param revisionId - The entry a republished version names, when this page knows it.
+   * @param visibility - Who can open the link, for a link that is not shared yet; absent keeps the link's setting.
+   * @param shouldCopy - Whether the press copies the link the publish brings.
    */
-  const sendPublish = (draft: PublishDraft, revisionId?: string): void => {
+  const sendPublish = (visibility: PublishVisibility | undefined, shouldCopy: boolean): void => {
     /* The copy starts here, inside the press; the publish below settles the link it copies. */
     pendingCopyRef.current?.reject(new Error('Another publish started.'));
-    pendingCopyRef.current = startPublishCopy();
+    pendingCopyRef.current = shouldCopy ? startPublishCopy() : undefined;
     setIsCopyRefused(false);
-    if (revisionId === undefined) {
-      commands.publishProject(draft.tag);
-    } else {
-      commands.publishProject(draft.tag, revisionId);
-    }
+    const draft: PublishDraft = {
+      tag: '',
+      isAutoNamed: true,
+      projectName,
+      entryPath,
+      ...(projectDescription.trim() === '' ? {} : { description: projectDescription.trim() }),
+      ...(visibility === undefined ? {} : { visibility }),
+    };
+    commands.publishProject();
     commands.confirmPublish(draft);
   };
 
-  const handlePublish = (): void => {
-    sendPublish({
-      tag: versionName.trim(),
-      projectName,
-      entryPath,
-      visibility: effectiveVisibility,
-      title: title.trim(),
-      ...(description.trim() === '' ? {} : { description: description.trim() }),
-      ...(effectiveVisibility === 'private' && sharedEmails.length > 0 ? { sharedEmails } : {}),
-      ...(effectiveVisibility === 'private' && sharedEmails.length > 0 ? { notifyRecipients: true } : {}),
-    });
-  };
-
   const handleVisibilityChange = async (nextVisibility: PublishVisibility): Promise<void> => {
-    const publication = envelope?.currentPublication;
-    if (!publication || publication.visibility === nextVisibility || visibilityMutating) {
+    const share = envelope?.share;
+    if (!share || share.visibility === nextVisibility || visibilityMutating) {
       return;
     }
     // Switching TO private is Pro-gated (T4/T5); the server 403s anyway — route
@@ -1141,7 +1154,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
     setVisibilityMutating(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/publications/${publication.id}/visibility`, {
+      const response = await fetch(shareEndpoint, {
         method: 'PATCH',
         credentials: 'include',
         headers: {
@@ -1168,32 +1181,30 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     }
   };
 
-  /*
-   * Republishing re-materializes the same publication at the same link: it re-pins the runtime and rewrites the
-   * manifest, thumbnail and entry, so it stays as the quiet way to refresh a link without making a new one.
-   */
-  const handleRepublish = (): void => {
-    const publication = envelope?.currentPublication;
-    if (!publication) {
-      return;
+  /* Stop sharing works on every plan: the link answers "no longer shared" on the next request, for everyone. */
+  const handleStopSharing = async (): Promise<void> => {
+    setIsStopping(true);
+    try {
+      const response = await fetch(shareEndpoint, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw recordApiRequestId(new Error('STOP_SHARING_FAILED'), response);
+      }
+      hasStoppedRef.current = true;
+      setIsStopDialogOpen(false);
+      setIsCopyRefused(false);
+      toast.success('Stopped sharing. The link no longer works.');
+      await loadEnvelope();
+      setFocusTarget('publish');
+    } catch {
+      setIsStopDialogOpen(false);
+      toast.error("Couldn't stop sharing. Try again.");
+    } finally {
+      setIsStopping(false);
     }
-
-    /* The version itself, by number: the machine publishes its own entry under
-     * its stored name, so the publication's title never renames it (B6). */
-    const number = versionNumberOfTag(publication.tag);
-    const version = publishFacet.tags.find((candidate) => candidate.number === number);
-    sendPublish(
-      {
-        tag: version?.name ?? '',
-        ...(number === undefined ? {} : { version: number }),
-        projectName,
-        entryPath,
-        visibility: publication.visibility,
-        title: publication.title,
-        ...(publication.description ? { description: publication.description } : {}),
-      },
-      version?.revisionId,
-    );
   };
 
   /* The copy starts inside the press, before any await, so a browser that needs the gesture still allows it. */
@@ -1211,167 +1222,222 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     }
   };
 
-  const publishForm = (publication: ProjectShareEnvelope['currentPublication']): React.JSX.Element => {
-    const current = publication === undefined ? undefined : versionNumberLabel(publication.tag);
-    return (
-      <SharePaneSection
-        title={publication === undefined ? 'Publish a version' : 'Publish a new version'}
-        description={
-          publication === undefined
-            ? 'People who open the link see this version. Tau keeps a copy so the link works anywhere.'
-            : `A new version gets its own link. The current link keeps working and keeps showing ${current ?? 'the published version'}. Invite people again for the new link.`
-        }
-      >
-        <form
-          className='flex flex-col gap-4'
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (canPublish) {
-              handlePublish();
-            }
-          }}
-        >
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-version'>Version name</Label>
-            <Input
-              ref={versionNameRef}
-              id='share-version'
-              list='share-version-options'
-              value={versionName}
-              disabled={busy}
-              aria-describedby={versionHelpId}
-              onChange={(event) => {
-                setChosenName(event.target.value);
-              }}
-            />
-            <datalist id='share-version-options'>
-              {existingNames.map((name: string) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <p id={versionHelpId} className='text-xs text-muted-foreground'>
-              Names this version in History. A version is permanent; to share later changes, publish a new one.
-            </p>
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-title'>Title</Label>
-            <Input
-              id='share-title'
-              value={title}
-              disabled={busy}
-              aria-describedby={titleHelpId}
-              onChange={(event) => {
-                setTitle(event.target.value);
-              }}
-            />
-            <p id={titleHelpId} className='text-xs text-muted-foreground'>
-              Shown at the top of the shared page.
-            </p>
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='share-description'>Description (optional)</Label>
-            <Textarea
-              id='share-description'
-              value={description}
-              disabled={busy}
-              rows={3}
-              onChange={(event) => {
-                setDescription(event.target.value);
-              }}
-            />
-          </div>
-          <div className='flex flex-col gap-2'>
-            <Label id={visibilityLabelId}>Who can open the link</Label>
-            <RadioGroup
-              value={effectiveVisibility}
-              disabled={busy}
-              aria-labelledby={visibilityLabelId}
-              onValueChange={(value) => {
-                setVisibility(value as PublishVisibility);
-              }}
-              className='flex flex-col gap-2'
-            >
-              <div className='flex flex-wrap items-center gap-2'>
-                <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
-                <Label
-                  htmlFor='share-vis-private'
-                  /* A 16px radio's label is its 24px target under a coarse pointer (I3). */
-                  className={cn(
-                    'font-normal pointer-coarse:min-h-6',
-                    !canCreatePrivateShares && 'text-muted-foreground',
-                  )}
-                >
-                  Only people you invite
-                </Label>
-                {canCreatePrivateShares || !isPlanResolved ? undefined : (
-                  <button
-                    type='button'
-                    className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
-                    onClick={() => {
-                      requestUpgrade();
-                    }}
-                  >
-                    <CommercialUpgradeLabel />
-                  </button>
-                )}
-              </div>
-              <div className='flex items-center gap-2'>
-                <RadioGroupItem value='public' id='share-vis-public' />
-                <Label htmlFor='share-vis-public' className='font-normal pointer-coarse:min-h-6'>
-                  Anyone with the link
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-          {effectiveVisibility === 'private' ? (
-            <PublicationEmailTagsField
-              id='share-shared-emails'
-              label='Invite people by email (optional)'
-              description="They'll get an email with the link when you publish."
-              emails={sharedEmails}
-              disabled={busy}
-              placeholder='teammate@example.com'
-              onEmailsChange={setSharedEmails}
-            />
-          ) : null}
+  const copyIcon = copied ? <Check className='size-3.5' aria-hidden /> : <Link2 className='size-3.5' aria-hidden />;
 
+  /* No link yet, or a stopped one: choose who can open it and publish. Publishing turns a stopped link back on. */
+  const notShared = (share: ProjectShare | undefined): React.JSX.Element => {
+    const visibility = chosenVisibility ?? share?.visibility ?? 'private';
+    // Free tier publishes public-only (T4/T5/AD11); derived so an async
+    // entitlements load never strands a locked selection in form state.
+    const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
+    return (
+      <SharePaneFrame isDisabled={busy}>
+        <SharePaneSection
+          title='Link'
+          description='People who open the link see the version you publish. Tau keeps a copy so the link works anywhere.'
+        >
+          {share?.status === 'stopped' ? (
+            <ShareNotice tone='info' title='Sharing is stopped'>
+              You stopped sharing this project. Publishing turns the same link back on, for the same people.
+            </ShareNotice>
+          ) : null}
+          <form
+            className='flex flex-col gap-4'
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!busy) {
+                sendPublish(effectiveVisibility, true);
+              }
+            }}
+          >
+            <div className='flex flex-col gap-2'>
+              <Label id={visibilityLabelId}>Who can open the link</Label>
+              <RadioGroup
+                value={effectiveVisibility}
+                disabled={busy}
+                aria-labelledby={visibilityLabelId}
+                onValueChange={(value) => {
+                  setChosenVisibility(value as PublishVisibility);
+                }}
+                className='flex flex-col gap-2'
+              >
+                <div className='flex flex-wrap items-center gap-2'>
+                  <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
+                  <Label
+                    htmlFor='share-vis-private'
+                    /* A 16px radio's label is its 24px target under a coarse pointer (I3). */
+                    className={cn(
+                      'font-normal pointer-coarse:min-h-6',
+                      !canCreatePrivateShares && 'text-muted-foreground',
+                    )}
+                  >
+                    Only people you invite
+                  </Label>
+                  {canCreatePrivateShares || !isPlanResolved ? undefined : (
+                    <button
+                      type='button'
+                      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
+                      onClick={() => {
+                        requestUpgrade();
+                      }}
+                    >
+                      <CommercialUpgradeLabel />
+                    </button>
+                  )}
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='public' id='share-vis-public' />
+                  <Label htmlFor='share-vis-public' className='font-normal pointer-coarse:min-h-6'>
+                    Anyone with the link
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            {busy ? (
+              <p role='status' className='sr-only'>
+                Publishing…
+              </p>
+            ) : null}
+            {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
+
+            <div className='flex flex-wrap justify-end gap-2'>
+              <Button ref={publishRef} type='submit' disabled={busy} aria-busy={busy}>
+                {busy ? (
+                  <>
+                    <Loader className='size-4' />
+                    <span>Publishing…</span>
+                  </>
+                ) : (
+                  <>
+                    {copyIcon}
+                    <span>Publish and copy link</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </SharePaneSection>
+      </SharePaneFrame>
+    );
+  };
+
+  /* The link is on: copy it, publish what changed since, choose who can open it, or stop sharing. */
+  const shared = (share: ProjectShare): React.JSX.Element => {
+    const version = share.currentVersion;
+    const versionLabel = version === null ? undefined : publishedVersionLabel(version.tag, publishFacet.tags);
+    const versionNumber = version === null ? undefined : versionNumberLabel(version.tag);
+    const date = share.publishedAt === null ? undefined : publishedDate(share.publishedAt);
+    const freshness = linkFreshnessOf(status, version?.revisionId);
+    const isDisabled = busy || visibilityMutating || isStopping;
+    const publishChanges = (
+      <Button
+        type='button'
+        variant='outline'
+        disabled={isDisabled}
+        aria-busy={busy}
+        onClick={() => {
+          sendPublish(undefined, false);
+        }}
+      >
+        {busy ? <Loader className='size-4' /> : null}
+        <span>{busy ? 'Publishing…' : 'Publish changes'}</span>
+      </Button>
+    );
+    return (
+      <SharePaneFrame isDisabled={isDisabled}>
+        <SharePaneSection title='Link'>
+          <Input
+            ref={linkRef}
+            aria-label='Share link'
+            readOnly
+            value={share.url}
+            onFocus={(event) => {
+              event.target.select();
+            }}
+          />
+          {versionLabel === undefined ? null : (
+            <p className='text-sm [overflow-wrap:anywhere] text-muted-foreground'>
+              {'Shows '}
+              <span className='font-medium text-foreground'>{versionLabel}</span>
+              {date === undefined ? '.' : `, published ${date}.`}
+            </p>
+          )}
+          {freshness === 'changed' ? (
+            <ShareNotice tone='info' actions={publishChanges}>
+              {versionNumber === undefined
+                ? "You've changed this project since you published it. People who open the link still see the published version."
+                : `You've changed this project since you published ${versionNumber}. People who open the link still see ${versionNumber}.`}
+            </ShareNotice>
+          ) : null}
+          {isCopyRefused ? <ShareNotice tone='info'>{copyRefusedSentence}</ShareNotice> : null}
           {busy ? (
             <p role='status' className='sr-only'>
-              Publishing this version…
+              Publishing…
             </p>
           ) : null}
           {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
-
           <div className='flex flex-wrap justify-end gap-2'>
-            {publication === undefined ? null : (
-              <Button
-                type='button'
-                variant='ghost'
-                disabled={busy}
-                onClick={() => {
-                  setPublishingAnother(false);
-                  setFocusTarget('publish-new-version');
-                }}
-              >
-                Cancel
-              </Button>
-            )}
-            <Button type='submit' disabled={!canPublish} aria-busy={busy}>
-              {busy ? (
-                <>
-                  <Loader className='size-4' />
-                  <span>Publishing…</span>
-                </>
-              ) : (
-                <>
-                  {copied ? <Check className='size-3.5' aria-hidden /> : <Link2 className='size-3.5' aria-hidden />}
-                  <span>Publish and copy link</span>
-                </>
-              )}
+            {/* Off `main` the head is not known here, so publishing is offered without the sentence. */}
+            {freshness === 'unknown' ? publishChanges : null}
+            <Button
+              ref={copyLinkRef}
+              type='button'
+              onClick={() => {
+                void copyPublishedLink(share.url);
+              }}
+            >
+              {copyIcon}
+              <span>Copy link</span>
             </Button>
           </div>
-        </form>
-      </SharePaneSection>
+        </SharePaneSection>
+        <SharePaneSection title='Who can open the link'>
+          <PublicationAccessPanel
+            apiBaseUrl={apiBaseUrl}
+            projectId={projectId}
+            shareUrl={share.url}
+            visibility={share.visibility}
+            loading={loadingEnvelope}
+            visibilityMutating={visibilityMutating}
+            grants={share.access.grants.filter((grant) => grant.status === 'active')}
+            onVisibilityChange={handleVisibilityChange}
+            onGrantsChanged={async () => {
+              await loadEnvelope();
+            }}
+          />
+          <div className='flex justify-start'>
+            <Button
+              ref={stopSharingRef}
+              type='button'
+              variant='ghost'
+              disabled={isDisabled}
+              onClick={() => {
+                hasStoppedRef.current = false;
+                setIsStopDialogOpen(true);
+              }}
+            >
+              Stop sharing…
+            </Button>
+          </div>
+        </SharePaneSection>
+        <StopSharingDialog
+          isOpen={isStopDialogOpen}
+          isStopping={isStopping}
+          onConfirm={() => {
+            void handleStopSharing();
+          }}
+          onCancel={() => {
+            setIsStopDialogOpen(false);
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!hasStoppedRef.current) {
+              stopSharingRef.current?.focus();
+            }
+          }}
+        />
+      </SharePaneFrame>
     );
   };
 
@@ -1404,90 +1470,14 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       );
     }
 
-    const publication = envelope.currentPublication;
-
-    if (publication === undefined || publishingAnother) {
-      return <SharePaneFrame isDisabled={busy}>{publishForm(publication)}</SharePaneFrame>;
-    }
-
-    const version = versionNumberLabel(publication.tag);
-    const date = publishedDate(publication.createdAt);
-    const isDisabled = busy || visibilityMutating;
-    return (
-      <SharePaneFrame isDisabled={isDisabled}>
-        <SharePaneSection title='Published version'>
-          <p className='text-sm [overflow-wrap:anywhere]'>
-            <span className='font-medium'>{publishedVersionLabel(publication.tag, publishFacet.tags)}</span>
-            {date === undefined ? null : <span className='text-muted-foreground'>{` · Published ${date}`}</span>}
-          </p>
-          <Input
-            ref={linkRef}
-            aria-label='Share link'
-            readOnly
-            value={publication.urls.share}
-            onFocus={(event) => {
-              event.target.select();
-            }}
-          />
-          {snapshotState === 'published-stale' ? (
-            <ShareNotice tone='info'>
-              {version === undefined
-                ? "You've changed this project since you published it. People who open the link still see the published version."
-                : `You've changed this project since you published ${version}. People who open the link still see ${version}.`}
-            </ShareNotice>
-          ) : null}
-          {isCopyRefused ? <ShareNotice tone='info'>{copyRefusedSentence}</ShareNotice> : null}
-          {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
-          <div className='flex flex-wrap justify-end gap-2'>
-            <Button type='button' variant='ghost' disabled={isDisabled} aria-busy={busy} onClick={handleRepublish}>
-              {busy ? <Loader className='size-4' /> : null}
-              <span>Republish this version</span>
-            </Button>
-            <Button
-              ref={publishNewVersionRef}
-              type='button'
-              variant='outline'
-              disabled={isDisabled}
-              onClick={() => {
-                setSharedEmails([]);
-                setPublishingAnother(true);
-                setFocusTarget('version-name');
-              }}
-            >
-              Publish new version
-            </Button>
-            <Button
-              ref={copyLinkRef}
-              type='button'
-              onClick={() => {
-                void copyPublishedLink(publication.urls.share);
-              }}
-            >
-              {copied ? <Check className='size-3.5' aria-hidden /> : <Link2 className='size-3.5' aria-hidden />}
-              <span>Copy link</span>
-            </Button>
-          </div>
-        </SharePaneSection>
-        <SharePaneSection title='Who can open the link'>
-          <PublicationAccessPanel
-            apiBaseUrl={apiBaseUrl}
-            publicationId={publication.id}
-            visibility={publication.visibility}
-            loading={loadingEnvelope}
-            visibilityMutating={visibilityMutating}
-            grants={publication.access.grants.filter((grant) => grant.status === 'active')}
-            onVisibilityChange={handleVisibilityChange}
-            onGrantsChanged={loadEnvelope}
-          />
-        </SharePaneSection>
-      </SharePaneFrame>
-    );
+    const { share } = envelope;
+    return share === null || share.status === 'stopped' ? notShared(share ?? undefined) : shared(share);
   };
 }
 
 /**
  * The Share pane's source over this project: the direct link and GitHub Gist when a snapshot can be collected, and
- * the Tau Cloud link, with the method choice remembered in a cookie (R8).
+ * the cloud link, with the method choice remembered in a cookie (R8).
  *
  * @param properties - The project and how to collect its snapshot.
  * @returns The source.
@@ -1497,7 +1487,6 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
     projectId,
     projectName,
     projectDescription = '',
-    projectUpdatedAt,
     entryPath,
     collectSnapshot,
     initialMethod,
@@ -1535,7 +1524,6 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
     projectId,
     projectName,
     projectDescription,
-    projectUpdatedAt,
     entryPath,
     isActive: shareMethod === 'tau',
     signIn,
@@ -1555,7 +1543,7 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
             id: 'tau',
             label: descriptor.label,
             icon: TauCloudIcon,
-            description: 'Publish a version and choose who can open it.',
+            description: 'One link that always shows the version you last published.',
             render: renderTau,
           },
         ];

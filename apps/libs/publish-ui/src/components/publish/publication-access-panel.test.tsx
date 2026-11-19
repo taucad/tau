@@ -11,17 +11,25 @@ import type { PublicationAccessGrant } from '#components/publish/publication-acc
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const toastSuccessMock = vi.fn();
+const toastWarningMock = vi.fn();
 const toastErrorMock = vi.fn();
 vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     success: (...args: unknown[]) => {
       toastSuccessMock(...args);
     },
+    warning: (...args: unknown[]) => {
+      toastWarningMock(...args);
+    },
     error: (...args: unknown[]) => {
       toastErrorMock(...args);
     },
   },
 }));
+
+/** A `POST …/share/access` answer with the given email outcome. */
+const inviteAnswer = (email: unknown): Response =>
+  ({ ok: true, json: async () => ({ id: 'sga_1', recipientEmail: 'x@example.com', email }) }) as unknown as Response;
 
 describe('PublicationAccessPanel', () => {
   beforeEach(() => {
@@ -35,8 +43,9 @@ describe('PublicationAccessPanel', () => {
       public disconnect = vi.fn();
     };
     toastSuccessMock.mockClear();
+    toastWarningMock.mockClear();
     toastErrorMock.mockClear();
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
   });
 
   afterEach(() => {
@@ -50,12 +59,12 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -73,8 +82,7 @@ describe('PublicationAccessPanel', () => {
 
   // Email bounce blueprint R9 and D5: "Not delivered", with no reason.
   it('marks a recipient the invite email cannot reach as not delivered', () => {
-    const grant: Pick<PublicationAccessGrant, 'publicationId' | 'status' | 'createdAt' | 'revokedAt'> = {
-      publicationId: 'pub_panel',
+    const grant: Pick<PublicationAccessGrant, 'status' | 'createdAt' | 'revokedAt'> = {
       status: 'active',
       createdAt: '2026-01-01T00:00:00.000Z',
       revokedAt: null,
@@ -82,7 +90,8 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
@@ -112,12 +121,12 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -137,12 +146,13 @@ describe('PublicationAccessPanel', () => {
     );
   });
 
-  it('adds normalized email recipients through the publication access API', async () => {
+  it('adds normalized email recipients through the cloud link access API', async () => {
     const onGrantsChanged = vi.fn();
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -151,12 +161,14 @@ describe('PublicationAccessPanel', () => {
     );
 
     const field = screen.getByRole('combobox', { name: 'Invite people by email' });
-    expect(field).toHaveAccessibleDescription("They'll get an email with the link.");
+    expect(field).toHaveAccessibleDescription(
+      "We'll email them the link. They sign in with this email address to open it.",
+    );
     await userEvent.type(field, 'Friend@Example.com{Enter}');
     await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_panel/access', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_panel/share/access', {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -171,11 +183,13 @@ describe('PublicationAccessPanel', () => {
     const onGrantsChanged = vi.fn();
     globalThis.fetch = vi.fn(async (_url: string, init: { readonly body: string }) => ({
       ok: !init.body.includes('nope@example.com'),
+      json: async () => ({ email: { status: 'sent' } }),
     })) as unknown as typeof fetch;
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -196,17 +210,17 @@ describe('PublicationAccessPanel', () => {
     expect(screen.queryByText('a@example.com')).not.toBeInTheDocument();
   });
 
-  it('revokes a grant through the publication access API', async () => {
+  it('revokes a grant through the cloud link access API', async () => {
     const onGrantsChanged = vi.fn();
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -221,7 +235,7 @@ describe('PublicationAccessPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_panel/access/pva_1', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_panel/share/access/pva_1', {
         method: 'DELETE',
         credentials: 'include',
         headers: { Accept: 'application/json' },
@@ -238,12 +252,12 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -263,7 +277,7 @@ describe('PublicationAccessPanel', () => {
     options.action.onClick();
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenLastCalledWith('https://api.example/v1/publications/pub_panel/access', {
+      expect(globalThis.fetch).toHaveBeenLastCalledWith('https://api.example/v1/projects/proj_panel/share/access', {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -280,12 +294,12 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -310,12 +324,114 @@ describe('PublicationAccessPanel', () => {
     });
   });
 
+  it('says an invite email was sent as Invited', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(inviteAnswer({ status: 'sent' }));
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
+        visibility='private'
+        grants={[]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(screen.getByRole('combobox', { name: 'Invite people by email' }), 'friend@example.com{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Invited friend@example.com.');
+    });
+    expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['daily_cap', 'limiter_unavailable', 'email_disabled', 'undeliverable', 'send_failed'])(
+    'asks the owner to send the link themselves when the email was skipped (%s), without naming why',
+    async (reason) => {
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+      globalThis.fetch = vi.fn().mockResolvedValue(inviteAnswer({ status: 'skipped', reason }));
+      const onGrantsChanged = vi.fn();
+      renderPanel(
+        <PublicationAccessPanel
+          apiBaseUrl='https://api.example'
+          projectId='proj_panel'
+          shareUrl='https://tau.example/s/tau~shr_panel'
+          visibility='private'
+          grants={[]}
+          onVisibilityChange={vi.fn()}
+          onGrantsChanged={onGrantsChanged}
+        />,
+      );
+
+      await userEvent.type(
+        screen.getByRole('combobox', { name: 'Invite people by email' }),
+        'friend@example.com{Enter}',
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+      await waitFor(() => {
+        expect(toastWarningMock).toHaveBeenCalledOnce();
+      });
+      const [message, options] = toastWarningMock.mock.calls[0] as [
+        string,
+        { action: { label: string; onClick: () => void } },
+      ];
+      expect(message).toBe("We couldn't email friend@example.com. Copy the link and send it yourself.");
+      expect(message).not.toMatch(/cap|limit|disabled|undeliverable|bounce|fail/iu);
+      expect(toastSuccessMock).not.toHaveBeenCalled();
+      expect(onGrantsChanged).toHaveBeenCalledOnce();
+      expect(options.action.label).toBe('Copy link');
+
+      /* The copy starts inside the action's press. */
+      options.action.onClick();
+      expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~shr_panel');
+      await waitFor(() => {
+        expect(toastSuccessMock).toHaveBeenCalledWith('Link copied');
+      });
+    },
+  );
+
+  it('counts the people it could not email apart from those it did', async () => {
+    globalThis.fetch = vi.fn(async (_url: string, init: { readonly body: string }) =>
+      inviteAnswer(init.body.includes('a@') ? { status: 'sent' } : { status: 'skipped', reason: 'daily_cap' }),
+    ) as unknown as typeof fetch;
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
+        visibility='private'
+        grants={[]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(
+      screen.getByRole('combobox', { name: 'Invite people by email' }),
+      'a@example.com{Enter}b@example.com{Enter}c@example.com{Enter}',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+    await waitFor(() => {
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        "We couldn't email 2 people. Copy the link and send it yourself.",
+        expect.anything(),
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith('Invited a@example.com.');
+  });
+
   it('lists five invited people in flow and the rest on request', async () => {
     const grants = Array.from(
       { length: 7 },
       (_unused, index): PublicationAccessGrant => ({
         id: `pva_${String(index)}`,
-        publicationId: 'pub_panel',
         recipientEmail: `person${String(index)}@example.com`,
         status: 'active',
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -325,7 +441,8 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='private'
         grants={grants}
         onVisibilityChange={vi.fn()}
@@ -350,12 +467,12 @@ describe('PublicationAccessPanel', () => {
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
-        publicationId='pub_panel'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
         visibility='public'
         grants={[
           {
             id: 'pva_1',
-            publicationId: 'pub_panel',
             recipientEmail: 'friend@example.com',
             status: 'active',
             createdAt: '2026-01-01T00:00:00.000Z',

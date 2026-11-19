@@ -15,7 +15,7 @@ import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 import { useProjectChatUsage } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
-import { sumReceiptCredits, useReceiptCredits } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+import { sumReceiptCredits, useReceiptCredits } from '#routes/w.$workspace.$project/chat-receipt-credits.js';
 
 type UsageTokens = {
   inputTokens: number;

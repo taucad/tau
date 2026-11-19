@@ -4,13 +4,6 @@ import { useModels } from '#hooks/use-models.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatMessageUsage, sumUsageTokens } from '@taucad/billing-ui/components/usage/chat-message-usage';
 
-export const usageOperationIds = (): string[] => [];
-export type ReceiptCredit = { readonly status: 'unavailable' };
-export type ReceiptTotal = { readonly creditAtoms: bigint; readonly pending: number };
-export const useReceiptCredits = (): ReadonlyMap<string, ReceiptCredit> => new Map();
-export const sumReceiptCredits = (): ReceiptTotal => ({ creditAtoms: 0n, pending: 0 });
-export const formatReceiptTotal = (): string => '';
-
 /** Self-host has no receipts: the same button and card, without a credits line. */
 export function ChatMessageDataUsage({
   usageParts,

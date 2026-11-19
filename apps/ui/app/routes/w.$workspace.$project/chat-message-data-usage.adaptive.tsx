@@ -7,15 +7,6 @@ import {
   ReceiptCreditsSummary as SelfHostReceiptCreditsSummary,
 } from '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js';
 
-/* oxlint-disable-next-line no-barrel-files/no-barrel-files -- pure helpers every ceiling shares; no receipt hook crosses. */
-export {
-  formatReceiptTotal,
-  sumReceiptCredits,
-  usageOperationIds,
-} from '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js';
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- as above.
-export type { ReceiptCredit, ReceiptTotal } from '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js';
-
 /** Per-message credits, from the Cloud chunk while funded; the receipt hooks stay inside the chunk. */
 export function ChatMessageDataUsage(
   props: ComponentProps<typeof CloudChatMessageDataUsage>,

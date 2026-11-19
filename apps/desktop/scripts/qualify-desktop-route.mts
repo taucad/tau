@@ -37,6 +37,7 @@ import { createMacosQualificationDriver } from './qualification-macos.mjs';
 import {
   assertBaselineShipsAutoInstall,
   assessRecovery,
+  recoveryFailure,
   brokenRendererDocument,
   qualificationScenario,
   rebuildAppImageWithEntry,
@@ -633,7 +634,19 @@ const main = async (): Promise<void> => {
         } catch (error) {
           reason = error instanceof Error ? error.message : String(error);
           if (Date.now() >= deadline) {
-            throw new Error(`T-B22.4 recovery did not complete: ${reason}`);
+            // The verdict alone cannot say why: keep the app's own path-free account of A beside the row's observations.
+            await transport.flush();
+            const failure = recoveryFailure({
+              reason,
+              log,
+              ledgerText,
+              aAlive: currentPid !== undefined && (await files.alive(currentPid)),
+              mirrorRequests: transport.requests,
+            });
+            await writeFile(join(root, 'qualification-recovery.json'), JSON.stringify(failure.record, undefined, 2), {
+              flag: 'wx',
+            });
+            throw failure.error;
           }
           await wait(2000);
         }

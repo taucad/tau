@@ -493,3 +493,45 @@ describe('phone header actions', () => {
     }
   });
 });
+
+/* PL7 blueprint FP9 (D17): a module that failed to load fails again for the life of the page, so a panel whose code
+ * did not load offers Reload only; an in-place Try Again could never succeed. Other errors keep Try Again. */
+describe('error content', () => {
+  beforeEach(() => {
+    mockUseIsMobile.mockReset().mockReturnValue(false);
+    mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  function Thrower({ error }: { readonly error: Error }): React.JSX.Element {
+    throw error;
+  }
+
+  it('should offer only Reload when the panel’s code failed to load', () => {
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelContent>
+          <Thrower
+            error={new TypeError('Failed to fetch dynamically imported module: https://tau.new/assets/a-B1.js')}
+          />
+        </FloatingPanelContent>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Reload Page' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try Again' })).toBeNull();
+  });
+
+  it('should keep Try Again for an error that rendering again may clear', () => {
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelContent>
+          <Thrower error={new Error('The chat store is not ready')} />
+        </FloatingPanelContent>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload Page' })).toBeInTheDocument();
+  });
+});

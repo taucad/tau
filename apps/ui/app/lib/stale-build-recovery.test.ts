@@ -7,8 +7,10 @@ import {
   autoReloadTimesKey,
   createStaleBuildRecovery,
   isStaleModuleError,
+  autoReloadBudgetWindow,
   preloadFollowUpDelay,
   staleBuildReloadKey,
+  transientReloadKey,
 } from '#lib/stale-build-recovery.js';
 import type { LiveBuildSource } from '#lib/stale-build-recovery.js';
 
@@ -735,5 +737,121 @@ describe('createStaleBuildRecovery', () => {
 
       expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
     });
+  });
+});
+
+/* PL7 blueprint FP9 (D17, D19): a module load that failed once fails again for the life of its realm, so a failure
+ * on a build the server still runs is transient and needs a new realm. It reloads within the same guard, budget and
+ * no-input window as a replaced build, else it offers the reload; one that repeats after that reload is genuine. */
+describe('a module load failure on the live build (FP9)', () => {
+  const live = async (): Promise<number | undefined> => ownBuildId;
+
+  it('should reload once into the same build, recording that it did, while reloading cannot lose work', async () => {
+    const { recovery, reload, storage, onSuperseded, onGenuineFailure } = setup({
+      fetchServerBuildId: live,
+      now: () => 5000,
+    });
+
+    await expect(recovery.recover(failure())).resolves.toBe('reloading');
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(storage.entries.get(transientReloadKey)).toBe(`${String(ownBuildId)}@5000`);
+    expect(storage.entries.get(autoReloadTimesKey)).toBe('[5000]');
+    expect(onSuperseded).not.toHaveBeenCalled();
+    expect(onGenuineFailure).not.toHaveBeenCalled();
+  });
+
+  it('should offer the reload, not force it and not call it genuine, once the user has worked on the page', async () => {
+    const { recovery, reload, onSuperseded, onGenuineFailure } = setup({
+      fetchServerBuildId: live,
+      canReloadSafely: () => false,
+    });
+    const error = failure();
+
+    await expect(recovery.recover(error)).resolves.toBe('transient');
+    await Promise.resolve();
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(onSuperseded).not.toHaveBeenCalled();
+    expect(onGenuineFailure).not.toHaveBeenCalled();
+    expect(recovery.classify(error)).toBe('transient');
+  });
+
+  it('should call a failure that repeats after the reload into the same build genuine', async () => {
+    const storage = createStorage();
+    storage.setItem(transientReloadKey, `${String(ownBuildId)}@1000`);
+    const { recovery, reload, onGenuineFailure } = setup({ fetchServerBuildId: live, storage, now: () => 61_000 });
+    const error = failure();
+
+    await expect(recovery.recover(error)).resolves.toBe('current');
+    await Promise.resolve();
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(onGenuineFailure).toHaveBeenCalledWith(error);
+    expect(recovery.classify(error)).toBe('current');
+  });
+
+  it('should reload again for a failure long after an earlier reload into the same build', async () => {
+    const storage = createStorage();
+    storage.setItem(transientReloadKey, `${String(ownBuildId)}@1000`);
+    const { recovery, reload } = setup({
+      fetchServerBuildId: live,
+      storage,
+      now: () => 1000 + autoReloadBudgetWindow,
+    });
+
+    await expect(recovery.recover(failure())).resolves.toBe('reloading');
+
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should keep the reload into the same build once the page arrives, so a repeat is known', async () => {
+    const storage = createStorage();
+    storage.setItem(transientReloadKey, `${String(ownBuildId)}@1000`);
+    const { recovery } = setup({ fetchServerBuildId: live, storage });
+
+    recovery.confirmArrival();
+
+    expect(storage.entries.get(transientReloadKey)).toBe(`${String(ownBuildId)}@1000`);
+  });
+
+  it('should offer the reload once the tab has spent its automatic reload budget', async () => {
+    const storage = createStorage();
+    storage.setItem(autoReloadTimesKey, JSON.stringify([1000, 2000]));
+    const { recovery, reload } = setup({ fetchServerBuildId: live, storage, now: () => 3000 });
+
+    await expect(recovery.recover(failure())).resolves.toBe('transient');
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('should offer the reload into the same build, never a deploy, when that reload stalls', async () => {
+    vi.useFakeTimers();
+    const { recovery, onSuperseded } = setup({ fetchServerBuildId: live, reloadTimeout: 15_000 });
+    const error = failure();
+
+    await expect(recovery.recover(error)).resolves.toBe('reloading');
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(recovery.readReloadState()).toBe('stalled');
+    expect(onSuperseded).not.toHaveBeenCalled();
+    expect(recovery.readOutcome(error)).toBe('transient');
+    await expect(recovery.recover(failure())).resolves.toBe('transient');
+  });
+
+  it('should never reload for the error tracker’s own load, which a content blocker refuses on every load', async () => {
+    const { recovery, reload } = setup({ fetchServerBuildId: live });
+
+    await expect(recovery.recover(failure(), 'sdk')).resolves.toBe('current');
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('should keep a failure the server could not place genuine, since a reload may not reach it either', async () => {
+    const { recovery, reload } = setup({ fetchServerBuildId: async () => undefined });
+
+    await expect(recovery.recover(failure())).resolves.toBe('current');
+
+    expect(reload).not.toHaveBeenCalled();
   });
 });

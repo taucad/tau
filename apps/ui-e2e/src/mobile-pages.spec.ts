@@ -499,7 +499,7 @@ describe('a password-protected shared link on a phone', () => {
       'data-state',
       'unchecked',
     );
-    await target.click(share.getByRole('button', { name: 'Copy direct link' }));
+    await target.click(share.getByRole('button', { name: 'Copy link' }));
     const link = share.getByRole('textbox', { name: 'Share link' });
     await target.expectVisible(link, 60_000);
     const { value: url } = await target.read(link);

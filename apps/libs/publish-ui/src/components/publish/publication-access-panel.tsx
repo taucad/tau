@@ -1,9 +1,8 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
-import { Trash2 } from 'lucide-react';
+import { Trash2, TriangleAlert } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CopyButton } from '@taucad/ui/components/copy-button';
 import { toast } from '@taucad/ui/components/sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -24,7 +23,6 @@ export type PublicationAccessGrant = {
 type PublicationAccessPanelProps = {
   readonly apiBaseUrl: string;
   readonly publicationId: string;
-  readonly shareUrl: string;
   readonly visibility: 'private' | 'public';
   readonly grants: readonly PublicationAccessGrant[];
   // oxlint-disable-next-line react-js/boolean-prop-naming -- existing panel API copy, analogous to async loading state props.
@@ -35,10 +33,37 @@ type PublicationAccessPanelProps = {
   readonly onGrantsChanged: () => Promise<void> | void;
 };
 
+/** Rows shown before "Show all"; the list renders in the pane's one scroll area, so it never scrolls on its own. */
+const collapsedRowCount = 5;
+
+const visibilityHelp = {
+  private: 'People sign in with the email address you invite.',
+  public: 'Anyone who has the link can open it.',
+} as const;
+
+/**
+ * The toast for an invite: the one address, or how many, in the words of what the person did.
+ *
+ * @param emails - The addresses this outcome is about.
+ * @param hasFailed - Whether these addresses failed.
+ * @returns One sentence.
+ */
+const inviteToast = (emails: readonly string[], hasFailed: boolean): string => {
+  const who = emails.length === 1 ? emails[0]! : `${String(emails.length)} people`;
+  return hasFailed ? `Couldn't invite ${who}. Try again.` : `Invited ${who}.`;
+};
+
+/**
+ * Who can open a published link: the setting, and for a link only invited people open, the invite field and the
+ * people invited to it. It is the body of the Share pane's "Who can open the link" section, and renders in that pane's
+ * one scroll area: its list grows rather than scrolling, and folds past five rows until the person asks for all.
+ *
+ * @param props - The publication, its setting and grants, and what a change does.
+ * @returns The setting, the invite field and the invited list.
+ */
 export function PublicationAccessPanel({
   apiBaseUrl,
   publicationId,
-  shareUrl,
   visibility,
   grants,
   loading = false,
@@ -48,11 +73,28 @@ export function PublicationAccessPanel({
 }: PublicationAccessPanelProps): React.JSX.Element {
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
   const [mutating, setMutating] = useState(false);
+  const [isListExpanded, setIsListExpanded] = useState(false);
+  const helpId = useId();
   const endpoint = `${apiBaseUrl}/v1/publications/${publicationId}/access`;
   const emailError = getPublicationEmailTagsError(pendingEmails);
   const controlsDisabled = mutating || visibilityMutating;
   const canAdd = visibility === 'private' && pendingEmails.length > 0 && !emailError && !controlsDisabled;
 
+  const invite = async (email: string): Promise<void> => {
+    // A network failure is named by its address too, never by the transport's message.
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, notifyRecipient: true }),
+    });
+    // The failure ends at the toast below and is never reported, so no request id is recorded on it.
+    if (!response.ok) {
+      throw new Error(email);
+    }
+  };
+
+  /* Each address settles on its own: one refusal never discards the invites that worked or skips the refresh. */
   const handleAdd = async (): Promise<void> => {
     if (!canAdd) {
       return;
@@ -60,30 +102,17 @@ export function PublicationAccessPanel({
 
     setMutating(true);
     try {
-      await Promise.all(
-        pendingEmails.map(async (email) => {
-          // A network failure is named by its address too, never by the transport's message.
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email }),
-          }).catch(() => {
-            throw new Error(email);
-          });
-
-          // The failure ends at the toast below and is never reported, so no request id is recorded on it.
-          if (!response.ok) {
-            throw new Error(email);
-          }
-        }),
-      );
-      setPendingEmails([]);
-      await onGrantsChanged();
-      toast.success('Invited. They can now open the link.');
-    } catch (error) {
-      const failedEmail = error instanceof Error ? error.message : 'a person';
-      toast.error(`Couldn't invite ${failedEmail}. Try again.`);
+      const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email)));
+      const failed = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'rejected');
+      const invited = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'fulfilled');
+      setPendingEmails(failed);
+      if (invited.length > 0) {
+        await onGrantsChanged();
+        toast.success(inviteToast(invited, false));
+      }
+      if (failed.length > 0) {
+        toast.error(inviteToast(failed, true));
+      }
     } finally {
       setMutating(false);
     }
@@ -103,7 +132,7 @@ export function PublicationAccessPanel({
       }
 
       await onGrantsChanged();
-      toast.success('Access removed');
+      toast.success(`Removed access for ${grant.recipientEmail}.`);
     } catch {
       toast.error(`Couldn't remove access for ${grant.recipientEmail}. Try again.`);
     } finally {
@@ -111,20 +140,11 @@ export function PublicationAccessPanel({
     }
   };
 
+  const shownGrants = isListExpanded ? grants : grants.slice(0, collapsedRowCount);
+
   return (
     <div className='flex flex-col gap-4'>
-      <div className='flex items-center justify-between gap-3 rounded-md border px-3 py-2'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium'>Link</p>
-          <p className='truncate text-xs text-muted-foreground'>{shareUrl}</p>
-        </div>
-        <CopyButton getText={() => shareUrl} readyToCopyText='Copy link' copiedText='Copied' size='sm' />
-      </div>
-
-      <div className='flex items-center justify-between rounded-md border px-3 py-2'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium'>Who can open the link</p>
-        </div>
+      <div className='flex flex-col gap-2'>
         <Select
           value={visibility}
           disabled={controlsDisabled}
@@ -132,7 +152,7 @@ export function PublicationAccessPanel({
             void onVisibilityChange(value as 'private' | 'public');
           }}
         >
-          <SelectTrigger className='w-52' aria-label='Who can open the link'>
+          <SelectTrigger className='w-full' aria-label='Who can open the link' aria-describedby={helpId}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -140,81 +160,104 @@ export function PublicationAccessPanel({
             <SelectItem value='public'>Anyone with the link</SelectItem>
           </SelectContent>
         </Select>
+        <p id={helpId} className='text-xs text-muted-foreground'>
+          {visibilityHelp[visibility]}
+        </p>
       </div>
 
       {visibility === 'private' ? (
-        <div className='flex flex-col gap-2'>
-          <PublicationEmailTagsField
-            id='publication-access-emails'
-            label='Invite people by email'
-            emails={pendingEmails}
-            disabled={controlsDisabled}
-            placeholder='teammate@example.com'
-            onEmailsChange={setPendingEmails}
-          />
-          <Button
-            type='button'
-            size='sm'
-            className='self-end'
-            disabled={!canAdd}
-            onClick={() => {
-              void handleAdd();
-            }}
-          >
-            {mutating ? <Loader className='size-4' /> : null}
-            <span>Invite</span>
-          </Button>
-        </div>
-      ) : null}
-
-      <div className='flex flex-col gap-2'>
-        <div className='flex items-center justify-between'>
-          {/* Who can open this link; the project's own members are People with access, below it (C2). */}
-          <Heading level={3} variant='label'>
-            People invited to this link
-          </Heading>
-          {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
-        </div>
-        {grants.length === 0 && !loading ? (
-          <p className='rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground'>
-            No one is invited yet.
-          </p>
-        ) : (
-          <div className='max-h-56 overflow-y-auto rounded-md border'>
-            {grants.map((grant) => (
-              <div
-                key={grant.id}
-                className='flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0'
+        <>
+          <div className='flex flex-col gap-2'>
+            <PublicationEmailTagsField
+              id='publication-access-emails'
+              label='Invite people by email'
+              description="They'll get an email with the link."
+              emails={pendingEmails}
+              disabled={controlsDisabled}
+              placeholder='teammate@example.com'
+              onEmailsChange={setPendingEmails}
+            />
+            <div className='flex flex-wrap justify-end gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={!canAdd}
+                aria-busy={mutating}
+                onClick={() => {
+                  void handleAdd();
+                }}
               >
-                <div className='min-w-0'>
-                  <p className='truncate text-sm'>{grant.recipientEmail}</p>
-                  <p className='text-xs text-muted-foreground'>
-                    Can view
-                    {grant.notDelivered === true ? ' · Email not delivered' : ''}
-                  </p>
-                </div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type='button'
-                      size='icon'
-                      variant='ghost'
-                      disabled={controlsDisabled}
-                      aria-label={`Remove access for ${grant.recipientEmail}`}
-                      onClick={() => {
-                        void handleRevoke(grant);
-                      }}
-                    >
-                      <Trash2 className='size-4' aria-hidden />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side='left'>Remove access</TooltipContent>
-                </Tooltip>
-              </div>
-            ))}
+                {mutating ? <Loader className='size-4' /> : null}
+                <span>Invite</span>
+              </Button>
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className='flex flex-col gap-2'>
+            <div className='flex items-center justify-between gap-2'>
+              {/* Who can open this link; the project's own members are People with access, below it (C2). */}
+              <Heading level={4} variant='overline'>
+                {`Invited (${String(grants.length)})`}
+              </Heading>
+              {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
+            </div>
+            {grants.length === 0 && !loading ? (
+              <p className='text-sm text-muted-foreground'>No one is invited yet.</p>
+            ) : (
+              <ul aria-label='Invited' className='flex list-none flex-col'>
+                {shownGrants.map((grant) => (
+                  <li key={grant.id} className='flex items-start justify-between gap-2 py-1'>
+                    <div className='flex min-w-0 flex-col gap-1'>
+                      <p className='text-sm [overflow-wrap:anywhere]'>{grant.recipientEmail}</p>
+                      {grant.notDelivered === true ? (
+                        <p className='flex items-start gap-2 text-xs text-muted-foreground'>
+                          <span className='flex h-lh shrink-0 items-center'>
+                            <TriangleAlert aria-hidden className='size-3.5 text-warning' />
+                          </span>
+                          <span>Email not delivered. Send them the link yourself.</span>
+                        </p>
+                      ) : null}
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type='button'
+                          size='icon-sm'
+                          variant='ghost'
+                          className='shrink-0'
+                          disabled={controlsDisabled}
+                          aria-label={`Remove access for ${grant.recipientEmail}`}
+                          onClick={() => {
+                            void handleRevoke(grant);
+                          }}
+                        >
+                          <Trash2 className='size-4' aria-hidden />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side='left'>Remove access</TooltipContent>
+                    </Tooltip>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {grants.length > collapsedRowCount ? (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='self-start'
+                aria-expanded={isListExpanded}
+                onClick={() => {
+                  setIsListExpanded((expanded) => !expanded);
+                }}
+              >
+                {isListExpanded ? 'Show fewer' : `Show all ${String(grants.length)}`}
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

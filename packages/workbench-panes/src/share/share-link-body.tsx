@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Check } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
+import { PasswordInput } from '@taucad/ui/components/password-input';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import type {
   ShareLinkContext,
@@ -12,6 +13,7 @@ import type {
   ShareLinkMethod,
   ShareLinkProtection,
 } from '#share/share-source.js';
+import { ShareNotice } from '#share/share-notice.jsx';
 
 const noExtension = (): ShareLinkExtension => ({});
 
@@ -25,8 +27,69 @@ const fitsPassword = (encryption: ShareEncryption, password: string): boolean =>
 };
 
 /**
- * The password choice of a link method: whether to encrypt, the password and its byte count, and whether the link
- * carries it.
+ * The words under the password field: the rule while the password is short or fits, the fix once it is too long.
+ * Validation counts UTF-8 bytes; the words say characters, which is what a person counts.
+ *
+ * @param encryption - The method's password bounds.
+ * @param password - The password typed so far.
+ * @returns One sentence.
+ */
+const passwordHelp = (encryption: ShareEncryption, password: string): string =>
+  passwordBytesOf(password) > encryption.maxBytes
+    ? 'This password is too long. Use a shorter one.'
+    : `Use at least ${String(encryption.minBytes)} characters.`;
+
+/**
+ * One checkbox with its label and, when given, a line under the label that the checkbox is described by.
+ *
+ * @param props - The checkbox's id, label, optional description, value and where a change goes.
+ * @returns The row.
+ */
+function ShareLinkCheckbox({
+  id,
+  label,
+  description,
+  isChecked,
+  isLocked,
+  onChange,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string | undefined;
+  readonly isChecked: boolean;
+  readonly isLocked: boolean;
+  readonly onChange: (checked: boolean) => void;
+}): React.JSX.Element {
+  const descriptionId = useId();
+  return (
+    <div className='flex items-start gap-2'>
+      <span className='flex h-lh shrink-0 items-center text-sm'>
+        <Checkbox
+          id={id}
+          checked={isChecked}
+          disabled={isLocked}
+          aria-describedby={description === undefined ? undefined : descriptionId}
+          onCheckedChange={(checked) => {
+            onChange(checked === true);
+          }}
+        />
+      </span>
+      <div className='flex min-w-0 flex-col gap-1'>
+        <Label htmlFor={id} className='font-normal pointer-coarse:min-h-6'>
+          {label}
+        </Label>
+        {description === undefined ? null : (
+          <p id={descriptionId} className='text-xs text-muted-foreground'>
+            {description}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The password choice of a link method: whether to encrypt, the password, and whether the link carries it.
  *
  * @param props - The bounds, the current choices and where changes go.
  * @returns The fields.
@@ -50,54 +113,50 @@ function ShareLinkEncryption({
   readonly onPasswordChange: (password: string) => void;
   readonly onIncludePasswordChange: (includePassword: boolean) => void;
 }): React.JSX.Element {
-  const passwordBytes = passwordBytesOf(password);
+  const helpId = useId();
   return (
     <>
-      <div className='flex items-start gap-2'>
-        <Checkbox
-          id='portable-share-encrypted'
-          checked={isEncrypted}
-          disabled={isLocked}
-          onCheckedChange={(checked) => {
-            onEncryptedChange(checked === true);
-          }}
-        />
-        <Label htmlFor='portable-share-encrypted' className='font-normal pointer-coarse:min-h-6'>
-          Encrypt with a password
-        </Label>
-      </div>
+      <ShareLinkCheckbox
+        id='portable-share-encrypted'
+        label='Encrypt with a password'
+        description={
+          isEncrypted ? 'The project is encrypted on this device. People need the password to open it.' : undefined
+        }
+        isChecked={isEncrypted}
+        isLocked={isLocked}
+        onChange={onEncryptedChange}
+      />
       {isEncrypted ? (
-        <div className='ml-6 flex flex-col gap-3'>
+        <div className='ml-6 flex flex-col gap-4'>
           <div className='flex flex-col gap-2'>
             <Label htmlFor='portable-share-password'>Password</Label>
-            <Input
+            <PasswordInput
               id='portable-share-password'
-              type='password'
               autoComplete='new-password'
               value={password}
               disabled={isLocked}
               aria-invalid={password.length > 0 && !fitsPassword(encryption, password)}
+              aria-describedby={helpId}
               onChange={(event) => {
                 onPasswordChange(event.target.value);
               }}
             />
-            <p className='text-xs text-muted-foreground'>
-              Use {encryption.minBytes}–{encryption.maxBytes} UTF-8 bytes ({passwordBytes} entered).
+            <p id={helpId} className='text-xs text-muted-foreground'>
+              {passwordHelp(encryption, password)}
             </p>
           </div>
-          <div className='flex items-start gap-2'>
-            <Checkbox
-              id='portable-share-include-password'
-              checked={shouldIncludePassword}
-              disabled={isLocked}
-              onCheckedChange={(checked) => {
-                onIncludePasswordChange(checked === true);
-              }}
-            />
-            <Label htmlFor='portable-share-include-password' className='font-normal pointer-coarse:min-h-6'>
-              Include password in the link
-            </Label>
-          </div>
+          <ShareLinkCheckbox
+            id='portable-share-include-password'
+            label='Include password in the link'
+            description={
+              shouldIncludePassword
+                ? 'Anyone with the link can open the project.'
+                : 'People need the link and the password. Send the password separately.'
+            }
+            isChecked={shouldIncludePassword}
+            isLocked={isLocked}
+            onChange={onIncludePasswordChange}
+          />
         </div>
       ) : null}
     </>
@@ -145,19 +204,17 @@ function ShareLinkOptions({
   return (
     <>
       {options.map((option) => (
-        <div key={option.id} className='flex items-start gap-2'>
-          <Checkbox
-            id={`portable-share-${option.id}`}
-            checked={values[option.id] === true}
-            disabled={isLocked}
-            onCheckedChange={(checked) => {
-              onChange(option.id, checked === true);
-            }}
-          />
-          <Label htmlFor={`portable-share-${option.id}`} className='font-normal pointer-coarse:min-h-6'>
-            {option.label}
-          </Label>
-        </div>
+        <ShareLinkCheckbox
+          key={option.id}
+          id={`portable-share-${option.id}`}
+          label={option.label}
+          description={option.description}
+          isChecked={values[option.id] === true}
+          isLocked={isLocked}
+          onChange={(checked) => {
+            onChange(option.id, checked);
+          }}
+        />
       ))}
     </>
   );
@@ -192,21 +249,29 @@ function ShareLinkPrimary({
     return primary.element;
   }
   return (
-    <Button ref={buttonRef} type='button' disabled={isDisabled} onClick={primary?.onActivate ?? onShare}>
+    <Button
+      ref={buttonRef}
+      type='button'
+      disabled={isDisabled}
+      aria-busy={isBusy}
+      onClick={primary?.onActivate ?? onShare}
+    >
       <ShareLinkActionIcon isBusy={isBusy} isCopied={isCopied} icon={icon} />
       <span>{primary?.label ?? label}</span>
     </Button>
   );
 }
 
-const clipboardDenied = 'The link was created but clipboard access was denied. Copy it below.';
+const clipboardDenied = "Couldn't copy the link. Select it above and copy it.";
+const shareFailed = "Couldn't create the link. Try again.";
 
 /**
- * The body of a link method: what the link is, its password and other options, any callouts its extension adds, and
- * the button that makes the link, copies it and confirms the copy with a tick.
+ * The body of a link method: its password and other options, any callouts its extension adds, the link once made, and
+ * the button that makes the link, copies it and confirms the copy with a tick. The first press makes and copies the
+ * link; later presses copy it, and the options are held once it exists.
  *
  * @param props - The method, how a copy is announced, and where the body reports that it is busy.
- * @returns The notice, choices, callouts, link field and action row.
+ * @returns The choices, callouts, link field, notices and action row.
  */
 export function ShareLinkBody({
   method,
@@ -227,6 +292,9 @@ export function ShareLinkBody({
   const [options, setOptions] = useState<Readonly<Record<string, boolean>>>({});
   const operationRef = useRef<AbortController | undefined>(undefined);
   const primaryRef = useRef<HTMLButtonElement>(null);
+  const linkRef = useRef<HTMLInputElement>(null);
+  /* Set when the clipboard refused the link, so the field it now shows takes focus with the link selected. */
+  const [shouldSelectLink, setShouldSelectLink] = useState(false);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
   const reset = useCallback((): void => {
@@ -262,6 +330,18 @@ export function ShareLinkBody({
     },
     [],
   );
+  useEffect(() => {
+    if (shouldSelectLink && shareUrl !== undefined) {
+      linkRef.current?.focus();
+      linkRef.current?.select();
+      setShouldSelectLink(false);
+    }
+  }, [shareUrl, shouldSelectLink]);
+
+  const refuseCopy = (): void => {
+    setError(clipboardDenied);
+    setShouldSelectLink(true);
+  };
 
   const share = async (): Promise<void> => {
     const controller = new AbortController();
@@ -271,9 +351,13 @@ export function ShareLinkBody({
     setError(undefined);
     try {
       if (shareUrl) {
-        await navigator.clipboard.writeText(shareUrl);
-        triggerCopiedTick();
-        notify?.('Link copied');
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          triggerCopiedTick();
+          notify?.('Link copied');
+        } catch {
+          refuseCopy();
+        }
         return;
       }
       const protection: ShareLinkProtection = encrypted
@@ -293,12 +377,12 @@ export function ShareLinkBody({
       try {
         await navigator.clipboard.writeText(outcome.url);
         triggerCopiedTick();
-        notify?.(method.copiedMessage);
+        notify?.('Link copied');
       } catch {
-        setError(clipboardDenied);
+        refuseCopy();
       }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Sharing failed.');
+    } catch {
+      setError(shareFailed);
     } finally {
       if (operationRef.current === controller) {
         operationRef.current = undefined;
@@ -310,23 +394,13 @@ export function ShareLinkBody({
   const { encryption } = method;
   const passwordValid = !encrypted || encryption === undefined || fitsPassword(encryption, password);
   const hasChoices = encryption !== undefined || (method.options?.length ?? 0) > 0;
-  const notice = encrypted && encryption ? encryption.notice : method.notice;
   const isLocked = busy || Boolean(shareUrl);
   const error = operationError ?? extension.error;
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='rounded-lg border bg-muted/30 p-4'>
-        <div className='flex items-start gap-3'>
-          {method.notice.icon}
-          <div className='min-w-0 text-sm'>
-            <p className='font-medium'>{notice.title}</p>
-            <p className='mt-1 text-muted-foreground'>{notice.text}</p>
-          </div>
-        </div>
-      </div>
       {hasChoices ? (
-        <div className='flex flex-col gap-3'>
+        <div className='flex flex-col gap-4'>
           {encryption ? (
             <ShareLinkEncryption
               encryption={encryption}
@@ -352,13 +426,19 @@ export function ShareLinkBody({
         </div>
       ) : null}
       {extension.callouts}
-      {error ? (
-        <div className='rounded-md border border-feature/40 bg-feature/10 px-3 py-2 text-sm text-feature'>{error}</div>
+      {shareUrl ? (
+        <Input
+          ref={linkRef}
+          aria-label='Share link'
+          readOnly
+          value={shareUrl}
+          onFocus={(event) => {
+            event.target.select();
+          }}
+        />
       ) : null}
-      {warning ? (
-        <div className='rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm'>{warning}</div>
-      ) : null}
-      {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
+      {warning ? <ShareNotice tone='warning'>{warning}</ShareNotice> : null}
+      {error ? <ShareNotice tone='error'>{error}</ShareNotice> : null}
       <div className='flex flex-wrap justify-end gap-2'>
         {extension.actions}
         <ShareLinkPrimary

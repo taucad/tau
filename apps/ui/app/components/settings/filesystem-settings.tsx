@@ -16,7 +16,7 @@ import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const { isResolved, canSyncFiles } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
 
   useEffect(() => {
@@ -45,7 +45,8 @@ export function FileSystemSettings(): React.JSX.Element {
       <SettingsItem settingId='workspaces'>
         <WorkspaceConnections onWorkspacesChange={setWorkspaces} />
       </SettingsItem>
-      {isResolved && canSyncFiles ? (
+      {/* C5: absent, with no plan copy, while the plan is unresolved. */}
+      {plan.isResolved && plan.canSyncFiles ? (
         <SettingsItem settingId='tau-cloud-projects'>
           <TauCloudProjectsSetting workspaces={workspaces} />
         </SettingsItem>

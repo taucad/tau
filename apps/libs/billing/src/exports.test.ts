@@ -18,6 +18,7 @@ describe('package exports', () => {
       './hooks/use-usage-snapshot': './src/hooks/use-usage-snapshot.ts',
       './training-consent': './src/training-consent.ts',
       './plan-catalog': './src/tau-plan-catalog.ts',
+      './kernel-tier-requirements': './src/kernel-tier-requirements.ts',
     });
   });
 });

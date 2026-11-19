@@ -43,6 +43,16 @@ describe('no-cloud-import-outside-loader', () => {
           code: "const load = () => import('#cloud/cloud-surfaces.lazy.js');",
         },
         {
+          name: 'the Cloud chunk imports a .cloud hook',
+          filename: 'apps/ui/app/cloud/cloud-surfaces.lazy.tsx',
+          code: "import { useCommercialFeatures } from '#cloud/commercial-features.cloud.js';",
+        },
+        {
+          name: 'the purge is Core',
+          filename: 'apps/ui/app/cloud/financial-purge.adaptive.ts',
+          code: "export { useCloudFinancialPurge } from '#cloud/financial-purge.cloud.js';",
+        },
+        {
           name: 'files outside the app',
           filename: 'apps/libs/billing-ui/src/index.ts',
           code: "const load = () => import('#cloud/x.cloud.js');",
@@ -60,6 +70,18 @@ describe('no-cloud-import-outside-loader', () => {
           filename: route,
           code: "const load = () => import('../../cloud/settings-billing.cloud.js');",
           errors: [{ messageId: 'cloudImport' }],
+        },
+        {
+          name: 'a facade importing a .cloud hook statically (BA13)',
+          filename: facade,
+          code: "import { useCommercialFeatures } from '#cloud/commercial-features.cloud.js';",
+          errors: [{ messageId: 'cloudStatic' }],
+        },
+        {
+          name: 'a route re-exporting a .cloud module',
+          filename: route,
+          code: "export { CloudBillingSettings } from '#cloud/settings-billing.cloud.js';",
+          errors: [{ messageId: 'cloudStatic' }],
         },
         {
           name: 'lazy() in the Cloud folder',

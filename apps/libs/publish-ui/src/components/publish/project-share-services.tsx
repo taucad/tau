@@ -31,12 +31,13 @@ export type ProjectShareServices = GithubGistServices &
     useRevisionClient: () =>
       | Readonly<{ divergence: (head: string, base: string) => Promise<RevisionDivergence> }>
       | undefined;
-    useCommercialFeatures: () => Readonly<{
-      canCreatePrivateShares: boolean;
-      /** False until the plan is known. */
-      isResolved: boolean;
-      requestUpgrade: () => void;
-    }>;
+    /**
+     * The plan, resolved or not (adaptive app deployment mode C1): an unresolved plan has no capability to read, so
+     * the panel keeps the person's choice and lets the API decide.
+     */
+    useCommercialFeatures: () =>
+      | Readonly<{ isResolved: true; canCreatePrivateShares: boolean; requestUpgrade: () => void }>
+      | Readonly<{ isResolved: false }>;
     /** The plan upgrade affordance's label; renders nothing where nothing is sold. */
     commercialUpgradeLabel: ComponentType;
   }>;

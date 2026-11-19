@@ -112,6 +112,9 @@ const harness = vi.hoisted(() => {
 
 // The store's own `Chat` instance, minus the AI SDK and its transport: this
 // scope asserts on the host command, never on a stream.
+/* The routing plan the turn reads at admission (adaptive app deployment mode C6): every kernel allowed here. */
+vi.mock('#cloud/kernel-commerce.js', () => ({ useKernelRoutingPlan: () => () => true }));
+
 vi.mock('@taucad/chat-ui/chat-clients/_internal/shared-chat-transport', () => ({
   createChatInstance: ({ chatId }: { chatId: string }) => {
     const chat = {

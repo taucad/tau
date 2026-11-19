@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 import { isResumableRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { awaitContextPayload } from '#hooks/use-context-payload.js';
+import { projectSnapshotKernel } from '#hooks/use-chat-snapshot.js';
+import { routingKernelProfile } from '#constants/available-kernel-configurations.js';
+import { useKernelRoutingPlan } from '#cloud/kernel-commerce.js';
+import { getAllFlags } from '#flags/feature-flags.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -41,6 +45,9 @@ export function ChatTurnHost(): ReactNode {
   /* Auto turns report how they resolved (blueprint D10); the owner is read again when the turn settles. */
   const kernelOwnerRef = useRef(kernelOwner);
   const isAutoRef = useRef(kernelPreference === 'auto');
+  /* Stable in an adaptive build, where it reads the plan when called (I4); a pinned build's follows its render. */
+  const isPlanAllowed = useKernelRoutingPlan();
+  const isPlanAllowedRef = useRef(isPlanAllowed);
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   /* Agent usage follows the one switch's resolved consent (AR-W6-02); only `granted` reports, `unknown` does not. */
   const { consent } = useTelemetryConsent();
@@ -64,7 +71,8 @@ export function ChatTurnHost(): ReactNode {
     setActiveExecutionRef.current = setActiveExecution;
     kernelOwnerRef.current = kernelOwner;
     isAutoRef.current = kernelPreference === 'auto';
-  }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
+    isPlanAllowedRef.current = isPlanAllowed;
+  }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference, isPlanAllowed]);
 
   /* Aborted when this turn host unmounts (the chat closes, the project switches): a turn held for a cloud open's files
    * then stops waiting (SP2h review); one already admitted runs on, as a turn outlives its view. */
@@ -131,8 +139,27 @@ export function ChatTurnHost(): ReactNode {
             : turnAgent.contextPayload;
         /* A host that unmounted during the catalog wait admits nothing for a closed chat. */
         mountedRef.current?.signal.throwIfAborted();
+        const withPayload = contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
+        /* C6 (adaptive app deployment mode I4): the routing set is read now, at admission, not from the snapshot a
+         * passive effect last handed the ref; an unresolved plan leaves Zoo out of automatic routing. */
+        const routed = withPayload.snapshot?.kernel;
         const admittedAgent =
-          contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
+          routed === undefined
+            ? withPayload
+            : {
+                ...withPayload,
+                snapshot: {
+                  ...withPayload.snapshot,
+                  kernel: projectSnapshotKernel({
+                    preference: routed.preference,
+                    owner: routed.owner,
+                    profile: routingKernelProfile({
+                      isPlanAllowed: isPlanAllowedRef.current,
+                      isSupplierOpen: getAllFlags().zooCloudDispatch,
+                    }),
+                  }),
+                },
+              };
         /* The chat owns what it ran on from its first turn, so a later default
          * cannot move it — and that choice becomes the next new chat's. */
         if (execution === liveAgent.execution) {

@@ -172,6 +172,8 @@
 \* No action or verdict changes.
 \* DC-10 files-ui slice 9 (2026-11-19): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type
 \* from `@taucad/files-ui`; only the import moved. No action or verdict changes.
+\* Adaptive app deployment mode C6 (2026-11-19): `chat-turn-host.tsx` rebuilds `snapshot.kernel` from the plan read at
+\* admission; delivery, persistence and the queue are untouched. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -1342,6 +1342,32 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(region.connect).not.toHaveBeenCalled();
   });
 
+  /* Adaptive app deployment mode C2 (T-G2): an unresolved plan keeps the Tau preselection, cannot confirm it, says
+   * which wait it is, offers no upgrade, and leaves Git usable. */
+  it.each([
+    ['checking', 'Checking your plan'],
+    ['unavailable', 'Tau can’t check your plan with this server'],
+    ['safe-mode', 'Not available in safe mode'],
+  ] as const)('keeps Tau preselected but unconfirmable while the plan waits (%s)', async (wait, copy) => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false, planWait: { wait, retry } });
+    await openBackUp(user);
+
+    expect(screen.getByRole('radio', { name: 'Tau' })).toBeChecked();
+    expect(screen.getByText(new RegExp(copy, 'u'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back up to the cloud' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Available on Pro/u })).not.toBeInTheDocument();
+    expect(screen.queryByText(/included/u)).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'GitHub or another Git host' })).toBeEnabled();
+    if (wait === 'unavailable') {
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(retry).toHaveBeenCalled();
+    }
+    expect(region.connect).not.toHaveBeenCalled();
+    expect(region.upgrade).not.toHaveBeenCalled();
+  });
+
   /* D16: an entitled account is told what its plan includes, not what it withholds. */
   it('should name the included allowance on the Tau Cloud choice instead of a plan gate', async () => {
     renderRegion(facet(), syncFacet(), { storageLimitBytes: 1024 ** 3 });

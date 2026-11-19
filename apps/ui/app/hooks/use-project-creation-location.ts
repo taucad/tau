@@ -29,7 +29,7 @@ import {
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useRootStatuses } from '#components/filesystem/folder-status.js';
+import { useRootStatuses } from '@taucad/files-ui/components/filesystem/folder-status';
 
 export type HomeLocationOption = {
   readonly location: HomeProjectCreationLocation;

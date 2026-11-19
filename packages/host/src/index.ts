@@ -31,6 +31,7 @@ export type {
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
 export { defaultConfigDirectory, defaultDependencyStore } from '#credential-store.js';
+export { computeStoreWorkspace } from '#compute-workspace.js';
 export {
   handOffMintPath,
   handOffSessionPath,

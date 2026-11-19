@@ -774,7 +774,6 @@
     "app/routes/w.$workspace.$project/revision-file-comparison.test.tsx": 2.8,
     "app/routes/w.$workspace.$project/revision-marker.test.tsx": 5,
     "app/routes/w.$workspace.$project/revision-outcomes.test.tsx": 0.4,
-    "app/routes/w.$workspace.$project/revision-ref-removal.test.ts": 0.3,
     "app/routes/w.$workspace.$project/revision-restore.test.tsx": 2.6,
     "app/routes/w.$workspace.$project/revision-save-shortcut.test.tsx": 1,
     "app/routes/w.$workspace.$project/revision-status-action.test.tsx": 1.2,

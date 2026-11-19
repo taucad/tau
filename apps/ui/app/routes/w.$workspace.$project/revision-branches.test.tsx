@@ -65,7 +65,9 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/revision-ref-removal.js', () => ({ requestRefRemoval: vi.fn() }));
 vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({ DiffViewer: () => null }));
-vi.mock('#routes/w.$workspace.$project/revision-conflict-editor.js', () => ({ RevisionConflictEditor: () => null }));
+vi.mock('@taucad/revisions-ui/components/revisions/revision-conflict-editor', () => ({
+  RevisionConflictEditor: () => null,
+}));
 
 const line = 'conflicts/main/device-b';
 const foreign: RevisionConflictFacet = {

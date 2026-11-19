@@ -4,7 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { lfsPointerFor } from '@taucad/revisions';
-import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
+import type { EditorLanguageEnvironment } from '@taucad/editor-ui/lib/editor-language-environment';
 import { revisionClients } from '@taucad/revisions-ui/services/revision-client-registry';
 import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import type * as EditorDocumentSessionModule from '@taucad/editor-ui/lib/editor-document-session';

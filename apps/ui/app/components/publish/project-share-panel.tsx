@@ -51,9 +51,15 @@ import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/
 import { githubGistServices } from '#components/share/github-gist-services.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { versionNumberOfTag } from '@taucad/revisions';
-import type { PublishDraft, PublishFacet, PublishVisibility, RevisionStatusProjection } from '@taucad/revisions';
+import type {
+  PublishDraft,
+  PublishFacet,
+  PublishVisibility,
+  RevisionDivergence,
+  RevisionStatusProjection,
+} from '@taucad/revisions';
 import type { ProjectShare, ProjectShareEnvelope } from '@taucad/types';
-import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationAccessPanel } from '@taucad/publish-ui/components/publish/publication-access-panel';
 import { ENV } from '#environment.config.js';
 import { shareEnvelopeFailureOf } from '#components/publish/share-envelope-state.js';
@@ -285,29 +291,53 @@ const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undef
 const publishedBranch = 'main';
 
 /**
+ * The head of `main`: the selected line's head on `main`, else the branch list's.
+ *
+ * @param status - The project's revision status.
+ * @returns The head, or `undefined` when neither knows it.
+ */
+const headOfMainOf = (status: RevisionStatusProjection | undefined): string | undefined =>
+  status === undefined
+    ? undefined
+    : status.line.kind === 'branch' && status.line.name === publishedBranch
+      ? status.headRevisionId
+      : status.branches.find((branch) => branch.name === publishedBranch)?.head;
+
+/**
+ * How the head of `main` stands to the revision the link shows, as the revision graph counts it.
+ * `pending` while the count is read; `missing` when it could not be read, which is what a revision this device does
+ * not have yet answers.
+ */
+type LinkRelation = RevisionDivergence | 'pending' | 'missing';
+
+/**
  * Whether the link shows what a publish would publish now: the head of `main`, compared with the revision the link's
- * version names. It is exact rather than a timestamp guess. Off `main`, the head comes from the branch list, and when
- * neither knows it the answer is `unknown`.
+ * version names. It is exact rather than a timestamp guess. `changed` needs the graph to say the link's revision is
+ * behind the head: when this device is the one behind (the link shows a version published elsewhere, or one it does
+ * not have yet), a publish would take the link back, so the link reads `elsewhere`. Off `main`, the head comes from
+ * the branch list, and when neither knows it the answer is `unknown`.
  *
  * @param status - The project's revision status.
  * @param publishedRevisionId - The revision the link shows.
- * @returns `current`, `changed`, or `unknown`.
+ * @param relation - How the head of `main` stands to that revision; read only when the two differ.
+ * @returns `current`, `changed`, `elsewhere`, `checking` (the graph has not answered yet), or `unknown`.
  */
 const linkFreshnessOf = (
   status: RevisionStatusProjection | undefined,
   publishedRevisionId: string | undefined,
-): 'current' | 'changed' | 'unknown' => {
-  if (status === undefined || publishedRevisionId === undefined) {
+  relation: LinkRelation,
+): 'current' | 'changed' | 'elsewhere' | 'checking' | 'unknown' => {
+  const head = headOfMainOf(status);
+  if (head === undefined || publishedRevisionId === undefined) {
     return 'unknown';
   }
-  const head =
-    status.line.kind === 'branch' && status.line.name === publishedBranch
-      ? status.headRevisionId
-      : status.branches.find((branch) => branch.name === publishedBranch)?.head;
-  if (head === undefined) {
-    return 'unknown';
+  if (head === publishedRevisionId) {
+    return 'current';
   }
-  return head === publishedRevisionId ? 'current' : 'changed';
+  if (relation === 'pending') {
+    return 'checking';
+  }
+  return relation !== 'missing' && relation.behind === 0 && relation.ahead > 0 ? 'changed' : 'elsewhere';
 };
 
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
@@ -988,6 +1018,28 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
   const visibilityLabelId = useId();
 
+  /* Whether the link's revision is behind the head of `main`: one bounded graph count, read only when they differ. */
+  const revisionClient = useRevisionClient();
+  const headOfMain = headOfMainOf(status);
+  const publishedRevisionId = envelope?.share?.currentVersion?.revisionId;
+  const linkRelationQuery = useQuery({
+    queryKey: ['revisions', projectId, 'divergence', headOfMain, publishedRevisionId],
+    queryFn: async () => {
+      if (revisionClient === undefined || headOfMain === undefined || publishedRevisionId === undefined) {
+        throw new Error('NO_LINK_RELATION');
+      }
+      return revisionClient.divergence(headOfMain, publishedRevisionId);
+    },
+    enabled:
+      revisionClient !== undefined &&
+      headOfMain !== undefined &&
+      publishedRevisionId !== undefined &&
+      headOfMain !== publishedRevisionId,
+    retry: false,
+  });
+  const linkRelation: LinkRelation =
+    linkRelationQuery.data ?? (linkRelationQuery.status === 'error' ? 'missing' : 'pending');
+
   /* Each read takes a number; only the latest may set what the pane shows, so an earlier read that answers late
      (an invite's refresh racing Stop sharing's) never puts back a link that has since changed. */
   const envelopeGenerationRef = useRef(0);
@@ -1360,7 +1412,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     const versionLabel = version === null ? undefined : publishedVersionLabel(version.tag, publishFacet.tags);
     const versionNumber = version === null ? undefined : versionNumberLabel(version.tag);
     const date = share.publishedAt === null ? undefined : publishedDate(share.publishedAt);
-    const freshness = linkFreshnessOf(status, version?.revisionId);
+    const freshness = linkFreshnessOf(status, version?.revisionId, linkRelation);
     const isDisabled = busy || visibilityMutating || isStopping;
     const publishChanges = (
       <Button
@@ -1410,7 +1462,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
           ) : null}
           {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
           <div className='flex flex-wrap justify-end gap-2'>
-            {/* Off `main` the head is not known here, so publishing is offered without the sentence. */}
+            {/* Off `main` the head is not known here, so publishing is offered without the sentence. A link that
+                shows a version this device is behind offers no publish: it would take the link back. */}
             {freshness === 'unknown' ? publishChanges : null}
             <Button
               ref={copyLinkRef}

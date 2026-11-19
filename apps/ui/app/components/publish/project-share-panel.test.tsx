@@ -6,11 +6,11 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { ShareError } from '@taucad/share/provider';
-import type { RevisionTag } from '@taucad/revisions';
+import type { RevisionRow, RevisionTag } from '@taucad/revisions';
 import { entitlementsFromTier } from '@taucad/billing';
 import {
   ProjectSharePanel,
@@ -196,6 +196,28 @@ const headOfMainAt = (revisionId: string): void => {
       branch.name === 'main' ? { ...branch, head: revisionId as (typeof branch)['head'] } : branch,
     ),
   };
+};
+
+/**
+ * Scripts the history of `main`, newest first, so the graph can say which revision is behind which.
+ *
+ * @param revisionIds - The revisions on `main`, newest first.
+ */
+const historyOfMain = (...revisionIds: string[]): void => {
+  revisionStatusHarness.rows = revisionIds.map(
+    (revisionId): RevisionRow => ({
+      revisionId,
+      revisionNumber: undefined,
+      changeId: `change-${revisionId}`,
+      who: { kind: 'recorded', identity: { kind: 'user', id: 'usr_ui' } },
+      source: 'user',
+      createdAt: 1_788_220_800_000,
+      summary: 'Change',
+      conflicted: false,
+      turnId: undefined,
+      tags: [],
+    }),
+  );
 };
 
 const mockJsonResponse = (body: unknown): Response =>
@@ -856,6 +878,7 @@ describe('ProjectSharePanel', () => {
     /* The reset returns the machine to idle and keeps the link it made; then the project changes. */
     publishFacet({ phase: 'idle', shareUrl: link });
     headOfMainAt('rev_v3');
+    historyOfMain('rev_v3', 'rev_v2');
     view.rerender(panelElement('proj_ok'));
     await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));
     publishFacet({ phase: 'success', shareUrl: link });
@@ -954,6 +977,7 @@ describe('ProjectSharePanel', () => {
   it('says the project changed since the version the link shows and publishes the changes to the same link', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
     headOfMainAt('rev_after_v2');
+    historyOfMain('rev_after_v2', 'rev_v2');
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     const notice = await screen.findByText(
@@ -980,6 +1004,55 @@ describe('ProjectSharePanel', () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     const section = await screen.findByRole('region', { name: 'Link' });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Copy link']);
+    expect(screen.queryByText(/you've changed this project/iu)).not.toBeInTheDocument();
+  });
+
+  it('offers no publish when this device is behind the version the link shows', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    /* V2 was published from another device after this one's head. */
+    headOfMainAt('rev_v1');
+    historyOfMain('rev_v2', 'rev_v1');
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
+    const divergence = vi.spyOn(client, 'divergence');
+    onTestFinished(() => {
+      divergence.mockRestore();
+    });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Link' });
+    await waitFor(async () => {
+      await expect(divergence.mock.results[0]?.value).resolves.toEqual({ ahead: 0, behind: 1 });
+    });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Copy link']);
+    expect(screen.queryByText(/you've changed this project/iu)).not.toBeInTheDocument();
+  });
+
+  it('offers no publish when the version the link shows is not on this device yet', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    headOfMainAt('rev_v1');
+    historyOfMain('rev_v1');
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
+    const divergence = vi.spyOn(client, 'divergence').mockRejectedValue(new Error('NOT_FOUND'));
+    onTestFinished(() => {
+      divergence.mockRestore();
+    });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Link' });
+    await waitFor(() => {
+      expect(divergence).toHaveBeenCalledWith('rev_v1', 'rev_v2');
+    });
     expect(
       within(section)
         .getAllByRole('button')
@@ -1266,6 +1339,7 @@ describe('ProjectSharePanel', () => {
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
       .mockResolvedValue(mockJsonResponse(stoppedEnvelope));
     headOfMainAt('rev_after_v2');
+    historyOfMain('rev_after_v2', 'rev_v2');
     const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));

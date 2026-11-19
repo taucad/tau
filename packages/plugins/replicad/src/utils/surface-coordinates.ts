@@ -1,5 +1,6 @@
 /* oxlint-disable eslint/new-cap -- OCCT methods retain their native C++ names. */
 import { getOC } from 'replicad';
+import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { GlbMaterial } from '@taucad/geometry-core';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { Meshable } from '#utils/tessellation-instancing.js';
@@ -17,6 +18,44 @@ export function needsSurfaceCoordinates(material: GlbMaterial | undefined): mate
   );
 }
 
+/* eslint-disable @typescript-eslint/naming-convention -- OCJS embind mirrors C++ PascalCase method names. */
+type NativeSurfaceBindings = {
+  wasmMemory: WebAssembly.Memory;
+  ReplicadSurfaceCoordinates?: {
+    AllocateNormals(size: number): NativeBuffer;
+    Extract(shape: unknown, normalsPointer: number, normalsSize: number, prototype: boolean): NativeSurfaceData;
+  };
+};
+
+type NativeBuffer = {
+  getPtr(): number;
+  getSize(): number;
+  delete(): void;
+};
+
+type NativeSurfaceData = {
+  getTexCoordsPtr(): number;
+  getTexCoordsSize(): number;
+  getTangentsPtr(): number;
+  getTangentsSize(): number;
+  getStatus(): number;
+  delete(): void;
+};
+/* eslint-enable @typescript-eslint/naming-convention -- end of embind-mirrored names */
+
+type SurfaceCoordinates = { texCoords: number[]; tangents: number[] };
+
+type SurfaceInput = {
+  /** Native BRep whose triangulation produced the mesh. */
+  shape: Meshable;
+  /** The mesh's normals, in vertex order. */
+  normals: ArrayLike<number>;
+  /** Whether the vertices are in prototype coordinates. */
+  prototype: boolean;
+};
+
+const missingUvNodes = 'Replicad material requires native surface UV coordinates.';
+
 /**
  * Preserve OCCT's seam-split surface coordinates in the native extractor's vertex order.
  * @param shape - Native BRep whose triangulation produced the mesh.
@@ -32,6 +71,66 @@ export function addSurfaceCoordinates(
     return;
   }
   const oc = getOC();
+  const { texCoords, tangents } =
+    (oc as OpenCascadeInstance & NativeSurfaceBindings).ReplicadSurfaceCoordinates === undefined
+      ? surfaceCoordinatesInJavaScript(oc, { shape, normals: mesh.normals, prototype })
+      : nativeSurfaceCoordinates(oc as OpenCascadeInstance & Required<NativeSurfaceBindings>, {
+          shape,
+          normals: mesh.normals,
+          prototype,
+        });
+  if (texCoords.length !== (mesh.vertices.length / 3) * 2 || texCoords.some((value) => !Number.isFinite(value))) {
+    throw new Error('Native surface UVs must match the tessellated vertex count and remain finite.');
+  }
+  mesh.texCoords = texCoords;
+  mesh.tangents = tangents;
+}
+
+/**
+ * Surface coordinates in one native call (`ReplicadSurfaceCoordinates.Extract`), which ports
+ * {@link surfaceCoordinatesInJavaScript} operation for operation and returns the same doubles.
+ * @param oc - The OpenCascade instance with the native extractor.
+ * @param input - The shape, its mesh's normals and whether the vertices are in prototype coordinates.
+ * @returns UVs (two per vertex) and tangents (four per vertex).
+ */
+export function nativeSurfaceCoordinates(
+  oc: OpenCascadeInstance & Required<NativeSurfaceBindings>,
+  { shape, normals, prototype }: SurfaceInput,
+): SurfaceCoordinates {
+  const extractor = oc.ReplicadSurfaceCoordinates;
+  const buffer = extractor.AllocateNormals(normals.length);
+  try {
+    new Float64Array(oc.wasmMemory.buffer, buffer.getPtr(), normals.length).set(normals);
+    const data = extractor.Extract(shape.wrapped, buffer.getPtr(), buffer.getSize(), prototype);
+    try {
+      if (data.getStatus() !== 0) {
+        throw new Error(missingUvNodes);
+      }
+      // Read after the call: it may have grown memory, detaching earlier views.
+      const memory = oc.wasmMemory.buffer;
+      return {
+        texCoords: [...new Float64Array(memory, data.getTexCoordsPtr(), data.getTexCoordsSize())],
+        tangents: [...new Float64Array(memory, data.getTangentsPtr(), data.getTangentsSize())],
+      };
+    } finally {
+      data.delete();
+    }
+  } finally {
+    buffer.delete();
+  }
+}
+
+/**
+ * Surface coordinates through the generated bindings, one node at a time: the path for an OpenCascade build without
+ * the native extractor.
+ * @param oc - The OpenCascade instance.
+ * @param input - The shape, its mesh's normals and whether the vertices are in prototype coordinates.
+ * @returns UVs (two per vertex) and tangents (four per vertex).
+ */
+export function surfaceCoordinatesInJavaScript(
+  oc: OpenCascadeInstance,
+  { shape, normals, prototype }: SurfaceInput,
+): SurfaceCoordinates {
   const coordinates: number[] = [];
   const tangents: number[] = [];
   const rootLocation = shape.wrapped.Location();
@@ -51,7 +150,7 @@ export function addSurfaceCoordinates(
           continue;
         }
         if (!triangulation.HasUVNodes()) {
-          throw new Error('Replicad material requires native surface UV coordinates.');
+          throw new Error(missingUvNodes);
         }
         const bounds = oc.BRepTools.UVBounds(face);
         const nodeCount = triangulation.NbNodes();
@@ -69,9 +168,9 @@ export function addSurfaceCoordinates(
                 derivatives.D1U.Transform(inverseLocation);
                 derivatives.D1V.Transform(inverseLocation);
               }
-              const nx = mesh.normals[vertex * 3]!;
-              const ny = mesh.normals[vertex * 3 + 1]!;
-              const nz = mesh.normals[vertex * 3 + 2]!;
+              const nx = normals[vertex * 3]!;
+              const ny = normals[vertex * 3 + 1]!;
+              const nz = normals[vertex * 3 + 2]!;
               let tx = derivatives.D1U.X();
               let ty = derivatives.D1U.Y();
               let tz = derivatives.D1U.Z();
@@ -115,9 +214,5 @@ export function addSurfaceCoordinates(
     inverseLocation.delete();
     rootLocation.delete();
   }
-  if (coordinates.length !== (mesh.vertices.length / 3) * 2 || coordinates.some((value) => !Number.isFinite(value))) {
-    throw new Error('Native surface UVs must match the tessellated vertex count and remain finite.');
-  }
-  mesh.texCoords = coordinates;
-  mesh.tangents = tangents;
+  return { texCoords: coordinates, tangents };
 }

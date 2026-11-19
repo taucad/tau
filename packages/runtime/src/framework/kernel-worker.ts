@@ -6,6 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { buildReportOf } from '#framework/kernel-build-report.js';
 import { tessellationSpanAttributes } from '#framework/tessellation-span-attributes.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, MediaType, OnWorkerLog } from '@taucad/types';
@@ -706,6 +707,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** The evaluation currently entering its terminal kernel hook. */
   private activeEvaluationSlot: EvaluationSlot | undefined;
+  /**
+   * How the terminal evaluate of the current document evaluation was answered: `retained` (the retained build) or
+   * `built` (the kernel's `evaluate` ran). Still `undefined` after a successful evaluation: a stored build answered.
+   * One record per evaluation, so its answer is read after the evaluation's awaits.
+   */
+  private buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
@@ -1898,6 +1905,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           } else {
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
+            const buildStarted = performance.now();
+            const buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
+            this.buildRun = buildRun;
             const { artifact } = await this.materializeRender(
               {
                 file,
@@ -1910,6 +1920,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               { dependencyContext, owner },
             );
             const { result } = artifact;
+            const build = buildReportOf(
+              buildRun.outcome === 'built',
+              artifact.evaluationSlot?.kernelBuild,
+              performance.now() - buildStarted,
+            );
             evaluation = result.success
               ? {
                   id: evaluationId,
@@ -1925,6 +1940,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     ...this.getDocumentEvaluateOptionsOffer(owner),
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                    build,
                   },
                 }
               : {
@@ -4078,6 +4094,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         }
         if (sameBuild && (retained.hasHandle || retained.serializedNativeHandleSlot)) {
+          this.buildRun.outcome = 'retained';
           evaluationSlot = retained;
           this.activeEvaluationSlot = retained;
           computeSpan.end();
@@ -4113,6 +4130,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
         }
         let result: EvaluateResult;
+        this.buildRun.outcome = 'built';
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
           if (result.success) {

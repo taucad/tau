@@ -51,6 +51,7 @@ import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { admitKernelBuildReport } from '#framework/kernel-build-report.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import type { RenderRequest } from '#types/runtime-middleware-v2.types.js';
@@ -459,6 +460,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
       slot.offers = offers;
       slot.nativeBuildInput = input;
+      slot.kernelBuild = admitKernelBuildReport(output.build);
       const defaultViewId = viewIds[0];
       const defaultView = defaultViewId ? kernel.definition.views[defaultViewId] : undefined;
       if (defaultView) {

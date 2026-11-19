@@ -395,8 +395,11 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
     tessellation: options.tessellation,
     material: shapeConfig.material,
   });
-  const kept = meshMemo.lookup(info, key);
-  if (kept && (kept.edges !== undefined || !options.collectBrepEdges)) {
+  // A kept mesh without edges cannot serve a render that collects them: that is a miss, meshed again.
+  const kept = meshMemo.lookup(info, key, {
+    usable: (mesh) => mesh.edges !== undefined || !options.collectBrepEdges,
+  });
+  if (kept) {
     return geometryFromMemo(shapeConfig, kept, options.collectBrepEdges);
   }
   const geometry = meshShape(shapeConfig, options);
@@ -679,20 +682,24 @@ function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableCo
       meshMemoKey({ mode: 'instanced', info: instance.info, tessellation, material: instance.config.material }),
     ),
   ].join(';');
-  const kept = meshMemo.lookupGroup(prototype, key);
-  if (
-    kept?.length === group.instances.length &&
-    (!collectBrepEdges || kept.every((mesh) => mesh.edges !== undefined))
-  ) {
+  const kept = meshMemo.lookupGroup(prototype, key, {
+    instances: group.instances.length,
+    usable: (meshes) => !collectBrepEdges || meshes.every((mesh) => mesh.edges !== undefined),
+  });
+  if (kept) {
     return group.instances.map((instance, index) => [
       instance.config,
       geometryFromMemo(instance.config, kept[index]!, collectBrepEdges),
     ]);
   }
   const prototypeKey = prototypeMemoKey(group, tessellation);
-  const keptPrototype = meshMemo.lookup(prototype, prototypeKey);
+  // The group's parts count as reused when the prototype's unplaced mesh is kept: only the placement is applied again.
+  const keptPrototype = meshMemo.lookup(prototype, prototypeKey, {
+    usable: (mesh) => mesh.edges !== undefined || !collectBrepEdges,
+    parts: group.instances.length,
+  });
   let prototypeGeometry: GeometryReplicad;
-  if (keptPrototype && (keptPrototype.edges !== undefined || !collectBrepEdges)) {
+  if (keptPrototype) {
     prototypeGeometry = geometryFromMemo(group.prototype.config, keptPrototype, collectBrepEdges);
   } else {
     prototypeGeometry = meshPrototype(options);

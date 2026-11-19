@@ -43,7 +43,7 @@ A resource-bound refusal carries `ResourceLimitDetails` in `details`: `limit`, `
 
 <auto-type-table path='./props/types.ts' name='ExportOffer' />
 
-Document results always carry `issues`. Successful evaluations offer ordered view and export IDs, including an empty view list. A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
+Document results carry `issues`. Successful evaluations offer ordered view and export IDs, possibly no views. A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
 
 `DocumentStatus` and `ViewStatus` describe separate owners. Their events and supersession outcomes are in [Client API](./client).
 
@@ -105,7 +105,7 @@ Document results always carry `issues`. Successful evaluations offer ordered vie
 
 <auto-type-table path='./props/types.ts' name='ViewInstance' />
 
-`evaluate` returns an opaque handle plus the ordered view and export IDs this result offers. The first offered view is the default. Views can expose named instances; `render` selects one view and optional instance without evaluating again.
+`evaluate` returns an opaque handle plus ordered view and export IDs; the first is the default. `render` selects one view and optional instance without re-evaluating.
 
 <auto-type-table path='./props/types.ts' name='EvaluateInput' />
 
@@ -116,6 +116,14 @@ Document results always carry `issues`. Successful evaluations offer ordered vie
 <auto-type-table path='./props/types.ts' name='RenderOutput' />
 
 <auto-type-table path='./props/types.ts' name='TessellationReport' />
+
+<auto-type-table path='./props/types.ts' name='KernelBuildReport' />
+
+<auto-type-table path='./props/types.ts' name='BuildReport' />
+
+<auto-type-table path='./props/types.ts' name='OperationReuse' />
+
+<auto-type-table path='./props/types.ts' name='OperationCost' />
 
 <auto-type-table path='./props/types.ts' name='ExportInput' />
 
@@ -165,7 +173,7 @@ Node hosts persist batches through `openTelemetryFileSink()`, a non-blocking `Te
 
 ## Content and Capability Types
 
-Framework-owned content requirements stay separate from plugin-owned option schemas. A route advertises supported content and an `ExportFidelity` (`'brep' | 'mesh'`) used by route ranking.
+Framework content requirements stay separate from plugin option schemas. A route advertises supported content and an `ExportFidelity` (`'brep' | 'mesh'`) used for ranking.
 
 <auto-type-table path='./props/types.ts' name='RuntimeContentInput' />
 

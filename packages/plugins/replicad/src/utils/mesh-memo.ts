@@ -12,6 +12,10 @@
  * renders is evicted, and the partner count and the bytes the memo keeps are capped. Evicting deletes the partner's
  * representative and its boxes, exactly once.
  *
+ * Exports (N14) read the memo but keep what they mesh apart, in a one-generation export slot: it holds only the
+ * latest export's new meshes, the next export replaces it, and the end of the next render drops it. An export does not
+ * advance or refresh the display decay clock, so an export at a tolerance no view uses never grows the display memo.
+ *
  * @internal
  */
 import type { Bnd_Box, OpenCascadeInstance, TopoDS_Shape } from 'replicad-opencascadejs';
@@ -41,7 +45,9 @@ type Partner = {
 
 /** Counters of the memo's current render and its size. @internal */
 export type ReplicadMeshMemoStats = {
+  /** Parts delivered from a kept mesh; an instanced group counts each instance. */
   hits: number;
+  /** Parts meshed because no usable mesh was kept; an instanced group counts each instance. */
   misses: number;
   boxHits: number;
   boxMisses: number;
@@ -67,12 +73,27 @@ export type ReplicadMeshMemo = {
   readonly readOccurrence: ReplicadOccurrenceReader;
   /** Pack facts (glTF) of the kept meshes (N6), keyed by their `faces`: a fact is dropped with its mesh. */
   readonly packFacts: ReplicadPackFacts;
-  /** The mesh kept for an occurrence under a key, if any. */
-  lookup(info: ReplicadShapeOccurrenceInfo, key: string): MemoMesh | undefined;
+  /**
+   * The mesh kept for an occurrence under a key, if one is kept and `usable` accepts it. Counts `parts` (default 1)
+   * hits for a mesh it returns, and `parts` misses otherwise: a group's prototype counts its instances.
+   */
+  lookup(
+    info: ReplicadShapeOccurrenceInfo,
+    key: string,
+    options?: Readonly<{ usable?: (mesh: MemoMesh) => boolean; parts?: number }>,
+  ): MemoMesh | undefined;
   /** Keeps an occurrence's mesh under a key. */
   store(info: ReplicadShapeOccurrenceInfo, key: string, mesh: MemoMesh): void;
-  /** The meshes kept for an instanced group led by a prototype occurrence, if any. */
-  lookupGroup(prototype: ReplicadShapeOccurrenceInfo, key: string): readonly MemoMesh[] | undefined;
+  /**
+   * The meshes kept for an instanced group of `instances` led by a prototype occurrence, if every one is kept and
+   * `usable` accepts them. Counts `instances` hits for meshes it returns; on a miss the prototype lookup that follows
+   * counts the group's parts.
+   */
+  lookupGroup(
+    prototype: ReplicadShapeOccurrenceInfo,
+    key: string,
+    group: Readonly<{ instances: number; usable?: (meshes: readonly MemoMesh[]) => boolean }>,
+  ): readonly MemoMesh[] | undefined;
   /** Keeps an instanced group's meshes, one per instance in group order. */
   storeGroup(prototype: ReplicadShapeOccurrenceInfo, key: string, meshes: readonly MemoMesh[]): void;
   /**
@@ -82,8 +103,12 @@ export type ReplicadMeshMemo = {
   diagonal(shapes: readonly Meshable[]): number;
   /** Starts a render: the occurrence reads of the last render are dropped and the counters reset. */
   beginRender(): void;
-  /** Ends a render: unused partners decay and the caps apply. */
+  /** Ends a render: unused partners decay, the caps apply and the export slot is dropped. */
   endRender(): void;
+  /** Starts an export: lookups also read the export slot, and stores go to a new one. */
+  beginExport(): void;
+  /** Ends an export: its new meshes replace the export slot. */
+  endExport(): void;
   stats(): ReplicadMeshMemoStats;
   /** Deletes everything the memo owns. */
   dispose(): void;
@@ -154,6 +179,11 @@ export function createReplicadMeshMemo({
   let totalBytes = 0;
   let reads = new WeakMap<Meshable, ReplicadShapeOccurrenceInfo>();
   let counters = freshStats();
+  /** Meshes of the latest export, by partner and key; `pending` collects the running export's. */
+  type ExportSlot = Map<string, { readonly partnerKey: string; readonly value: MemoMesh | readonly MemoMesh[] }>;
+  let exportSlot: ExportSlot = new Map();
+  let pending: ExportSlot | undefined;
+  const slotKey = (partnerKey: string, key: string): string => `${partnerKey}\n${key}`;
 
   const partnerOf = (info: ReplicadShapeOccurrenceInfo): Partner | undefined => {
     if (info.partnerKey.length === 0) {
@@ -164,8 +194,68 @@ export function createReplicadMeshMemo({
       partner = { lastUsed: render, bytes: 0, meshes: new Map(), boxes: new Map() };
       partners.set(info.partnerKey, partner);
     }
-    partner.lastUsed = render;
+    // An export neither advances nor refreshes the display decay clock.
+    if (pending === undefined) {
+      partner.lastUsed = render;
+    }
     return partner;
+  };
+
+  /** A kept mesh or group: the display memo's, else the export slot's. */
+  const kept = (info: ReplicadShapeOccurrenceInfo, key: string): MemoMesh | readonly MemoMesh[] | undefined => {
+    const partner = partnerOf(info);
+    if (!partner) {
+      return undefined;
+    }
+    const shown = partner.meshes.get(key);
+    if (shown !== undefined) {
+      return shown;
+    }
+    const id = slotKey(info.partnerKey, key);
+    const exported = pending?.get(id) ?? exportSlot.get(id);
+    // A running export carries what it reads from the slot into its own, so its successor keeps it.
+    if (exported !== undefined && pending !== undefined) {
+      pending.set(id, exported);
+    }
+    return exported?.value;
+  };
+
+  /** Keeps a mesh or group: in the display memo, or during an export in the export's own slot. */
+  const keepFor = (info: ReplicadShapeOccurrenceInfo, key: string, value: MemoMesh | readonly MemoMesh[]): void => {
+    const partner = partnerOf(info);
+    if (!partner) {
+      return;
+    }
+    if (pending) {
+      pending.set(slotKey(info.partnerKey, key), { partnerKey: info.partnerKey, value });
+    } else {
+      keep(partner, key, value);
+    }
+  };
+
+  /**
+   * Drop an export slot: a partner it alone made (no display mesh, no box) and that the current slot no longer names
+   * is evicted, so the slot's shapes are not kept alive.
+   */
+  const releaseSlot = (slot: ExportSlot): void => {
+    const named = new Set([...exportSlot.values()].map(({ partnerKey }) => partnerKey));
+    for (const { partnerKey } of slot.values()) {
+      const partner = partners.get(partnerKey);
+      if (partner?.meshes.size === 0 && partner.boxes.size === 0 && !named.has(partnerKey)) {
+        evict(partnerKey);
+      }
+    }
+  };
+
+  /** Bytes the export slot keeps. */
+  const slotBytes = (): number => {
+    let total = 0;
+    for (const { value } of exportSlot.values()) {
+      total += Array.isArray(value)
+        ? (value as readonly MemoMesh[]).reduce((sum, mesh) => sum + meshBytes(mesh), 0)
+        : meshBytes(value as MemoMesh);
+    }
+    return total;
   };
 
   const keep = (partner: Partner, key: string, value: MemoMesh | readonly MemoMesh[]): void => {
@@ -238,35 +328,28 @@ export function createReplicadMeshMemo({
   return {
     readOccurrence,
     packFacts: createReplicadPackFacts(),
-    lookup(info, key) {
-      const mesh = partnerOf(info)?.meshes.get(key) as MemoMesh | undefined;
-      if (mesh) {
-        counters.hits++;
-      } else {
-        counters.misses++;
+    lookup(info, key, { usable, parts = 1 } = {}) {
+      const mesh = kept(info, key) as MemoMesh | undefined;
+      if (mesh && (usable === undefined || usable(mesh))) {
+        counters.hits += parts;
+        return mesh;
       }
-      return mesh;
+      counters.misses += parts;
+      return undefined;
     },
     store(info, key, mesh) {
-      const partner = partnerOf(info);
-      if (partner) {
-        keep(partner, key, mesh);
-      }
+      keepFor(info, key, mesh);
     },
-    lookupGroup(prototype, key) {
-      const meshes = partnerOf(prototype)?.meshes.get(key) as readonly MemoMesh[] | undefined;
-      if (meshes) {
-        counters.hits += meshes.length;
-      } else {
-        counters.misses++;
+    lookupGroup(prototype, key, { instances, usable }) {
+      const meshes = kept(prototype, key) as readonly MemoMesh[] | undefined;
+      if (meshes?.length === instances && (usable === undefined || usable(meshes))) {
+        counters.hits += instances;
+        return meshes;
       }
-      return meshes;
+      return undefined;
     },
     storeGroup(prototype, key, meshes) {
-      const partner = partnerOf(prototype);
-      if (partner) {
-        keep(partner, key, meshes);
-      }
+      keepFor(prototype, key, meshes);
     },
     diagonal(shapes) {
       const total = new openCascade.Bnd_Box();
@@ -290,12 +373,25 @@ export function createReplicadMeshMemo({
         total.delete();
       }
     },
+    beginExport() {
+      reads = new WeakMap();
+      pending = new Map();
+    },
+    endExport() {
+      const previous = exportSlot;
+      exportSlot = pending ?? new Map();
+      pending = undefined;
+      releaseSlot(previous);
+    },
     beginRender() {
       render++;
       reads = new WeakMap();
       counters = freshStats();
     },
     endRender() {
+      const passed = exportSlot;
+      exportSlot = new Map();
+      releaseSlot(passed);
       for (const [key, partner] of partners) {
         if (render - partner.lastUsed >= decayRenders) {
           evict(key);
@@ -313,9 +409,11 @@ export function createReplicadMeshMemo({
       }
     },
     stats() {
-      return { ...counters, partners: partners.size, bytes: totalBytes };
+      return { ...counters, partners: partners.size, bytes: totalBytes + slotBytes() };
     },
     dispose() {
+      exportSlot.clear();
+      pending = undefined;
       for (const key of partners.keys()) {
         evict(key);
       }

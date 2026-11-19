@@ -79,6 +79,8 @@ import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { installNativeUserBreak } from '#utils/native-user-break.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
 import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
+import { meterOperations, tierBuildReport } from '#utils/operation-cost.js';
+import type { OperationMeter } from '#utils/operation-cost.js';
 import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { createToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
@@ -761,10 +763,12 @@ export const replicadKernel = defineKernel({
           const delivered = aliasBuiltModel(revisited);
           tierBuiltHandles.add(delivered.handle);
           context.epochs.adopt(delivered.handle);
-          return delivered;
+          return { ...delivered, build: { reused: true } };
         });
       }
 
+      // R18: the meter of the delivered run of user code; a fallback re-run gets a fresh one.
+      let meter: OperationMeter | undefined;
       const collector = collectorRelease(context, entryPath, bundleResult.code);
       let releaseFallback: 'module' | 'worker' | undefined;
       /** Executes the module, or with `fresh` runs it again and replaces its cached instance. */
@@ -784,9 +788,11 @@ export const replicadKernel = defineKernel({
 
         /** One run of `main` with the tier installed; a delivered value an epoch deleted fails it before `endBuild`. */
         const runMainOnce = async (): Promise<OcRunMainResult & { released?: boolean }> => {
-          const endBuild = documentTier
-            ? installOperationTier(context.replicadLibrary, documentTier.operations)
-            : undefined;
+          meter = documentTier ? meterOperations(documentTier.operations.cache) : undefined;
+          const endBuild =
+            documentTier && meter
+              ? installOperationTier(context.replicadLibrary, { ...documentTier.operations, cache: meter.cache })
+              : undefined;
           let outcome: 'delivered' | 'failed' = 'failed';
           try {
             const result = await context.libraryTrace.runInScope({
@@ -945,7 +951,7 @@ export const replicadKernel = defineKernel({
       context.epochs.adopt(built.handle, {
         collector: context.collectorWorker || (collector.group ?? false),
       });
-      return built;
+      return documentTier ? { ...built, build: tierBuildReport(documentTier.operations, meter) } : built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
         throw error;
@@ -1077,9 +1083,14 @@ export const replicadKernel = defineKernel({
           gltfSpan.end();
         }
       });
+      const memo = meshMemo?.stats();
       return {
         content: gltfBlob,
-        tessellation: rendered.tessellation,
+        // R18: the parts whose mesh the memo kept, beside the cost of the mesh.
+        tessellation:
+          memo === undefined
+            ? rendered.tessellation
+            : { ...rendered.tessellation, meshes: { reused: memo.hits, computed: memo.misses } },
         issues: mechanismIssues,
       };
     } catch (error) {
@@ -1142,6 +1153,14 @@ export const replicadKernel = defineKernel({
                 explicitDefaults: occtExplicitTessellationDefaults.export,
               });
               const { linearTolerance, angularTolerance } = requested;
+              // N14: with the live tier, the export composes the part meshes a render or an earlier export kept at
+              // these exact tolerances; what it meshes goes to the memo's one-generation export slot, not the display
+              // memo. With reuse off every export meshes, as before (I2).
+              const meshMemo =
+                runtime.compute.status === 'on' && context.liveTier
+                  ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
+                  : undefined;
+              meshMemo?.beginExport();
               const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
                 render(namedShapes, {
                   tessellation: { linearTolerance, angularTolerance },
@@ -1149,8 +1168,11 @@ export const replicadKernel = defineKernel({
                   openCascade: context.openCascade,
                   tessellationInstancing: context.tessellationInstancing,
                   tracer: runtime.tracer,
+                  meshMemo,
                 }),
-              );
+              ).finally(() => {
+                meshMemo?.endExport();
+              });
               const temporaryShapes = renderedShapes.filter(
                 (shape): shape is GeometryReplicad => shape.format === 'replicad',
               );

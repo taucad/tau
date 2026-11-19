@@ -92,10 +92,11 @@ export function PublicationLockScreen({
         };
       }
       case 'unpublished': {
+        /* A stopped link, or a deleted project: the API answers 410 for both, so no cause is stated. */
         return {
           Icon: Archive,
-          headline: 'This design has been unpublished',
-          body: 'The owner removed this share link.',
+          headline: 'This link is no longer shared',
+          body: 'Ask the owner for a new link.',
           primary: { label: 'Go home', action: 'home' },
         };
       }

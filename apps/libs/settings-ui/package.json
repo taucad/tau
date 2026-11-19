@@ -25,6 +25,7 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/settings/browser-storage-status": "./src/components/settings/browser-storage-status.tsx",
     "./components/settings/settings-catalogue": "./src/components/settings/settings-catalogue.ts",
     "./components/settings/settings-item": "./src/components/settings/settings-item.tsx",
     "./components/settings/settings-section": "./src/components/settings/settings-section.ts",
@@ -46,6 +47,7 @@
   "dependencies": {
     "@taucad/preferences": "workspace:*",
     "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
     "lucide-react": "catalog:"
   },
   "peerDependencies": {

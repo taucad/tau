@@ -5,7 +5,7 @@ import type { WireOperationReceipt } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { useModels } from '#hooks/use-models.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/chat-message-usage.js';
+import { ChatMessageUsage, sumUsageTokens } from '@taucad/billing-ui/components/usage/chat-message-usage';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { recordBillingRevisionMinimum } from '@taucad/billing-ui/db/billing-snapshot-store';

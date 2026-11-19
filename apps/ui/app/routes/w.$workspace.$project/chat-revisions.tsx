@@ -53,8 +53,8 @@ import {
   useRowBoxes,
 } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
-import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
-import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
+import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '@taucad/revisions-ui/lib/history-lanes';
+import type { HistoryFilter, HistoryLanes } from '@taucad/revisions-ui/lib/history-lanes';
 import { LaneStepRow, laneGraphRowOf, pendingStepsOf } from '#routes/w.$workspace.$project/history-lanes-rows.js';
 import type { LaneStep } from '#routes/w.$workspace.$project/history-lanes-rows.js';
 import {

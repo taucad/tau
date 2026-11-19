@@ -1,7 +1,7 @@
 import type { UsageData } from '@taucad/chat';
 import { useModels } from '#hooks/use-models.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/chat-message-usage.js';
+import { ChatMessageUsage, sumUsageTokens } from '@taucad/billing-ui/components/usage/chat-message-usage';
 
 export const usageOperationIds = (): string[] => [];
 export type ReceiptCredit = { readonly status: 'unavailable' };

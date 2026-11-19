@@ -42,7 +42,7 @@ import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-s
 import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { requestBranchControl } from '@taucad/revisions-ui/lib/revision-pane-requests';
-import { listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
+import { listedBranchesOf } from '@taucad/revisions-ui/lib/history-lanes';
 import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';

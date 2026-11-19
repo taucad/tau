@@ -64,6 +64,7 @@ import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#fil
 import { armDatabaseOpenDeadline } from '@taucad/ui-core/lib/database-open-deadline';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
+import type { PersistentStorageStatus } from '@taucad/ui-core/types/persistent-storage.types';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 
 const dbName = `${appMetaConfig.databasePrefix}fs-handles`;
@@ -458,9 +459,6 @@ async function withDb<T>(operation: (db: IDBDatabase) => Promise<T>): Promise<T>
 }
 
 // ============ Persistent storage + disk-side identity marker ============
-
-/** Current browser-reported protection from automatic storage eviction. */
-export type PersistentStorageStatus = 'unknown' | 'best-effort' | 'persistent' | 'unavailable';
 
 let persistentStorageStatus: PersistentStorageStatus = 'unknown';
 const persistentStorageChanges = new Topic<void>({ name: 'HandleStore.persistentStorageChanges' });

@@ -3365,6 +3365,9 @@ importers:
       '@taucad/billing':
         specifier: workspace:*
         version: link:../billing
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../../../libs/chat
       '@taucad/settings-ui':
         specifier: workspace:*
         version: link:../settings-ui
@@ -3976,6 +3979,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../../packages/runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../../packages/runtime-testing
       '@taucad/xstate-testing':
         specifier: workspace:*
         version: link:../../../libs/xstate-testing
@@ -3991,6 +3997,9 @@ importers:
       fake-indexeddb:
         specifier: 'catalog:'
         version: 6.2.5
+      oxc-transform-react:
+        specifier: 'catalog:'
+        version: 0.148.0
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -4306,6 +4315,9 @@ importers:
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       lucide-react:
         specifier: 'catalog:'
         version: 0.552.0(react@19.3.1)

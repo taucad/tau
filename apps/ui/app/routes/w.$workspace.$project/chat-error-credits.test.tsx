@@ -34,7 +34,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 const topupModalMock = vi.hoisted(() => vi.fn((_props: { isOpen: boolean }) => undefined));
-vi.mock('#components/billing/topup-modal.js', () => ({
+vi.mock('@taucad/billing-ui/components/billing/topup-modal', () => ({
   TopupModal: (props: { readonly isOpen: boolean }) => {
     topupModalMock(props);
     return <div data-testid='topup-modal' data-open={props.isOpen} />;

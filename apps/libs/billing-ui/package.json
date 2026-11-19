@@ -27,12 +27,15 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/billing/account-closure-settings": "./src/components/billing/account-closure-settings.tsx",
     "./components/billing/auto-reload-settings": "./src/components/billing/auto-reload-settings.tsx",
     "./components/billing/billing-primitives": "./src/components/billing/billing-primitives.tsx",
     "./components/billing/cancel-plan-settings": "./src/components/billing/cancel-plan-settings.tsx",
     "./components/billing/monthly-credits-meter": "./src/components/billing/monthly-credits-meter.tsx",
     "./components/billing/plan-cards": "./src/components/billing/plan-cards.tsx",
+    "./components/billing/topup-modal": "./src/components/billing/topup-modal.tsx",
     "./components/billing/use-billing-binding": "./src/components/billing/use-billing-binding.ts",
+    "./components/settings/billing-settings": "./src/components/settings/billing-settings.tsx",
     "./components/tier-badge": "./src/components/tier-badge.tsx",
     "./components/usage/activity-names": "./src/components/usage/activity-names.ts",
     "./components/usage/charts/credit-usage-tooltip": "./src/components/usage/charts/credit-usage-tooltip.tsx",
@@ -49,6 +52,7 @@
     "./hooks/use-auto-reload-enabled": "./src/hooks/use-auto-reload-enabled.ts",
     "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",
     "./lib/billing-payment-client": "./src/lib/billing-payment-client.ts",
+    "./providers/billing-legal-links-provider": "./src/providers/billing-legal-links-provider.tsx",
     "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
     "./package.json": "./package.json"
   },
@@ -60,6 +64,7 @@
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",
     "fake-indexeddb": "catalog:",
+    "oxc-transform-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"

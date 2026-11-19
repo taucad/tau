@@ -5,7 +5,7 @@ import { CreditCard, Play, Plus, Repeat } from 'lucide-react';
 import { creditAtomsPerCredit } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions } from '#hooks/use-chat.js';
-import { TopupModal } from '#components/billing/topup-modal.js';
+import { TopupModal } from '@taucad/billing-ui/components/billing/topup-modal';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { useModels } from '#hooks/use-models.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';

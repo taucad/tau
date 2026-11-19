@@ -138,6 +138,9 @@ const composedRow = (path: string, type: 'dir' | 'file'): [string, FileEntry] =>
       },
 ];
 
+/** The shared project context the skill's file links read, rather than `useProject`. */
+const project = { projectId: 'project-1', projectRef: { send: vi.fn() }, editorRef: { send: editorSend } };
+
 beforeEach(() => {
   editorSend.mockClear();
   treeSnapshot.current = new Map<string, FileEntry>([
@@ -152,9 +155,7 @@ describe('system skill row links (north star W0, green in W4)', () => {
   it('opens a system skill bundle file as a read-only entry and reveals it', async () => {
     // The skill's file links read the project from the shared context, not through `useProject`.
     render(
-      <ProjectContext.Provider
-        value={{ projectId: 'project-1', projectRef: { send: vi.fn() }, editorRef: { send: editorSend } }}
-      >
+      <ProjectContext.Provider value={project}>
         <ChatMessageToolUseSkill part={readSkillPart()} />
       </ProjectContext.Provider>,
     );

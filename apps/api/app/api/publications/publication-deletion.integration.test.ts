@@ -651,6 +651,11 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
 
   it('should reject a view counter update that resumes after deletion', async () => {
     const fixture = await seed();
+    /* An anonymous ping counts only on a link anyone can open; a private link refuses it before it reaches the counter. */
+    await database
+      .update(schema.projectShare)
+      .set({ visibility: 'public' })
+      .where(eq(schema.projectShare.id, fixture.shareId));
     const entered = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
     const redis = mockDeep<Dependencies[3]>();

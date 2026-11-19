@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { RouterContextProvider } from 'react-router';
-import { createElement } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
@@ -422,14 +421,9 @@ describe('Tau publication client environment', () => {
       throw new Error('Expected the publication fixture to parse.');
     }
     render(
-      createElement(PublicationViewerServicesProvider, {
-        value: viewerServices,
-        children: createElement(PublicationInteractiveSurface, {
-          data: sampleLoaderData,
-          publication,
-          hydratedFiles: {},
-        }),
-      }),
+      <PublicationViewerServicesProvider value={viewerServices}>
+        <PublicationInteractiveSurface data={sampleLoaderData} publication={publication} hydratedFiles={{}} />
+      </PublicationViewerServicesProvider>,
     );
 
     expect(apiBaseUrl).not.toHaveBeenCalled();

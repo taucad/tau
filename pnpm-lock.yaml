@@ -3770,6 +3770,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
+      '@taucad/files-ui':
+        specifier: workspace:*
+        version: link:../files-ui
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem

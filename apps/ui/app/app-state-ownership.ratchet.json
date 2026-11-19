@@ -5,6 +5,8 @@
       "apps/libs/files-ui/src/hooks/use-project-manager.ts",
       "apps/libs/files-ui/src/hooks/use-projects.ts",
       "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
+      "apps/libs/ui-core/src/contexts/file-manager-context.tsx",
+      "apps/libs/ui-core/src/contexts/project-context.tsx",
       "apps/ui/app/hooks/chat-session-store.fixture.tsx",
       "apps/ui/app/hooks/use-file-manager.tsx",
       "apps/ui/app/hooks/use-project-manager.tsx",

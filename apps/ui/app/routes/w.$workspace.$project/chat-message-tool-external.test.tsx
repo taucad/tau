@@ -21,7 +21,7 @@ import { classifyActivityPart } from '@taucad/chat-ui/utils/assistant-message-ac
 import chatMessageSource from '#routes/w.$workspace.$project/chat-message.tsx?raw';
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn()] }));
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({

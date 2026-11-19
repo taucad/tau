@@ -1,7 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
 import type { FileProvenance } from '@taucad/types';
-import { useProject } from '#hooks/use-project.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 import { cn } from '@taucad/ui/utils/cn';
 
 type FileLinkProps = {
@@ -77,7 +77,7 @@ export function FileLink({
   children,
   asChild = false,
 }: FileLinkProps): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
+  const project = useContext(ProjectContext);
 
   const activate = useCallback(() => {
     if (!project) {

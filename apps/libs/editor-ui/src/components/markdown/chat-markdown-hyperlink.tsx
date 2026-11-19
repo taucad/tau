@@ -1,10 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import type { ComponentProps, MouseEvent } from 'react';
 import { resolveRootedPath } from '@taucad/utils/path';
 import { cn } from '@taucad/ui/utils/cn';
-import { MarkdownHyperlink } from '@taucad/editor-ui/components/markdown/markdown-hyperlink';
-import { useProject } from '#hooks/use-project.js';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { toast } from '@taucad/ui/components/sonner';
@@ -65,8 +65,8 @@ async function projectPathForHostFile(path: string, projectId: string): Promise<
 
 /** Chat-only link renderer. Generic markdown elsewhere keeps its route semantics. */
 export function ChatMarkdownHyperlink({ href, className, children, ...rest }: ComponentProps<'a'>): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
-  const fileManager = useOptionalFileManager();
+  const project = useContext(ProjectContext);
+  const fileManager = useContext(FileManagerContext);
   const filePath = chatFileHref(href);
 
   const open = useCallback(

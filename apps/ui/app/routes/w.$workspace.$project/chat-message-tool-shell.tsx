@@ -14,7 +14,7 @@ import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 
 type ShellInvocation = ToolInvocation<typeof toolName.shell>;
 type ShellInputValue = NonNullable<ShellInvocation['input']>;

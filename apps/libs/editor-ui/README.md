@@ -1,6 +1,6 @@
 # @taucad/editor-ui
 
-The editor feature of the Tau UI app: the CodeMirror source editor (`CodeEditor` and its lazily loaded view), the document, diagnostics and syntax models it edits, the read-only code and diff viewers, the editor pane placeholder and the CodeMirror extension builders (language features, go-to-definition, lint, search panel, surface theme, JSON depth highlighting) that read no app state, the language services a code pane acquires on demand (TypeScript, KCL, C#, OpenSCAD, JSON and Python), the bundled authoring types the file-manager worker mounts for them, and the Markdown viewer with its links, code fences, sanitizer and chat streaming fade. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
+The editor feature of the Tau UI app: the CodeMirror source editor (`CodeEditor` and its lazily loaded view), the document, diagnostics and syntax models it edits, the read-only code and diff viewers, the editor pane placeholder and the CodeMirror extension builders (language features, go-to-definition, lint, search panel, surface theme, JSON depth highlighting) that read no app state, the language services a code pane acquires on demand (TypeScript, KCL, C#, OpenSCAD, JSON and Python), the bundled authoring types the file-manager worker mounts for them, and the Markdown viewer with its links, chat file links, code fences, sanitizer and chat streaming fade. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
 
 Cut from `apps/ui/app/components/code` and `apps/ui/app/lib` in five slices (tau #2378, tau #2438 with the source editor and its models, the document session and the navigation service, tau #2669 with the language services, then the Markdown viewer and the bundled types). It grows as the modules it waits on leave the app.
 
@@ -36,6 +36,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/markdown/markdown-viewer`                                                   | The Markdown renderer (`MarkdownViewer`, `defaultMarkdownControls`): Streamdown with math, CJK, sanitizing and Tau's links and code                        |
 | `./components/markdown/markdown-<name>`                                                   | Its parts: `hyperlink` (in-app and external links), `code` (inline code and collapsible fences), `sanitize` (`publicationRehypeSanitize`), `header-anchor` |
 | `./components/markdown/rehype-at-references`                                              | `@`-reference chips from chat text (`rehypeAtReferences`)                                                                                                  |
+| `./components/markdown/chat-markdown-hyperlink`                                           | Chat links to files (`ChatMarkdownHyperlink`, `rehypeChatFileLinks`): open a project file; import a desktop generated image first                          |
 | `./components/markdown/chat-streaming-block`, `./components/markdown/chat-streaming-fade` | The fade on newly streamed chat prose                                                                                                                      |
 | `./components/ui/collapsible-code-block`                                                  | A code block that collapses past a line count, with copy                                                                                                   |
 | `./components/external-link`                                                              | A link that opens in a new tab, with its arrow                                                                                                             |
@@ -43,12 +44,14 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 
 The CodeMirror extension modules, `code-editor-view.client`, `editor-lint` and the `lib/<language>-language/` adapters are deferred leaves of `tau-lint/no-static-heavy-import`: the app reaches them only through dynamic imports, and `editor-language-runtime` imports each family only when a code pane asks for it.
 
+`chat-markdown-hyperlink` reads the open project from `ProjectContext` (`@taucad/ui-core/contexts/project-context`) and the file manager from `FileManagerContext` (`@taucad/ui-core/contexts/file-manager-context`). Each types only what library components use; the app's providers fill them, and its `useProject` and `useFileManager` hooks read them back as the app's types. Its suite renders inside both providers.
+
 The app supplies `EditorLanguageHost` from `apps/ui/app/lib/editor-language-runtime.ts`: the TypeScript acquisition mode, the staged C# and OpenSCAD server assets, and the KCL worker, which stays in the app because it loads `kcl.wasm` by a `?url` import. It imports the KCL codec and types through this library's subpaths.
 
 ## Still in the app
 
 - `components/code/code-surfaces.test.tsx`: the check that no app source pins a `CodeEditor` to a literal language. It reads `apps/ui/app`; the surface matrix is here.
-- `components/markdown/markdown-viewer-chat` and `chat-markdown-hyperlink`: `use-project`, `use-file-manager` and `at-reference-chip`. `chat-streaming-fade.test.tsx` stays with them, since it renders `MarkdownViewerChat`.
+- `components/markdown/markdown-viewer-chat`: it renders the app's `at-reference-chip`, a chat component. `chat-streaming-fade.test.tsx` and `chat-markdown-hyperlink.browser.test.tsx` stay with it, since they render `MarkdownViewerChat`.
 - `code-editor.browser.test.tsx` and its browser config: `use-theme` and the app's Vite config.
 - `lib/editor-language-runtime` (the host binding over this library's runtime) and `lib/kcl-language/lsp/kcl-lsp-worker`: build defines, `#environment.config` and the `kcl.wasm?url` import.
 - `machines/editor.machine`, `hooks/use-editor-document-session` and `components/panes/editor-tab-context-menu`: the app runtime, the workbench records, `use-file-manager`, `use-project` and the revision client registry.

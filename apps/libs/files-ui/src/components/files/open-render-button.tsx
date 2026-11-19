@@ -1,8 +1,8 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { Box } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { useProject } from '#hooks/use-project.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 
 export type OpenRenderButtonProperties = {
   readonly path: string;
@@ -24,7 +24,7 @@ export function OpenRenderButton({
   className,
   ...properties
 }: OpenRenderButtonProperties): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
+  const project = useContext(ProjectContext);
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {

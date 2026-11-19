@@ -3,13 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FileProvenance } from '@taucad/types';
+import type { ReactNode } from 'react';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
+import type { ProjectContextValue } from '@taucad/ui-core/contexts/project-context';
 import { FileLink } from '#components/files/file-link.js';
 
-const editorSend = vi.hoisted(() => vi.fn());
+const editorSend = vi.fn();
+const project: ProjectContextValue = {
+  projectId: 'project-1',
+  projectRef: { send: vi.fn() },
+  editorRef: { send: editorSend },
+};
 
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef: { send: editorSend } }),
-}));
+function ProjectWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <ProjectContext.Provider value={project}>{children}</ProjectContext.Provider>;
+}
 
 const systemSkill: FileProvenance = {
   source: 'system-skills',
@@ -24,7 +32,7 @@ beforeEach(() => {
 
 describe('FileLink', () => {
   it('opens a project file for editing and does not disturb the tree', async () => {
-    render(<FileLink path='main.scad'>main.scad</FileLink>);
+    render(<FileLink path='main.scad'>main.scad</FileLink>, { wrapper: ProjectWrapper });
 
     await userEvent.click(screen.getByRole('button', { name: 'main.scad' }));
 
@@ -39,6 +47,7 @@ describe('FileLink', () => {
       <FileLink path={path} provenance={systemSkill}>
         cad-openscad
       </FileLink>,
+      { wrapper: ProjectWrapper },
     );
 
     await userEvent.click(screen.getByRole('button', { name: 'cad-openscad' }));

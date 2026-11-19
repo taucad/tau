@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useOptionalFileServices } from '#hooks/use-file-services.js';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FilesEntry } from '@taucad/workbench-panes/files/files-source';
@@ -18,8 +18,8 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: vi.fn(() => false),
 }));
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: vi.fn(() => undefined),
+vi.mock('#hooks/use-file-services.js', () => ({
+  useOptionalFileServices: vi.fn(() => undefined),
 }));
 
 /** The tree service's shared listing projection over a scripted `listDirectory`, as `observeDirectory` builds it. */
@@ -47,7 +47,7 @@ const observeListing =
 
 beforeEach(() => {
   vi.mocked(useIsMobile).mockReturnValue(false);
-  vi.mocked(useOptionalFileManager).mockReturnValue(undefined);
+  vi.mocked(useOptionalFileServices).mockReturnValue(undefined);
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -284,17 +284,17 @@ describe('FileSelector (context auto-wiring)', () => {
   });
 
   it('should surface Retry instead of empty copy when context listDirectory fails', async () => {
-    const { useOptionalFileManager } = await import('#hooks/use-file-manager.js');
+    const { useOptionalFileServices } = await import('#hooks/use-file-services.js');
     const error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     const listDirectory = vi.fn().mockRejectedValue(error);
-    vi.mocked(useOptionalFileManager).mockReturnValue({
+    vi.mocked(useOptionalFileServices).mockReturnValue({
       treeService: {
         listDirectory,
         listDirectorySync: vi.fn().mockReturnValue(undefined),
         subscribePath: vi.fn().mockReturnValue(() => undefined),
         observeDirectory: observeListing(listDirectory),
       },
-    } as unknown as ReturnType<typeof useOptionalFileManager>);
+    } as unknown as ReturnType<typeof useOptionalFileServices>);
 
     render(<FileSelector selectedFile={undefined} onSelect={vi.fn()} />);
 
@@ -305,11 +305,11 @@ describe('FileSelector (context auto-wiring)', () => {
     });
     expect(screen.queryByText('No files found.')).not.toBeInTheDocument();
 
-    vi.mocked(useOptionalFileManager).mockReturnValue(undefined);
+    vi.mocked(useOptionalFileServices).mockReturnValue(undefined);
   });
 
   it('should preserve full breadcrumb path when drilling down after navigating up', async () => {
-    const { useOptionalFileManager } = await import('#hooks/use-file-manager.js');
+    const { useOptionalFileServices } = await import('#hooks/use-file-services.js');
     const listingSnapshot = new Map<
       string,
       Array<{ name: string; path: string; isFolder: boolean; size: number; mtimeMs: number }>
@@ -346,14 +346,14 @@ describe('FileSelector (context auto-wiring)', () => {
 
     const listDirectorySync = vi.fn((path: string) => listingSnapshot.get(path));
 
-    vi.mocked(useOptionalFileManager).mockReturnValue({
+    vi.mocked(useOptionalFileServices).mockReturnValue({
       treeService: {
         listDirectory,
         listDirectorySync,
         subscribePath: vi.fn().mockReturnValue(() => undefined),
         observeDirectory: observeListing(listDirectory),
       },
-    } as unknown as ReturnType<typeof useOptionalFileManager>);
+    } as unknown as ReturnType<typeof useOptionalFileServices>);
 
     render(<FileSelector selectedFile='public/kcl-samples/ball-bearing/main.kcl' onSelect={vi.fn()} />);
 
@@ -403,11 +403,24 @@ describe('FileSelector (context auto-wiring)', () => {
       expect(screen.getAllByText('main.kcl').length).toBeGreaterThanOrEqual(1);
     });
 
-    vi.mocked(useOptionalFileManager).mockReturnValue(undefined);
+    vi.mocked(useOptionalFileServices).mockReturnValue(undefined);
   });
 });
 
 describe('FileSelector mobile drawer naming', () => {
+  // The drawer reads `matchMedia`, which jsdom lacks; `apps/ui`'s setup stubs it for every suite.
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('should keep its own accessible name and description beside an existing drawer title', async () => {
     vi.mocked(useIsMobile).mockReturnValue(true);
     render(
@@ -463,8 +476,8 @@ describe('FileSelector search recovery', () => {
       observeDirectory: observeListing(async () => []),
       searchFilesDebounced: searchFiles,
     });
-    vi.mocked(useOptionalFileManager).mockReturnValue(
-      mock<NonNullable<ReturnType<typeof useOptionalFileManager>>>({ treeService }),
+    vi.mocked(useOptionalFileServices).mockReturnValue(
+      mock<NonNullable<ReturnType<typeof useOptionalFileServices>>>({ treeService }),
     );
     render(<FileSelector selectedFile={undefined} onSelect={vi.fn()} />);
     await userEvent.click(screen.getByRole('button'));

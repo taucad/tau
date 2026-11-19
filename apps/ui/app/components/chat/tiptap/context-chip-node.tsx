@@ -3,7 +3,7 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import type { Editor } from '@tiptap/core';
 import type { ReactNodeViewProps } from '@tiptap/react';
 import { ReactNodeViewRenderer, NodeViewWrapper, useEditorState } from '@tiptap/react';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import type { ChipType } from '@taucad/chat-ui/components/context-chip';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';

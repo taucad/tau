@@ -7,7 +7,7 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { compareFileEntries, FileBrowser, useFileBrowser } from '@taucad/workbench-panes/files/file-selector';
 import type { FileBrowserStatus, FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FilesEntry } from '@taucad/workbench-panes/files/files-source';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useOptionalFileServices } from '#hooks/use-file-services.js';
 import {
   Drawer,
   DrawerContent,
@@ -56,8 +56,7 @@ type FileSelectorProps = {
 function useFileSelectorContextSearch(
   shouldIncludeDirectories?: boolean,
 ): { searchFiles: (query: string) => Promise<FilesEntry[]> } | undefined {
-  const fileManager = useOptionalFileManager();
-  const treeService = fileManager?.treeService;
+  const treeService = useOptionalFileServices()?.treeService;
 
   const searchFiles = useCallback(
     async (query: string): Promise<FilesEntry[]> => {
@@ -127,7 +126,7 @@ export function FileSelector({
   popoverProperties,
   initialPath,
 }: FileSelectorProps): React.JSX.Element {
-  const fileManager = useOptionalFileManager();
+  const fileServices = useOptionalFileServices();
   const contextSearch = useFileSelectorContextSearch(shouldIncludeDirectories ?? shouldShowDirectoriesOnly);
   const isExplicitBrowse = explicitSource !== undefined;
 
@@ -146,7 +145,7 @@ export function FileSelector({
   const { currentPath, reset } = browser;
 
   const directoryListing = useDirectoryListing(
-    !isExplicitBrowse && open ? fileManager?.treeService : undefined,
+    !isExplicitBrowse && open ? fileServices?.treeService : undefined,
     currentPath,
     { reloadToken: listingReloadToken },
   );

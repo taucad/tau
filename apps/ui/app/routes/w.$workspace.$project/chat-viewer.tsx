@@ -22,7 +22,7 @@ import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provi
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
 import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
 import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { StartFromTemplate } from '#routes/w.$workspace.$project/start-from-template.js';
 import { Button } from '@taucad/ui/components/button';
 import { useProject } from '#hooks/use-project.js';

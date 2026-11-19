@@ -3034,6 +3034,8 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   it(
     'should still wait for the page to save when an update installs once the shell has mounted',
     async () => {
+      /* No `home-ready` either: a project session opens once `rootFiles` holds the shared worker, before it is
+       * `ready`, so a mounted page may hold edits even in a launch whose Home never became ready (N1). */
       await booted();
       reportStage('shell-mounted');
       await vi.waitFor(() => {
@@ -3043,6 +3045,45 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       await expect(state.prepareToInstall!(commit)).resolves.toBe(true);
       expect(commit).toHaveBeenCalledOnce();
       expect(state.sentToRenderer).toContain(quitChannels.ask);
+      expect(state.log).not.toHaveBeenCalledWith('info', 'main.restart-without-page', expect.anything());
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when a Squirrel update restarts before shell-mounted, and log why (N1)',
+    async () => {
+      /* macOS and Windows: Squirrel's `quitAndInstall` runs after the updater's `prepareToRestart`. */
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToRestart).toBeDefined();
+      });
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      expect(state.log).toHaveBeenCalledWith('info', 'main.restart-without-page', { reason: 'update-install' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask the page to save again on a later quit after an install before shell-mounted fails',
+    async () => {
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn(async () => {
+        throw new Error('spawn refused');
+      });
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(false);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.restart-without-page', { reason: 'update-install' });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.sentToRenderer).toContain(quitChannels.ask);
+      });
     },
     bootMilliseconds,
   );

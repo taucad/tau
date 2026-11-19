@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import type * as FileSystem from 'node:fs';
@@ -1145,6 +1146,41 @@ describe('desktop main compute owner', () => {
       for (const resolved of [project, copy, other]) {
         resolved.release!();
       }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should give a Git worktree of a project the project's compute connection",
+    async () => {
+      const projectRoot = await bootstrap();
+      const worktreeRoot = resolve(join(state.userData, 'home', 'project-feature'));
+      await mkdir(join(projectRoot, '.tau'), { recursive: true });
+      await writeFile(
+        join(projectRoot, '.tau', 'project.json'),
+        `${JSON.stringify({ version: 1, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' })}\n`,
+      );
+      await writeFile(join(projectRoot, '.gitignore'), '/.tau/*\n');
+      await writeFile(join(projectRoot, 'tau.json'), '{}\n');
+      const git = (...args: string[]): void => {
+        execFileSync(
+          'git',
+          ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args],
+          { cwd: projectRoot, stdio: 'ignore' },
+        );
+      };
+      git('init', '-q');
+      git('add', '.');
+      git('commit', '-qm', 'init');
+      git('worktree', 'add', '-q', worktreeRoot);
+      const project = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const worktree = state.resolveFork!({ projectRoot: worktreeRoot, computeMode: 'durable' });
+      const storeOf = (resolved: typeof project): unknown => (resolved.compute as { store: unknown }).store;
+
+      expect(existsSync(join(worktreeRoot, '.tau', 'project.json'))).toBe(false);
+      expect(storeOf(worktree)).toBe(storeOf(project));
+      project.release!();
+      worktree.release!();
     },
     bootMilliseconds,
   );

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -105,5 +105,70 @@ describe('computeStoreWorkspace', () => {
     expect(computeStoreWorkspace(root)).toBe(root);
     expect(computeStoreWorkspace(join(base, 'missing'))).toBe(join(base, 'missing'));
     expect(computeStoreWorkspace('/projects/a')).toBe('/projects/a');
+  });
+
+  describe("when a folder tries to choose another project's store", () => {
+    /* A project the person owns, with its own repository. */
+    const makeVictim = async (): Promise<string> => {
+      const victim = join(base, 'victim');
+      await makeProject(victim, projectA);
+      git(victim, 'init', '-q');
+      git(victim, 'add', '.');
+      git(victim, 'commit', '-qm', 'init');
+      return victim;
+    };
+
+    it('should refuse a forged .git file whose commondir names another repository', async () => {
+      const victim = await makeVictim();
+      const forged = join(base, 'downloads', 'forged');
+      await mkdir(join(forged, 'admin'), { recursive: true });
+      await writeFile(join(forged, '.git'), 'gitdir: admin\n');
+      await writeFile(join(forged, 'admin', 'commondir'), `${join(victim, '.git')}\n`);
+
+      expect(computeStoreWorkspace(forged)).toBe(forged);
+    });
+
+    it('should refuse a forged admin directory inside the real worktrees folder that does not point back here', async () => {
+      const victim = await makeVictim();
+      git(victim, 'worktree', 'add', '-q', join(base, 'branch'));
+      const forged = join(base, 'downloads', 'forged');
+      await mkdir(forged, { recursive: true });
+      await writeFile(join(forged, '.git'), `gitdir: ${join(victim, '.git', 'worktrees', 'branch')}\n`);
+
+      expect(computeStoreWorkspace(forged)).toBe(forged);
+    });
+
+    it('should refuse a .tau directory symlinked to another project', async () => {
+      const victim = await makeVictim();
+      const borrowed = join(base, 'downloads', 'borrowed');
+      await mkdir(borrowed, { recursive: true });
+      await symlink(join(victim, '.tau'), join(borrowed, '.tau'));
+
+      expect(computeStoreWorkspace(borrowed)).toBe(borrowed);
+    });
+
+    it('should stop at a .git symlink instead of adopting an outer worktree', async () => {
+      const victim = await makeVictim();
+      const outer = join(base, 'outer');
+      git(victim, 'worktree', 'add', '-q', outer);
+      await makeProject(join(victim, 'nested'), projectB);
+      const other = join(base, 'other');
+      await mkdir(other, { recursive: true });
+      git(other, 'init', '-q');
+      const inner = join(outer, 'nested');
+      await mkdir(inner, { recursive: true });
+      await symlink(join(other, '.git'), join(inner, '.git'));
+
+      expect(computeStoreWorkspace(inner)).toBe(inner);
+    });
+
+    it('should still give a real linked worktree its main worktree store, also through a symbolic link', async () => {
+      const victim = await makeVictim();
+      git(victim, 'worktree', 'add', '-q', join(base, 'branch'));
+      await symlink(join(base, 'branch'), join(base, 'branch-link'));
+
+      expect(computeStoreWorkspace(join(base, 'branch'))).toBe(`project:${projectA}`);
+      expect(computeStoreWorkspace(join(base, 'branch-link'))).toBe(`project:${projectA}`);
+    });
   });
 });

@@ -2599,6 +2599,7 @@ describe('PublicationsService invite-only entitlement gate on publish (T4/T16)',
   function createGateService(args: { readonly entitled: boolean; readonly link?: Record<string, unknown> }): {
     readonly service: PublicationsService;
     readonly repositoryPath: string;
+    readonly database: TableDatabase;
   } {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
     const database = createTableDatabase([
@@ -2615,7 +2616,7 @@ describe('PublicationsService invite-only entitlement gate on publish (T4/T16)',
       repositoryPath,
       billing: createBillingStub({ canCreatePrivateShares: args.entitled }),
     });
-    return { service, repositoryPath };
+    return { service, repositoryPath, database };
   }
 
   const withoutVisibility = (repositoryPath: string): ReturnType<typeof publishRequest> => {
@@ -2674,6 +2675,16 @@ describe('PublicationsService invite-only entitlement gate on publish (T4/T16)',
         request: { ...withoutVisibility(repositoryPath), defaultVisibility: 'public' },
       }),
     ).resolves.toMatchObject({ share: { visibility: 'private' } });
+  });
+
+  it('clears the description the link showed when the project no longer has one', async () => {
+    const { service, repositoryPath, database } = createGateService({ entitled: true, link: { visibility: 'public' } });
+    Object.assign(database.rows(schema.project)[0] ?? {}, { description: 'An old description' });
+
+    await service.publishFromRevision({ ownerId: 'user_free', request: withoutVisibility(repositoryPath) });
+
+    expect(database.rows(schema.project)[0]?.['description']).toBeNull();
+    expect(database.rows(schema.publication).at(-1)?.['description']).toBeNull();
   });
 
   it('refuses switching a public link to invite-only on publish without the entitlement', async () => {

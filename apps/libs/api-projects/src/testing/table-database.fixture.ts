@@ -246,7 +246,11 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
               return [];
             }
             if (conflict !== undefined) {
-              Object.assign(existing, conflict.set);
+              /* Drizzle leaves a column whose value is `undefined` out of the update, as it does here. */
+              Object.assign(
+                existing,
+                Object.fromEntries(Object.entries(conflict.set).filter(([, column]) => column !== undefined)),
+              );
             }
             return [{ ...existing }];
           }

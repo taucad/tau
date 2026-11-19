@@ -1015,6 +1015,9 @@ export class PublicationsService {
   }): Promise<ProjectShareRow> {
     const { tx, ownerId, request, publicationId, visibility, ownerSnapshot, version } = args;
     const now = new Date();
+    /* The project's own description, or none: an absent one clears what an earlier publish wrote, since Drizzle
+       leaves an `undefined` column out of the update. */
+    const description = request.description ?? null;
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
     await tx
       .insert(schema.project)
@@ -1022,14 +1025,14 @@ export class PublicationsService {
         id: request.projectId,
         ownerId,
         name: request.projectName,
-        description: request.description,
+        description,
         origin: 'local-mirror',
         createdAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: schema.project.id,
-        set: { name: request.projectName, description: request.description, updatedAt: now },
+        set: { name: request.projectName, description, updatedAt: now },
       });
 
     await tx
@@ -1048,7 +1051,7 @@ export class PublicationsService {
         kernels: [...version.kernels],
         entryPath: request.entryPath,
         title: request.projectName,
-        description: request.description,
+        description,
         ownerSnapshot,
         createdAt: now,
       })
@@ -1063,7 +1066,7 @@ export class PublicationsService {
           kernels: [...version.kernels],
           entryPath: request.entryPath,
           title: request.projectName,
-          description: request.description,
+          description,
           unpublishedAt: null,
         },
       });

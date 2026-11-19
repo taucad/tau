@@ -43,7 +43,7 @@ A resource-bound refusal carries `ResourceLimitDetails` in `details`: `limit`, `
 
 <auto-type-table path='./props/types.ts' name='ExportOffer' />
 
-Document results carry `issues`. Successful evaluations offer ordered view and export IDs (possibly no views). A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
+Document results carry `issues`. Successful evaluations offer ordered view and export IDs, possibly no views. A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
 
 `DocumentStatus` and `ViewStatus` describe separate owners. Their events and supersession outcomes are in [Client API](./client).
 
@@ -105,7 +105,7 @@ Document results carry `issues`. Successful evaluations offer ordered view and e
 
 <auto-type-table path='./props/types.ts' name='ViewInstance' />
 
-`evaluate` returns an opaque handle plus ordered view and export IDs; the first view is the default. `render` selects one view and optional named instance without re-evaluating.
+`evaluate` returns an opaque handle plus ordered view and export IDs; the first is the default. `render` selects one view and optional instance without re-evaluating.
 
 <auto-type-table path='./props/types.ts' name='EvaluateInput' />
 

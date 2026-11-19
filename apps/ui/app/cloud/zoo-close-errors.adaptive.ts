@@ -12,4 +12,3 @@ export const zooCloseErrors: Readonly<Record<string, string>> = {
   4402: zooNeutralCloseMessages.credits,
   4403: zooNeutralCloseMessages.pro,
 };
-/* eslint-enable @typescript-eslint/naming-convention -- End numeric WebSocket close-code keys. */

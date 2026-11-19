@@ -94,14 +94,14 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. service-worker-skew.test.ts serves it as two real builds (the next one rebuilt a boot chunk and its importers) with faults injected at the server by Sec-Fetch-Dest, and checks that the web app's service worker never makes the app fail where no worker would (PL7 service worker staging defects blueprint, FP0; operator decision 7 put these rows in the merge queue ahead of the five-nightly ratchet). Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts --environment=node"
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts apps/ui-e2e/src/service-worker-skew.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",

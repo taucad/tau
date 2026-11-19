@@ -350,6 +350,50 @@ export type TurnFailedEvent = Readonly<{
 }>;
 
 /**
+ * Writes the version a publish names. A new version takes the name given; a version published as it is keeps the
+ * name the store holds now, read here rather than when the dialog opened, so a rename since is never undone, and is
+ * not written again unless a note changes it.
+ *
+ * @param port - The store the version is in.
+ * @param input - What `publish.machine`'s `tagging` asks for.
+ * @param actor - Who writes it.
+ * @returns The version as written.
+ * @throws Error When the version named by number is no longer in the store, in words the person can act on.
+ * @public
+ */
+export const writePublishTag = async (
+  port: Pick<RevisionPort, 'listTags' | 'tag'>,
+  input: PublishTagActorInput,
+  actor: RevisionTag['actor'],
+): Promise<RevisionTag> => {
+  const note = input.note === undefined ? {} : { note: input.note };
+  if (input.name !== undefined || input.number === undefined) {
+    return port.tag({
+      name: input.name ?? '',
+      revisionId: revisionId(input.revisionId),
+      ...note,
+      ...(input.number === undefined ? {} : { number: input.number }),
+      actor,
+    });
+  }
+  const tags = await port.listTags();
+  const stored = tags.find((tag) => tag.number === input.number);
+  if (stored === undefined) {
+    throw new Error(`V${String(input.number)} is no longer on this device. Publish again to pick a version.`);
+  }
+  if (input.note === undefined && stored.revisionId === input.revisionId) {
+    return stored;
+  }
+  return port.tag({
+    name: stored.name,
+    revisionId: revisionId(input.revisionId),
+    ...note,
+    number: stored.number,
+    actor,
+  });
+};
+
+/**
  * Fill in the two facts a settlement does not carry, and shape it for the wire.
  *
  * `changedPaths` and `treeId` are graph questions, so they are asked of the
@@ -6656,13 +6700,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* W6's tag members, on a revision that already exists. */
       createTag: fromAuthorityPromise<RevisionTag, PublishTagActorInput>(async ({ input }) => {
         await ensureStore();
-        return port.tag({
-          name: input.name,
-          revisionId: revisionId(input.revisionId),
-          ...(input.note === undefined ? {} : { note: input.note }),
-          ...(input.number === undefined ? {} : { number: input.number }),
-          actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
-        });
+        return writePublishTag(port, input, options.identity.resolve({ runId: undefined, trigger: 'save' }));
       }),
 
       /*

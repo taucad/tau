@@ -39,7 +39,7 @@ const customMethod = (render: () => React.ReactNode) =>
     id: 'tau',
     label: 'Cloud link',
     icon: Link2,
-    description: 'Publish a version and choose who can open it.',
+    description: 'One link that always shows the version you last published.',
     render,
   }) as const;
 
@@ -99,7 +99,7 @@ describe('SharePane', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
 
     expect(screen.getByRole('option', { name: /^Cloud link/u })).toHaveTextContent(
-      'Publish a version and choose who can open it.',
+      'One link that always shows the version you last published.',
     );
   });
 
@@ -397,7 +397,7 @@ describe('SharePane', () => {
         directMethod(),
         customMethod(() => (
           <SharePaneFrame>
-            <SharePaneSection title='Publish a version'>
+            <SharePaneSection title='Link'>
               <p>Hosted body</p>
             </SharePaneSection>
           </SharePaneFrame>
@@ -410,8 +410,8 @@ describe('SharePane', () => {
     await userEvent.click(screen.getByRole('option', { name: /^Cloud link/u }));
 
     expect(onMethodChange).toHaveBeenCalledWith('tau');
-    expect(within(screen.getByRole('region', { name: 'Publish a version' })).getByText('Hosted body')).toBeVisible();
-    expect(screen.getByText('Publish a version and choose who can open it.')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Link' })).getByText('Hosted body')).toBeVisible();
+    expect(screen.getByText('One link that always shows the version you last published.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share with Cloud link' })).toBeInTheDocument();
   });
 

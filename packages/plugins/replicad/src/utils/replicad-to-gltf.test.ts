@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type * as RuntimeKernelModule from '@taucad/runtime/kernel';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
@@ -7,6 +8,19 @@ import type { KernelIssue } from '@taucad/runtime/types';
 import { convertReplicadGeometriesToGltf, createReplicadPackFacts } from '#utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
+
+// The cooperative abort poll: the stand-in throws once `abortAfter` polls have passed (unbounded by default).
+const { abort } = vi.hoisted(() => ({ abort: { polls: 0, abortAfter: Number.POSITIVE_INFINITY } }));
+
+vi.mock('@taucad/runtime/kernel', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeKernelModule>()),
+  checkAbort(): void {
+    abort.polls += 1;
+    if (abort.polls > abort.abortAfter) {
+      throw new Error('Render aborted by a superseding document operation');
+    }
+  },
+}));
 
 // =============================================================================
 // Fixtures
@@ -785,5 +799,36 @@ describe('convertReplicadGeometriesToGltf with kept pack facts (N6)', () => {
 
     convertReplicadGeometriesToGltf({ geometries: [copy], packFacts });
     expect(packFacts.get(copy.faces)).not.toBe(packFacts.get(geometry.faces));
+  });
+});
+
+describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', () => {
+  const parts = (count: number): GeometryReplicad[] =>
+    Array.from({ length: count }, (_, index) => createSimpleGeometry({ name: `Part ${index}` }));
+
+  it('should poll the abort word before each part and before writing', () => {
+    abort.polls = 0;
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+
+    convertReplicadGeometriesToGltf({ geometries: parts(3) });
+
+    expect(abort.polls).toBe(4);
+  });
+
+  it('should stop between parts once a later operation supersedes the render', () => {
+    abort.polls = 0;
+    abort.abortAfter = 1;
+
+    expect(() => convertReplicadGeometriesToGltf({ geometries: parts(3) })).toThrow(/superseding/u);
+    // The first part was packed; the poll before the second stopped the pack instead of writing a stale GLB.
+    expect(abort.polls).toBe(2);
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+  });
+
+  it('should pack the same bytes while nothing aborts', () => {
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+    const geometries = parts(2);
+
+    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(convertReplicadGeometriesToGltf({ geometries }));
   });
 });

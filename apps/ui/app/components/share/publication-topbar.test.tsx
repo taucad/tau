@@ -109,7 +109,7 @@ describe('PublicationTopbar', () => {
   it('starts the copy inside the press and, when the clipboard refuses, shows the link selected', async () => {
     const clipboard = { writeText: vi.fn<Clipboard['writeText']>().mockRejectedValue(new Error('denied')) };
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard });
-    const shareUrl = 'https://tau.example/s/tau~pub_1';
+    const shareUrl = 'https://tau.example/s/tau~shr_1';
 
     render(
       <TooltipProvider>

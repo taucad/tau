@@ -27,7 +27,7 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import type { WorkerRevisionCommand } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const projectId = 'alpha';

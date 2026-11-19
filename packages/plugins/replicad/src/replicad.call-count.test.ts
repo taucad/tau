@@ -86,6 +86,7 @@ const spyOnBindings = (): (() => Counts) => {
     'gp_Trsf.Value': members('gp_Trsf', 'Value'),
     'Poly_Triangulation.UVNode': members('Poly_Triangulation', 'UVNode'),
     'BRepAdaptor_Surface.EvalD1': members('BRepAdaptor_Surface', 'EvalD1'),
+    'ReplicadSurfaceCoordinates.Extract': statics('ReplicadSurfaceCoordinates', 'Extract'),
   };
   return () => Object.fromEntries(Object.entries(spies).map(([name, spy]) => [name, spy.mock.calls.length]));
 };
@@ -159,6 +160,7 @@ const none: Counts = {
   'gp_Trsf.Value': 0,
   'Poly_Triangulation.UVNode': 0,
   'BRepAdaptor_Surface.EvalD1': 0,
+  'ReplicadSurfaceCoordinates.Extract': 0,
 };
 
 /**
@@ -236,20 +238,18 @@ describe('Replicad kernel call counts', () => {
     });
   });
 
-  it('should record per-vertex surface-coordinate calls for a material that needs them', () => {
-    // Blueprint A4 (deferred: needs UV and D1U/D1V buffers in the fork's mesh extractor, charter
-    // D6): an anisotropic or textured material reads `UVNode` and `EvalD1` once per prototype mesh
-    // vertex, so the count grows as the tolerance tightens.
+  it('should read surface coordinates in one native call per prototype mesh, at any tolerance', () => {
+    // Blueprint A4 (N13): an anisotropic or textured material used to read `UVNode` and `EvalD1`
+    // once per prototype mesh vertex (290 coarse, 578 fine). `ReplicadSurfaceCoordinates.Extract`
+    // (replicad-opencascadejs 0.23.0-beta.3) returns them in one call, whatever the vertex count.
     const meshed = {
       ...none,
       ...occurrences(2),
       'ReplicadPrototypeMeshExtractor.ExtractFaces': 1,
       'ReplicadPrototypeMeshExtractor.ExtractEdges': 1,
+      'ReplicadSurfaceCoordinates.Extract': 1,
     };
-    expect({ coarse: texturedCoarse.render, fine: texturedFine.render }).toEqual({
-      coarse: { ...meshed, 'Poly_Triangulation.UVNode': 290, 'BRepAdaptor_Surface.EvalD1': 290 },
-      fine: { ...meshed, 'Poly_Triangulation.UVNode': 578, 'BRepAdaptor_Surface.EvalD1': 578 },
-    });
+    expect({ coarse: texturedCoarse.render, fine: texturedFine.render }).toEqual({ coarse: meshed, fine: meshed });
     expect(texturedCoarse.glb).toEqual(keptOccurrences(2));
     expect(texturedFine.glb).toEqual(keptOccurrences(2));
   });
@@ -351,10 +351,11 @@ describe('Replicad ocTracing summary', () => {
       'replicad.render-output',
       'kernel.export-compute',
     ]);
-    // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
+    // The anisotropic material makes render read surface coordinates through OpenCASCADE (one native call since
+    // replicad-opencascadejs 0.23.0-beta.3; the per-vertex loop's summary counted 9), so each phase has calls.
     // Render's count includes one identity `TopLoc_Location` per shape for its partner hash. Run-main makes 10 calls
     // since `@taulabs/replicad` 1.2.0-beta.1 builds each operation once (taucad/replicad#9), and the live tier's cost
     // estimate of the entry it stores walks its faces (a `TopExp_Explorer`, `More` and `Next`: 3 more).
-    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([13, 9, 13]);
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([13, 2, 13]);
   });
 });

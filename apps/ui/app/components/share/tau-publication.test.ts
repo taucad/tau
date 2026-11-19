@@ -66,8 +66,8 @@ const sampleLoaderData: PublicationRouteLoaderData = {
   },
   viewerRole: 'public',
   urls: {
-    view: 'https://tau.example/s/tau~pub_1',
-    share: 'https://tau.example/s/tau~pub_1',
+    view: 'https://tau.example/s/tau~shr_1',
+    share: 'https://tau.example/s/tau~shr_1',
     og: 'https://cdn.example/defaults/og.png',
     thumbnail: 'https://cdn.example/defaults/thumb.webp',
   },
@@ -148,29 +148,47 @@ describe('Tau publication loader', () => {
     );
   });
 
-  it('returns JSON from GET /v1/publications/:id', async () => {
+  it('returns JSON from GET /v1/shares/:shareId', async () => {
     const data = await loaderJson(
       loaderArgs({
-        request: new Request('http://localhost/s/tau~pub_1'),
-        params: { id: 'pub_1' },
+        request: new Request('http://localhost/s/tau~shr_1'),
+        params: { id: 'shr_1' },
       }),
     );
 
     expect(data['publication']).toEqual(sampleLoaderData.publication);
+    expect(globalThis.fetch).toHaveBeenCalledWith('http://api.test/v1/shares/shr_1', expect.anything());
   });
 
-  it('marks private publication responses as private and non-cacheable', async () => {
+  /* Stable cloud link D2: an old per-version link is not found, with no redirect and no request. */
+  it('says an old per-version link does not exist without asking the API', async () => {
+    await expectThrowsPublicationLock(
+      async () =>
+        loader(
+          loaderArgs({
+            request: new Request('http://localhost/s/tau~pub_1'),
+            params: { id: 'pub_1' },
+          }),
+        ),
+      404,
+      'not-found',
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('marks private link responses as private and non-cacheable', async () => {
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/s/tau~pub_1'),
-        params: { id: 'pub_1' },
+        request: new Request('http://localhost/s/tau~shr_1'),
+        params: { id: 'shr_1' },
       }),
     );
 
     expect(loaderHeaders(result).get('Cache-Control')).toBe('private, no-store');
   });
 
-  it('keeps public publication responses on the CDN-backed cache path', async () => {
+  /* C5: the link shows the version last published and stops on Stop sharing, so no CDN may keep a copy. */
+  it('keeps an anonymous view of a public link out of the CDN cache', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -186,21 +204,22 @@ describe('Tau publication loader', () => {
 
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/s/tau~pub_1'),
-        params: { id: 'pub_1' },
+        request: new Request('http://localhost/s/tau~shr_1'),
+        params: { id: 'shr_1' },
       }),
     );
 
     const headers = loaderHeaders(result);
-    expect(headers.get('Cache-Control')).not.toBe('private, no-store');
-    expect(headers.get('Cache-Tag')).toBe('publication-viewer');
+    expect(headers.get('Cache-Control')).toBe('private, no-store');
+    expect(headers.get('Netlify-CDN-Cache-Control')).toBeNull();
+    expect(headers.get('Cache-Tag')).toBeNull();
   });
 
   it.each([
     { label: 'the owner', viewerRole: 'owner', cookie: 'tau.session_token=owner' },
     { label: 'a grantee', viewerRole: 'grantee', cookie: '__Secure-tau.session_token=grantee' },
     { label: 'a signed-in public viewer', viewerRole: 'public', cookie: 'tau-theme=dark; tau.session_token=viewer' },
-  ])('keeps a public publication viewed by $label out of the CDN cache', async ({ viewerRole, cookie }) => {
+  ])('keeps a public link viewed by $label out of the CDN cache', async ({ viewerRole, cookie }) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -217,8 +236,8 @@ describe('Tau publication loader', () => {
 
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/s/tau~pub_1', { headers: [['Cookie', cookie]] }),
-        params: { id: 'pub_1' },
+        request: new Request('http://localhost/s/tau~shr_1', { headers: [['Cookie', cookie]] }),
+        params: { id: 'shr_1' },
       }),
     );
 
@@ -241,22 +260,22 @@ describe('Tau publication loader', () => {
 
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/s/tau~pub_1'),
-        params: { id: 'pub_1' },
+        request: new Request('http://localhost/s/tau~shr_1'),
+        params: { id: 'shr_1' },
       }),
     );
 
     expect(loaderHeaders(result).get('Set-Cookie')).toBeNull();
   });
 
-  it('propagates 404 / 410 / 429 as typed lock reasons', async () => {
+  it('propagates 404 / 410 (a stopped link) / 429 as typed lock reasons', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
     await expectThrowsPublicationLock(
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       404,
@@ -268,8 +287,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       410,
@@ -281,8 +300,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       429,
@@ -301,8 +320,8 @@ describe('Tau publication loader', () => {
     try {
       await loader(
         loaderArgs({
-          request: new Request('http://localhost/s/tau~pub_1'),
-          params: { id: 'pub_1' },
+          request: new Request('http://localhost/s/tau~shr_1'),
+          params: { id: 'shr_1' },
         }),
       );
       throw new Error('expected Response rejection');
@@ -329,8 +348,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       403,
@@ -345,8 +364,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       503,
@@ -361,8 +380,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       503,
@@ -382,8 +401,8 @@ describe('Tau publication loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/s/tau~pub_1'),
-            params: { id: 'pub_1' },
+            request: new Request('http://localhost/s/tau~shr_1'),
+            params: { id: 'shr_1' },
           }),
         ),
       503,
@@ -427,7 +446,7 @@ describe('Tau publication client environment', () => {
  * reads.
  */
 const metaArgs = (loaderData: Parameters<typeof meta>[0]['loaderData']): Parameters<typeof meta>[0] =>
-  ({ loaderData, params: { id: 'pub_1' }, location: {}, matches: [] }) as unknown as Parameters<typeof meta>[0];
+  ({ loaderData, params: { id: 'shr_1' }, location: {}, matches: [] }) as unknown as Parameters<typeof meta>[0];
 
 describe('Tau publication metadata', () => {
   it('emits social image metadata only when the canonical thumbnail is present in files', () => {

@@ -20,7 +20,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { useDeleteCloudProject } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 /** One overflow owner for cloud-only, downloaded and trashed projects. */
 export function ProjectActionMenu({

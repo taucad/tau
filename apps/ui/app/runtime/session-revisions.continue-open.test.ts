@@ -15,7 +15,7 @@ vi.mock('#environment.config.js', async (importOriginal) => ({
   requireClientEnvironmentUrl: () => 'https://api.test',
 }));
 
-const { setRevisionSessionUser } = await import('#lib/revision-actor.js');
+const { setRevisionSessionUser } = await import('@taucad/revisions-ui/lib/revision-actor');
 const { tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 const { cloudOpenContinuationTestApi, continueCloudOpen } = await import('#hooks/use-cloud-projects.js');
 const { revisionClientTestApi } = await import('#hooks/use-revision-status.js');

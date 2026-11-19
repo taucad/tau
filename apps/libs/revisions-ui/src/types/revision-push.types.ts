@@ -3,9 +3,8 @@
  * who-resolver sees it (blueprint A3, client half; I2 step 2).
  *
  * The store that reads `GET /v1/projects/:projectId/git/pushes` and joins it to
- * the rows the page holds stays in the app (`lib/revision-pushes`: the API
- * origin and the request id). These are the shapes it hands out, so the
- * resolver here reads them without reaching that store.
+ * the rows the page holds is `lib/revision-pushes`. These are the shapes it
+ * hands out, so the resolver here reads them without reaching that store.
  */
 
 /**

@@ -43,6 +43,7 @@ import type {
   PublishPublicationActorOutput,
   PublishDraft,
   PublishFacet,
+  PublishVisibility,
 } from '#publish.types.js';
 
 /** Input accepted when creating the publishMachine actor. @public */
@@ -81,6 +82,8 @@ export type PublishMachineContext = Readonly<{
   tag: string | undefined;
   /** The version `tagging` made or renamed, whose tag `pushing` and `publishing` name (B6). */
   version: number | undefined;
+  /** That version's name, as `tagging` left it. */
+  versionName: string | undefined;
   /** The id the running `publish` was asked under; its answer echoes it (RM-R1). */
   requestId: string | undefined;
   draft: PublishDraft | undefined;
@@ -111,8 +114,16 @@ export type PublishMachineEvent =
 
 /** Facts publishMachine emits for a host that holds only the root. @public */
 export type PublishMachineEmitted =
-  /* `tag` is the published version's tag, `v<number>` (B6). */
-  | Readonly<{ type: 'published'; requestId: string; publicationId: string; url: string; tag: string }>
+  /* `tag` is the published version's tag, `v<number>` (B6); `name` its name; `visibility` the link's setting. */
+  | Readonly<{
+      type: 'published';
+      requestId: string;
+      publicationId: string;
+      url: string;
+      tag: string;
+      name: string;
+      visibility: PublishVisibility;
+    }>
   | Readonly<{ type: 'toast.info'; message: string }>
   /* `code` names a refusal the page phrases; the other refusals are still sentences (a Rule 1 gap the guide records). */
   | Readonly<{ type: 'toast.error'; requestId: string; message: string; code?: 'REVISIONS_BUSY' }>;
@@ -140,7 +151,17 @@ export type PublishVersionsActorOutput = Readonly<{
  * What `createTag` is asked to name: a new version, or with `number` the
  * existing version on this revision, renamed to `name` (B6). @public
  */
-export type PublishTagActorInput = Readonly<{ name: string; revisionId: string; note?: string; number?: number }>;
+export type PublishTagActorInput = Readonly<{
+  /**
+   * The new version's name. Absent with {@link PublishTagActorInput.number}: the version keeps the name it has where
+   * the tag is written, so a rename that landed after the names were read is never undone.
+   */
+  name?: string;
+  revisionId: string;
+  note?: string;
+  /** The number of the version being published as it is; absent for a new version. */
+  number?: number;
+}>;
 
 /** What `push` is asked to offer: the history set, tag included. @public */
 export type PublishPushActorInput = Readonly<{
@@ -180,6 +201,7 @@ type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
 const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>): Partial<PublishMachineContext> => ({
   tag: event.tag,
   version: undefined,
+  versionName: undefined,
   requestId: event.requestId,
   revisionId: event.revisionId,
   draft: undefined,
@@ -201,15 +223,23 @@ const failWith = (
 
 /*
  * The version a draft publishes as it is: the one it names by number, or else
- * one with its name, on the revision being published. A version never moves
- * to another revision (Q13), so a name on another revision makes a new one.
+ * one with its name, on the revision being published. An auto-named draft takes
+ * any version that entry already has, newest first as the port lists them
+ * (rule 14). A version never moves to another revision (Q13), so a name on
+ * another revision makes a new one.
  */
-const existingVersion = (context: PublishMachineContext): RevisionTag | undefined =>
-  context.tags.find(
-    (tag) =>
-      tag.revisionId === context.revisionId &&
-      (context.draft?.version === undefined ? tag.name === context.draft?.tag : tag.number === context.draft.version),
-  );
+const existingVersion = (context: PublishMachineContext): RevisionTag | undefined => {
+  const { draft } = context;
+  return context.tags.find((tag) => {
+    if (tag.revisionId !== context.revisionId) {
+      return false;
+    }
+    if (draft?.version !== undefined) {
+      return tag.number === draft.version;
+    }
+    return draft?.isAutoNamed === true || tag.name === draft?.tag;
+  });
+};
 
 /*
  * The version a republish names by number (B6): it publishes that version's
@@ -220,6 +250,27 @@ const republished = (draft: PublishDraft | undefined, tags: readonly RevisionTag
   draft?.version === undefined ? undefined : tags.find((tag) => tag.number === draft.version);
 
 const notOnThisDevice = 'That version isn’t on this device yet. Get the latest changes, then publish it again.';
+
+/*
+ * An entry carries at most one version (rule 14). A name the person typed that
+ * the entry's version does not have is refused: publishing it would make a
+ * second version on the entry, and renaming is not what a publish does.
+ */
+const alreadyVersioned = (
+  draft: PublishDraft,
+  tags: readonly RevisionTag[],
+  revisionId: string | undefined,
+): string | undefined => {
+  if (draft.version !== undefined || draft.isAutoNamed === true) {
+    return undefined;
+  }
+  const onEntry = tags.filter((tag) => tag.revisionId === revisionId);
+  const [version] = onEntry;
+  if (version === undefined || onEntry.some((tag) => tag.name === draft.tag)) {
+    return undefined;
+  }
+  return `This entry is already V${String(version.number)} “${version.name}”. Publish it as is, or save a new entry first.`;
+};
 
 /* The tag `pushing` and `publishing` name once `tagging` has made it: `v<number>`,
  * as `versionTagName` spells it (a machine imports no value from the port). */
@@ -258,6 +309,7 @@ const publishMachineDefinition = setup({
     remoteTags: {},
     tag: undefined,
     version: undefined,
+    versionName: undefined,
     requestId: undefined,
     draft: undefined,
     pushId: undefined,
@@ -330,6 +382,11 @@ const publishMachineDefinition = setup({
               if (context.draft?.version !== undefined && version === undefined) {
                 return { target: '#publish.error', context: { ...read, ...failWith(context, enq, notOnThisDevice) } };
               }
+              const versioned =
+                context.draft === undefined ? undefined : alreadyVersioned(context.draft, read.tags, read.revisionId);
+              if (versioned !== undefined) {
+                return { target: '#publish.error', context: { ...read, ...failWith(context, enq, versioned) } };
+              }
               /* A name was confirmed while the read was in flight. */
               return context.draft === undefined
                 ? { target: 'ready', context: read }
@@ -354,6 +411,10 @@ const publishMachineDefinition = setup({
               const version = republished(event.draft, context.tags);
               if (event.draft.version !== undefined && version === undefined) {
                 return { target: '#publish.error', context: failWith(context, enq, notOnThisDevice) };
+              }
+              const versioned = alreadyVersioned(event.draft, context.tags, context.revisionId);
+              if (versioned !== undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, versioned) };
               }
               return {
                 target: '#publish.tagging',
@@ -382,14 +443,17 @@ const publishMachineDefinition = setup({
         input: ({ context }) => {
           const existing = existingVersion(context);
           return {
-            /* A republish keeps the version's stored name; only a new publish names it. */
-            name: republished(context.draft, context.tags)?.name ?? context.draft?.tag ?? '',
+            /* Only a new version is named here. A version published as it is keeps the name it has where the tag
+             * is written, not the one read when the dialog opened: a publish never renames a version. */
+            ...(existing === undefined ? { name: context.draft?.tag ?? '' } : { number: existing.number }),
             revisionId: context.revisionId ?? '',
             ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
-            ...(existing === undefined ? {} : { number: existing.number }),
           };
         },
-        onDone: ({ event }) => ({ target: 'pushing', context: { version: event.output.number } }),
+        onDone: ({ event }) => ({
+          target: 'pushing',
+          context: { version: event.output.number, versionName: event.output.name },
+        }),
         onError: ({ context, event }, enq) => ({
           target: 'error',
           context: failWith(context, enq, reason(event.error)),
@@ -484,9 +548,10 @@ const publishMachineDefinition = setup({
     },
 
     /**
-     * The row: `{ projectId, tag, revisionId }` plus what only a person
-     * decides. The server materializes the named tree from the pack it just
-     * received, so nothing is uploaded twice (A21).
+     * The row: `{ projectId, tag, revisionId }`, the project's name and
+     * description, and who can open the link when the person chose. The server
+     * materializes the named tree from the pack it just received, so nothing
+     * is uploaded twice (A21), and points the project's one cloud link at it.
      */
     publishing: {
       tags: ['busy'],
@@ -495,17 +560,16 @@ const publishMachineDefinition = setup({
         input: ({ context }) => {
           /* The draft is set before `tagging` is entered and `publishing` is
            * only reachable through it; the fallback keeps the type honest. */
-          const {
-            tag: _name,
-            version: _version,
-            ...draft
-          } = context.draft ??
-          ({ tag: '', projectName: '', entryPath: '', visibility: 'private', title: '' } satisfies PublishDraft);
+          const draft = context.draft ?? ({ tag: '', projectName: '', entryPath: '' } satisfies PublishDraft);
           return {
-            ...draft,
             projectId: context.projectId,
+            projectName: draft.projectName,
             tag: versionTagOf(context),
             revisionId: context.revisionId ?? '',
+            entryPath: draft.entryPath,
+            ...(draft.description === undefined ? {} : { description: draft.description }),
+            ...(draft.visibility === undefined ? {} : { visibility: draft.visibility }),
+            ...(draft.defaultVisibility === undefined ? {} : { defaultVisibility: draft.defaultVisibility }),
           };
         },
         onDone: ({ context, event }, enq) => {
@@ -515,6 +579,8 @@ const publishMachineDefinition = setup({
             publicationId: event.output.publicationId,
             url: event.output.url,
             tag: versionTagOf(context),
+            name: context.versionName ?? context.draft?.tag ?? '',
+            visibility: event.output.visibility,
           });
           return {
             target: 'success',
@@ -558,7 +624,7 @@ export interface PublishMachine extends PublishMachineDefinition {}
  * Headless publication of one project's named version.
  *
  * @public
- * @example <caption>Publish the head of `main` as a new version named Ready for print</caption>
+ * @example <caption>Publish the head of `main` as a new version named Ready for print, to a link anyone can open</caption>
  * ```typescript
  * import { createActor } from 'xstate';
  * import { publishMachine } from '@taucad/revisions/publish-machine';
@@ -570,7 +636,7 @@ export interface PublishMachine extends PublishMachineDefinition {}
  * actor.send({ type: 'publish', requestId: 'publish-1' });
  * actor.send({
  *   type: 'confirm',
- *   draft: { tag: 'Ready for print', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },
+ *   draft: { tag: 'Ready for print', projectName: 'Bracket', entryPath: 'main.ts', visibility: 'public' },
  * });
  * ```
  */
@@ -578,6 +644,25 @@ export const publishMachine: PublishMachine = publishMachineDefinition;
 
 /** The actor set `publishMachine.provide` needs. @public */
 export type PublishActors = MachineActors<typeof publishMachine>;
+
+/**
+ * The name a publish gives a version nobody named: `Shared Nov 19`, in the
+ * person's locale (`Shared 19 Nov`, `Shared 19. Nov.`). The host makes it,
+ * because only the host has a locale; the machine never formats a date.
+ *
+ * @param date - When the version is published.
+ * @param locales - The person's locale; the runtime's default when absent.
+ * @returns The version's name, sent with `isAutoNamed: true`.
+ * @public
+ * @example <caption>Name a version for a publish nobody named</caption>
+ * ```typescript
+ * import { autoVersionName } from '@taucad/revisions/publish-machine';
+ *
+ * autoVersionName(new Date('2026-11-19T12:00:00Z'), 'en-US'); // 'Shared Nov 19'
+ * ```
+ */
+export const autoVersionName = (date: Date, locales?: Intl.LocalesArgument): string =>
+  `Shared ${date.toLocaleDateString(locales, { month: 'short', day: 'numeric' })}`;
 
 const phaseOf = (value: unknown): PublishFacet['phase'] => {
   /* `choosingVersion` has children, so the snapshot value is an object there. */

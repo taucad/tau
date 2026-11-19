@@ -97,14 +97,14 @@ describe('/s provider dispatch', () => {
     await expect(loader(loaderArgs('builtin~replicad.missing'))).rejects.toMatchObject({ status: 404 });
   });
 
-  it('resolves provider-qualified Tau references through the Tau loader', async () => {
-    const slug = 'tau~pub_123';
+  it('resolves provider-qualified cloud links through the cloud link loader', async () => {
+    const slug = 'tau~shr_123';
     await loader(loaderArgs(slug));
-    expect(loadPublication.mock.calls.at(-1)?.[0].params['id']).toBe('pub_123');
+    expect(loadPublication.mock.calls.at(-1)?.[0].params['id']).toBe('shr_123');
   });
 
   it('rejects bare references instead of guessing a provider', async () => {
-    await expect(loader(loaderArgs('pub_bare'))).rejects.toThrow('must identify its provider');
+    await expect(loader(loaderArgs('shr_bare'))).rejects.toThrow('must identify its provider');
     expect(loadPublication).not.toHaveBeenCalled();
   });
 

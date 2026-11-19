@@ -38,6 +38,51 @@ export const parseSigntoolVerification = (output: string): EmbeddedSignatureVerd
 /** The signer Windows reports for its own operating-system components through the OS catalog. */
 const windowsComponentSigner = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US';
 
+type WindowsSignatureExpectation = {
+  path: string;
+  publisher: string;
+  timestampRequired: boolean;
+  expectedVersion?: string;
+  expectedProductName?: string;
+  allowWindowsComponent?: boolean;
+};
+
+/** Name each field that disagrees, by the observed report's key; product fields add their public expected value. */
+const identityDisagreements = (
+  signature: z.infer<typeof signatureSchema>,
+  expected: WindowsSignatureExpectation,
+  trustedSigner: boolean,
+): string[] => {
+  const disagreements: string[] = [];
+  if (
+    !win32.isAbsolute(expected.path) ||
+    win32.normalize(signature.path).toLowerCase() !== win32.normalize(expected.path).toLowerCase()
+  ) {
+    disagreements.push('path');
+  }
+  if (!expected.publisher.trim() || signature.embeddedSubject !== expected.publisher) {
+    disagreements.push('embeddedSubject');
+  }
+  if (!trustedSigner) {
+    if (signature.signatureType !== 'Authenticode' || signature.osBinary) {
+      disagreements.push('signatureType');
+    }
+    if (signature.subject !== expected.publisher) {
+      disagreements.push('subject');
+    }
+    if (expected.timestampRequired && !signature.timestamp) {
+      disagreements.push('timestamp');
+    }
+  }
+  if (expected.expectedVersion !== undefined && signature.productVersion !== expected.expectedVersion) {
+    disagreements.push(`productVersion (expected ${JSON.stringify(expected.expectedVersion)})`);
+  }
+  if (expected.expectedProductName !== undefined && signature.productName !== expected.expectedProductName) {
+    disagreements.push(`productName (expected ${JSON.stringify(expected.expectedProductName)})`);
+  }
+  return disagreements;
+};
+
 /**
  * Bind Windows' trust verdict to the requested file and complete publisher identity.
  *
@@ -50,14 +95,7 @@ const windowsComponentSigner = 'CN=Microsoft Windows, O=Microsoft Corporation, L
  */
 export const validateWindowsSignature = (
   value: unknown,
-  expected: {
-    path: string;
-    publisher: string;
-    timestampRequired: boolean;
-    expectedVersion?: string;
-    expectedProductName?: string;
-    allowWindowsComponent?: boolean;
-  },
+  expected: WindowsSignatureExpectation,
   embedded?: EmbeddedSignatureVerdict,
 ): void => {
   const signature = signatureSchema.parse(value);
@@ -74,15 +112,8 @@ export const validateWindowsSignature = (
     win32.basename(expected.path).toLowerCase() !== 'tau.exe' &&
     embedded?.verified === true &&
     (!expected.timestampRequired || embedded.timestamped);
-  if (
-    !win32.isAbsolute(expected.path) ||
-    !expected.publisher.trim() ||
-    win32.normalize(signature.path).toLowerCase() !== win32.normalize(expected.path).toLowerCase() ||
-    signature.embeddedSubject !== expected.publisher ||
-    !(embeddedPublisher || windowsComponent) ||
-    (expected.expectedVersion !== undefined && signature.productVersion !== expected.expectedVersion) ||
-    (expected.expectedProductName !== undefined && signature.productName !== expected.expectedProductName)
-  ) {
+  const disagreements = identityDisagreements(signature, expected, embeddedPublisher || windowsComponent);
+  if (disagreements.length > 0) {
     // Certificate subjects and product fields are public identity, never secrets; print them so a failure is diagnosable.
     // Reports never carry a directory (a runtime update lives under the user's profile), only the file name.
     const observed = {
@@ -92,10 +123,24 @@ export const validateWindowsSignature = (
       embedded,
     };
     throw new Error(
-      `Windows signature path, publisher, timestamp or signed product identity disagrees with the required identity: ${JSON.stringify(observed)}`,
+      `Windows signature disagrees with the required identity in ${disagreements.join(', ')}: ${JSON.stringify(observed)}`,
     );
   }
 };
+
+/**
+ * The signed product identity of a Windows release file. The NSIS installer carries the channel's product name (Tau
+ * Staging on staging). The application executable, Tau.exe, is stamped by Electron Packager in package-desktop.mts with
+ * the product name Tau on every channel, the same as the Mac bundle; its channel is bound by its bytes, its ASAR
+ * manifest and its installation marker instead. Both carry the channel's package version.
+ */
+export const windowsProductIdentity = (
+  release: { readonly channel: 'production' | 'staging'; readonly version: string },
+  file: 'installer' | 'executable',
+): { expectedVersion: string; expectedProductName: string } => ({
+  expectedVersion: release.version,
+  expectedProductName: file === 'installer' && release.channel === 'staging' ? 'Tau Staging' : 'Tau',
+});
 
 const execute = promisify(execFile);
 // File names are process data, never PowerShell source. ConvertTo-Json failure is fatal.

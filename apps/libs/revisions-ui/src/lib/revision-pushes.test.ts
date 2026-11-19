@@ -2,16 +2,18 @@
  * Tau Cloud's push records, joined to the graph the page holds (blueprint A3,
  * client half): the read is incremental and cached per account and project,
  * and a non-member's `404` resolves nothing. The parse and the join are
- * `@taucad/revisions-ui/lib/revision-push-records`' own suite.
+ * `./revision-push-records`' own suite.
  */
 
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getPushRecords, holdRevisionGraph, refreshPushRecords, resetPushRecords } from '#lib/revision-pushes.js';
+import { createRevisionPushStore } from '#lib/revision-pushes.js';
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
-vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test.local/' } }));
+/* The app's API origin, with the trailing `/` the store drops. */
+const { getPushRecords, holdRevisionGraph, refreshPushRecords, resetPushRecords } = createRevisionPushStore({
+  apiBaseUrl: () => 'https://api.test.local/',
+});
 
 /*
  * The fixture graph, oldest at the bottom:

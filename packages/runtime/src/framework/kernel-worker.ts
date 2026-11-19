@@ -1814,6 +1814,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let initialWatchRefusal: { error: unknown } | undefined;
     const pending = this.enqueueOperation(
       async () => {
+        // Build elapsed: queue wait excluded, the parameter description included.
+        const buildStarted = performance.now();
         const previousProgress = this.onProgress;
         this.activeDocumentEvaluationController = controller;
         this.activeDocumentEvaluationSequence = Number(evaluationId) >>> 0;
@@ -1905,7 +1907,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           } else {
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
-            const buildStarted = performance.now();
             const buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
             this.buildRun = buildRun;
             const { artifact } = await this.materializeRender(

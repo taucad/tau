@@ -38,7 +38,9 @@ const assembly = `
 type Step =
   | 'render'
   | 'render:high'
+  | 'render:high:edgeless'
   | 'glb'
+  | 'glb:edges'
   | 'gltf'
   | 'glb:z-up'
   | 'stl'
@@ -71,8 +73,18 @@ const exportSession = async (computeReuse: boolean, steps: readonly Step[], para
       }
       const before = spans.length;
       let bytes: Uint8Array<ArrayBuffer>;
-      if (step === 'render' || step === 'render:high') {
-        const view = document.view('model', step === 'render' ? {} : { options: { tessellation: 'high' } });
+      if (step.startsWith('render')) {
+        const view = document.view(
+          'model',
+          step === 'render'
+            ? {}
+            : {
+                options: { tessellation: 'high' },
+                ...(step === 'render:high:edgeless'
+                  ? { content: { includeEdges: false, includeTopology: false } }
+                  : {}),
+              },
+        );
         const outcome = await view.rendering();
         view.close();
         if (
@@ -84,10 +96,14 @@ const exportSession = async (computeReuse: boolean, steps: readonly Step[], para
         }
         bytes = outcome.rendering.artifact.content;
       } else {
-        const [format, system] = step.split(':') as ['glb' | 'gltf' | 'stl', 'y-up' | 'z-up' | undefined];
+        const [format, suffix] = step.split(':') as ['glb' | 'gltf' | 'stl', 'y-up' | 'z-up' | 'edges' | undefined];
         const result = await document.export(
           format,
-          system === undefined ? {} : { options: { coordinateSystem: system } },
+          suffix === undefined
+            ? {}
+            : suffix === 'edges'
+              ? { content: { includeEdges: true } }
+              : { options: { coordinateSystem: suffix } },
         );
         if (!result.success) {
           throw new Error(`export failed: ${JSON.stringify(result.issues)}`);
@@ -138,6 +154,22 @@ describe('replicad exports compose kept meshes', () => {
         ['stl', false],
         ['render', true],
       ]);
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should reuse the export slot mesh for an edge-collecting export after an edgeless render',
+    async () => {
+      const [reference] = await exportSession(false, ['glb:edges']);
+      const [, first, repeat] = await exportSession(true, ['render:high:edgeless', 'glb:edges', 'glb:edges']);
+
+      // The edgeless display meshes cannot serve an export that collects edges: the first export meshes into the
+      // export slot, and the repeat takes the slot's meshes instead of the unusable display ones.
+      expect(first!.meshed).toBeGreaterThan(0);
+      expect(repeat!.meshed).toBe(0);
+      expect(first!.digest).toBe(reference!.digest);
+      expect(repeat!.digest).toBe(reference!.digest);
     },
     renderTimeout,
   );

@@ -201,23 +201,39 @@ export function createReplicadMeshMemo({
     return partner;
   };
 
-  /** A kept mesh or group: the display memo's, else the export slot's. */
-  const kept = (info: ReplicadShapeOccurrenceInfo, key: string): MemoMesh | readonly MemoMesh[] | undefined => {
+  /**
+   * A kept mesh or group that `usable` accepts: the display memo's first, then the running export's slot, then the
+   * previous export's. An unusable display mesh (no edges when edges are requested) does not hide a usable slot one.
+   * @param info - The occurrence.
+   * @param key - The memo key.
+   * @param usable - Whether a candidate can serve the caller.
+   * @returns The first usable candidate, if any.
+   */
+  const kept = (
+    info: ReplicadShapeOccurrenceInfo,
+    key: string,
+    usable: (value: MemoMesh | readonly MemoMesh[]) => boolean,
+  ): MemoMesh | readonly MemoMesh[] | undefined => {
     const partner = partnerOf(info);
     if (!partner) {
       return undefined;
     }
     const shown = partner.meshes.get(key);
-    if (shown !== undefined) {
+    if (shown !== undefined && usable(shown)) {
       return shown;
     }
     const id = slotKey(info.partnerKey, key);
-    const exported = pending?.get(id) ?? exportSlot.get(id);
-    // A running export carries what it reads from the slot into its own, so its successor keeps it.
-    if (exported !== undefined && pending !== undefined) {
-      pending.set(id, exported);
+    const running = pending?.get(id);
+    if (running !== undefined && usable(running.value)) {
+      return running.value;
     }
-    return exported?.value;
+    const previous = exportSlot.get(id);
+    if (previous === undefined || !usable(previous.value)) {
+      return undefined;
+    }
+    // A running export carries what it reads from the slot into its own, so its successor keeps it.
+    pending?.set(id, previous);
+    return previous.value;
   };
 
   /** Keeps a mesh or group: in the display memo, or during an export in the export's own slot. */
@@ -329,8 +345,10 @@ export function createReplicadMeshMemo({
     readOccurrence,
     packFacts: createReplicadPackFacts(),
     lookup(info, key, { usable, parts = 1 } = {}) {
-      const mesh = kept(info, key) as MemoMesh | undefined;
-      if (mesh && (usable === undefined || usable(mesh))) {
+      const mesh = kept(info, key, (value) => usable === undefined || usable(value as MemoMesh)) as
+        | MemoMesh
+        | undefined;
+      if (mesh) {
         counters.hits += parts;
         return mesh;
       }
@@ -341,8 +359,11 @@ export function createReplicadMeshMemo({
       keepFor(info, key, mesh);
     },
     lookupGroup(prototype, key, { instances, usable }) {
-      const meshes = kept(prototype, key) as readonly MemoMesh[] | undefined;
-      if (meshes?.length === instances && (usable === undefined || usable(meshes))) {
+      const meshes = kept(prototype, key, (value) => {
+        const group = value as readonly MemoMesh[];
+        return group.length === instances && (usable === undefined || usable(group));
+      }) as readonly MemoMesh[] | undefined;
+      if (meshes) {
         counters.hits += instances;
         return meshes;
       }

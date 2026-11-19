@@ -24,8 +24,8 @@ const parameters = {
   defaults: { size: 1 },
 } as const;
 
-/** A kernel whose evaluate reports what the next call returns, and counts its runs. */
-const reportingClient = (report: () => KernelBuildReport | undefined) => {
+/** A kernel whose evaluate reports what the next call returns, and counts its runs; `describeDelay` slows describe. */
+const reportingClient = (report: () => KernelBuildReport | undefined, describeDelay = 0) => {
   const runs = { count: 0 };
   const kernel = defineKernelV2({
     id: 'build-report',
@@ -41,6 +41,11 @@ const reportingClient = (report: () => KernelBuildReport | undefined) => {
       return { resolved: [entryPath], unresolved: [] };
     },
     async describe() {
+      if (describeDelay > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, describeDelay);
+        });
+      }
       return createKernelSuccess({ parameters });
     },
     async evaluate() {
@@ -199,6 +204,48 @@ it('reports the elapsed time to a tenth of a millisecond', async () => {
   try {
     const { build } = (await evaluated(document.evaluation())) as { build?: { elapsed: number } };
     expect(Math.round(build!.elapsed * 10) / 10).toBe(build!.elapsed);
+  } finally {
+    document.close();
+    await client.shutdown();
+  }
+});
+
+/** A report whose `property` getter throws, as a plain JavaScript kernel can return. */
+const throwingReport = (property: string): KernelBuildReport => {
+  const report = { operations: { reused: 1, computed: 2 } };
+  Object.defineProperty(report, property, {
+    enumerable: true,
+    get() {
+      throw new Error(`${property} getter`);
+    },
+  });
+  return report as KernelBuildReport;
+};
+
+it('drops a kernel report whose getters throw', () => {
+  expect(admitKernelBuildReport(throwingReport('costliest'))).toBeUndefined();
+  expect(admitKernelBuildReport(throwingReport('reused'))).toBeUndefined();
+});
+
+it('keeps an evaluation successful when its kernel report throws on read', async () => {
+  const { client } = reportingClient(() => throwingReport('costliest'));
+  const document = client.open({ source: { files: { 'model.part': 'a' } }, watch: false });
+  try {
+    const evaluation = await evaluated(document.evaluation());
+    expect(evaluation).toMatchObject({ success: true });
+    expect(evaluation.build).toStrictEqual({ reused: false, elapsed: anyNumber });
+  } finally {
+    document.close();
+    await client.shutdown();
+  }
+});
+
+it('counts a slow parameter description in the elapsed time', async () => {
+  const { client } = reportingClient(() => undefined, 60);
+  const document = client.open({ source: { files: { 'model.part': 'a' } }, watch: false });
+  try {
+    const { build } = (await evaluated(document.evaluation())) as { build?: { elapsed: number } };
+    expect(build!.elapsed).toBeGreaterThanOrEqual(50);
   } finally {
     document.close();
     await client.shutdown();

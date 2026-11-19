@@ -30,6 +30,14 @@ class CloudSurfaceBoundary extends Component<BoundaryProps, { readonly hasFailed
   }
 }
 
+/** Calls the surface's render beneath both local boundaries, so a throw or a suspension in it is contained. */
+function CloudRendering<Module>({
+  module,
+  render,
+}: Readonly<{ module: Module; render: (module: Module) => ReactNode }>): ReactNode {
+  return render(module);
+}
+
 /** What {@link CloudSurface} takes. @public */
 export type CloudSurfaceProps<Module> = Readonly<{
   /** The entry's loader; none while the surface has no Cloud chunk (the W2 skeleton). */
@@ -79,7 +87,9 @@ export function CloudSurface<Module>({
   }
   return (
     <CloudSurfaceBoundary key={identityKey} fallback={fallback}>
-      <Suspense fallback={fallback}>{render(state.module)}</Suspense>
+      <Suspense fallback={fallback}>
+        <CloudRendering module={state.module} render={render} />
+      </Suspense>
     </CloudSurfaceBoundary>
   );
 }

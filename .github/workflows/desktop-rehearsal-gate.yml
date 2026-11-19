@@ -116,9 +116,11 @@ jobs:
 
       # The services utility renders under plain Node, and the runner has no GPU: lavapipe, as in e2e-nightly.yml.
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       # The rehearsal boots a real API, which reads this file for its `BILLING_*` development values.
       - name: Prepare API env file

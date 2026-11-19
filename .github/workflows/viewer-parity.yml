@@ -175,10 +175,13 @@ jobs:
         with:
           name: viewer-parity-fixtures
           path: ${{ env.PARITY_FIXTURES_OUT }}
-      - name: Install Chromium and Xvfb
-        run: |
-          pnpm exec playwright install --with-deps chromium
-          sudo apt-get install -y xvfb
+      - name: Install Xvfb and Chromium's system dependencies
+        uses: ./.github/actions/apt-install
+        with:
+          packages: xvfb
+          playwright-browsers: chromium
+      - name: Install Chromium
+        run: pnpm exec playwright install chromium
       - name: Deal this shard's fixtures
         id: deal
         env:
@@ -227,12 +230,15 @@ jobs:
         with:
           name: viewer-parity-fixtures
           path: ${{ env.PARITY_FIXTURES_OUT }}
-      - name: Install lavapipe and Chromium
+      - name: Install lavapipe and Chromium's system dependencies
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+          playwright-browsers: chromium
+      - name: Install Chromium and select lavapipe
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers
           echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
-          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright install chromium
       - name: Download the viewer references
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

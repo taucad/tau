@@ -111,8 +111,12 @@ jobs:
           persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+      - name: Install Chromium and WebKit (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium webkit
       - name: Install Chromium and WebKit
-        run: pnpm exec playwright install --with-deps chromium webkit
+        run: pnpm exec playwright install chromium webkit
       - name: Validate polling helpers
         run: pnpm nx run ui-e2e:test:observability-helpers
       - name: Check deployed harness

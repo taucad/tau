@@ -29,8 +29,12 @@ jobs:
           persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+      - name: Install the three browsers (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install the three browsers
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: pnpm exec playwright install chromium firefox webkit
       - name: Measure and tamper
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"

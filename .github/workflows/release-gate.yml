@@ -373,8 +373,12 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: pnpm exec playwright install chromium firefox webkit
 
       - name: Install Pandoc for reference conversion
         run: |
@@ -386,9 +390,11 @@ jobs:
         uses: ./.github/actions/setup-linux-sandbox
 
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       - name: Prepare API env file
         run: cp apps/api/.env.example apps/api/.env

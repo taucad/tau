@@ -76,16 +76,31 @@ describe('setup step 3', () => {
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
   });
 
-  it('asks how the view turns, Turntable first, and the preview turns as the choice does', async () => {
+  it('asks for the orbit style, Turntable first, and the preview turns as the choice does', async () => {
     const user = userEvent.setup();
     renderViewerStep();
-    const orbit = screen.getByRole('radiogroup', { name: 'How the view turns' });
+    const orbit = screen.getByRole('group', { name: 'Orbit style' });
     expect(within(orbit).getByRole('radio', { name: 'Turntable' })).toBeChecked();
     expect(await screen.findByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'turntable');
-    await user.click(within(orbit).getByRole('radio', { name: 'Tumble' }));
-    expect(personRecordStores.viewer.read().controls.orbitStyle).toBe('tumble');
-    expect(screen.getByTestId('setup-orbit-hint')).toHaveTextContent('turns freely over the top');
-    expect(screen.getByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'tumble');
+    await user.click(within(orbit).getByRole('radio', { name: 'Free orbit' }));
+    expect(personRecordStores.viewer.read().controls.orbitStyle).toBe('free');
+    expect(within(orbit).getByRole('radio', { name: 'Free orbit' })).toBeChecked();
+    expect(screen.getByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'free');
+  });
+
+  it('shows both orbit styles’ hints at once, each describing its own option', async () => {
+    const user = userEvent.setup();
+    renderViewerStep();
+    const orbit = screen.getByRole('group', { name: 'Orbit style' });
+    const turntable = within(orbit).getByRole('radio', { name: 'Turntable' });
+    const free = within(orbit).getByRole('radio', { name: 'Free orbit' });
+    expect(turntable).toHaveAccessibleDescription('The view stays upright and stops at the top and bottom');
+    expect(free).toHaveAccessibleDescription('The view turns freely over the top and can roll');
+    expect(within(orbit).getByText('The view stays upright and stops at the top and bottom')).toBeVisible();
+    expect(within(orbit).getByText('The view turns freely over the top and can roll')).toBeVisible();
+    await user.click(free);
+    expect(within(orbit).getByText('The view stays upright and stops at the top and bottom')).toBeVisible();
+    expect(within(orbit).getByText('The view turns freely over the top and can roll')).toBeVisible();
   });
 
   it('offers no trackpad switch: the mouse preset is the only mapping', () => {

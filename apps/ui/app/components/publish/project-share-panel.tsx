@@ -869,6 +869,26 @@ const versionNumberLabel = (tag: string): string | undefined => {
 };
 
 /**
+ * What a Publish changes says once the link is read again. The version is named only when the link still points at
+ * the one this publish made (another device may have published since), and only a link that is on shows it.
+ *
+ * @param share - The link as read after the publish.
+ * @param publishedId - The version row the publish made or re-pointed.
+ * @returns The toast's sentence.
+ */
+const publishedChangesSentence = (share: ProjectShare | undefined, publishedId: string | undefined): string => {
+  const current = share?.currentVersion;
+  const version =
+    current === undefined || current === null || current.publicationId !== publishedId
+      ? undefined
+      : versionNumberLabel(current.tag);
+  if (version === undefined) {
+    return 'Published.';
+  }
+  return share?.status === 'active' ? `Published ${version}. The link now shows it.` : `Published ${version}.`;
+};
+
+/**
  * A date as people read it, `12 Nov 2026`.
  *
  * @param isoDate - When the link last changed what it shows.
@@ -1039,6 +1059,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const commands = useRevisionCommands();
   const publishShareUrl = publishFacet.shareUrl;
   const publishSucceeded = publishFacet.phase === 'success';
+  /* The version row the publish that just succeeded made or re-pointed, which names it apart from a later publish. */
+  const publishedId = publishSucceeded ? publishFacet.publicationId : undefined;
   const publishError = publishFacet.error;
 
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
@@ -1198,14 +1220,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       /* The choice is saved on the link now; a later publish starts from the link's own setting. */
       setChosenVisibility(undefined);
       if (pending === undefined) {
-        /* Publish changes: the link did not change, so nothing is copied; the toast names what it now shows. */
+        /* Publish changes: the link did not change, so nothing is copied. The toast names the version only when the
+           link still points at the one this publish made: another device may have published after it. */
         const next = await loadEnvelope();
         if (!cancelled) {
-          const tag = next?.share?.currentVersion?.tag;
-          const version = tag === undefined ? undefined : versionNumberLabel(tag);
-          /* Only a link that is on shows anything: a stopped one is acknowledged without the claim. */
-          const shows = next?.share?.status === 'active' ? ' The link now shows it.' : '';
-          toast.success(version === undefined ? `Published.${shows}` : `Published ${version}.${shows}`);
+          toast.success(publishedChangesSentence(next?.share ?? undefined, publishedId));
           setIsCopyRefused(false);
         }
       } else {
@@ -1238,7 +1257,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [commands, loadEnvelope, publishShareUrl, publishSucceeded, triggerCopiedTick]);
+  }, [commands, loadEnvelope, publishShareUrl, publishSucceeded, publishedId, triggerCopiedTick]);
 
   const busy = publishFacet.phase === 'working';
 

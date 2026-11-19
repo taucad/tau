@@ -881,7 +881,7 @@ describe('ProjectSharePanel', () => {
     historyOfMain('rev_v3', 'rev_v2');
     view.rerender(panelElement('proj_ok'));
     await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));
-    publishFacet({ phase: 'success', shareUrl: link });
+    publishFacet({ phase: 'success', shareUrl: link, publicationId: 'pub_v3' });
     view.rerender(panelElement('proj_ok'));
 
     await waitFor(() => {
@@ -889,6 +889,30 @@ describe('ProjectSharePanel', () => {
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledOnce();
     expect(toastSuccessMock).toHaveBeenLastCalledWith('Published V3. The link now shows it.');
+  });
+
+  it('names no version when another device published after this one, before the refresh', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
+      /* This device published V3; another published V4 before the link was read again. */
+      .mockResolvedValue(
+        mockJsonResponse({
+          ...publishedEnvelope,
+          share: { ...sharedLink, currentVersion: { publicationId: 'pub_v4', tag: 'v4', revisionId: 'rev_v4' } },
+        }),
+      );
+    headOfMainAt('rev_v3');
+    historyOfMain('rev_v3', 'rev_v2');
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~shr_ui', publicationId: 'pub_v3' });
+    view.rerender(panelElement('proj_ui'));
+
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Published.');
+    });
+    expect(toastSuccessMock).not.toHaveBeenCalledWith(expect.stringContaining('V4'));
   });
 
   it('hands the clipboard a pending link in the publish press, before the machine has made it', async () => {
@@ -1371,7 +1395,7 @@ describe('ProjectSharePanel', () => {
     const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Publish changes' }));
-    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~shr_ui' });
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~shr_ui', publicationId: 'pub_ui' });
     view.rerender(panelElement('proj_ui'));
 
     await waitFor(() => {

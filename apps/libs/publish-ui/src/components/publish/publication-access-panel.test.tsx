@@ -27,9 +27,12 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   },
 }));
 
+/** The JSON body a request sent. */
+const bodyOf = (init: RequestInit | undefined): string => (typeof init?.body === 'string' ? init.body : '');
+
 /** A `POST …/share/access` answer with the given email outcome. */
 const inviteAnswer = (email: unknown): Response =>
-  ({ ok: true, json: async () => ({ id: 'sga_1', recipientEmail: 'x@example.com', email }) }) as unknown as Response;
+  Response.json({ id: 'sga_1', recipientEmail: 'x@example.com', email });
 
 describe('PublicationAccessPanel', () => {
   beforeEach(() => {
@@ -148,6 +151,7 @@ describe('PublicationAccessPanel', () => {
 
   it('adds normalized email recipients through the cloud link access API', async () => {
     const onGrantsChanged = vi.fn();
+    globalThis.fetch = vi.fn<typeof fetch>(async () => inviteAnswer({ status: 'sent' }));
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
@@ -181,10 +185,9 @@ describe('PublicationAccessPanel', () => {
 
   it('settles each address on its own and keeps only the ones that failed', async () => {
     const onGrantsChanged = vi.fn();
-    globalThis.fetch = vi.fn(async (_url: string, init: { readonly body: string }) => ({
-      ok: !init.body.includes('nope@example.com'),
-      json: async () => ({ email: { status: 'sent' } }),
-    })) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn<typeof fetch>(async (_url, init) =>
+      Response.json({ email: { status: 'sent' } }, { status: bodyOf(init).includes('nope@example.com') ? 500 : 200 }),
+    );
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
@@ -397,9 +400,9 @@ describe('PublicationAccessPanel', () => {
   );
 
   it('counts the people it could not email apart from those it did', async () => {
-    globalThis.fetch = vi.fn(async (_url: string, init: { readonly body: string }) =>
-      inviteAnswer(init.body.includes('a@') ? { status: 'sent' } : { status: 'skipped', reason: 'daily_cap' }),
-    ) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn<typeof fetch>(async (_url, init) =>
+      inviteAnswer(bodyOf(init).includes('a@') ? { status: 'sent' } : { status: 'skipped', reason: 'daily_cap' }),
+    );
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
@@ -425,6 +428,57 @@ describe('PublicationAccessPanel', () => {
       );
     });
     expect(toastSuccessMock).toHaveBeenCalledWith('Invited a@example.com.');
+  });
+
+  it('says an address that already had access has it, with the link to copy, and claims no email', async () => {
+    globalThis.fetch = vi.fn<typeof fetch>(async () => inviteAnswer({ status: 'not_requested' }));
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
+        visibility='private'
+        grants={[]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(screen.getByRole('combobox', { name: 'Invite people by email' }), 'friend@example.com{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    const [message, options] = toastSuccessMock.mock.calls[0] as [string, { action: { label: string } }];
+    expect(message).toBe('friend@example.com already has access. Copy the link to send it again.');
+    expect(options.action.label).toBe('Copy link');
+  });
+
+  it('never claims an email when the answer does not say what happened to it', async () => {
+    globalThis.fetch = vi.fn<typeof fetch>(async () => Response.json({ id: 'sga_1' }));
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        projectId='proj_panel'
+        shareUrl='https://tau.example/s/tau~shr_panel'
+        visibility='private'
+        grants={[]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(screen.getByRole('combobox', { name: 'Invite people by email' }), 'friend@example.com{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+    await waitFor(() => {
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        "We couldn't email friend@example.com. Copy the link and send it yourself.",
+        expect.anything(),
+      );
+    });
+    expect(toastSuccessMock).not.toHaveBeenCalled();
   });
 
   it('lists five invited people in flow and the rest on request', async () => {

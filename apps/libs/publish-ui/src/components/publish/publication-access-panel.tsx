@@ -45,8 +45,11 @@ const visibilityHelp = {
   public: 'Anyone who has the link can open it.',
 } as const;
 
-/** What one invite came to: given access with its email sent, given access but not emailed, or refused. */
-type InviteOutcome = 'invited' | 'not-emailed' | 'failed';
+/**
+ * What one invite came to: given access with its email sent, given access but not emailed, already had access (so
+ * no email was due), or refused.
+ */
+type InviteOutcome = 'invited' | 'not-emailed' | 'has-access' | 'failed';
 
 /**
  * Who a toast is about: the one address, or how many.
@@ -71,22 +74,30 @@ const inviteToast = (emails: readonly string[], outcome: InviteOutcome): string 
   if (outcome === 'failed') {
     return `Couldn't invite ${who}. Try again.`;
   }
+  if (outcome === 'has-access') {
+    return emails.length === 1
+      ? `${who} already has access. Copy the link to send it again.`
+      : `${who} already have access. Copy the link to send it again.`;
+  }
   return outcome === 'not-emailed'
     ? `We couldn't email ${who}. Copy the link and send it yourself.`
     : `Invited ${who}.`;
 };
 
 /**
- * Reads what the API did with an invite's email. Anything but `skipped` says nothing about an email the person must
- * send, so it reads as invited: `sent`, and `not_requested` for an address that already had access.
+ * Reads what the API did with an invite's email. Only `sent` reads as invited and emailed; `not_requested` is an
+ * address that already had access; `skipped`, and an answer that says nothing, never claim an email was sent.
  *
  * @param body - The `POST …/share/access` answer.
- * @returns Whether the person was invited and emailed, or invited and not emailed.
+ * @returns Whether the person was emailed, already had access, or was not emailed.
  */
 const inviteOutcomeOf = (body: unknown): Exclude<InviteOutcome, 'failed'> => {
   const email = typeof body === 'object' && body !== null ? (body as { email?: unknown }).email : undefined;
   const status = typeof email === 'object' && email !== null ? (email as { status?: unknown }).status : undefined;
-  return status === 'skipped' ? 'not-emailed' : 'invited';
+  if (status === 'sent') {
+    return 'invited';
+  }
+  return status === 'not_requested' ? 'has-access' : 'not-emailed';
 };
 
 /**
@@ -165,13 +176,24 @@ export function PublicationAccessPanel({
         pendingEmails.filter((_email, index) => outcomes[index] === outcome);
       const invited = withOutcome('invited');
       const notEmailed = withOutcome('not-emailed');
+      const hasAccess = withOutcome('has-access');
       const failed = withOutcome('failed');
       setPendingEmails(failed);
-      if (invited.length > 0 || notEmailed.length > 0) {
+      if (invited.length > 0 || notEmailed.length > 0 || hasAccess.length > 0) {
         await onGrantsChanged();
       }
       if (invited.length > 0) {
         toast.success(inviteToast(invited, 'invited'));
+      }
+      if (hasAccess.length > 0) {
+        toast.success(inviteToast(hasAccess, 'has-access'), {
+          action: {
+            label: 'Copy link',
+            onClick() {
+              void copyLink();
+            },
+          },
+        });
       }
       if (notEmailed.length > 0) {
         toast.warning(inviteToast(notEmailed, 'not-emailed'), {

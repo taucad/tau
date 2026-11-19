@@ -3414,6 +3414,9 @@ importers:
       fake-indexeddb:
         specifier: 'catalog:'
         version: 6.2.5
+      oxc-transform-react:
+        specifier: 'catalog:'
+        version: 0.148.0
       react:
         specifier: 'catalog:'
         version: 19.3.1

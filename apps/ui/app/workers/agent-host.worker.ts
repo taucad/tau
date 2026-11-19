@@ -16,6 +16,7 @@ import {
 } from '#workers/agent-host.contract.js';
 import type { BrowserProjectHost, ResidentWorkerContext } from '#workers/agent-host.impl.js';
 import { createProjectHosts } from '#workers/agent-host-projects.js';
+import { createImplementationLoader } from '#workers/agent-host-implementation.js';
 import { randomUuid } from '@taucad/utils/id';
 
 type WorkerScope = {
@@ -74,7 +75,7 @@ const capabilityOf = async (
   return probe;
 };
 
-const loadImplementation = async () => {
+const loadImplementationModule = async () => {
   try {
     return await import('./agent-host.impl.js');
   } catch (error) {
@@ -84,6 +85,16 @@ const loadImplementation = async () => {
     );
   }
 };
+
+/*
+ * Loaded once (STO-25 SP6-warm). The page probes this worker's capabilities when it opens a project, well before its
+ * first `provide`, which waits on the project's revision root and the session. The load starts once that probe has
+ * answered: the session's readiness waits on the probe, which must not share the thread with this module's evaluation
+ * (a stall there past the page's liveness bound would close the channel and fail the probe for the document). A warm
+ * reopen's chat history then does not wait for this module after the provide's own inputs. A load that failed before
+ * a provide is retried by that provide; a provide waiting on it reports its failure.
+ */
+const implementation = createImplementationLoader(loadImplementationModule);
 
 /* D-092: a fault in one chat or one project host is logged and the worker continues. */
 workerScope.addEventListener('error', (event) => {
@@ -117,7 +128,7 @@ const requireTab = (): string => {
 
 /** One project host per project; a newer `provide` replaces the incarnation, and `release` closes it (RH-R4). */
 const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
-  const loaded = await loadImplementation();
+  const loaded = await implementation.get();
   return loaded.openBrowserProjectHost(args, {
     tabId: requireTab(),
     visibility,
@@ -143,7 +154,10 @@ workerScope.addEventListener('message', (event) => {
           return undefined;
         }
         case 'capabilities': {
-          return capabilityOf((args as Calls['capabilities']['args']).durability);
+          const report = await capabilityOf((args as Calls['capabilities']['args']).durability);
+          /* After the probe has answered, so its reply never waits on the implementation's evaluation. */
+          implementation.warm();
+          return report;
         }
         case 'provide': {
           return hosts.provide(args as Calls['provide']['args']);

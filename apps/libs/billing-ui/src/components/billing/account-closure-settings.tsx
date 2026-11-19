@@ -14,17 +14,16 @@ import {
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
-import { authClient } from '#lib/auth-client.js';
-import { createPaymentRequestId } from '@taucad/billing-ui/lib/billing-payment-client';
-import type { PaymentActionBinding } from '@taucad/billing-ui/lib/billing-payment-client';
+import { createPaymentRequestId } from '#lib/billing-payment-client.js';
+import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 import {
   AccountClosurePaymentPending,
   getAccountClosure,
   getCurrentAccountClosure,
   prepareAccountClosure,
-} from '@taucad/billing-ui/lib/billing-lifecycle-client';
-import { useFinancialSession } from '@taucad/billing-ui/providers/financial-session-provider';
-import { IconLine, supportEmail } from '@taucad/billing-ui/components/billing/billing-primitives';
+} from '#lib/billing-lifecycle-client.js';
+import { useFinancialSession } from '#providers/financial-session-provider.js';
+import { IconLine, supportEmail } from '#components/billing/billing-primitives.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
@@ -138,12 +137,26 @@ const closureAlternatives = [
   `If you bought credits in the last 14 days and want a refund, email ${supportEmail} before you close.`,
 ] as const;
 
+/**
+ * The auth calls account closure makes, supplied by the host app (its Better Auth client). Only the last step, deleting
+ * the signed-in user once billing has revoked the account, goes through auth.
+ */
+export type AccountClosureServices = {
+  /** Deletes the signed-in user; it rejects on failure (`throw: true`) and stops when `signal` aborts. */
+  readonly deleteUser: (options: {
+    readonly fetchOptions: { readonly throw: true; readonly signal: AbortSignal };
+  }) => Promise<unknown>;
+};
+
 /** Prepares the durable financial tombstone before invoking Better Auth deletion. */
 export function AccountClosureSettings({
   binding,
+  services,
   onReviewPayment,
 }: {
   readonly binding: PaymentActionBinding | undefined;
+  /** The host's auth calls; see {@link AccountClosureServices}. */
+  readonly services: AccountClosureServices;
   /** Opens the Add credits dialog, where an unfinished purchase can be finished or canceled. */
   readonly onReviewPayment: () => void;
 }): React.JSX.Element {
@@ -226,7 +239,7 @@ export function AccountClosureSettings({
         onClick={() =>
           void run(async () => {
             const token = financial.capture();
-            await authClient.deleteUser({
+            await services.deleteUser({
               fetchOptions: { throw: true, signal: token.signal },
             });
             if (token.isCurrent()) {

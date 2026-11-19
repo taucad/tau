@@ -36,10 +36,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ readFile
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel: vi.fn() }),
 }));
-vi.mock('#components/files/use-export-to-disk.js', () => ({
+vi.mock('@taucad/files-ui/components/files/use-export-to-disk', () => ({
   useExportToDisk: () => ({ exportToDisk: mocks.exportToDisk, isExporting: false }),
 }));
-vi.mock('#components/files/export-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/export-selector', () => ({
   ExportFormatComboboxLabel: () => null,
   getExportFormatValue: (item: { format: string }) => item.format,
 }));

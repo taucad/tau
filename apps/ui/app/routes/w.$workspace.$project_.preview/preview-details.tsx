@@ -2,7 +2,7 @@ import { Heading } from '@taucad/ui/components/heading';
 import type { ActorRefFrom } from 'xstate';
 import { Badge } from '@taucad/ui/components/badge';
 import { Separator } from '@taucad/ui/components/separator';
-import { ExportSelector } from '#components/files/export-selector.js';
+import { ExportSelector } from '@taucad/files-ui/components/files/export-selector';
 import { useFeature } from '#flags/use-feature.js';
 import { PreviewDebugPanel } from '#routes/w.$workspace.$project_.preview/preview-debug-panel.js';
 import type { cadMachine } from '#machines/cad.machine.js';

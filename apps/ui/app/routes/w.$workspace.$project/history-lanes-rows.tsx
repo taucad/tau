@@ -16,7 +16,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import type { HistoryLanes, PendingMerge } from '#routes/w.$workspace.$project/history-lanes.js';
+import type { HistoryLanes, PendingMerge } from '@taucad/revisions-ui/lib/history-lanes';
 import { BranchMenu, renameRefusalOf } from '#routes/w.$workspace.$project/revision-branches.js';
 import {
   agentWorkingTitle,

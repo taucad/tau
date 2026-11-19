@@ -3,7 +3,7 @@ import { AlertCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SettingsGroup, SettingsItem, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
-import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
+import { BrowserStorageStatus } from '@taucad/settings-ui/components/settings/browser-storage-status';
 import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';

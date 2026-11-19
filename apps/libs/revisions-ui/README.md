@@ -16,6 +16,9 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/revisions/revision-region`          | One region of the Revisions pane (`RevisionRegion`)                                                                                                                                                        |
 | `./components/revisions/name-popover`             | The naming form every revision surface shares (`NamePopover`)                                                                                                                                              |
 | `./components/revisions/revision-conflict-editor` | Another device's conflict, resolved hunk by hunk in the code editor (`RevisionConflictEditor`)                                                                                                             |
+| `./lib/chat-turn-revision-state`                  | A chat turn's revision summary from its log facts (`deriveTurnRevisionState`, `turnRevisionLabel`, `turnRevisionDetail`); `TurnRevisionLog`, the facts the app's chat projection selects                   |
+| `./lib/history-lanes`                             | The History pane's lanes: listed branches, conflict lines and pending merges for a filter (`historyLanesOf`, `listedBranchesOf`, `conflictLinesOf`)                                                        |
+| `./lib/history-lanes.test-harness`                | Lanes graph scenarios for History suites (`lanesScenarios`, `oneBranchRows`, `conflictLine`, `lidConflict`)                                                                                                |
 | `./lib/revision-entry-title`                      | The title a person reads for a History entry (`entryTitleOf`)                                                                                                                                              |
 | `./lib/revision-failure-reporting`                | Which refusals are warnings, and `createRevisionToastReporter(reportUiError)` for every client's error toasts                                                                                              |
 | `./lib/revision-who`                              | Who made an entry (`revisionWho`), the resolver's view of a joined push store (`revisionPushRecordOf`), `RevisionWhoContext`, `RevisionPushRecord`, `RevisionPusher`                                       |
@@ -56,8 +59,7 @@ The app makes one `createRevisionRefRemoval` over `RevisionRefRemovalServices` i
 - `machines/revision-load-telemetry`: `observability/report-to-api`.
 - `components/revision-actor-identity`: `lib/auth-client`.
 - `machines/revisions-opfs.browser.test.ts` and its fixture worker: a Playwright browser suite under the app's browser config.
-- `routes/…/chat-turn-revision-state`: reads a turn's revision from the chat projection (`machines/chat-projection.logic`).
-- `routes/…/revision-vocabulary`: the History words and icons over the app's `use-revisions`, `use-revision-status`, `use-cloud-projects` and `use-sidebar-status` and the chat turn state.
+- `routes/…/revision-vocabulary`: the History words and icons over the app's `use-revisions`, `use-revision-status`, `use-cloud-projects` and `use-sidebar-status`.
 - The other `routes/w.$workspace.$project` revision modules: route composition over `use-project`, `use-revision-status`, `use-revisions`, the workspace context, chats, analytics, GitHub connections and the client environment.
 
 Part of the [Tau](https://github.com/taucad/tau) monorepo.

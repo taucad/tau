@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
 import type { ExportResult } from '@taucad/runtime/client';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type * as FileUtilsModuleType from '@taucad/utils/file';
 import type { FileExtension } from '@taucad/types';
-import type { cadMachine } from '#machines/cad.machine.js';
+import type { CadExportActor } from '#components/files/use-export-to-disk.js';
 
 const mockDownloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 vi.mock('@taucad/utils/file', async () => {
@@ -64,7 +63,7 @@ function createCadActor(options: {
   capabilities?: CapabilitiesManifest | undefined;
   activeKernelId?: string | undefined;
   exportImplementation?: () => Promise<ExportResult>;
-}): { actor: ActorRefFrom<typeof cadMachine>; mockExport: ReturnType<typeof vi.fn> } {
+}): { actor: CadExportActor; mockExport: ReturnType<typeof vi.fn> } {
   const capabilities = options.capabilities ?? createCapabilities();
   const activeKernelId = options.activeKernelId ?? 'replicad';
   const defaultExport = async (): Promise<ExportResult> => ({
@@ -90,7 +89,7 @@ function createCadActor(options: {
     getSnapshot: () => ({
       context: { kernelClient, activeKernelId, capabilities, document: fixture.document },
     }),
-  } as unknown as ActorRefFrom<typeof cadMachine>;
+  } as unknown as CadExportActor;
 
   return { actor, mockExport };
 }
@@ -207,7 +206,7 @@ describe('useExportToDisk', () => {
   it('should toast error and skip export when the actor has no kernelClient', async () => {
     const actor = {
       getSnapshot: () => ({ context: { kernelClient: undefined, activeKernelId: undefined, capabilities: undefined } }),
-    } as unknown as ActorRefFrom<typeof cadMachine>;
+    } as unknown as CadExportActor;
 
     const { result } = renderHook(() => useExportToDisk('test-project'));
 

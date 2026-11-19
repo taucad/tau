@@ -1,14 +1,28 @@
 import { useCallback, useState } from 'react';
-import type { ActorRefFrom } from 'xstate';
+import type { AnyActorRef } from 'xstate';
+import type { RuntimeClient, RuntimeDocument } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
 import { isRecord } from '@taucad/utils/schema';
 import { toast } from '@taucad/ui/components/sonner';
-import type { cadMachine } from '#machines/cad.machine.js';
-import {
-  bestRouteForActiveKernel,
-  exportDocumentWithValidatedInput,
-} from '@taucad/files-ui/utils/export-formats.utils';
+import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 import { downloadExportArtifactSet } from '@taucad/ui-core/utils/export-artifact-set.utils';
+
+/**
+ * The CAD actor as export reads it: a geometry unit's runtime client, active kernel, open document and capabilities.
+ * The app's CAD machine actor satisfies it; nothing here sends it an event.
+ *
+ * @public
+ */
+export type CadExportActor = Pick<AnyActorRef, 'subscribe'> & {
+  getSnapshot: () => {
+    readonly context: Readonly<{
+      kernelClient?: RuntimeClient;
+      activeKernelId?: string;
+      document?: RuntimeDocument;
+      capabilities?: RuntimeClient['capabilities'];
+    }>;
+  };
+};
 
 export type UseExportToDiskResult = {
   /**
@@ -16,7 +30,7 @@ export type UseExportToDiskResult = {
    * the resulting blob to disk. Resolves once the toast/download have fired.
    * Failures are surfaced via toast; the promise still resolves.
    */
-  readonly exportToDisk: (cadActor: ActorRefFrom<typeof cadMachine>, format: FileExtension) => Promise<void>;
+  readonly exportToDisk: (cadActor: CadExportActor, format: FileExtension) => Promise<void>;
   readonly isExporting: boolean;
 };
 
@@ -34,7 +48,7 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
   const [isExporting, setIsExporting] = useState(false);
 
   const exportToDisk = useCallback(
-    async (cadActor: ActorRefFrom<typeof cadMachine>, format: FileExtension): Promise<void> => {
+    async (cadActor: CadExportActor, format: FileExtension): Promise<void> => {
       const { kernelClient, activeKernelId, document } = cadActor.getSnapshot().context;
 
       if (!kernelClient || !activeKernelId || !document) {

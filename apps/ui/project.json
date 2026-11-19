@@ -106,6 +106,9 @@
           "env": "PICOGK_BROWSER_MIRROR_BASE"
         },
         {
+          "env": "CADMPEG_ENGINES_BASE"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {
@@ -198,6 +201,9 @@
         },
         {
           "env": "PICOGK_BROWSER_MIRROR_BASE"
+        },
+        {
+          "env": "CADMPEG_ENGINES_BASE"
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
@@ -423,6 +429,28 @@
       "options": {
         "cwd": ".",
         "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build --external @taucad/openrscad"
+      }
+    },
+    "check-cadmpeg-engine-absence": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "cadmpeg engine-absence gate (cadmpeg engine delivery charter D16, I1): fails when the web, desktop renderer or `tau serve` build holds a file whose SHA-256 is the raw or gzip digest of any engine in the installed `cadmpeg-ts/digests`, under any name, and names the file and the engine. The browser loads one engine per opened format by digest at run time, so no build carries one. A missing build directory fails. CI's build lane runs it whenever this app is affected; its builds are already in that lane."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-cadmpeg-engine-absence.mts",
+        {
+          "externalDependencies": ["cadmpeg-ts"]
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-cadmpeg-engine-absence.mts apps/ui/build apps/ui/desktop/build apps/ui/serve/build"
       }
     },
     "check-route-module-patch": {

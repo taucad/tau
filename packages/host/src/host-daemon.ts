@@ -34,6 +34,7 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types'
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
+import type { StaticUiWasmMount } from '#static-ui.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { runtimeTranscodePort } from '#acp/media.js';
 import type { AcpAdapterRefusal } from '#acp/index.js';
@@ -250,6 +251,8 @@ export type HostDaemonAgentOptions = {
   readonly port?: number | undefined;
   /** Absolute directory of a prebuilt Tau UI served at `/` (serve mode). */
   readonly uiRoot?: string | undefined;
+  /** WebAssembly directories served beside the UI, such as the installed `cadmpeg-ts` engines. */
+  readonly uiWasmMounts?: readonly StaticUiWasmMount[] | undefined;
   /** Extra browser origins admitted on the upgrade; own origins always are. */
   readonly allowedOrigins?: readonly string[] | undefined;
   /**
@@ -1217,6 +1220,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(agent.label ? { label: agent.label } : {}),
       ...(agent.port === undefined ? {} : { port: agent.port }),
       ...(agent.uiRoot ? { uiRoot: agent.uiRoot } : {}),
+      ...(agent.uiWasmMounts ? { uiWasmMounts: agent.uiWasmMounts } : {}),
       ...(agent.allowedOrigins ? { allowedOrigins: agent.allowedOrigins } : {}),
       ...(project.mcp ? { mcp: project.mcp } : {}),
       ...(externalAgents.length > 0 ? { externalAgents } : {}),

@@ -410,8 +410,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
-| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
-| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
+| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
+| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
 | [call-bind-apply-helpers](https://github.com/ljharb/call-bind-apply-helpers) | 1.0.2 | MIT |
 | [call-bound](https://github.com/ljharb/call-bound) | 1.0.4 | MIT |

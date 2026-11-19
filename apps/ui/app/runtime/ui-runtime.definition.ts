@@ -23,6 +23,7 @@ import { runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
 
+import { cadmpegEngines } from '#runtime/cadmpeg-engines.js';
 import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
 
 type UiRuntimeOptions = {
@@ -71,7 +72,11 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     smlib(),
     gltf(),
     brep(),
-    cadmpeg(),
+    /*
+     * One engine per opened format, fetched and verified by digest (cadmpeg engine delivery charter D2, D11, D12). The
+     * export transcoder is not selected here (the plugin's default preset), so only the kernel takes the option.
+     */
+    cadmpeg({ kernels: { import: { engines: cadmpegEngines() } } }),
     image(),
     // HEIC/HEIF stills to JPEG, PNG and WebP (operator ruling O1); libheif loads only for a HEIC source.
     heif(),

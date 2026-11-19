@@ -875,6 +875,11 @@
     "reason": "reads workspace-root configuration or inventory"
   },
   {
+    "file": "scripts/src/check-cadmpeg-engine-mirror.ts",
+    "target": "pnpm-lock.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/check-registry-dependencies.test.ts",
     "target": "package.json",
     "reason": "reads workspace-root configuration or inventory"

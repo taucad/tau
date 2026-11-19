@@ -9,9 +9,10 @@ import { createExportFile } from '@taucad/runtime/types';
 import { loadOcctBackend, meshOcctFile } from '@taucad/brep/occt';
 import type { OcctBackend } from '@taucad/brep/occt';
 import { createImportFileInventory, normalizeGltfGeometryNames, transformGltfExportBytes } from '@taucad/geometry-core';
-import { createCadmpeg } from 'cadmpeg-ts';
-import type { Cadmpeg } from 'cadmpeg-ts';
+import type { Cadmpeg } from 'cadmpeg-ts/core';
 
+import { openCadmpeg } from '#cadmpeg-converter.js';
+import { cadmpegOptionsSchema, CadmpegEngineError, engineIssue } from '#cadmpeg-engines.js';
 import { failureMessage, lossIssue } from '#cadmpeg-issues.js';
 
 /**
@@ -59,13 +60,16 @@ export const cadmpegKernel = defineKernel({
   name: 'CadmpegKernel',
   // Bumps with every cadmpeg-ts release that can change output bytes (D8).
   version: '0.1.0',
+  optionsSchema: cadmpegOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
   exports: {
     glb: { title: 'glTF binary', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbOptionsSchema },
   },
 
-  async initialize(): Promise<CadmpegKernelContext> {
-    const [cadmpeg, occt] = await Promise.all([createCadmpeg(), loadOcctBackend()]);
+  async initialize(options): Promise<CadmpegKernelContext> {
+    // A browser realm without `engines` refuses before OCCT loads.
+    const cadmpeg = await openCadmpeg(options.engines);
+    const occt = await loadOcctBackend();
     return { cadmpeg, occt };
   },
 
@@ -91,6 +95,10 @@ export const cadmpegKernel = defineKernel({
     try {
       step = await context.cadmpeg.convert({ name, bytes: inventory.entryBytes }, { to: 'step', signal });
     } catch (error) {
+      const issue = engineIssue(error, 'KERNEL_BINDING_FAILED');
+      if (issue !== undefined) {
+        throw new CadmpegEngineError(issue, { cause: error });
+      }
       throw new Error(failureMessage(error), { cause: error });
     }
     const [file] = step.files;

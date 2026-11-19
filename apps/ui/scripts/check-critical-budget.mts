@@ -39,8 +39,10 @@
  *
  * Gate G1 of the adaptive app deployment mode charter (I10, I11): the build's ceiling is read from the ceiling module
  * the alias rule chose. A pinned build (`cloud`, `self-host`) may hold no adaptive-only module. An `adaptive` build has
- * no entry of its own: each class must stay within +2 requests, 1 % of total bytes and 1 % of the largest chunk of both
- * the checked-in `self-host` entry and the same run's `self-host` build (`--baseline`), and `--write` refuses it.
+ * no entry of its own: each class must stay within +2 requests, 1 % of total bytes and 1 % of the largest chunk of the
+ * same run's `self-host` build (`--baseline`), and what it adds over that build must fit the same allowance taken from
+ * the checked-in `self-host` entry (drift of `main` above the entry is the self-host check's concern). `--write`
+ * refuses an adaptive build.
  *
  * Usage (after `nx build ui`):
  *   node apps/ui/scripts/check-critical-budget.mts           # check
@@ -537,6 +539,53 @@ export const adaptiveBounds = { requests: 2, bytes: 0.01, largestChunkBytes: 0.0
 export type ClassNumbers = Pick<ClassBudget, 'brotliBytes' | 'requests' | 'largestChunkBrotliBytes'>;
 
 /**
+ * Gate G1's amended bound (1): what the adaptive build adds over the same run's self-host build, held to the
+ * checked-in entry's allowance (+2 requests, 1 % of the entry's total bytes, 1 % of the entry's largest chunk). Drift of
+ * the self-host build above its entry is the self-host check's concern: it neither spends nor widens this allowance.
+ *
+ * @param input - The label, what the adaptive build measured, the same run's self-host build and the entry.
+ * @returns One message per bound the excess exceeds; empty when it fits.
+ */
+export const compareExcessWithEntry = (input: {
+  label: string;
+  measure: ClassNumbers;
+  sameRun: ClassNumbers | undefined;
+  entry: ClassNumbers | undefined;
+}): string[] => {
+  const { label, measure, sameRun, entry } = input;
+  if (sameRun === undefined || entry === undefined) {
+    return [`${label}: gate G1 needs both the self-host entry and the same-run self-host build for this class`];
+  }
+  const excess = {
+    requests: measure.requests - sameRun.requests,
+    brotliBytes: measure.brotliBytes - sameRun.brotliBytes,
+    largestChunkBrotliBytes: measure.largestChunkBrotliBytes - sameRun.largestChunkBrotliBytes,
+  };
+  const allowance = {
+    requests: adaptiveBounds.requests,
+    brotliBytes: Math.round(entry.brotliBytes * adaptiveBounds.bytes),
+    largestChunkBrotliBytes: Math.round(entry.largestChunkBrotliBytes * adaptiveBounds.largestChunkBytes),
+  };
+  const problems: string[] = [];
+  if (excess.requests > allowance.requests) {
+    problems.push(
+      `${label}: adds ${excess.requests} requests over the same-run self-host build; the allowance is ${allowance.requests}`,
+    );
+  }
+  if (excess.brotliBytes > allowance.brotliBytes) {
+    problems.push(
+      `${label}: adds ${excess.brotliBytes} B over the same-run self-host build; the allowance is ${allowance.brotliBytes} B (1% of the self-host entry)`,
+    );
+  }
+  if (excess.largestChunkBrotliBytes > allowance.largestChunkBrotliBytes) {
+    problems.push(
+      `${label}: grows the largest chunk by ${excess.largestChunkBrotliBytes} B over the same-run self-host build; the allowance is ${allowance.largestChunkBrotliBytes} B (1% of the self-host entry)`,
+    );
+  }
+  return problems;
+};
+
+/**
  * Compare an adaptive class with one self-host baseline on all three bounds (gate G1).
  *
  * @param input - The label, what the adaptive build measured, the baseline and its name.
@@ -736,9 +785,10 @@ const main = (): void => {
     const classProblems =
       ceiling === 'adaptive'
         ? [
-            /* G1: within +2 requests, 1 % bytes and 1 % of the largest chunk of the checked-in self-host entry and of
-             * the same run's self-host build. Landing under either is never a failure here: the entry is not its own. */
-            ...compareWithSelfHostBaseline({ label, measure, baseline: budget, baselineName: 'self-host entry' }),
+            /* G1 bound (1), as amended (charter ab4e173d3): the excess over the same run's self-host build fits the
+             * entry's allowance. Bound (2): within +2 requests, 1 % bytes and 1 % of the largest chunk of the same
+             * run's self-host build. Landing under either is never a failure here: the entry is not its own. */
+            ...compareExcessWithEntry({ label, measure, sameRun: sameRun?.get(routeClass.id), entry: budget }),
             ...compareWithSelfHostBaseline({
               label,
               measure,

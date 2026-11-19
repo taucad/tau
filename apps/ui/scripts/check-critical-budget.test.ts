@@ -5,6 +5,7 @@ import {
   adaptiveBounds,
   buildCeilingOf,
   buildVariantOf,
+  compareExcessWithEntry,
   compareWithSelfHostBaseline,
   findPinnedCeilingLeaks,
   compareWithBudget,
@@ -279,6 +280,28 @@ describe('compareWithSelfHostBaseline (gate G1)', () => {
   it('should never fail an adaptive class for landing under a baseline', () => {
     const under = { brotliBytes: 1, requests: 1, largestChunkBrotliBytes: 1 };
     expect(compareWithSelfHostBaseline({ label: 'x', measure: under, baseline, baselineName: 'b' })).toEqual([]);
+  });
+});
+
+describe('compareExcessWithEntry (gate G1 bound 1, amended)', () => {
+  const entry = { brotliBytes: 1_239_607, requests: 228, largestChunkBrotliBytes: 140_852 };
+
+  it('should pass when main has drifted above the entry but the adaptive excess fits its allowance', () => {
+    const sameRun = { brotliBytes: 1_251_446, requests: 227, largestChunkBrotliBytes: 136_688 };
+    const adaptive = { brotliBytes: 1_255_352, requests: 225, largestChunkBrotliBytes: 136_615 };
+    expect(compareExcessWithEntry({ label: 'home', measure: adaptive, sameRun, entry })).toEqual([]);
+  });
+
+  it('should fail an excess over 1 % of the entry on bytes, over 2 requests or over 1 % of the largest chunk', () => {
+    const sameRun = { brotliBytes: 1_000_000, requests: 200, largestChunkBrotliBytes: 100_000 };
+    const adaptive = { brotliBytes: 1_012_397, requests: 203, largestChunkBrotliBytes: 101_410 };
+    expect(compareExcessWithEntry({ label: 'home', measure: adaptive, sameRun, entry })).toHaveLength(3);
+    const fits = { brotliBytes: 1_012_396, requests: 202, largestChunkBrotliBytes: 101_409 };
+    expect(compareExcessWithEntry({ label: 'home', measure: fits, sameRun, entry })).toEqual([]);
+  });
+
+  it('should need both baselines', () => {
+    expect(compareExcessWithEntry({ label: 'home', measure: entry, sameRun: undefined, entry })).toHaveLength(1);
   });
 });
 

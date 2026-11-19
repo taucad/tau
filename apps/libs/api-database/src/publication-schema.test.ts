@@ -331,16 +331,28 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await expect(
       db.insert(schema.projectShare).values({ id: `shr_b_${Date.now()}`, projectId, ownerId, visibility: 'public' }),
     ).rejects.toThrow();
+    /* Each refusal on its own: a project with no link and an unknown setting
+       exercises the visibility check, not the foreign key. */
+    const other = await seedOwnedProject('one_link_other');
     await expect(
       db.insert(schema.projectShare).values({
         id: `shr_c_${Date.now()}`,
-        projectId: `${projectId}_other`,
-        ownerId,
+        projectId: other.projectId,
+        ownerId: other.ownerId,
         visibility: 'secret',
+      }),
+    ).rejects.toThrow();
+    await expect(
+      db.insert(schema.projectShare).values({
+        id: `shr_d_${Date.now()}`,
+        projectId: `${projectId}_missing`,
+        ownerId,
+        visibility: 'private',
       }),
     ).rejects.toThrow();
 
     await db.delete(schema.user).where(eq(schema.user.id, ownerId));
+    await db.delete(schema.user).where(eq(schema.user.id, other.ownerId));
   });
 
   it('should cascade a cloud link and its invited people from the project and from the owner', async () => {

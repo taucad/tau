@@ -121,6 +121,7 @@
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "catalog:",
     "@agentclientprotocol/codex-acp": "catalog:",
+    "@taucad/cache-core": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",

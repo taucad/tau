@@ -6159,6 +6159,9 @@ importers:
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
         version: 1.7.0(patch_hash=81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f)
+      '@taucad/cache-core':
+        specifier: workspace:*
+        version: link:../core/cache
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx

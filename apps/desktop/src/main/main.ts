@@ -54,6 +54,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   acpLoginLaunch,
+  computeStoreWorkspace,
   defaultConfigDirectory,
   defaultDependencyStore,
   discoverAcpAgents,
@@ -1158,8 +1159,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   let computeWorker: Worker | undefined;
-  /* One connection per root while some utility runs durable compute on it,
-   * counted by holder: a root nobody runs keeps no connection in main. */
+  /* One connection per store workspace while some utility runs durable compute
+   * on it, counted by holder: a store nobody runs keeps no connection in main.
+   * A project's worktrees and copies share its workspace (`computeStoreWorkspace`). */
   const computeConnections = new Map<
     string,
     { readonly connection: ReturnType<typeof connectSqliteComputeStoreWorker>; holders: number }
@@ -1176,7 +1178,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     computeWorker = undefined;
   };
   const holdComputeConnection = (projectRoot: string) => {
-    let entry = computeConnections.get(projectRoot);
+    const workspace = computeStoreWorkspace(projectRoot);
+    let entry = computeConnections.get(workspace);
     if (!entry) {
       if (!computeWorker) {
         const worker = new Worker(computeStoreWorkerEntry, {
@@ -1192,10 +1195,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
         computeWorker = worker;
       }
       entry = {
-        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot }),
+        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace }),
         holders: 0,
       };
-      computeConnections.set(projectRoot, entry);
+      computeConnections.set(workspace, entry);
     }
     const held = entry;
     held.holders += 1;
@@ -1209,8 +1212,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
         released = true;
         held.holders -= 1;
         /* A worker restart already disposed and replaced a stale entry. */
-        if (held.holders === 0 && computeConnections.get(projectRoot) === held) {
-          computeConnections.delete(projectRoot);
+        if (held.holders === 0 && computeConnections.get(workspace) === held) {
+          computeConnections.delete(workspace);
           held.connection.dispose();
         }
       },

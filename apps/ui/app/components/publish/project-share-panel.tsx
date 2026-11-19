@@ -1346,6 +1346,12 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         throw recordApiRequestId(new Error('STOP_SHARING_FAILED'), response);
       }
       hasStoppedRef.current = true;
+      /* The server stopped it: hold that here too, so a refresh that fails (and its Try again) never shows the link. */
+      const stoppedAt = new Date().toISOString();
+      const markStopped = (current: ProjectShareEnvelope | undefined): ProjectShareEnvelope | undefined =>
+        current?.share ? { ...current, share: { ...current.share, status: 'stopped', stoppedAt } } : current;
+      acceptedEnvelopeRef.current = markStopped(acceptedEnvelopeRef.current);
+      setEnvelope(markStopped);
       setIsStopDialogOpen(false);
       setIsCopyRefused(false);
       toast.success('Stopped sharing. The link no longer works.');

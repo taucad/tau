@@ -1314,6 +1314,42 @@ describe('ProjectSharePanel', () => {
     );
   });
 
+  it('keeps a stopped link hidden when the refresh after Stop sharing fails, through Try again', async () => {
+    let releaseRetry: (() => void) | undefined;
+    let envelopeReads = 0;
+    globalThis.fetch = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
+      envelopeReads += 1;
+      if (envelopeReads === 2) {
+        return new Response(null, { status: 503 });
+      }
+      if (envelopeReads === 3) {
+        await new Promise<void>((resolve) => {
+          releaseRetry = resolve;
+        });
+        return mockJsonResponse(stoppedEnvelope);
+      }
+      return mockJsonResponse(publishedEnvelope);
+    });
+    headOfMainAt('rev_v2');
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop sharing…' }));
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop sharing' }));
+    await userEvent.click(await screen.findByRole('button', { name: /try again/iu }));
+
+    /* While the retry is in flight, the stopped link is neither shown nor offered to copy. */
+    await waitFor(() => {
+      expect(releaseRetry).toBeDefined();
+    });
+    expect(screen.queryByRole('textbox', { name: 'Share link' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy link' })).not.toBeInTheDocument();
+    releaseRetry?.();
+    expect(await screen.findByText(/you stopped sharing this project/iu)).toBeInTheDocument();
+  });
+
   it('keeps a stopped link stopped when an earlier refresh answers after it', async () => {
     let releaseInviteRefresh: (() => void) | undefined;
     let envelopeReads = 0;

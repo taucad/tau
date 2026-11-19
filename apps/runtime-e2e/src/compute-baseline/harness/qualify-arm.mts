@@ -34,7 +34,7 @@ import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
-import { qualifyRuntime } from './qualify-runtime.mts';
+import { qualifyPhaseChannel, qualifyRuntime } from './qualify-runtime.mts';
 import {
   fullMatrixSteps,
   geometryKey,
@@ -63,7 +63,7 @@ const { values } = parseArgs({
     label: { type: 'string', default: '' },
     /** in-process (default) | worker: a real worker thread; the abort scenario always uses it. */
     transport: { type: 'string', default: 'in-process' },
-    /** abort: supersede the running build this many ms after it starts (default: half the measured base main). */
+    /** abort: supersede this many ms after the superseded build's main() starts (default: at once). */
     abortAfter: { type: 'string' },
     /** abort: how many supersede trials to measure. */
     trials: { type: 'string', default: '2' },
@@ -241,7 +241,13 @@ const openClient = () => {
     transport:
       transport === 'worker'
         ? // Worker threads cannot take an inline filesystem; documents open with `watch: false` instead.
-          nodeWorkerTransport({ url: new URL('./qualify-worker.mts', import.meta.url), fileSystem: base, compute })
+          nodeWorkerTransport({
+            url: new URL('./qualify-worker.mts', import.meta.url),
+            fileSystem: base,
+            compute,
+            // The abort scenario places its supersedes on the phase ends the worker reports from the span mirror.
+            ...(scenario === 'abort' ? { devtoolsTelemetry: true } : {}),
+          })
         : inProcessTransport({ runtime: runtime!, fileSystem, compute }),
   });
   const state = { telemetry: [] as any[], logs: [] as string[] };
@@ -487,16 +493,25 @@ const run = async () => {
     return;
   }
   if (scenario === 'abort') {
-    // Stop latency (audit R9/F17, S1): supersede a running build with the next edit and measure how long the
-    // superseded build's `main()` keeps running after the supersede was issued. The kernel polls the shared abort
-    // word at every OCCT call, so the target is the next operation boundary plus at most 50 ms.
+    // Stop latency (audit R9/F17, S1, P9c): supersede the edit in flight with the next one and measure how long the
+    // superseded work keeps running and when the committed edit's build starts. Odd trials supersede the build's
+    // main(), which polls the shared abort word at every OCCT call; even trials supersede the render while it packs
+    // the GLB, which makes no OCCT call and polls between parts. The worker reports the end of the phase before each
+    // one (`qualify-worker.mts`), so where a supersede lands does not depend on this machine's speed.
+    const phaseEnds = new BroadcastChannel(qualifyPhaseChannel);
+    const waiters: Array<{ span: string; settle: () => void }> = [];
+    phaseEnds.onmessage = ({ data }: MessageEvent<{ span: string }>) => {
+      const index = waiters.findIndex((waiter) => waiter.span === data.span);
+      if (index >= 0) waiters.splice(index, 1)[0]!.settle();
+    };
+    const phaseEnd = (span: string) => new Promise<void>((settle) => waiters.push({ span, settle }));
     const { client, state } = openClient();
     await client.connect();
     const session = liveSession(client, content);
     try {
       await measure(state, { token: 'base', phase: 'open' }, () => session.step('base'));
       // Every build below uses a parameter value not seen before (the scrub ladder), so each is a real rebuild in
-      // every arm. The first is a warm edit whose main() time sets the default supersede delay (half of it).
+      // every arm. The first is a warm edit.
       const key = model.scrub.key;
       const ladder = model.scrub.values;
       const frame = (value: unknown) => ({ ...model.params.base, [key]: value });
@@ -506,21 +521,24 @@ const run = async () => {
         return renderView(session.view());
       });
       const warmMain = warm.spans['replicad.run-main']?.ms ?? 0;
-      const delay =
-        values.abortAfter === undefined ? Math.max(10, Math.round(warmMain / 3)) : Number(values.abortAfter);
+      const delay = values.abortAfter === undefined ? 0 : Number(values.abortAfter);
       const trials = Math.min(Number(values.trials), Math.floor((ladder.length - 1) / 2));
       for (let trial = 1; trial <= trials; trial += 1) {
         const first = ladder[2 * trial - 1];
         const second = ladder[2 * trial];
+        const target = trial % 2 === 1 ? 'main' : 'pack';
         let issued = 0;
         let firstOutcome: unknown;
         const step = await measure(
           state,
-          { token: `${key}=${String(second)}`, phase: 'supersede', trial, superseded: first, delayMs: delay },
+          { token: `${key}=${String(second)}`, phase: 'supersede', trial, superseded: first, target, delayMs: delay },
           async () => {
             const document = session.document();
+            // `kernel.execute` ends as main() starts; `replicad.render-output` ends as the GLB pack starts.
+            const landed = phaseEnd(target === 'main' ? 'kernel.execute' : 'replicad.render-output');
             const pending = document.update({ parameters: frame(first) });
-            await new Promise((settle) => setTimeout(settle, delay));
+            await landed;
+            if (delay > 0) await new Promise((settle) => setTimeout(settle, delay));
             issued = performance.timeOrigin + performance.now();
             const committed = document.update({ parameters: frame(second) });
             const [one, two] = await Promise.allSettled([pending, committed]);
@@ -533,20 +551,41 @@ const run = async () => {
             return renderView(session.view());
           },
         );
-        // The superseded build is the run-main span that started before the supersede was issued.
-        const mains = state.telemetry.filter((entry) => entry.name === 'replicad.run-main');
         const startOf = (entry: any) => entry.workerTimeOrigin + entry.startTime;
-        const stopped = mains.filter((entry) => startOf(entry) < issued).sort((a, b) => startOf(b) - startOf(a))[0];
-        const end = stopped ? startOf(stopped) + stopped.duration : 0;
-        // The committed edit's build: the first run-main to start after the supersede was issued.
-        const next = mains.filter((entry) => startOf(entry) >= issued).sort((a, b) => startOf(a) - startOf(b))[0];
+        const endOf = (entry: any) => startOf(entry) + entry.duration;
+        const byStart = (name: string) =>
+          state.telemetry.filter((entry) => entry.name === name).sort((a, b) => startOf(a) - startOf(b));
+        // The superseded evaluation is the first of the step; the committed edit's is the second. Their runs of
+        // main() and the superseded render are the spans inside each.
+        const [superseded, committed] = byStart('kernel.evaluate');
+        const mains = byStart('replicad.run-main');
+        const stopped = mains.find(
+          (entry) => superseded && startOf(entry) >= startOf(superseded) && endOf(entry) <= endOf(superseded),
+        );
+        const next = mains.find((entry) => committed && startOf(entry) >= startOf(committed));
+        const render = byStart('kernel.render').find((entry) => startOf(entry) < issued && endOf(entry) > issued);
+        const renderAtIssue = Boolean(render);
         (step as any).abort = {
-          // Valid when the superseded main() was running when the supersede was issued; otherwise the delay missed it.
-          valid: Boolean(stopped && end > issued && (firstOutcome as any)?.superseded),
+          target,
+          // A main() trial is valid when the superseded main() was still running at the supersede; a pack trial when
+          // the superseded render was.
+          valid:
+            target === 'main'
+              ? Boolean(
+                  superseded?.detail?.['operation.outcome'] === 'cancelled' &&
+                  endOf(superseded) > issued &&
+                  (firstOutcome as any)?.superseded,
+                )
+              : renderAtIssue,
           firstOutcome,
           supersededMainMs: stopped ? +stopped.duration.toFixed(1) : undefined,
-          stopAfterIssueMs: stopped ? +(startOf(stopped) + stopped.duration - issued).toFixed(1) : undefined,
-          // P9c: from the supersede to the committed edit's `main()`: the stop, its unwinding and the next build's setup.
+          // How long the superseded main() kept running after the supersede (0 when it stopped before starting).
+          stopAfterIssueMs:
+            target === 'main' ? (stopped ? +Math.max(0, endOf(stopped) - issued).toFixed(1) : 0) : undefined,
+          // The superseded render's outcome: `cancelled` when packing stopped at the supersede.
+          supersededRender: render?.detail?.['operation.outcome'],
+          renderAfterIssueMs: render ? +(endOf(render) - issued).toFixed(1) : undefined,
+          // From the supersede to the committed edit's `main()`: the stop, its unwinding and the next build's setup.
           nextBuildAfterIssue: next ? +(startOf(next) - issued).toFixed(1) : undefined,
           supersededMainStatus: stopped?.detail?.status ?? stopped?.detail?.error,
           warmMainMs: warmMain,
@@ -557,6 +596,7 @@ const run = async () => {
       }
     } finally {
       session.close();
+      phaseEnds.close();
       await client.shutdown({ drain: true });
     }
     return;

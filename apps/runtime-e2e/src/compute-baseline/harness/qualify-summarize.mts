@@ -146,13 +146,13 @@ if (abortRows.length > 0) {
   out('## Stop latency of a superseded build');
   out();
   out(
-    'A running build is superseded by the next edit (worker transport). `stop after issue` is how long its `main()` kept running after the supersede was issued: the wait for the next OCCT call boundary plus the abort poll. A trial is valid when the superseded `main()` was still running at the supersede. The 50 ms target is measured from the next operation boundary, which this number upper-bounds; it is reported, not gated. `next build after issue` runs from the supersede to the start of the committed edit build `main()`.',
+    'A running build is superseded by the next edit (worker transport). `stop after issue` is how long its `main()` kept running after the supersede was issued: the wait for the next OCCT call boundary plus the abort poll. Odd trials supersede `main()` as it starts and are valid when it was still running at the supersede; even trials supersede the render as its GLB pack starts and are valid when it was still running. The 50 ms target is measured from the next operation boundary, which this number upper-bounds; it is reported, not gated. `next build after issue` runs from the supersede to the start of the committed edit build `main()`, over both kinds; `renders cancelled` counts the pack trials whose render stopped.',
   );
   out();
   out(
-    '| model | arm | valid trials | stop after issue ms | next build after issue ms | superseded main ms | committed bytes = off |',
+    '| model | arm | valid trials | stop after issue ms | next build after issue ms | renders cancelled | superseded main ms | committed bytes = off |',
   );
-  out('| --- | --- | --- | --- | --- | --- | --- |');
+  out('| --- | --- | --- | --- | --- | --- | --- | --- |');
   const grouped: Record<string, any[]> = {};
   for (const row of abortRows) (grouped[`${row.model}|${row.arm}`] ??= []).push(row.run);
   for (const [key, runs] of Object.entries(grouped)) {
@@ -164,9 +164,12 @@ if (abortRows.length > 0) {
     );
     const offByToken = new Map(offTrials.map((step: any) => [step.token, step.output?.sha256]));
     const equal = trials.every((step: any) => offByToken.get(step.token) === step.output?.sha256);
-    (summary.stopLatency ??= {})[key] = valid.map((step: any) => step.abort.stopAfterIssueMs);
+    const validMain = valid.filter((step: any) => step.abort.target !== 'pack');
+    const pack = valid.filter((step: any) => step.abort.target === 'pack');
+    const cancelled = pack.filter((step: any) => step.abort.supersededRender === 'cancelled').length;
+    (summary.stopLatency ??= {})[key] = validMain.map((step: any) => step.abort.stopAfterIssueMs);
     out(
-      `| ${model} | ${arm} | ${valid.length}/${trials.length} | ${stat(valid.map((step: any) => step.abort.stopAfterIssueMs))} | ${stat(valid.map((step: any) => step.abort.nextBuildAfterIssue))} | ${stat(valid.map((step: any) => step.abort.supersededMainMs))} | ${equal ? 'yes' : 'NO'} |`,
+      `| ${model} | ${arm} | ${valid.length}/${trials.length} | ${stat(validMain.map((step: any) => step.abort.stopAfterIssueMs))} | ${stat(valid.map((step: any) => step.abort.nextBuildAfterIssue))} | ${cancelled}/${pack.length} | ${stat(validMain.map((step: any) => step.abort.supersededMainMs))} | ${equal ? 'yes' : 'NO'} |`,
     );
   }
   out();

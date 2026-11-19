@@ -30,10 +30,14 @@ export type QualifyStep = {
   readonly content?: string;
   /**
    * Stop-latency trial outcome. Its timings are data the summarizer reports, except `nextBuildAfterIssue`, which CI
-   * bounds.
+   * bounds, and the superseded render's outcome, which CI requires to be `cancelled` for a pack trial.
    */
   readonly abort?: {
+    /** The phase the supersede was placed on: the superseded build's `main()`, or its render's GLB pack. */
+    readonly target?: 'main' | 'pack';
     readonly valid: boolean;
+    /** The superseded render's operation outcome, for a pack trial. */
+    readonly supersededRender?: string;
     /** Milliseconds from the supersede to the start of the committed edit's `main()`. */
     readonly nextBuildAfterIssue?: number;
   };

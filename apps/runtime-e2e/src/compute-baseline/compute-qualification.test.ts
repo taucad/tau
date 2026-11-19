@@ -192,18 +192,26 @@ describe.each(ciModels)('compute reuse qualification: %s', (model) => {
     expect(trials.length).toBeGreaterThan(0);
   });
 
-  it('should start the committed edit soon after it superseded a running build', () => {
-    // P9c, worker transport: 16 to 49 ms on planetary-gear-system's 20 s faceWidth build (n 12, both arms), and up to
-    // about 150 ms when the supersede lands in a render's GLB pack before the pack polled the abort word. The bound
-    // is ten times the heavy-model worst case, below the 0.7 to 0.9 s a render that runs to its end would add there,
-    // and far below the whole-build waits of 2 to 15 s before the native user break.
-    const nextBuild = ['abort.off', 'abort.memory'].flatMap((key) =>
-      reports[key]!.steps.flatMap((step) =>
-        step.abort?.valid && step.abort.nextBuildAfterIssue !== undefined ? [step.abort.nextBuildAfterIssue] : [],
-      ),
+  it('should start the committed edit soon after it superseded a running build or render', () => {
+    // P9c, worker transport. The arm supersedes main() as it starts on odd trials and the render as its GLB pack starts
+    // on even ones, on phase ends the worker reports, so both phases are sampled on every machine. The pack makes no
+    // OCCT call and polls the abort word between parts: without those polls the superseded render runs to its end
+    // and is delivered. The 500 ms bound is ten times the heavy-model worst case (16 to 49 ms on planetary-gear-system's
+    // 20 s faceWidth build), below the 0.7 to 0.9 s a whole stale render adds there.
+    const trials = ['abort.off', 'abort.memory'].flatMap((key) =>
+      reports[key]!.steps.flatMap((step) => (step.phase === 'supersede' && step.abort ? [step.abort] : [])),
     );
-    expect(nextBuild.length).toBeGreaterThan(0);
-    expect(Math.max(...nextBuild)).toBeLessThan(500);
+    for (const target of ['main', 'pack'] as const) {
+      const placed = trials.filter((trial) => trial.target === target);
+      expect(placed.length, target).toBeGreaterThan(0);
+      for (const trial of placed) {
+        expect(trial.valid, JSON.stringify(trial)).toBe(true);
+        expect(trial.nextBuildAfterIssue, JSON.stringify(trial)).toBeLessThan(500);
+        if (target === 'pack') {
+          expect(trial.supersededRender, JSON.stringify(trial)).toBe('cancelled');
+        }
+      }
+    }
   });
 
   it('should do no compute store work with reuse off', () => {

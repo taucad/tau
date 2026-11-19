@@ -5,7 +5,18 @@
  */
 import { nodeWorkerHost } from '@taucad/runtime/transport/node';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
-import { qualifyRuntime } from './qualify-runtime.mts';
+import { qualifyPhaseChannel, qualifyRuntime } from './qualify-runtime.mts';
+
+// With `devtoolsTelemetry`, the tracer mirrors each span into `performance.measure` the moment it ends, as
+// `tau:<span>:<epoch>:<id>`. Posting the span name from there tells the arm process that the next phase has begun
+// while the worker is still busy with it. A plain worker never calls `measure`, so nothing is posted.
+const phaseEnds = new BroadcastChannel(qualifyPhaseChannel);
+(phaseEnds as unknown as { unref?: () => void }).unref?.();
+const measure = performance.measure.bind(performance);
+performance.measure = ((name: string, ...rest: unknown[]) => {
+  if (name.startsWith('tau:')) phaseEnds.postMessage({ span: name.split(':')[1] });
+  return (measure as (...args: unknown[]) => PerformanceMeasure)(name, ...rest);
+}) as typeof performance.measure;
 
 const runtime = await qualifyRuntime({
   arm: process.env['TAU_QUALIFY_ARM'] ?? 'off',

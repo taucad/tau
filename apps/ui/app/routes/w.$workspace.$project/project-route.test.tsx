@@ -932,7 +932,9 @@ describe('project route session identity', () => {
       expect(focusedSessionId()).toBe(projectB);
     });
     expect(sessionIds()).toContain(projectA);
-    expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    await waitFor(() => {
+      expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    });
     expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
   });
 

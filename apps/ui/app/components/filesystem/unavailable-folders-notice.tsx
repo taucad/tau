@@ -5,7 +5,7 @@ import { listWorkspaces } from '@taucad/files-ui/filesystem/handle-store';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import type { RootStatus } from '@taucad/filesystem';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
-import { useRootStatuses, workspaceStorageRootKey } from '#components/filesystem/folder-status.js';
+import { useRootStatuses, workspaceStorageRootKey } from '@taucad/files-ui/components/filesystem/folder-status';
 
 /**
  * Workspace ids already announced as unavailable, as a JSON array (blueprint D2, Specification "Notice memory"). An

@@ -1,9 +1,16 @@
 import { useSelector } from '@xstate/react';
 import type { RootStatus } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import type { ActorRef, Snapshot } from 'xstate';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
-import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import type { Workspace } from '#filesystem/handle-store.js';
+
+/** The root file manager as far as root statuses go: the app's file manager actor satisfies it. */
+export type RootStatusSource = ActorRef<
+  Snapshot<unknown> & { readonly context: { readonly rootStatuses: readonly RootStatus[] } },
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- any event: only the snapshot is read.
+  any
+>;
 
 /**
  * The storage-root key a workspace's root status is published under: `node:<path>` for a picked folder,
@@ -28,7 +35,7 @@ const noRootStatuses: readonly RootStatus[] = [];
  * @param fileManagerRef - The root file manager, which configures every root.
  * @returns Its statuses, or none before it has configured any.
  */
-export function useRootStatuses(fileManagerRef: FileManagerRef | undefined): readonly RootStatus[] {
+export function useRootStatuses(fileManagerRef: RootStatusSource | undefined): readonly RootStatus[] {
   return useSelector(fileManagerRef, (snapshot) => snapshot?.context.rootStatuses ?? noRootStatuses);
 }
 

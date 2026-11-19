@@ -50,7 +50,7 @@ import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
-import { prepareDeploys, startDeployServer } from './support/two-deploys.ts';
+import { heldChunk, prepareDeploys, startDeployServer } from './support/two-deploys.ts';
 import type { DeployServer, Deploys } from './support/two-deploys.ts';
 // oxlint-enable no-restricted-imports
 
@@ -110,6 +110,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     path = '/',
     hold = true,
     retain = false,
+    resetOnce?: RegExp,
   ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
     if (browser === undefined || deploys === undefined) {
       expect.fail('the builds and browser did not start');
@@ -117,7 +118,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     const live = await startDeployServer(
       deploys.builds,
       { shells: deploys.shells, workers: deploys.workers.scripts },
-      { hold, retain },
+      { hold, retain, resetOnce },
     );
     server = live;
     // No worker (see the file comment): recovery must not depend on whether one took the page first.
@@ -264,5 +265,22 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
 
     expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
     expect(live.documents).toStrictEqual(['previous', 'next']);
+  }, 120_000);
+
+  /* PL7 blueprint FP9, row 9 (D17, D19): one build, the file present, one transient failure. A module that failed to
+   * load fails again for the life of the page, so the page needs a new realm: an untouched page reloads into the same
+   * build once and mounts, where it used to keep the failure as genuine and leave a dead control. */
+  it('should reload once into the same build when a lazy chunk fails once on the live build', async () => {
+    const { page, live } = await open('/', false, false, heldChunk);
+
+    await expect.poll(() => live.documents, { timeout: 30_000 }).toStrictEqual(['previous', 'previous']);
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+
+    expect(live.resets()).toBe(1);
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-transient-reload'))).toMatch(
+      /^\d+@\d+$/u,
+    );
   }, 120_000);
 });

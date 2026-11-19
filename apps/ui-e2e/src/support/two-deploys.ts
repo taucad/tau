@@ -35,7 +35,8 @@ const serviceWorkerUrl = '/service-worker.js';
 /** The retired `/usage` worker's URL, where every PL7 build ships the retiring worker. */
 const retiredServiceWorkerUrl = '/offline-shell-worker.js';
 const projectUrl = /^\/w\/[^/.]+\/[^/.]+\/?$/u;
-const heldChunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
+/** The command palette's lazy chunk, which every route loads right after hydration. */
+export const heldChunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
 /** Milliseconds between the two deploys' build ids. */
 export const deployGap = 60_000;
 
@@ -124,6 +125,8 @@ export type DeployServer = {
   /** How many `/health/build` answers the next deploy gave. */
   readonly buildChecks: () => number;
   readonly heldRequest: Promise<void>;
+  /** How many requests `resetOnce` reset (at most one). */
+  readonly resets: () => number;
   deploy(): void;
   close(): Promise<void>;
 };
@@ -137,13 +140,26 @@ export const startDeployServer = async (
     /** Each deploy's `/offline-shell-worker.js` (the retired `/usage` worker's URL); unset serves the build's file. */
     retiredWorkers?: Readonly<Record<Deploy, string>>;
   }>,
-  { hold = true, retain = false }: { readonly hold?: boolean; readonly retain?: boolean } = {},
+  {
+    hold = true,
+    retain = false,
+    resetOnce,
+  }: {
+    readonly hold?: boolean;
+    readonly retain?: boolean;
+    /**
+     * The first `/assets/*` request whose path matches has its connection reset, as a dropped connection or a network
+     * change does; later ones are served (PL7 blueprint row 9: a transient failure on the live build).
+     */
+    readonly resetOnce?: RegExp;
+  } = {},
 ): Promise<DeployServer> => {
   const shells = files?.shells;
   const workers = files?.workers;
   const retiredWorkers = files?.retiredWorkers;
   let live: Deploy = 'previous';
   let buildChecks = 0;
+  let resets = 0;
   const documents: Deploy[] = [];
   const held: Array<() => void> = [];
   let markHeld: () => void = () => undefined;
@@ -164,6 +180,11 @@ export const startDeployServer = async (
     const cookie = request.headers.cookie ?? '';
     const renderedByNext =
       cookie.includes(`${deployCookie}=next`) || (live === 'next' && !cookie.includes(deployCookie));
+    if (resetOnce !== undefined && resets === 0 && resetOnce.test(request.originalUrl)) {
+      resets += 1;
+      request.socket.destroy();
+      return;
+    }
     if (hold && live === 'previous' && heldChunk.test(request.originalUrl)) {
       held.push(() => {
         sendDeletedAsset(response);
@@ -233,6 +254,7 @@ export const startDeployServer = async (
     documents,
     buildChecks: () => buildChecks,
     heldRequest,
+    resets: () => resets,
     deploy() {
       live = 'next';
       for (const release of held.splice(0)) {

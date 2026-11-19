@@ -70,4 +70,30 @@ describe('@taucad/cadmpeg', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('imports cadmpeg-ts only through its engine-free entry, digests and formats', () => {
+    // The bare `cadmpeg-ts` entry and `cadmpeg-ts/wasm/*` name all 13 engines, so a bundler would
+    // emit every one of them into each app that registers this plugin (engine delivery charter D16).
+    const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+    const allowed = new Set(['cadmpeg-ts/core', 'cadmpeg-ts/digests', 'cadmpeg-ts/formats']);
+    const specifiers = readdirSync(sourceDirectory, { encoding: 'utf8', recursive: true })
+      .filter((name) => name.endsWith('.ts'))
+      .flatMap((name) =>
+        [
+          ...readFileSync(join(sourceDirectory, name), 'utf8').matchAll(
+            /(?:from\s+|import\s*\(\s*|import\s+|require\s*\(\s*|resolve\s*\(\s*)["'](cadmpeg-ts(?:\/[^"']*)?)["']/g,
+          ),
+        ].map((match) => ({ name, specifier: match[1]! })),
+      );
+
+    expect(specifiers.length).toBeGreaterThan(0);
+    expect(
+      specifiers
+        .filter(
+          ({ name, specifier }) =>
+            !allowed.has(specifier) && !(name.endsWith('.test.ts') && specifier === 'cadmpeg-ts/package.json'),
+        )
+        .map(({ name, specifier }) => `${name}: ${specifier}`),
+    ).toEqual([]);
+  });
 });

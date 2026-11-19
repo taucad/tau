@@ -23,6 +23,7 @@ export const workspaceTests = [
   'src/affected-selection.test.ts',
   'src/api-shard-union.test.ts',
   'src/billing-stripe-lanes.test.ts',
+  'src/check-cadmpeg-engine-mirror.test.ts',
   'src/check-standalone-project.test.ts',
   'src/check-viewer-shell-parity.test.ts',
   'src/ci-affected-lanes.test.ts',

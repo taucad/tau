@@ -315,16 +315,16 @@ describe('publishMachine', () => {
   it('4c: names and publishes an older revision when the dialog was opened on one, and the head again after', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish', requestId: 'publish-1', revisionId: 'rev-1' });
+    actor.send({ type: 'publish', requestId: 'publish-1', revisionId: 'rev-0' });
     await settle();
     actor.send({ type: 'confirm', draft });
     await settle();
 
     expect(actor.getSnapshot().matches('success')).toBe(true);
-    expect(calls[0]?.input).toStrictEqual({ name: 'Lid fit', revisionId: 'rev-1' });
+    expect(calls[0]?.input).toStrictEqual({ name: 'Lid fit', revisionId: 'rev-0' });
     /* The branch still travels under its own lease: an older revision is already in its history. */
     expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v3', expected: 'rev-1', expectedTag: undefined });
-    expect(calls[2]?.input).toMatchObject({ tag: 'v3', revisionId: 'rev-1' });
+    expect(calls[2]?.input).toMatchObject({ tag: 'v3', revisionId: 'rev-0' });
 
     /* A later publish without one names the head, not the revision the last dialog was opened on. */
     actor.send({ type: 'publish', requestId: 'publish-2' });
@@ -599,7 +599,7 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
-  it('21: keeps today’s rule for an explicit name on an entry that already is a version', async () => {
+  it('21: refuses an explicit name an entry’s version does not have, naming that version (rule 14)', async () => {
     const { actor, calls } = start();
 
     actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
@@ -607,8 +607,36 @@ describe('publishMachine', () => {
     actor.send({ type: 'confirm', draft: { ...draft, tag: 'Hinge' } });
     await settle();
 
-    /* A name the person chose that the entry's version does not have makes a new version. */
-    expect(calls[0]?.input).toStrictEqual({ name: 'Hinge', revisionId: 'rev-1' });
+    /* An entry carries at most one version: no second version, and no rename. */
+    expect(calls.map((call) => call.name)).not.toContain('createTag');
+    expect(actor.getSnapshot().matches('error')).toBe(true);
+    expect(selectPublishFacet(actor.getSnapshot()).error).toBe(
+      'This entry is already V2 “Ready for print”. Publish it as is, or save a new entry first.',
+    );
+    actor.stop();
+  });
+
+  it('21: refuses it too when the confirm arrives before the names were read', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Hinge' } });
+    await settle();
+
+    expect(calls.map((call) => call.name)).not.toContain('createTag');
+    expect(selectPublishFacet(actor.getSnapshot()).error).toMatch(/^This entry is already V2/u);
+    actor.stop();
+  });
+
+  it('21: publishes an explicit name the entry’s version already has as that version', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Ready for print' } });
+    await settle();
+
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
     actor.stop();
   });
 

@@ -253,6 +253,27 @@ const republished = (draft: PublishDraft | undefined, tags: readonly RevisionTag
 
 const notOnThisDevice = 'That version isn’t on this device yet. Get the latest changes, then publish it again.';
 
+/*
+ * An entry carries at most one version (rule 14). A name the person typed that
+ * the entry's version does not have is refused: publishing it would make a
+ * second version on the entry, and renaming is not what a publish does.
+ */
+const alreadyVersioned = (
+  draft: PublishDraft,
+  tags: readonly RevisionTag[],
+  revisionId: string | undefined,
+): string | undefined => {
+  if (draft.version !== undefined || draft.isAutoNamed === true) {
+    return undefined;
+  }
+  const onEntry = tags.filter((tag) => tag.revisionId === revisionId);
+  const [version] = onEntry;
+  if (version === undefined || onEntry.some((tag) => tag.name === draft.tag)) {
+    return undefined;
+  }
+  return `This entry is already V${String(version.number)} “${version.name}”. Publish it as is, or save a new entry first.`;
+};
+
 /* The tag `pushing` and `publishing` name once `tagging` has made it: `v<number>`,
  * as `versionTagName` spells it (a machine imports no value from the port). */
 const versionTagOf = (context: PublishMachineContext): string =>
@@ -363,6 +384,11 @@ const publishMachineDefinition = setup({
               if (context.draft?.version !== undefined && version === undefined) {
                 return { target: '#publish.error', context: { ...read, ...failWith(context, enq, notOnThisDevice) } };
               }
+              const versioned =
+                context.draft === undefined ? undefined : alreadyVersioned(context.draft, read.tags, read.revisionId);
+              if (versioned !== undefined) {
+                return { target: '#publish.error', context: { ...read, ...failWith(context, enq, versioned) } };
+              }
               /* A name was confirmed while the read was in flight. */
               return context.draft === undefined
                 ? { target: 'ready', context: read }
@@ -387,6 +413,10 @@ const publishMachineDefinition = setup({
               const version = republished(event.draft, context.tags);
               if (event.draft.version !== undefined && version === undefined) {
                 return { target: '#publish.error', context: failWith(context, enq, notOnThisDevice) };
+              }
+              const versioned = alreadyVersioned(event.draft, context.tags, context.revisionId);
+              if (versioned !== undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, versioned) };
               }
               return {
                 target: '#publish.tagging',

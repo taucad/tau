@@ -49,6 +49,7 @@ const templateKinds: ReadonlySet<string> = new Set<EmailTemplateKind>([
   'reset-password',
   'password-changed',
   'publication-invite',
+  'project-invite',
   'payment-failed',
   'auto-reload-disabled',
   'auto-reload-action-required',

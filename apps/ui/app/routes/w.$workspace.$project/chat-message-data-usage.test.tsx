@@ -24,7 +24,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: (_name: string, fallback: boolean) => [fallback, vi.fn()] }));
-vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({ recordBillingRevisionMinimum }));
 vi.mock('#lib/agent-host-placement.js', () => ({ externalAgentDisplayName: (id: string) => id }));
 
 const identity = { schemaVersion: 1, environment: 'development', ownerId: 'user', subjectId: 'account' };

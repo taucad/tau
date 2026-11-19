@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useIsFetching: () => query.fetching,
   useQueryClient: () => ({ invalidateQueries: query.invalidateQueries }),
 }));
-vi.mock('#lib/billing-payment-client.js', () => ({
+vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => ({
   purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
   createPortalAction,
@@ -38,10 +38,10 @@ vi.mock('#components/auth/settings/account/email-deliverability-banner.js', () =
 vi.mock('#components/billing/topup-modal.js', () => ({
   TopupModal: () => <div>Top-up modal</div>,
 }));
-vi.mock('#components/billing/auto-reload-settings.js', () => ({
+vi.mock('@taucad/billing-ui/components/billing/auto-reload-settings', () => ({
   AutoReloadSettings: () => <div>Automatic reload controls</div>,
 }));
-vi.mock('#components/billing/cancel-plan-settings.js', () => ({
+vi.mock('@taucad/billing-ui/components/billing/cancel-plan-settings', () => ({
   CancelPlanSettings: () => <div>Cancel plan controls</div>,
 }));
 

@@ -4,7 +4,7 @@ import type { UseMutationResult } from '@tanstack/react-query';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /** The agent-observability processing purposes, in the server's order. */
 export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;

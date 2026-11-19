@@ -32,12 +32,12 @@ import { wireUsageSnapshotSchema } from '@taucad/billing';
 import type { WireUsageSnapshot } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import type { UsageSnapshotQuery, UsageSnapshotResult } from '@taucad/billing/hooks/use-usage-snapshot';
-import { metaConfig } from '#constants/meta.constants.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 
 /** Bumped only when a stored shape changes; older records are then unreadable and dropped. */
 const schemaVersion = 1;
-const databaseName = `${metaConfig.databasePrefix}billing`;
+const databaseName = `${appMetaConfig.databasePrefix}billing`;
 const snapshotStoreName = 'usageSnapshots';
 const profileStoreName = 'selectedProfile';
 const profileId = 'selected';
@@ -120,7 +120,7 @@ export type SavedUsageScope = {
   readonly ownerId: string;
 };
 
-const revisionChangedEvent = `${metaConfig.databasePrefix}billing-revision-changed`;
+const revisionChangedEvent = `${appMetaConfig.databasePrefix}billing-revision-changed`;
 
 const maximumRevision = (left: string | undefined, right: string): string =>
   left !== undefined && /^\d+$/u.test(left) && BigInt(left) > BigInt(right) ? left : right;

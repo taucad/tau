@@ -13,7 +13,11 @@ import {
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
+import {
+  createPaymentRequestId,
+  createPortalAction,
+  followPaymentRedirect,
+} from '@taucad/billing-ui/lib/billing-payment-client';
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
@@ -26,10 +30,10 @@ import {
 } from '@taucad/billing-ui/components/billing/billing-primitives';
 import { MonthlyCreditsMeter } from '@taucad/billing-ui/components/billing/monthly-credits-meter';
 import { TopupModal } from '#components/billing/topup-modal.js';
-import { PlanCards } from '#components/billing/plan-cards.js';
-import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
-import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
-import { useBillingBinding } from '#components/billing/use-billing-binding.js';
+import { PlanCards } from '@taucad/billing-ui/components/billing/plan-cards';
+import { AutoReloadSettings } from '@taucad/billing-ui/components/billing/auto-reload-settings';
+import { CancelPlanSettings } from '@taucad/billing-ui/components/billing/cancel-plan-settings';
+import { useBillingBinding } from '@taucad/billing-ui/components/billing/use-billing-binding';
 import { Button } from '@taucad/ui/components/button';
 import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 

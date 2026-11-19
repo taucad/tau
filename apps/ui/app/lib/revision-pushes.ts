@@ -30,7 +30,7 @@
 
 import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { joinPushes, parsePushPage } from '@taucad/revisions-ui/lib/revision-push-records';
 import type { PushMember, PushPage } from '@taucad/revisions-ui/lib/revision-push-records';
 import type { PushEntry, PushRecordSnapshot } from '@taucad/revisions-ui/types/revision-push.types';

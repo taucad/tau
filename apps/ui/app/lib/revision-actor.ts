@@ -50,7 +50,7 @@ import { revisionPushRecordOf } from '@taucad/revisions-ui/lib/revision-who';
 import type { RevisionWhoContext } from '@taucad/revisions-ui/lib/revision-who';
 import { ENV } from '#environment.config.js';
 import { useFeature } from '#flags/use-feature.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { getPushRecords, subscribePushRecords } from '#lib/revision-pushes.js';
 
 /** Local-storage key prefix; one entry per workspace (EQ8). @public */

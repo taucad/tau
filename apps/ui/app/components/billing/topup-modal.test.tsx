@@ -51,7 +51,7 @@ const entitlements = vi.hoisted((): { current: TestEntitlements } => ({
   current: { isResolved: true, paymentCollectionAvailable: true, paymentMethod: { brand: 'visa', last4: '4242' } },
 }));
 const invalidateQueries = vi.hoisted(() => vi.fn());
-vi.mock('#lib/billing-payment-client.js', () => ({
+vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => ({
   ...client,
   BillingPaymentConflict: PaymentConflict,
   BillingCollectionUnavailable: CollectionUnavailable,

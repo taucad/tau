@@ -25,7 +25,7 @@ import {
   prepareTopup,
   purchasesUnavailableMessage,
   recoverPaymentAction,
-} from '#lib/billing-payment-client.js';
+} from '@taucad/billing-ui/lib/billing-payment-client';
 import { toast } from '@taucad/ui/components/sonner';
 import { PaymentMethod } from '@taucad/ui-kit/components/payment-method';
 import { Button } from '@taucad/ui/components/button';

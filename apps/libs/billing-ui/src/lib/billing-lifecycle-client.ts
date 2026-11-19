@@ -1,9 +1,8 @@
-// eslint-disable-next-line @nx/enforce-module-boundaries -- UI owns this first-party billing HTTP boundary
 import { wireAccountClosureSchema, wireAutoReloadConsentSchema, wirePaymentActionSchema } from '@taucad/billing';
 import type { WireAccountClosure, WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { parseCollectionRefusal } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /** Automatic reload quotes tax from a billing address that only a Checkout purchase saves; retrying cannot help. */
 export class BillingAddressRequired extends Error {

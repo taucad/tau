@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { metaConfig } from '#constants/meta.constants.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import { purgeSavedUsage } from '#db/billing-snapshot-store.js';
 import type { SavedUsageScope } from '#db/billing-snapshot-store.js';
 
@@ -34,7 +34,7 @@ const billingKey = ['billing'] as const;
  * switch or closure here. Messages carry the surviving account namespace only —
  * never a token, cookie or balance.
  */
-const purgeChannelName = `${metaConfig.databasePrefix}financial-session-purge`;
+const purgeChannelName = `${appMetaConfig.databasePrefix}financial-session-purge`;
 const purgeMessageSchema = z.object({
   keep: z.object({ environment: z.string(), ownerId: z.string() }).nullable(),
 });

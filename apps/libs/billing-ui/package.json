@@ -27,8 +27,12 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/billing/auto-reload-settings": "./src/components/billing/auto-reload-settings.tsx",
     "./components/billing/billing-primitives": "./src/components/billing/billing-primitives.tsx",
+    "./components/billing/cancel-plan-settings": "./src/components/billing/cancel-plan-settings.tsx",
     "./components/billing/monthly-credits-meter": "./src/components/billing/monthly-credits-meter.tsx",
+    "./components/billing/plan-cards": "./src/components/billing/plan-cards.tsx",
+    "./components/billing/use-billing-binding": "./src/components/billing/use-billing-binding.ts",
     "./components/tier-badge": "./src/components/tier-badge.tsx",
     "./components/usage/activity-names": "./src/components/usage/activity-names.ts",
     "./components/usage/charts/credit-usage-tooltip": "./src/components/usage/charts/credit-usage-tooltip.tsx",
@@ -41,6 +45,11 @@
     "./components/usage/reserved-table": "./src/components/usage/reserved-table.tsx",
     "./components/usage/usage-summary-cards": "./src/components/usage/usage-summary-cards.tsx",
     "./components/usage/use-usage-filters": "./src/components/usage/use-usage-filters.ts",
+    "./db/billing-snapshot-store": "./src/db/billing-snapshot-store.ts",
+    "./hooks/use-auto-reload-enabled": "./src/hooks/use-auto-reload-enabled.ts",
+    "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",
+    "./lib/billing-payment-client": "./src/lib/billing-payment-client.ts",
+    "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
     "./package.json": "./package.json"
   },
   "imports": {
@@ -49,20 +58,28 @@
   "devDependencies": {
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "fake-indexeddb": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "dependencies": {
+    "@tanstack/react-query": "catalog:",
     "@tanstack/react-table": "^8.21.3",
     "@taucad/billing": "workspace:*",
+    "@taucad/settings-ui": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/ui-core": "workspace:*",
     "@taucad/ui-kit": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "date-fns": "catalog:",
     "lucide-react": "catalog:",
     "react-day-picker": "^10.0.1",
-    "recharts": "^3.8.1"
+    "react-router": "catalog:",
+    "recharts": "^3.8.1",
+    "sonner": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

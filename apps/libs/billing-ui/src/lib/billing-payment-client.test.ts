@@ -4,13 +4,17 @@ import {
   followPaymentRedirect,
   getUnresolvedPaymentActions,
   prepareTopup,
-} from './billing-payment-client.js';
+} from '#lib/billing-payment-client.js';
 import type { WirePaymentAction } from '@taucad/billing';
 
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
 
-vi.mock('#environment.config.js', () => ({
-  requireClientEnvironmentUrl: () => 'https://api.tau.new/',
+/** The build target `opensPaymentsInBrowser` reads; the desktop case sets it. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
 }));
 vi.mock('@taucad/utils/id', () => ({ randomUuid: () => 'request_1' }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
@@ -308,7 +312,7 @@ describe('followPaymentRedirect', () => {
   it('should open Stripe in the browser from the desktop app, whose window never leaves the app', () => {
     const assign = vi.fn();
     const openWindow = vi.fn();
-    vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     vi.stubGlobal('location', { assign });
     vi.stubGlobal('open', openWindow);
     try {
@@ -317,7 +321,7 @@ describe('followPaymentRedirect', () => {
       expect(assign).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
-      vi.unstubAllEnvs();
+      buildTarget.desktop = false;
     }
   });
 });

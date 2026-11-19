@@ -57,6 +57,18 @@ export const { createHostRevisionClient } = revisionClients;
  */
 export const { getRevisionClient } = revisionClients;
 
+/**
+ * The commands one client accepts, outside any project's React subtree: the *Open* gesture's early connection
+ * (STO-25 SP6) sends the same verbs `useRevisionCommands` does.
+ *
+ * @param client - The project's client.
+ * @param projectId - Its project.
+ * @returns The command surface.
+ * @public
+ */
+export const revisionCommandsFor = (client: RevisionClient, projectId: string): RevisionCommands =>
+  revisionClients.revisionCommands(client, projectId);
+
 /** Test-only access to the module's client table; not exported from a barrel. @internal */
 export const { revisionClientTestApi } = revisionClients;
 

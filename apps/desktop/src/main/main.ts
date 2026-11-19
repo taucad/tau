@@ -2998,6 +2998,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
     event.preventDefault();
     pendingQuit ??= quitWhenReady(quitReason ?? 'external');
   });
+  /*
+   * A restart in a launch whose shell never mounted asks no page to save (D0): such a page has nothing to save and
+   * cannot answer, so waiting on it would end in the saving review. The recovery window's restarts and an update's
+   * install, including N1's automatic one, both come through here (T-B22.4).
+   */
+  const prepareToRestart = async (reason: string): Promise<boolean> => {
+    restartWithoutPage = bootWatchdog !== undefined && !bootWatchdog.shellMounted();
+    try {
+      return await prepareToQuit('restart', reason);
+    } finally {
+      restartWithoutPage = false;
+    }
+  };
   /* Start only once the shared shutdown owner and normal application startup are ready. */
   const prepareToInstall = async (commit: () => void | Promise<void>): Promise<boolean> => {
     if (shutdownComplete || shutdownPending !== undefined || installBeforeExit !== undefined) {
@@ -3010,7 +3023,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       committed = true;
     };
     try {
-      return (await prepareToQuit('restart', 'update-install')) && committed;
+      return (await prepareToRestart('update-install')) && committed;
     } finally {
       installBeforeExit = undefined;
       installFailed = false;
@@ -3038,7 +3051,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       channel: desktopChannel,
       environment,
       autoUpdater,
-      prepareToRestart: async () => prepareToQuit('restart', 'update-install'),
+      prepareToRestart: async () => prepareToRestart('update-install'),
       ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
       ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
       ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
@@ -3188,14 +3201,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         autoInstall?.reevaluate();
       },
     },
-    prepareToQuit: async (purpose, reason) => {
-      restartWithoutPage = bootWatchdog !== undefined && !bootWatchdog.shellMounted();
-      try {
-        return await prepareToQuit(purpose, reason);
-      } finally {
-        restartWithoutPage = false;
-      }
-    },
+    prepareToQuit: async (_purpose, reason) => prepareToRestart(reason),
     relaunch: relaunchWith,
     quit: () => {
       app.quit();

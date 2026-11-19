@@ -44,12 +44,14 @@ const textField = (value: unknown): string | undefined =>
 
 /**
  * Reads `tau.json`. Without `--entry` it is required, for the file a viewer opens with; with `--entry` it only adds a
- * name and a description, so a project without one publishes under its directory's name.
+ * name and a description, so a project without one publishes under its directory's name. Only an absent `tau.json`
+ * is passed over: one that exists but cannot be read may hold the project's identity, which the host then refuses
+ * to guess, so it is refused here in the same words as a missing one.
  *
  * @param workspaceRoot - The project directory.
  * @param hasEntry - Whether `--entry` named the file a viewer opens with.
- * @returns What `tau.json` says, or nothing when `--entry` was given and it could not be read.
- * @throws CliError When `--entry` was not given and `tau.json` could not be read.
+ * @returns What `tau.json` says, or nothing when `--entry` was given and there is no `tau.json`.
+ * @throws CliError When `tau.json` is needed and absent, or exists and cannot be read.
  */
 const readProjectManifest = async (workspaceRoot: string, hasEntry: boolean): Promise<ProjectManifestFields> => {
   const manifestPath = join(workspaceRoot, 'tau.json');
@@ -64,8 +66,8 @@ const readProjectManifest = async (workspaceRoot: string, hasEntry: boolean): Pr
       description: textField(manifest.description),
       entryPath: manifest.assets?.main?.entryPath,
     };
-  } catch {
-    if (hasEntry) {
+  } catch (error) {
+    if (hasEntry && (error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { name: undefined, description: undefined, entryPath: undefined };
     }
     throw cliError(

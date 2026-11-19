@@ -7,7 +7,7 @@
  * needs and the draft that leaves — never a second publish path.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -180,6 +180,16 @@ describe('publishCommand', () => {
       projectName: basename(project),
       entryPath: 'main.ts',
     });
+  });
+
+  it('refuses a project manifest it cannot read even with --entry, before opening the project', async () => {
+    /* Not absent but unreadable: it may hold the project's identity, which the host will not guess. */
+    await mkdir(join(project, 'tau.json'));
+
+    await expect(
+      runCommand(publishCommand, { rawArgs: ['v1', '--project', project, '--entry', 'main.ts'] }),
+    ).rejects.toMatchObject({ code: 'NO_PROJECT_MANIFEST' });
+    expect(openProjectRevisions).not.toHaveBeenCalled();
   });
 
   it('refuses a project whose manifest does not say what it opens with', async () => {

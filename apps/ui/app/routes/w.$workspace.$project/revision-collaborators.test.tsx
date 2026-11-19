@@ -240,12 +240,19 @@ describe('RevisionCollaborators', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(says);
   });
 
-  it('removes access at once, then hands focus to the heading', async () => {
+  it('asks before removing access, then removes it and hands focus to the heading', async () => {
     const fetchMock = answer([teammate]);
     renderPanel();
 
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
     await userEvent.click(screen.getByRole('button', { name: 'Remove access for teammate@example.test' }));
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.',
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'DELETE' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove access' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -253,11 +260,33 @@ describe('RevisionCollaborators', () => {
         expect.objectContaining({ method: 'DELETE' }),
       );
     });
-    /* F5: the button the click came from is gone, so focus would fall to
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    /* F5: the button the click came from is disabled with its removed row, so focus would fall to
        `<body>` — the same defect review R15 fixed on the disconnect confirm. */
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'People with access' }));
     });
+  });
+
+  it('keeps access and returns focus to the row when the removal is cancelled', async () => {
+    const fetchMock = answer([{ ...teammate, status: 'pending' }]);
+    renderPanel();
+
+    const remove = await screen.findByRole('button', { name: 'Remove access for teammate@example.test' });
+    await userEvent.click(remove);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    expect(document.activeElement).toBe(remove);
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'DELETE' }));
   });
 
   it('lists five people in flow and the rest on request', async () => {

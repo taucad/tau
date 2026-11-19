@@ -15,6 +15,15 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { UserMinus } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Badge } from '@taucad/ui/components/badge';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { SharePaneSection } from '@taucad/workbench-panes/share/share-pane';
@@ -148,6 +157,11 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
   const [role, setRole] = useState<'read' | 'write'>('write');
   const [issued, setIssued] = useState<IssuedInvitation>();
   const [failure, setFailure] = useState<string>();
+  /* The person a removal waits to be confirmed for: access cannot be given back without a new invite link. */
+  const [removal, setRemoval] = useState<CollaboratorEntry>();
+  const shouldFocusHeadingRef = useRef(false);
+  /* The row button that asked, so a cancelled removal hands focus back to it. */
+  const removalTriggerRef = useRef<HTMLButtonElement | undefined>(undefined);
 
   const {
     data: people = [],
@@ -239,11 +253,14 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
     },
     async onSuccess() {
       setFailure(undefined);
+      /* The row's button is disabled once its person is removed, so the dialog hands focus to the heading. */
+      shouldFocusHeadingRef.current = true;
+      setRemoval(undefined);
       await refreshPeople();
-      headingRef.current?.focus();
     },
     onError(error: Error) {
       setFailure(error.message);
+      setRemoval(undefined);
     },
   });
 
@@ -399,8 +416,9 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
                             className='shrink-0'
                             disabled={busy || person.status === 'revoked'}
                             aria-label={`Remove access for ${person.email}`}
-                            onClick={() => {
-                              revoke.mutate(person.email);
+                            onClick={(event) => {
+                              removalTriggerRef.current = event.currentTarget;
+                              setRemoval(person);
                             }}
                           >
                             <UserMinus aria-hidden />
@@ -457,7 +475,86 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
           <p className='text-sm text-muted-foreground'>Nobody else has access to this project.</p>
         )}
       </div>
+      <RemoveCollaboratorDialog
+        person={removal}
+        isRemoving={revoke.isPending}
+        onConfirm={(person) => {
+          revoke.mutate(person.email);
+        }}
+        onCancel={() => {
+          setRemoval(undefined);
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (shouldFocusHeadingRef.current) {
+            shouldFocusHeadingRef.current = false;
+            headingRef.current?.focus();
+          } else {
+            removalTriggerRef.current?.focus();
+          }
+        }}
+      />
     </SharePaneSection>
+  );
+}
+
+/**
+ * Asks before a person loses access (UX Rule 4): a removed collaborator can only come back through a new invite link,
+ * so the removal is confirmed with their address rather than undone.
+ *
+ * @param props - The person waiting to be removed, whether the removal is running, and what each answer does.
+ * @returns The dialog, open while a person is waiting.
+ */
+function RemoveCollaboratorDialog({
+  person,
+  isRemoving,
+  onConfirm,
+  onCancel,
+  onCloseAutoFocus,
+}: {
+  readonly person: CollaboratorEntry | undefined;
+  readonly isRemoving: boolean;
+  readonly onConfirm: (person: CollaboratorEntry) => void;
+  readonly onCancel: () => void;
+  readonly onCloseAutoFocus: (event: Event) => void;
+}): React.JSX.Element {
+  return (
+    <AlertDialog
+      open={person !== undefined}
+      onOpenChange={(open) => {
+        if (!open && !isRemoving) {
+          onCancel();
+        }
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{`Remove ${person?.email ?? ''}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {person?.status === 'pending'
+              ? 'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.'
+              : 'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isRemoving}>Cancel</AlertDialogCancel>
+          <Button
+            type='button'
+            variant='destructive'
+            disabled={isRemoving}
+            aria-busy={isRemoving}
+            onClick={() => {
+              if (person !== undefined) {
+                onConfirm(person);
+              }
+            }}
+          >
+            {isRemoving ? <Loader className='size-4' /> : null}
+            Remove access
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

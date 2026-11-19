@@ -14,6 +14,7 @@ import { createActor } from 'xstate';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { RemoteRef, RevisionPort, RevisionRemoteAddress } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionFileSystem } from '#revision-effects.js';
@@ -35,7 +36,13 @@ type Harness = Readonly<{
 }>;
 
 const harness = async (
-  options: Readonly<{ failInit?: boolean; failListing?: (remote: string | RevisionRemoteAddress) => boolean }> = {},
+  options: Readonly<{
+    failInit?: boolean;
+    failListing?: (remote: string | RevisionRemoteAddress) => boolean;
+    /** The remote answers `404` until the project is registered. */
+    unregistered?: boolean;
+    remoteUrl?: (projectId: string) => string | undefined;
+  }> = {},
 ): Promise<Harness> => {
   const filesystem = await createMemoryProvider();
   const inner = createIsomorphicGitRevisionPort({ filesystem });
@@ -60,6 +67,9 @@ const harness = async (
       if (options.failListing?.(remote) === true) {
         throw new Error('The remote did not answer.');
       }
+      if (options.unregistered === true && !steps.includes('register')) {
+        throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+      }
       const listed = Object.freeze([{ name: 'refs/heads/main', head }]) as readonly RemoteRef[];
       listings.push(listed);
       return listed;
@@ -74,6 +84,10 @@ const harness = async (
     port,
     projectId: 'project-1',
     filesystem: async () => Object.create(filesystem) as RevisionFileSystem,
+    registerRemoteProject: async () => {
+      steps.push('register');
+    },
+    ...(options.remoteUrl === undefined ? {} : { remoteUrl: options.remoteUrl }),
   });
   return {
     actors,
@@ -179,6 +193,47 @@ describe('a cold Tau Cloud connect lists the remote beside the store work (STO-2
     await port.setRemote({ name: 'tau', url: tauUrl });
     await start(actors.remote.validate, { remote: 'tau', url: tauUrl });
     expect(steps.filter((step) => step.startsWith('list:'))).toStrictEqual(['list:tau@' + tauUrl, 'list:tau']);
+  });
+
+  /* CI on #2653: the early listing's `404` is the one validate registers on (D11); no second listing before the PUT. */
+  it('registers on the early listing’s 404, then lists once, with no second listing before the registration', async () => {
+    const { actors, steps, releaseInit } = await harness({ unregistered: true });
+    releaseInit();
+    await start(actors.remote.writeRemote, tauConnect);
+    await start(actors.remote.validate, { remote: 'tau', url: tauUrl });
+    expect(steps.filter((step) => step.startsWith('list:') || step === 'register')).toStrictEqual([
+      'list:tau@' + tauUrl,
+      'register',
+      'list:tau',
+    ]);
+  });
+
+  /* CI on #2653: a host resolves the project's identity for its Tau URL; one connect asks it once. */
+  it('resolves the Tau destination once for the early listing and the config write', async () => {
+    const asked: string[] = [];
+    const { actors, releaseInit } = await harness({
+      remoteUrl: (projectId) => {
+        asked.push(projectId);
+        return tauUrl;
+      },
+    });
+    releaseInit();
+    await start(actors.remote.writeRemote, { projectId: 'project-1', kind: 'tau' });
+    expect(asked).toStrictEqual(['project-1']);
+
+    /* With no destination, the write still fails as before, having asked once. */
+    asked.length = 0;
+    const none = await harness({
+      remoteUrl: (projectId) => {
+        asked.push(projectId);
+        return undefined;
+      },
+    });
+    none.releaseInit();
+    await expect(start(none.actors.remote.writeRemote, { projectId: 'project-1', kind: 'tau' })).rejects.toThrow(
+      'Couldn’t find this project in the cloud',
+    );
+    expect(asked).toStrictEqual(['project-1']);
   });
 
   it('asks a remote with a credential to authorize nothing early', async () => {

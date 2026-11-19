@@ -3234,33 +3234,42 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * Cloud, the session cookie then); `initialSync`'s fetch that takes it runs under the session current at its own
    * time, which the server checks again for every object it serves.
    */
-  let earlyListing:
-    | Readonly<{ address: RevisionRemoteAddress; listing: Promise<readonly RemoteRef[] | undefined> }>
+  /* What the early listing answered: the refs, the remote's `REMOTE_NOT_FOUND` (kept for `validate` to register on), or nothing. */
+  type EarlyListingOutcome =
+    | Readonly<{ refs: readonly RemoteRef[] }>
+    | Readonly<{ notFound: RevisionPortError }>
     | undefined;
-  const listEarly = (input: RemoteWriteActorInput): void => {
-    earlyListing = undefined;
-    if (input.kind !== 'tau' || input.provider !== undefined || input.fetchOnly === true) {
-      return;
-    }
-    let address: RevisionRemoteAddress;
+  let earlyListing: Readonly<{ address: RevisionRemoteAddress; listing: Promise<EarlyListingOutcome> }> | undefined;
+  /* A connect's destination, resolved once: the early listing and the config write read the same answer. */
+  type ResolvedAddress = Readonly<{ address: RevisionRemoteAddress }> | Readonly<{ error: unknown }>;
+  const resolveAddress = (input: RemoteWriteActorInput): ResolvedAddress => {
     try {
-      address = remoteAddressOf(input);
-    } catch {
-      /* The write reports a missing address itself. */
+      return { address: remoteAddressOf(input) };
+    } catch (error) {
+      return { error };
+    }
+  };
+  const listEarly = (input: RemoteWriteActorInput, resolved: ResolvedAddress): void => {
+    earlyListing = undefined;
+    if (input.kind !== 'tau' || input.provider !== undefined || input.fetchOnly === true || !('address' in resolved)) {
+      /* No early listing; a missing address is reported by the write itself. */
       return;
     }
-    // async-iife: bootstrap -- the listing is taken by `validate`; a failure answers `undefined` and is asked again.
-    const listing = (async (): Promise<readonly RemoteRef[] | undefined> => {
+    const { address } = resolved;
+    // async-iife: bootstrap -- the outcome is taken by `validate`; a failure never rejects, and is asked again or registered on.
+    const listing = (async (): Promise<EarlyListingOutcome> => {
       try {
-        return await port.listRemoteRefs(address);
-      } catch {
-        return undefined;
+        return { refs: await port.listRemoteRefs(address) };
+      } catch (error) {
+        return error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND'
+          ? { notFound: error }
+          : undefined;
       }
     })();
     earlyListing = { address, listing };
   };
-  /* The early listing, taken once, when the recorded remote is still the Tau destination it was asked for. */
-  const takeEarlyListing = async (configured: Remote | undefined): Promise<readonly RemoteRef[] | undefined> => {
+  /* The early outcome, taken once, when the recorded remote is still the Tau destination it was asked for. */
+  const takeEarlyListing = async (configured: Remote | undefined): Promise<EarlyListingOutcome> => {
     const early = earlyListing;
     earlyListing = undefined;
     if (
@@ -6382,11 +6391,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
-        listEarly(input);
+        const resolved = resolveAddress(input);
+        listEarly(input, resolved);
         const asked = earlyListing;
         try {
           await ensureStore();
-          const { name, url } = remoteAddressOf(input);
+          if ('error' in resolved) {
+            throw resolved.error;
+          }
+          const { name, url } = resolved.address;
           const [current] = await port.listRemotes();
           if (
             current !== undefined &&
@@ -6470,9 +6483,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const remotes = await port.listRemotes();
         const configured = remotes.find((remote) => remote.name === input.remote);
         const kind = configured?.kind;
+        const early = await takeEarlyListing(configured);
+        /* A `404` the early listing already heard is registered on at once (D11), then listed: no second `404`. */
+        let heard = early !== undefined && 'notFound' in early ? early.notFound : undefined;
         const listed =
-          (await takeEarlyListing(configured)) ??
-          (await listRegistered(kind, async () => port.listRemoteRefs(input.remote)));
+          early !== undefined && 'refs' in early
+            ? early.refs
+            : await listRegistered(kind, async () => {
+                if (heard !== undefined) {
+                  const answer = heard;
+                  heard = undefined;
+                  throw answer;
+                }
+                return port.listRemoteRefs(input.remote);
+              });
         if (!signal.aborted && validation === validations) {
           validatedListing = { remote: input.remote, identity, refs: listed };
         }

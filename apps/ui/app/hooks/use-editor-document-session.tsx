@@ -16,7 +16,10 @@ import {
 import { confirmFlush } from '#workbench-records/record-health.js';
 import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { clearEditorNavigation } from '@taucad/editor-ui/lib/editor-navigation-service';
-import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
+import type {
+  EditorLanguageEnvironment,
+  EditorNavigationTarget,
+} from '@taucad/editor-ui/lib/editor-language-environment';
 import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';

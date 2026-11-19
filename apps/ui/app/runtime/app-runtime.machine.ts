@@ -203,6 +203,7 @@ export type DeploymentChildInput = Readonly<{ parentRef: AnyActorRef; visible: b
  * The driver default of `deployment`: nothing asked, nothing reported. A pinned build keeps it, so its mode is the
  * initial constant for the page's life (I10); an adaptive build provides the owner (`#cloud/deployment-mode.js`).
  */
+// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a pinned build must not import the owner (I10), so the slot's default cannot be the machine itself; a machine and a callback logic share no assignable type, and the root reads neither's snapshot. The input and command types are checked where the owner is provided (`app-runtime.ts`, `satisfies MachineActors`).
 const noDeployment = createCallbackLogic<DeploymentCommand, DeploymentChildInput>(
   () => undefined,
   /* Typed as the owner, which a pinned build never imports (I10): the slot then takes the owner as provided. Both take

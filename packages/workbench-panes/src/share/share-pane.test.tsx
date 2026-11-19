@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link2 } from 'lucide-react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -252,11 +252,74 @@ describe('SharePane', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't copy the link. Select it above and copy it.");
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
     const field = screen.getByRole('textbox', { name: 'Share link' });
     await waitFor(() => {
       expect(field).toHaveFocus();
     });
+  });
+
+  it('should start the copy inside the press while the link is still being made', async () => {
+    const write = vi.fn<(items: unknown[]) => Promise<void>>(async () => undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText, write } });
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        declare public readonly items: unknown;
+
+        public constructor(items: unknown) {
+          Object.assign(this, { items });
+        }
+      },
+    );
+    let finish: (url: string) => void = () => undefined;
+    const method = directMethod({
+      share: vi.fn(
+        async () =>
+          new Promise<{ url: string }>((resolve) => {
+            finish = (url) => {
+              resolve({ url });
+            };
+          }),
+      ),
+    });
+    renderPane({ methods: [method] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    /* No await between the press and the clipboard: Safari would refuse a write that started later. */
+    expect(write).toHaveBeenCalledOnce();
+    finish('https://tau.example/s/direct#v=2&zip=late');
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toHaveValue(
+      'https://tau.example/s/direct#v=2&zip=late',
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('should make a fresh link on every press and never hold the choices when the method remakes its link', async () => {
+    const share = vi
+      .fn<(request: ShareLinkRequest) => Promise<{ url: string }>>()
+      .mockResolvedValueOnce({ url: 'https://tau.example/s/direct#v=2&zip=first' })
+      .mockResolvedValueOnce({ url: 'https://tau.example/s/direct#v=2&zip=second' });
+    renderPane({ methods: [directMethod({ shouldRemakeLink: true, share })] });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toHaveValue(
+      'https://tau.example/s/direct#v=2&zip=first',
+    );
+    const protect = screen.getByRole('checkbox', { name: 'Protect with a password' });
+    expect(protect).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenLastCalledWith('https://tau.example/s/direct#v=2&zip=second');
+    });
+    expect(share).toHaveBeenCalledTimes(2);
+
+    await userEvent.click(protect);
+    expect(screen.queryByRole('textbox', { name: 'Share link' })).toBeNull();
   });
 
   it('should say the link could not be made when a share throws', async () => {

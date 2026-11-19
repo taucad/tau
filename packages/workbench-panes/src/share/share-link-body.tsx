@@ -7,6 +7,8 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
+import { copyText } from '@taucad/ui/utils/clipboard';
+import type { CopyTextOutcome } from '@taucad/ui/utils/clipboard';
 import type {
   ShareLinkContext,
   ShareLinkExtension,
@@ -296,19 +298,22 @@ function ShareLinkPrimary({
 }
 
 /**
- * The link once it exists, in a read-only field that selects itself, and a reminder when the password is not in it.
+ * The link once it exists, in a read-only field that selects itself; what to do when the clipboard refused it; and a
+ * reminder when the password is not in it.
  *
- * @param props - The field's ref, the link, and whether the link leaves the password out.
- * @returns The field and, when the password is left out, the reminder.
+ * @param props - The field's ref, the link, whether the link leaves the password out and whether the copy was refused.
+ * @returns The field and the notes that apply.
  */
 function ShareLinkResult({
   linkRef,
   shareUrl,
   isPasswordLeftOut,
+  isCopyRefused,
 }: {
   readonly linkRef: React.Ref<HTMLInputElement>;
   readonly shareUrl: string;
   readonly isPasswordLeftOut: boolean;
+  readonly isCopyRefused: boolean;
 }): React.JSX.Element {
   return (
     <>
@@ -321,6 +326,7 @@ function ShareLinkResult({
           event.target.select();
         }}
       />
+      {isCopyRefused ? <ShareNotice tone='info'>Select the link and copy it.</ShareNotice> : null}
       {isPasswordLeftOut ? (
         <ShareNotice tone='info'>This link doesn’t include the password. Send the password separately.</ShareNotice>
       ) : null}
@@ -328,14 +334,18 @@ function ShareLinkResult({
   );
 }
 
-const clipboardDenied = "Couldn't copy the link. Select it above and copy it.";
 const passwordClipboardDenied = "Couldn't copy the password. Show it, then select it and copy it.";
 const shareFailed = "Couldn't create the link. Try again.";
 
+/** A share that answered why there is no link; its sentence is the one the body shows. */
+class ShareRefusal extends Error {}
+
 /**
  * The body of a link method: its password and other options, any callouts its extension adds, the link once made, and
- * the button that makes the link, copies it and confirms the copy with a tick. The first press makes and copies the
- * link; later presses copy it, and the options are held once it exists.
+ * the button that makes the link, copies it and confirms the copy with a tick. The copy starts inside the press, while
+ * the link is still being made (`copyText`), so no browser refuses it for lack of a gesture; when the clipboard still
+ * refuses, the link is shown selected for the person to copy. A method that remakes its link makes a fresh one on every
+ * press and never holds its options; any other makes the link once, copies it on later presses and holds its options.
  *
  * @param props - The method, how a copy is announced, and where the body reports that it is busy.
  * @returns The choices, callouts, link field, notices and action row.
@@ -362,6 +372,7 @@ export function ShareLinkBody({
   const linkRef = useRef<HTMLInputElement>(null);
   /* Set when the clipboard refused the link, so the field it now shows takes focus with the link selected. */
   const [shouldSelectLink, setShouldSelectLink] = useState(false);
+  const [isCopyRefused, setIsCopyRefused] = useState(false);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
   const reset = useCallback((): void => {
@@ -407,81 +418,99 @@ export function ShareLinkBody({
 
   /* The copy starts inside the press, before any await, so Safari still counts it as the person's gesture. */
   const copyPassword = async (): Promise<void> => {
-    const copying = navigator.clipboard.writeText(password);
+    const copying = copyText(password);
     setError(undefined);
-    try {
-      await copying;
+    const { isCopied } = await copying;
+    if (isCopied) {
       notify?.('Password copied');
-    } catch {
+    } else {
       setError(passwordClipboardDenied);
+    }
+  };
+
+  const remakesLink = method.shouldRemakeLink === true;
+  /* A link the next press copies as it is, rather than making a new one. */
+  const holdsLink = shareUrl !== undefined && !remakesLink;
+  /* A link that remakes itself is stale once a choice changes, so the field that showed it goes. */
+  const choose = (change: () => void): void => {
+    change();
+    if (remakesLink) {
+      setShareUrl(undefined);
+      setWarning(undefined);
+      setIsCopyRefused(false);
     }
   };
 
   /* Turning protection on offers a strong password; one the person typed is kept. */
   const changeProtection = (next: boolean): void => {
-    setEncrypted(next);
-    if (next && password === '' && method.encryption !== undefined) {
-      setPassword(generateSharePassword(method.encryption));
+    choose(() => {
+      setEncrypted(next);
+      if (next && password === '' && method.encryption !== undefined) {
+        setPassword(generateSharePassword(method.encryption));
+      }
+    });
+  };
+
+  /**
+   * Makes the link the press asked for, telling the body what it answered as it arrives.
+   *
+   * @param signal - Aborted when the body goes away or another press starts.
+   * @returns The link; a share that answered why there is none rejects with that sentence.
+   */
+  const makeLink = async (signal: AbortSignal): Promise<string> => {
+    const protection: ShareLinkProtection = encrypted
+      ? { kind: 'password', password, includePassword }
+      : { kind: 'none' };
+    const outcome = await (extension.share ?? method.share)({ protection, options, signal });
+    setWarning(outcome.warning);
+    if ('error' in outcome) {
+      throw new ShareRefusal(outcome.error);
+    }
+    setShareUrl(outcome.url);
+    return outcome.url;
+  };
+
+  const finishCopy = async (copying: Promise<CopyTextOutcome>, controller?: AbortController): Promise<void> => {
+    try {
+      const { isCopied } = await copying;
+      if (isCopied) {
+        triggerCopiedTick();
+        notify?.('Link copied');
+      } else {
+        setIsCopyRefused(true);
+        setShouldSelectLink(true);
+      }
+    } catch (error) {
+      setError(error instanceof ShareRefusal ? error.message : shareFailed);
+    } finally {
+      if (controller !== undefined && operationRef.current === controller) {
+        operationRef.current = undefined;
+        setBusy(false);
+      }
     }
   };
 
-  const refuseCopy = (): void => {
-    setError(clipboardDenied);
-    setShouldSelectLink(true);
-  };
-
-  const share = async (): Promise<void> => {
+  /* Synchronous to the press: `copyText` is handed the link, or the promise of it, before anything is awaited. */
+  const share = (): void => {
+    setError(undefined);
+    setIsCopyRefused(false);
+    if (holdsLink) {
+      void finishCopy(copyText(shareUrl));
+      return;
+    }
     const controller = new AbortController();
     operationRef.current?.abort();
     operationRef.current = controller;
+    setShareUrl(undefined);
+    setWarning(undefined);
     setBusy(true);
-    setError(undefined);
-    try {
-      if (shareUrl) {
-        try {
-          await navigator.clipboard.writeText(shareUrl);
-          triggerCopiedTick();
-          notify?.('Link copied');
-        } catch {
-          refuseCopy();
-        }
-        return;
-      }
-      const protection: ShareLinkProtection = encrypted
-        ? { kind: 'password', password, includePassword }
-        : { kind: 'none' };
-      const outcome = await (extension.share ?? method.share)({
-        protection,
-        options,
-        signal: controller.signal,
-      });
-      setWarning(outcome.warning);
-      if ('error' in outcome) {
-        setError(outcome.error);
-        return;
-      }
-      setShareUrl(outcome.url);
-      try {
-        await navigator.clipboard.writeText(outcome.url);
-        triggerCopiedTick();
-        notify?.('Link copied');
-      } catch {
-        refuseCopy();
-      }
-    } catch {
-      setError(shareFailed);
-    } finally {
-      if (operationRef.current === controller) {
-        operationRef.current = undefined;
-      }
-      setBusy(false);
-    }
+    void finishCopy(copyText(makeLink(controller.signal)), controller);
   };
 
   const { encryption } = method;
   const passwordValid = !encrypted || encryption === undefined || fitsPassword(encryption, password);
   const hasChoices = encryption !== undefined || (method.options?.length ?? 0) > 0;
-  const isLocked = busy || Boolean(shareUrl);
+  const isLocked = busy || holdsLink;
   const error = operationError ?? extension.error;
 
   return (
@@ -497,14 +526,24 @@ export function ShareLinkBody({
               isBusy={busy}
               isLocked={isLocked}
               onEncryptedChange={changeProtection}
-              onPasswordChange={setPassword}
+              onPasswordChange={(next) => {
+                choose(() => {
+                  setPassword(next);
+                });
+              }}
               onGeneratePassword={() => {
-                setPassword(generateSharePassword(encryption));
+                choose(() => {
+                  setPassword(generateSharePassword(encryption));
+                });
               }}
               onCopyPassword={() => {
                 void copyPassword();
               }}
-              onIncludePasswordChange={setIncludePassword}
+              onIncludePasswordChange={(next) => {
+                choose(() => {
+                  setIncludePassword(next);
+                });
+              }}
             />
           ) : null}
           {method.options === undefined ? null : (
@@ -513,7 +552,9 @@ export function ShareLinkBody({
               values={options}
               isLocked={isLocked}
               onChange={(id, value) => {
-                setOptions((current) => ({ ...current, [id]: value }));
+                choose(() => {
+                  setOptions((current) => ({ ...current, [id]: value }));
+                });
               }}
             />
           )}
@@ -521,7 +562,12 @@ export function ShareLinkBody({
       ) : null}
       {extension.callouts}
       {shareUrl ? (
-        <ShareLinkResult linkRef={linkRef} shareUrl={shareUrl} isPasswordLeftOut={encrypted && !includePassword} />
+        <ShareLinkResult
+          linkRef={linkRef}
+          shareUrl={shareUrl}
+          isPasswordLeftOut={encrypted && !includePassword}
+          isCopyRefused={isCopyRefused}
+        />
       ) : null}
       {warning ? <ShareNotice tone='warning'>{warning}</ShareNotice> : null}
       {error ? <ShareNotice tone='error'>{error}</ShareNotice> : null}
@@ -534,10 +580,8 @@ export function ShareLinkBody({
           isCopied={copied}
           isDisabled={busy || !passwordValid || extension.isPending === true}
           icon={method.action.icon}
-          label={shareUrl ? 'Copy link' : method.action.label}
-          onShare={() => {
-            void share();
-          }}
+          label={holdsLink ? 'Copy link' : method.action.label}
+          onShare={share}
         />
       </div>
     </div>

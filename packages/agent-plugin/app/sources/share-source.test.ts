@@ -84,6 +84,7 @@ describe('createShareSource', () => {
       kind: 'link',
       description: 'The whole project travels in the link, so anyone with the link can open it. Nothing is uploaded.',
       encryption: { minBytes: 32, maxBytes: 128 },
+      shouldRemakeLink: true,
       action: { label: 'Copy link' },
     });
     expect(methods[0]).not.toHaveProperty('notice');

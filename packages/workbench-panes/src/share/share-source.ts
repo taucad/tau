@@ -152,10 +152,24 @@ export type ShareLinkMethod = ShareMethodBase &
       notice?: Readonly<{ title: string; text: string }>;
     }>;
     options?: readonly ShareLinkOption[];
-    /** The primary button before the link exists, for example `Copy link`; once the link exists it reads `Copy link`. */
+    /**
+     * Make a fresh link from the project as it is now on every press, and never hold the choices: changing one removes
+     * the link shown. For a link that costs nothing to remake, such as one that carries the project itself. Without it
+     * the first press makes the link, later presses copy that link, and the choices are held once it exists, for a link
+     * that creates something (a Gist) a second press must not create again.
+     */
+    shouldRemakeLink?: boolean;
+    /**
+     * The primary button's label, for example `Copy link`. For a method that does not remake its link, it reads `Copy
+     * link` once the link exists.
+     */
     action: Readonly<{ label: string; icon: ShareMethodIcon }>;
     /** @deprecated Every copy is announced as `Link copied`; ignored, and it will be removed. */
     copiedMessage?: string;
+    /**
+     * Makes the link. The pane starts copying it inside the press, before this settles, so it may take as long as it
+     * needs.
+     */
     share: (request: ShareLinkRequest) => Promise<ShareLinkOutcome>;
     /**
      * A hook the body calls on every render, for a method that needs more than the link body draws. It runs once per

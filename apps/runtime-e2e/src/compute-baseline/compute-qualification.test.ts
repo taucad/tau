@@ -192,6 +192,29 @@ describe.each(ciModels)('compute reuse qualification: %s', (model) => {
     expect(trials.length).toBeGreaterThan(0);
   });
 
+  it('should start the committed edit soon after it superseded a running build or render', () => {
+    // P9c, worker transport. The arm supersedes main() as it starts on odd trials and the render as its GLB pack starts
+    // on even ones: the worker holds at the end of the phase before until the supersede is issued, so both phases are
+    // sampled on every machine and the pack's first poll already sees the abort, even for a one-part model
+    // (gridfinity-box). The pack makes no OCCT call and polls the abort word before each part and before writing:
+    // without those polls the superseded render runs to its end and is delivered. The 500 ms bound is ten times the heavy-model worst case (16 to 49 ms on planetary-gear-system's
+    // 20 s faceWidth build), below the 0.7 to 0.9 s a whole stale render adds there.
+    const trials = ['abort.off', 'abort.memory'].flatMap((key) =>
+      reports[key]!.steps.flatMap((step) => (step.phase === 'supersede' && step.abort ? [step.abort] : [])),
+    );
+    for (const target of ['main', 'pack'] as const) {
+      const placed = trials.filter((trial) => trial.target === target);
+      expect(placed.length, target).toBeGreaterThan(0);
+      for (const trial of placed) {
+        expect(trial.valid, JSON.stringify(trial)).toBe(true);
+        expect(trial.nextBuildAfterIssue, JSON.stringify(trial)).toBeLessThan(500);
+        if (target === 'pack') {
+          expect(trial.supersededRender, JSON.stringify(trial)).toBe('cancelled');
+        }
+      }
+    }
+  });
+
   it('should do no compute store work with reuse off', () => {
     for (const scenario of ['matrix', 'scrub', 'agent']) {
       expect(reports[`${scenario}.off`]!.steps.every((step) => step.counts.storeWrites === 0)).toBe(true);

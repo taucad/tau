@@ -857,12 +857,13 @@ export const publishFailureMessage = (status: number, code?: string): string => 
  *
  * Nothing is written under the project: the row lives on the API, and the tag
  * the publication points at was already pushed with the credential this call's
- * {@link TauCloudAuth} names.
+ * {@link TauCloudAuth} names. The answer is the project's one cloud link, which
+ * stays the same across publishes.
  *
  * @param apiBaseUrl - The API origin, with or without a trailing slash.
  * @param auth - How this host proves who is asking.
- * @param input - The pointer and the settings the dialog collected.
- * @returns The publication's id and the link to copy.
+ * @param input - The pointer, the project's name and description, and who can open the link.
+ * @returns The publication's id, the link to copy and who can open it.
  * @throws Error When Tau Cloud refused, in the words a person can act on.
  * @public
  */
@@ -871,21 +872,36 @@ export const publishOverHttp = async (
   auth: TauCloudAuth,
   input: PublishPublicationActorInput,
 ): Promise<PublishPublicationActorOutput> => {
+  /* Named field by field, so nothing a draft carries for the machine (a note, the auto-name flag) reaches the API. */
+  const request = {
+    projectId: input.projectId,
+    projectName: input.projectName,
+    tag: input.tag,
+    revisionId: input.revisionId,
+    entryPath: input.entryPath,
+    ...(input.description === undefined ? {} : { description: input.description }),
+    ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
+    ...(input.defaultVisibility === undefined ? {} : { defaultVisibility: input.defaultVisibility }),
+  };
   const response = await globalThis.fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
     method: 'POST',
     ...tauCloudRequestInit(auth),
-    body: JSON.stringify(input),
+    body: JSON.stringify(request),
   });
   if (!response.ok) {
     const answered = await answeredCode(response);
     throw new Error(publishFailureMessage(response.status, answered.code));
   }
-  const body = (await response.json()) as Readonly<{ id?: string; urls?: Readonly<{ share?: string; view?: string }> }>;
-  const url = body.urls?.share ?? body.urls?.view;
-  if (body.id === undefined || url === undefined) {
+  const body = (await response.json()) as Readonly<{
+    id?: string;
+    share?: Readonly<{ url?: string; visibility?: string }>;
+  }>;
+  const url = body.share?.url;
+  const visibility = body.share?.visibility;
+  if (body.id === undefined || url === undefined || (visibility !== 'private' && visibility !== 'public')) {
     throw new Error('Couldn’t create the link. Try again.');
   }
-  return { publicationId: body.id, url };
+  return { publicationId: body.id, url, visibility };
 };
 
 /**

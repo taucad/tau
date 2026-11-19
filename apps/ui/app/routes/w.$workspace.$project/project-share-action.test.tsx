@@ -18,7 +18,6 @@ const projectSend = vi.hoisted(() => vi.fn());
 const fileClient = vi.hoisted(() => ({ readdir: vi.fn() }));
 const parameterService = vi.hoisted(() => ({ readSettled: vi.fn() }));
 let capturedPanelProperties: ProjectSharePanelProps | undefined;
-let projectActivity = 10;
 let sourceContent = new TextEncoder().encode('initial source');
 
 const project = createProjectFixture({
@@ -76,12 +75,6 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ recordFiles: fileClient }),
 }));
 
-vi.mock('#hooks/use-projects.js', () => ({
-  useProjects: () => ({
-    projects: [{ id: project.id, lastActivityAt: projectActivity }],
-  }),
-}));
-
 vi.mock('#components/publish/project-share-panel.js', () => ({
   missingModelFileMessage: 'This project has no model file to share yet.',
   ProjectSharePanel: (properties: ProjectSharePanelProps) => {
@@ -109,7 +102,6 @@ vi.mock('#routes/w.$workspace.$project/revision-collaborators.js', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   capturedPanelProperties = undefined;
-  projectActivity = 10;
   sourceContent = new TextEncoder().encode('initial source');
   fileClient.readdir.mockResolvedValue(['README.md', '.tau']);
   parameterService.readSettled.mockResolvedValue(
@@ -236,7 +228,6 @@ describe('ProjectShareWorkbenchPanel', () => {
 
     expect(snapshotSource).not.toHaveBeenCalled();
     expect(projectSend).not.toHaveBeenCalled();
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(10);
 
     sourceContent = new TextEncoder().encode('edited after opening Share');
     const snapshot = await capturedPanelProperties!.collectSnapshot!();
@@ -273,23 +264,6 @@ describe('ProjectShareWorkbenchPanel', () => {
         message: 'The runtime could not resolve missing.ts.',
       },
     ]);
-  });
-
-  it('updates publication freshness from the reactive project listing', () => {
-    const view = render(
-      <MemoryRouter>
-        <ProjectShareWorkbenchPanel />
-      </MemoryRouter>,
-    );
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(10);
-
-    projectActivity = 20;
-    view.rerender(
-      <MemoryRouter>
-        <ProjectShareWorkbenchPanel />
-      </MemoryRouter>,
-    );
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(20);
   });
 
   it('hands the shared pane the project host with its share source', () => {

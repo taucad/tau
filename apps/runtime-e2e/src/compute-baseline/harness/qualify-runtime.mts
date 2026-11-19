@@ -7,6 +7,12 @@ import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits
 import { replicadKernel } from '@taucad/replicad';
 import { defineRuntime } from '@taucad/runtime/worker';
 
+/**
+ * The channel the worker posts each span's end on (`qualify-worker.mts`), so the abort scenario can supersede an edit
+ * exactly when a phase starts instead of after a timed delay.
+ */
+export const qualifyPhaseChannel = 'tau-qualify-phase';
+
 export type QualifyRuntimeOptions = {
   /** `off` switches the Replicad live tier off (`computeReuse: false`, the reuse-off reference). */
   readonly arm: string;

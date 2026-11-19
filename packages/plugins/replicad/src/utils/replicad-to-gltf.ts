@@ -1,6 +1,7 @@
 import { Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
+import { checkAbort } from '@taucad/runtime/kernel';
 import {
   compactTriangleIndices,
   isClosedTriangleMesh,
@@ -399,6 +400,11 @@ function buildNodeFromReplicadGeometry({
  * When `logger` is supplied, emits a debug log with the produced GLB byte
  * length and node count.
  *
+ * Packing makes no OpenCascade call, so the exception proxy never polls the abort word here. It polls before each
+ * part and before writing: an edit that supersedes the render while it packs starts its build after one part
+ * instead of after the whole GLB (P9c: 70 to 150 ms on planetary-gear-system). Outside an operation the poll does
+ * nothing.
+ *
  * @param options - Conversion inputs and output transform intent.
  * @returns GLTF blob
  */
@@ -419,6 +425,7 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   const componentIds = new Map<string, string>();
 
   for (const geometry of geometries) {
+    checkAbort();
     const result = buildNodeFromReplicadGeometry({
       geometry,
       packFacts: options.packFacts,
@@ -489,6 +496,7 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
       : {}),
   };
 
+  checkAbort();
   const output = format === 'gltf' ? writeGltfJson(input) : writeGlb(input);
 
   logger?.debug(

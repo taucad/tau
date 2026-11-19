@@ -76,6 +76,7 @@ import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import type { ReportingConsent } from '#telemetry.js';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
+import { autoVersionName } from '@taucad/revisions/publish-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
 import type {
@@ -84,6 +85,7 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
+  PublishVisibility,
   RevisionCommitAuthor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
@@ -130,6 +132,22 @@ import type { HostRevisionActorResolver } from '#revision-actor.js';
  * worker injects, so a conflict re-derived here settles as it was recorded.
  */
 const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
+
+/**
+ * Names a draft nobody named. Only the host has a locale, so the auto name is made here, not in the machine: by the
+ * `publish` verb and by a page's `confirmPublish`, which the Share pane sends with no name. A page's draft is not
+ * validated before it reaches here, so a missing name reads as empty rather than throwing.
+ *
+ * @internal
+ * @param draft - The draft as asked.
+ * @returns The draft, with `autoVersionName` as its name when it is auto-named and empty.
+ */
+export const autoNamed = (draft: PublishDraft): PublishDraft => {
+  const tag: unknown = draft.tag;
+  return draft.isAutoNamed === true && (typeof tag === 'string' ? tag : '').trim() === ''
+    ? { ...draft, tag: autoVersionName(new Date()) }
+    : draft;
+};
 
 /**
  * Where one prepared turn runs, and what it descends from.
@@ -1773,7 +1791,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         }
         actor.send({
           type: 'publish',
-          event: { type: 'confirm', draft: draft as PublishDraft },
+          event: { type: 'confirm', draft: autoNamed(draft as PublishDraft) },
         });
         break;
       }
@@ -2024,9 +2042,15 @@ const readManifestField = (workspaceRoot: string, field: 'name'): string | undef
 export type RevisionPublishOutcome =
   | Readonly<{
       status: 'published';
+      /** The version's tag, `v<number>`. */
       tag: string;
+      /** The version's name, as History shows it. */
+      name: string;
       publicationId: string;
+      /** The project's cloud link, the same across publishes. */
       url: string;
+      /** Who can open that link now. */
+      visibility: PublishVisibility;
     }>
   | Readonly<{ status: 'refused'; reason: string }>;
 
@@ -2097,7 +2121,11 @@ export type ProjectRevisionVerbs = {
    * terminal verb does not outlive the window.
    */
   save(): Promise<RevisionSaveOutcome>;
-  /** Name this branch's head and publish it: one gesture, the dialog's machine. */
+  /**
+   * Name this branch's head and publish it: one gesture, the Share pane's machine.
+   * An auto-named draft with an empty `tag` is named here, `Shared Nov 19`, in
+   * this host's locale.
+   */
   publish(draft: PublishDraft): Promise<RevisionPublishOutcome>;
   /**
    * Connect Tau Cloud and let the open pull fill this directory (W18 DEF-2).
@@ -2544,7 +2572,8 @@ export const openProjectRevisions = async (
    * is held in `choosingVersion.reading` until the names have been read, so
    * nothing here waits for a frame.
    */
-  const publish = async (draft: PublishDraft): Promise<RevisionPublishOutcome> => {
+  const publish = async (requested: PublishDraft): Promise<RevisionPublishOutcome> => {
+    const draft = autoNamed(requested);
     const { actor } = await started();
     const child = actor.getSnapshot().children.publish;
     if (child === undefined) {
@@ -2563,8 +2592,10 @@ export const openProjectRevisions = async (
           Object.freeze({
             status: 'published',
             tag: event.tag,
+            name: event.name,
             publicationId: event.publicationId,
             url: event.url,
+            visibility: event.visibility,
           }),
         );
       });

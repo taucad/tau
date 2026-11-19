@@ -44,13 +44,36 @@ describe('EmailService delivery gate', () => {
   it('renders but does not send when RESEND_API_KEY is absent', async () => {
     const service = createService('   ');
 
-    await service.sendMagicLink({
-      email: 'user@example.com',
-      url: 'https://tau.new/auth/magic-link/verify?token=secret&redirectTo=%2F',
+    const outcome = await service.send({
+      to: 'user@example.com',
+      template: {
+        kind: 'magic-link',
+        email: 'user@example.com',
+        url: 'https://tau.new/auth/magic-link/verify?token=secret&redirectTo=%2F',
+      },
     });
 
+    expect(outcome).toBe('disabled');
+    expect(service.isDeliveryEnabled).toBe(false);
     expect(resendConstructorMock).not.toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('answers sent once Resend accepts the email', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'email_123' }, error: null });
+    const service = createService('re_test_key');
+
+    const outcome = await service.sendProjectInvite({
+      recipientEmail: 'friend@example.com',
+      ownerName: 'Ada',
+      projectName: 'Bracket',
+      role: 'write',
+      expiresAt: '3 Dec 2026',
+      url: 'https://tau.new/invitations/tok_abc',
+    });
+
+    expect(outcome).toBe('sent');
+    expect(service.isDeliveryEnabled).toBe(true);
   });
 
   it('sends through Resend when RESEND_API_KEY is present', async () => {
@@ -178,7 +201,19 @@ const templatesByKind: ReadonlyArray<{ readonly template: EmailTemplate; readonl
       recipientEmail: 'user@example.com',
       ownerName: 'Ada',
       publicationTitle: 'Bracket',
-      url: 'https://tau.new/s/tau~pub_123',
+      url: 'https://tau.new/s/tau~shr_123',
+    },
+    from: notifications,
+  },
+  {
+    template: {
+      kind: 'project-invite',
+      recipientEmail: 'user@example.com',
+      ownerName: 'Ada',
+      projectName: 'Bracket',
+      role: 'read',
+      expiresAt: '3 Dec 2026',
+      url: 'https://tau.new/invitations/tok_abc',
     },
     from: notifications,
   },
@@ -259,7 +294,7 @@ describe('EmailService sender per template kind', () => {
   });
 
   it('covers every template kind', () => {
-    expect(new Set(templatesByKind.map(({ template }) => template.kind)).size).toBe(9);
+    expect(new Set(templatesByKind.map(({ template }) => template.kind)).size).toBe(10);
   });
 
   it.each(templatesByKind)('sends $template.kind from its purpose sender', async ({ template, from }) => {

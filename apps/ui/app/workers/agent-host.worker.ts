@@ -171,8 +171,9 @@ workerScope.addEventListener('message', (event) => {
         }
         case 'connect': {
           const { projectId, hostId, port } = args as Calls['connect']['args'];
-          const host = hosts.hostOf(projectId);
-          if (host?.hostId !== hostId) {
+          /* In the project's order: a connect the page sent right behind its provide reaches the host it opened. */
+          const host = await hosts.connectable({ projectId, hostId });
+          if (host === undefined) {
             port.close();
             return { status: 'needs' };
           }

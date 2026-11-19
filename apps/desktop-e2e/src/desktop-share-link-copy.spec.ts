@@ -113,7 +113,7 @@ describe('desktop share links', () => {
     const email = people.getByLabel('Email address');
     await expectVisible(email, 180_000);
     await email.fill(invitee);
-    await people.getByRole('button', { name: 'Create invite link' }).click();
+    await people.getByRole('button', { name: 'Invite', exact: true }).click();
     const created = page.getByRole('status', { name: 'Invite link created' }).first();
     await expectVisible(created, 60_000);
 

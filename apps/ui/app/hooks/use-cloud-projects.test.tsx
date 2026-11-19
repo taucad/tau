@@ -1,4 +1,4 @@
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';

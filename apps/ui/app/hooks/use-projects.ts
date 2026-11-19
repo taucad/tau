@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { CreatedProject } from '#runtime/project-library-commands.js';
+import type { CreatedProject } from '@taucad/files-ui/runtime/project-library-commands';
 import { isInProjectScope, projectLibraryEntryToListItem } from '@taucad/files-ui/types/project-library.types';
 import type { ProjectScope } from '@taucad/files-ui/types/project-library.types';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';

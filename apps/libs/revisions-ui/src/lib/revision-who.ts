@@ -3,9 +3,9 @@
  * comes from what the server authenticated", I2, A3, B2, Q2, Q3).
  *
  * Pure: the entry's typed who, the signed-in account, Tau Cloud's push record
- * and the debug setting go in, and the who line comes out. The app binds the
- * inputs (`lib/revision-actor`'s `useRevisionWhoContext`: the session store,
- * the `tauDebug` flag and `lib/revision-pushes`' store, which reads the API).
+ * and the debug setting go in, and the who line comes out. The inputs come
+ * from `lib/revision-actor`'s `useRevisionWhoContext`: the session store, the
+ * app's injected debug setting and `lib/revision-pushes`' store.
  */
 
 import type { RevisionRowWho, RevisionUserActor } from '@taucad/revisions';

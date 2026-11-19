@@ -578,6 +578,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const projects = new Map<string, ProjectRegistration>();
   let current: Incarnation | undefined;
   const recovering = new Map<string, Promise<void>>();
+  /* Each provide's host id once the provide is sent, by the provide's own promise (STO-25 SP6). */
+  const postedHostIds = new WeakMap<Promise<string>, Promise<string | undefined>>();
   const recoveryWanted = new Set<string>();
   /* Consecutive retirements for missed keepalives; each one doubles the next worker's bound (D-UI-23). */
   let unresponsiveRetirements = 0;
@@ -804,7 +806,12 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   };
 
   /** Give the live worker a new host incarnation for the project, with fresh bridges (RH-R4). */
-  const provideTo = async (live: Incarnation, projectId: string): Promise<string> => {
+  const provideTo = async (
+    live: Incarnation,
+    projectId: string,
+    /** Told the host id once the provide is on the wire, ahead of its answer. */
+    onPosted: (hostId: string) => void,
+  ): Promise<string> => {
     const options = registrationOf(projectId);
     const principal = await (options.principal === undefined ? sessionPrincipalIn(live) : options.principal());
     const {
@@ -823,7 +830,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     const hostId = randomUuid();
     live.bridges.set(hostId, dispose);
     try {
-      const answer = await live.channel.call('provide', {
+      const answering = live.channel.call('provide', {
         value: {
           projectId,
           hostId,
@@ -848,6 +855,11 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         },
         transferables,
       });
+      /* The provide is sent (or queued to send) in call order. The worker serves a project's control calls in the order
+       * they were sent, so a connect sent from here on is answered after this provide settles: from the host it
+       * opened, or `needs` when it failed, and the connect then reports this provide's error (STO-25 SP6). */
+      onPosted(hostId);
+      const answer = await answering;
       /* The replaced incarnation drains its runs on its own bridges (T3); only its bridges go, once it has closed, so a
        * late close never takes the new host's (I31, RH-A26). */
       if (answer.replaced !== undefined) {
@@ -863,19 +875,27 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     }
   };
 
-  /** The project's host in this worker: the provide in flight or done, or a new one. A failed provide is forgotten. */
-  const openingIn = async (live: Incarnation, projectId: string): Promise<string> => {
+  /**
+   * The project's host in this worker: the provide in flight or done, or a new one. A failed provide is forgotten.
+   * Not `async`: the promise returned is the provide's own, which keys its posted host id.
+   */
+  // oxlint-disable-next-line typescript/promise-function-async -- the returned promise is the provide's own, its key.
+  const openingIn = (live: Incarnation, projectId: string): Promise<string> => {
     const existing = live.provided.get(projectId);
     if (existing !== undefined) {
       return existing;
     }
-    const opening = provideTo(live, projectId);
+    /* The host id once the provide is sent; `undefined` when the provide failed before it was, and its error speaks. */
+    const posted = Promise.withResolvers<string | undefined>();
+    const opening = provideTo(live, projectId, posted.resolve);
+    postedHostIds.set(opening, posted.promise);
     live.provided.set(projectId, opening);
     // async-iife: bootstrap -- forget a provide that failed, so the next use provides again; its caller sees the error.
     void (async (): Promise<void> => {
       try {
         await opening;
       } catch {
+        posted.resolve(undefined);
         if (live.provided.get(projectId) === opening) {
           live.provided.delete(projectId);
         }
@@ -1051,20 +1071,34 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         // oxlint-disable-next-line no-await-in-loop -- a worker that lost the host is given it again.
         const live = await incarnation();
         const opening = openingIn(live, projectId);
+        /* Connect as soon as the provide is sent, not once it answered: the worker answers the connect only after that
+         * provide settled, from the host it opened, so the page waits one round trip instead of two (STO-25 SP6). */
         // oxlint-disable-next-line no-await-in-loop -- see above.
-        const hostId = await opening;
+        const hostId = (await postedHostIds.get(opening)) ?? (await opening);
         const { port1, port2 } = new MessageChannel();
         // oxlint-disable-next-line no-await-in-loop -- see above.
         const answer = await live.channel
           .call('connect', { value: { projectId, hostId, port: port1 }, transferables: [port1] })
-          .catch((error: unknown) => {
+          .catch(async (error: unknown) => {
             port2.close();
+            /* A provide that failed is what this connect met: its error wins. */
+            await opening;
             throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
           });
+        if (answer.status !== 'connected') {
+          port2.close();
+        }
+        /* The provide answered before this connect did; a failed one is this connect's failure, as it always was. */
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- see above.
+          await opening;
+        } catch (error) {
+          port2.close();
+          throw error;
+        }
         if (answer.status === 'connected') {
           return port2;
         }
-        port2.close();
         /* Forget only the incarnation this `needs` named: a newer one another client provided meanwhile stays. */
         if (live.provided.get(projectId) === opening) {
           live.provided.delete(projectId);

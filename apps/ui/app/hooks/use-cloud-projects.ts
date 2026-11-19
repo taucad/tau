@@ -21,8 +21,8 @@ import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-crea
 import { parseProjectCreationLocation } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
-import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { getRevisionSessionUser, useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import {
   canOpenCloudProject,
   deletionStoragePrefix,

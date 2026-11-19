@@ -1032,7 +1032,7 @@ overrides:
   oxfmt@0.39.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
   replicad: npm:@taulabs/replicad@1.2.0-beta.2
-  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
   sockjs@0.3.24>uuid: 11.1.1
   vitest: 4.1.11
 
@@ -1422,8 +1422,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.2.0-beta.2
         version: '@taulabs/replicad@1.2.0-beta.2'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.2'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -3867,6 +3867,9 @@ importers:
       '@taucad/project-workspace':
         specifier: workspace:*
         version: link:../project-workspace
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../../packages/plugins/slicer
@@ -3888,12 +3891,21 @@ importers:
       '@taucad/workbench-panes':
         specifier: workspace:*
         version: link:../../../packages/workbench-panes
+      deepmerge:
+        specifier: 'catalog:'
+        version: 4.3.1
       lucide-react:
         specifier: 'catalog:'
         version: 0.552.0(react@19.3.1)
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      type-fest:
+        specifier: 'catalog:'
+        version: 4.41.0
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4191,6 +4203,9 @@ importers:
       '@taucad/ui-core':
         specifier: workspace:*
         version: link:../ui-core
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
     devDependencies:
       '@testing-library/jest-dom':
         specifier: 'catalog:'
@@ -5796,8 +5811,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.2.0-beta.2
         version: '@taulabs/replicad@1.2.0-beta.2'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.2'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
       sharp:
         specifier: 'catalog:'
         version: 0.35.5(@types/node@26.6.5)
@@ -7234,8 +7249,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.2.0-beta.2
         version: '@taulabs/replicad@1.2.0-beta.2'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.2'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
       source-map-js:
         specifier: 'catalog:'
         version: 1.2.2
@@ -16054,8 +16069,8 @@ packages:
     resolution: {integrity: sha512-jXQwh6NYfgpKh+eQMR/8hVYUuvbaH5zISD02T8o0atRQoV9w+4F8D7enfAYgejEJtbGJVr5J+/zzTzf7QJqgWw==}
     engines: {node: '>=20'}
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.2':
-    resolution: {integrity: sha512-BDXT2HISFlFJ/yxaAeK3Z0KyJ/b72aytxzO3V17d4nx4fwhSqiJmeRFRGcPKvWDoFwLD5wAVa+ALDhAJlCz1+w==}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.3':
+    resolution: {integrity: sha512-9GeLIgJjKHgKX0wJwtW0Bntqq56Mqd8OFQ16bQwg2KIARIb4RPB0e8oo+oW3kszLsRsTBOtN5FxrWkhhXahJ0A==}
 
   '@taulabs/replicad@1.2.0-beta.2':
     resolution: {integrity: sha512-GQq3pa8CSTt354ouCcD7fC+wXAjUMkVuOi9pMIZoY6+P6mT4UIm7/RGsvhkZfEA8t+1xGLTFZqRk0VX9PH0ssQ==}
@@ -37109,7 +37124,7 @@ snapshots:
       '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.5
       '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.5
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.2': {}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.3': {}
 
   '@taulabs/replicad@1.2.0-beta.2':
     dependencies:

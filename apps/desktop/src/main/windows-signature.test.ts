@@ -4,7 +4,9 @@ import {
   createWindowsPowerShellEnvironment,
   parseSigntoolVerification,
   validateWindowsSignature,
+  windowsProductIdentity,
 } from '#main/windows-signature.js';
+import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 
 const path = String.raw`C:\Users\Person\Downloads\Tau setup.exe`;
 const publisher = 'CN=Tau Limited, O=Tau Limited, L=Auckland, C=NZ';
@@ -19,7 +21,13 @@ const signature = {
   productVersion: '1.2.3',
   productName: 'Tau',
 };
-const expected = { path, publisher, timestampRequired: true, expectedVersion: '1.2.3', expectedProductName: 'Tau' };
+const expected = {
+  path,
+  publisher,
+  timestampRequired: true,
+  expectedVersion: '1.2.3',
+  expectedProductName: 'Tau',
+};
 
 describe('Windows Authenticode verdict', () => {
   it('should admit a trusted timestamped file from the exact publisher', () => {
@@ -70,7 +78,12 @@ describe('Windows Authenticode verdict', () => {
     productVersion: '10.0.26100.7705',
     productName: 'Microsoft® Windows® Operating System',
   };
-  const componentExpected = { path: componentPath, publisher, timestampRequired: true, allowWindowsComponent: true };
+  const componentExpected = {
+    path: componentPath,
+    publisher,
+    timestampRequired: true,
+    allowWindowsComponent: true,
+  };
 
   // `signtool verify /pa /all /v` checks only the embedded signature: chain, signature bytes and timestamp.
   const verifiedEmbedded = { verified: true, timestamped: true };
@@ -111,6 +124,88 @@ describe('Windows Authenticode verdict', () => {
     expect(() => {
       validateWindowsSignature({ ...signature, path: userPath, subject: 'CN=Other' }, { ...expected, path: userPath });
     }).not.toThrow(/Users|Person|AppData/u);
+  });
+
+  // Observed by route qualification run 44527145723 (jobs 135570680836 and 135570680866) on the installed Tau.exe of
+  // desktop-staging@0.5.0-staging.1572. Electron Packager stamps the application executable with the channel's package
+  // version and the product name Tau on every channel; only the NSIS installer carries the channel's product name.
+  const stagingRelease = desktopReleaseIdentity('desktop-staging@0.5.0-staging.1572');
+  const installedPath = String.raw`C:\Users\runneradmin\AppData\Local\Programs\tau-desktop\Tau.exe`;
+  const installedExecutable = {
+    path: installedPath,
+    status: 'Valid',
+    signatureType: 'Authenticode',
+    osBinary: false,
+    subject: publisher,
+    embeddedSubject: publisher,
+    timestamp: 'CN=Trusted Timestamp',
+    productVersion: '1.15.72',
+    productName: 'Tau',
+  };
+
+  it('should admit the installed staging Tau.exe under the application executable identity', () => {
+    expect(windowsProductIdentity(stagingRelease, 'executable')).toEqual({
+      expectedVersion: '1.15.72',
+      expectedProductName: 'Tau',
+    });
+    expect(() => {
+      validateWindowsSignature(installedExecutable, {
+        path: installedPath,
+        publisher,
+        timestampRequired: true,
+        ...windowsProductIdentity(stagingRelease, 'executable'),
+      });
+    }).not.toThrow();
+  });
+
+  it('should keep the channel product name for the installer', () => {
+    expect(windowsProductIdentity(stagingRelease, 'installer')).toEqual({
+      expectedVersion: '1.15.72',
+      expectedProductName: 'Tau Staging',
+    });
+    expect(windowsProductIdentity({ channel: 'production', version: '0.5.0' }, 'installer')).toEqual({
+      expectedVersion: '0.5.0',
+      expectedProductName: 'Tau',
+    });
+  });
+
+  it('should name only the disagreeing product field, without a directory', () => {
+    const check = (): void => {
+      validateWindowsSignature(installedExecutable, {
+        path: installedPath,
+        publisher,
+        timestampRequired: true,
+        expectedVersion: '1.15.72',
+        expectedProductName: 'Tau Staging',
+      });
+    };
+
+    // The field list ends at the first colon, so this also proves no other field is named.
+    expect(check).toThrow(
+      /^Windows signature disagrees with the required identity in productName \(expected "Tau Staging"\): \{"path":"Tau\.exe"/u,
+    );
+    expect(check).not.toThrow(/Users|runneradmin|AppData/u);
+  });
+
+  it.each([
+    [{ productVersion: '1.15.71' }, 'productVersion (expected "1.15.72")'],
+    [{ subject: 'CN=Other' }, 'subject'],
+    [{ embeddedSubject: 'CN=Other' }, 'embeddedSubject'],
+    [{ timestamp: null }, 'timestamp'],
+    [{ signatureType: 'Catalog' }, 'signatureType'],
+    [{ path: String.raw`C:\Users\runneradmin\Tau.exe` }, 'path'],
+  ])('should name the disagreeing field %j', (change, field) => {
+    expect(() => {
+      validateWindowsSignature(
+        { ...installedExecutable, ...change },
+        {
+          path: installedPath,
+          publisher,
+          timestampRequired: true,
+          ...windowsProductIdentity(stagingRelease, 'executable'),
+        },
+      );
+    }).toThrow(`disagrees with the required identity in ${field}:`);
   });
 
   it('should verify a correctly signed Tau update as the runtime updater requests it', () => {

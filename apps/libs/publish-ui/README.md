@@ -30,7 +30,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 ## Still in the app
 
 - `components/publish/project-share-panel` (and its test): it reads `#environment.config`, `lib/share-providers`, `lib/build-target`, `use-settings-dialog`, `use-cookie`, `use-auth-links`, `use-revision-status` and `cloud/commercial-features`.
-- `hooks/use-publish-cloud-project-preview` (and its test): it reads `#environment.config`, `lib/revision-actor` and `use-project-thumbnail`.
+- `hooks/use-publish-cloud-project-preview` (and its test): it reads `#environment.config` and `use-project-thumbnail`.
 - `components/share/publication-lock-screen`: a thin wrapper that binds the app's `useAuthLinks` to the library's lock screen.
 - `components/share/tau-publication`: it reads `#environment.config`, the auth client and the file manager.
 - `components/share/shared-project-workbench`: it reads `#environment.config`, the project and file-manager hooks, `lib/build-target` and the kill-memory modules.

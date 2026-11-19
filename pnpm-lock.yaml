@@ -4191,6 +4191,9 @@ importers:
       '@taucad/ui-core':
         specifier: workspace:*
         version: link:../ui-core
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
     devDependencies:
       '@testing-library/jest-dom':
         specifier: 'catalog:'

@@ -33,9 +33,11 @@
     "./components/revisions/revision-timeline": "./src/components/revisions/revision-timeline.ts",
     "./hooks/use-revision-status": "./src/hooks/use-revision-status.ts",
     "./hooks/use-revisions": "./src/hooks/use-revisions.ts",
+    "./lib/revision-actor": "./src/lib/revision-actor.ts",
     "./lib/revision-entry-title": "./src/lib/revision-entry-title.ts",
     "./lib/revision-failure-reporting": "./src/lib/revision-failure-reporting.ts",
     "./lib/revision-push-records": "./src/lib/revision-push-records.ts",
+    "./lib/revision-pushes": "./src/lib/revision-pushes.ts",
     "./lib/revision-who": "./src/lib/revision-who.ts",
     "./machines/revision-compute": "./src/machines/revision-compute.ts",
     "./services/revision-client-registry": "./src/services/revision-client-registry.ts",
@@ -60,7 +62,8 @@
     "@taucad/events": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/ui": "workspace:*",
-    "@taucad/ui-core": "workspace:*"
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/utils": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

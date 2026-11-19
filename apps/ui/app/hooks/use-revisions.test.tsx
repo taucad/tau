@@ -26,7 +26,7 @@ import {
 import { revisionPageSize } from '@taucad/revisions-ui/hooks/use-revisions';
 import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { resetPushRecords } from '#lib/revision-pushes.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));

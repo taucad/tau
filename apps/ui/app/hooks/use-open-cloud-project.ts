@@ -16,7 +16,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { withNamedLock } from '#lib/named-lock.js';
-import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { getRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';

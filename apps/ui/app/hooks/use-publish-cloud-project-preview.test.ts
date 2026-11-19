@@ -4,14 +4,14 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { publishCloudProjectPreview, usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
 
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- Runtime environment names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test/' } }));
 // This test exercises the producer boundary, not the mounted project's hook dependencies.
-vi.mock('#lib/revision-actor.js', () => ({ useRevisionSessionUser: vi.fn() }));
+vi.mock('@taucad/revisions-ui/lib/revision-actor', () => ({ useRevisionSessionUser: vi.fn() }));
 vi.mock('#hooks/use-project-thumbnail.js', () => ({ useProjectThumbnail: vi.fn() }));
 afterEach(() => {
   vi.unstubAllGlobals();

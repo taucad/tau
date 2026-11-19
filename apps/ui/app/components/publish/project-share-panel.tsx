@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Loader } from '@taucad/ui/components/loader';
+import { copyText } from '@taucad/ui/utils/clipboard';
+import type { CopyTextOutcome } from '@taucad/ui/utils/clipboard';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
@@ -62,7 +64,7 @@ import {
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /**
  * What wraps the shared Share pane with the host it reads: the project's workbench host in the workbench, or a
@@ -446,7 +448,7 @@ const publishPortable = async (
 
 const stoppedWaitingSentence = "Stopped waiting for your browser. Your GitHub connection hasn't changed.";
 const timedOutSentence = "GitHub didn't confirm within 10 minutes. Try again.";
-const copyRefusedSentence = "Couldn't copy the link. Select it above and copy it.";
+const copyRefusedSentence = 'Select the link and copy it.';
 
 type GithubGistExtensionOptions = {
   readonly collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
@@ -610,6 +612,7 @@ function useGithubGistExtension(
               locator={publication.locator}
               protection={publication.protection}
               collectSnapshot={collectSnapshot}
+              shareUrl={context.shareUrl}
               onRepublished={setShareUrl}
               onUnpublished={forgetPublication}
               surface='editor'
@@ -696,6 +699,8 @@ const usePortableShareMethods = (
         icon: DirectIcon,
         description: 'The whole project travels in the link, so anyone with the link can open it. Nothing is uploaded.',
         encryption,
+        /* The link is the project as it is now, so every press builds it again and nothing is held. */
+        shouldRemakeLink: true,
         action: { label: 'Copy link', icon: DirectIcon },
         share: portableShare('direct'),
       },
@@ -737,7 +742,53 @@ type TauShareOptions = {
 };
 
 /** Where focus goes after the control that had it went away. */
-type CloudFocusTarget = 'copy-link' | 'publish-new-version' | 'version-name';
+type CloudFocusTarget = 'copy-link' | 'share-link' | 'publish-new-version' | 'version-name';
+
+/**
+ * The link a publish press is waiting for. The press starts the copy with a promise of the link (`copyText`), so the
+ * browser counts it as the person's gesture however long the publish takes; the publish settles the promise.
+ */
+type PendingPublishCopy = Readonly<{
+  resolve: (url: string) => void;
+  reject: (reason: Error) => void;
+  /** The copy's outcome, or `undefined` when the publish failed and nothing was copied. */
+  copying: Promise<CopyTextOutcome | undefined>;
+}>;
+
+/**
+ * A copy's outcome, or `undefined` when the text it waited for never came.
+ *
+ * @param copying - The copy, as `copyText` started it.
+ * @returns What it did, never a rejection.
+ */
+const outcomeOf = async (copying: Promise<CopyTextOutcome>): Promise<CopyTextOutcome | undefined> => {
+  try {
+    return await copying;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Starts copying the link a publish will make. Call it inside the press.
+ *
+ * @returns How the publish settles the link, and the copy's outcome.
+ */
+const startPublishCopy = (): PendingPublishCopy => {
+  const settle: Pick<PendingPublishCopy, 'resolve' | 'reject'> = { resolve: () => undefined, reject: () => undefined };
+  const link = new Promise<string>((resolve, reject) => {
+    Object.assign(settle, { resolve, reject });
+  });
+  return {
+    resolve(url) {
+      settle.resolve(url);
+    },
+    reject(reason) {
+      settle.reject(reason);
+    },
+    copying: outcomeOf(copyText(link)),
+  };
+};
 
 /**
  * A version's number for a sentence, `V3`, without its name: the name can repeat words around it.
@@ -871,6 +922,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const publishFacet = status?.publish ?? emptyPublishFacet;
   const commands = useRevisionCommands();
   const publishShareUrl = publishFacet.shareUrl;
+  const publishSucceeded = publishFacet.phase === 'success';
   const publishError = publishFacet.error;
 
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
@@ -905,6 +957,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const [isCopyRefused, setIsCopyRefused] = useState(false);
   const [focusTarget, setFocusTarget] = useState<CloudFocusTarget>();
   const lastHandledShareUrlRef = useRef<string | undefined>(undefined);
+  const pendingCopyRef = useRef<PendingPublishCopy | undefined>(undefined);
   const linkRef = useRef<HTMLInputElement>(null);
   const copyLinkRef = useRef<HTMLButtonElement>(null);
   const publishNewVersionRef = useRef<HTMLButtonElement>(null);
@@ -959,40 +1012,68 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     const target =
       focusTarget === 'copy-link'
         ? copyLinkRef.current
-        : focusTarget === 'publish-new-version'
-          ? publishNewVersionRef.current
-          : versionNameRef.current;
+        : focusTarget === 'share-link'
+          ? linkRef.current
+          : focusTarget === 'publish-new-version'
+            ? publishNewVersionRef.current
+            : versionNameRef.current;
     if (target !== null) {
       target.focus();
+      if (focusTarget === 'share-link') {
+        linkRef.current?.select();
+      }
       setFocusTarget(undefined);
     }
   });
 
+  /* A publish that failed or a pane that went away never brings the link, so the copy waiting on it is let go. */
   useEffect(() => {
-    if (!publishShareUrl || lastHandledShareUrlRef.current === publishShareUrl) {
+    if (publishError !== undefined) {
+      pendingCopyRef.current?.reject(new Error(publishError));
+      pendingCopyRef.current = undefined;
+    }
+  }, [publishError]);
+  useEffect(
+    () => () => {
+      pendingCopyRef.current?.reject(new Error('The Share pane closed.'));
+      pendingCopyRef.current = undefined;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    /*
+     * One publish is one stay in `success`: the reset after it returns the machine to idle while the link is kept, so the
+     * marker clears outside `success` and the next publish is handled even when it brings the same link.
+     */
+    if (!publishSucceeded || !publishShareUrl) {
+      lastHandledShareUrlRef.current = undefined;
+      return;
+    }
+    if (lastHandledShareUrlRef.current === publishShareUrl) {
       return;
     }
 
     lastHandledShareUrlRef.current = publishShareUrl;
+    const pending = pendingCopyRef.current;
+    pendingCopyRef.current = undefined;
+    pending?.resolve(publishShareUrl);
     let cancelled = false;
     const finishPublish = async (): Promise<void> => {
-      try {
-        await navigator.clipboard.writeText(publishShareUrl);
-        if (!cancelled) {
+      const outcome = await (pending?.copying ?? Promise.resolve(undefined));
+      if (!cancelled) {
+        if (outcome?.isCopied === true) {
           toast.success('Published. Link copied');
           triggerCopiedTick();
+        } else {
+          toast.success('Published');
         }
-      } catch {
-        if (!cancelled) {
-          toast.error("Published. Couldn't copy the link, so use Copy link.");
-        }
-      }
-
-      if (!cancelled) {
+        setIsCopyRefused(outcome?.isCopied === false);
         await loadEnvelope();
+      }
+      if (!cancelled) {
         setPublishingAnother(false);
-        setIsCopyRefused(false);
-        setFocusTarget('copy-link');
+        setFocusTarget(outcome?.isCopied === false ? 'share-link' : 'copy-link');
         commands.resetPublish();
       }
     };
@@ -1002,7 +1083,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [commands, loadEnvelope, publishShareUrl, triggerCopiedTick]);
+  }, [commands, loadEnvelope, publishShareUrl, publishSucceeded, triggerCopiedTick]);
 
   const busy = publishFacet.phase === 'working';
   const sharedEmailError = effectiveVisibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;
@@ -1021,6 +1102,10 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
    * @param revisionId - The entry a republished version names, when this page knows it.
    */
   const sendPublish = (draft: PublishDraft, revisionId?: string): void => {
+    /* The copy starts here, inside the press; the publish below settles the link it copies. */
+    pendingCopyRef.current?.reject(new Error('Another publish started.'));
+    pendingCopyRef.current = startPublishCopy();
+    setIsCopyRefused(false);
     if (revisionId === undefined) {
       commands.publishProject(draft.tag);
     } else {
@@ -1113,13 +1198,13 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
   /* The copy starts inside the press, before any await, so a browser that needs the gesture still allows it. */
   const copyPublishedLink = async (url: string): Promise<void> => {
-    const copying = navigator.clipboard.writeText(url);
+    const copying = copyText(url);
     setIsCopyRefused(false);
-    try {
-      await copying;
+    const { isCopied } = await copying;
+    if (isCopied) {
       triggerCopiedTick();
       toast.success('Link copied');
-    } catch {
+    } else {
       setIsCopyRefused(true);
       linkRef.current?.focus();
       linkRef.current?.select();
@@ -1351,7 +1436,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 : `You've changed this project since you published ${version}. People who open the link still see ${version}.`}
             </ShareNotice>
           ) : null}
-          {isCopyRefused ? <ShareNotice tone='error'>{copyRefusedSentence}</ShareNotice> : null}
+          {isCopyRefused ? <ShareNotice tone='info'>{copyRefusedSentence}</ShareNotice> : null}
           {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
           <div className='flex flex-wrap justify-end gap-2'>
             <Button type='button' variant='ghost' disabled={isDisabled} aria-busy={busy} onClick={handleRepublish}>

@@ -22,7 +22,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
 }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
-vi.mock('#db/billing-snapshot-store.js', () => ({
+vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({
   canonicalUsageQueryKey: () => 'key',
   useBillingRevisionMinimum,
   useSavedUsage,

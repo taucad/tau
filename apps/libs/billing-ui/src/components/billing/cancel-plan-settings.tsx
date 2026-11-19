@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
-import { BillingInlineError, formatBillingDate } from '@taucad/billing-ui/components/billing/billing-primitives';
+import { BillingInlineError, formatBillingDate } from '#components/billing/billing-primitives.js';
 import { Button } from '@taucad/ui/components/button';
 
 /** One message for every way the cancellation page can fail to open: the customer's next step is the same. */

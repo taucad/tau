@@ -16,7 +16,7 @@ import {
   desktopAuthAction,
 } from '#providers/auth-provider.js';
 import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
-import { FinancialSessionProvider } from '#providers/financial-session-provider.js';
+import { FinancialSessionProvider } from '@taucad/billing-ui/providers/financial-session-provider';
 
 const mocks = vi.hoisted(() => ({
   routerLink: vi.fn(),
@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
 const { routerLink } = mocks;
 
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: mocks.resolvedAuth }));
-vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
 
 vi.mock('react-router', () => ({
   Link: ({ to, children, ...rest }: { readonly to: string } & React.ComponentProps<'a'>) => {

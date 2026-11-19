@@ -491,7 +491,7 @@ describe('a password-protected shared link on a phone', () => {
     await target.click(selectors.getByRole('button', { name: 'Share', exact: true }).first());
     const share = selectors.getByRole('region', { name: 'Share project' });
     await target.expectVisible(share, 15_000);
-    await target.click(share.getByRole('checkbox', { name: 'Encrypt with a password' }));
+    await target.click(share.getByRole('checkbox', { name: 'Protect with a password' }));
     await target.fill(share.getByLabelText('Password', { exact: true }), sharePassword);
     await target.click(share.getByRole('checkbox', { name: 'Include password in the link' }));
     await target.expectAttribute(

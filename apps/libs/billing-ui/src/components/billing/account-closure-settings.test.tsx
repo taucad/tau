@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountClosureSettings } from '#components/billing/account-closure-settings.js';
+import type { AccountClosureServices } from '#components/billing/account-closure-settings.js';
 import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 
@@ -24,7 +25,8 @@ vi.mock('#lib/billing-lifecycle-client.js', () => ({
   getAccountClosure: getClosure,
 }));
 vi.mock('#lib/billing-payment-client.js', () => ({ createPaymentRequestId: () => 'request-a' }));
-vi.mock('#lib/auth-client.js', () => ({ authClient: { deleteUser } }));
+/** The host's auth calls, as the app supplies them from its Better Auth client. */
+const services: AccountClosureServices = { deleteUser };
 const binding = { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' } as const;
 const renderClosure = (activeBinding = binding, onReviewPayment: () => void = vi.fn()) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -32,7 +34,7 @@ const renderClosure = (activeBinding = binding, onReviewPayment: () => void = vi
     <QueryClientProvider client={queryClient}>
       <FinancialSessionProvider>
         <FinancialSessionScope identity={nextBinding}>
-          <AccountClosureSettings binding={nextBinding} onReviewPayment={onReviewPayment} />
+          <AccountClosureSettings binding={nextBinding} services={services} onReviewPayment={onReviewPayment} />
         </FinancialSessionScope>
       </FinancialSessionProvider>
     </QueryClientProvider>

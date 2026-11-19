@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { legalUrl } from '#lib/legal-url.js';
 import { CircleCheck, ExternalLink, Info, LoaderCircle } from 'lucide-react';
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import {
@@ -31,12 +30,8 @@ import { PaymentMethod } from '@taucad/ui-kit/components/payment-method';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@taucad/ui/components/dialog';
-import {
-  IconLine,
-  SummaryList,
-  SummaryRow,
-  supportEmail,
-} from '@taucad/billing-ui/components/billing/billing-primitives';
+import { IconLine, SummaryList, SummaryRow, supportEmail } from '#components/billing/billing-primitives.js';
+import { useBillingLegalLinks } from '#providers/billing-legal-links-provider.js';
 
 const presetsCents = [1000, 2500, 5000, 10_000] as const;
 const minCents = topupPrincipalBoundsMinor.minimum;
@@ -166,6 +161,7 @@ const actionCopy = (action: WirePaymentAction): DialogCopy => {
  * named link away at the point of purchase, without a refund sentence in the pitch.
  */
 function LegalLine(): React.JSX.Element {
+  const { legalUrl } = useBillingLegalLinks();
   return (
     <p data-slot='legal-line' className='text-xs text-muted-foreground'>
       By continuing, you agree to Tau’s{' '}

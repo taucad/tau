@@ -3,7 +3,6 @@ import { SettingsItem, SettingsSectionCard } from '@taucad/settings-ui/component
 import { useRef, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, LoaderCircle, Plus } from 'lucide-react';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party settings surface owns the direct billing client contract
 import {
   formatCreditAtomsDisplay,
   formatMonthlyPrice,
@@ -23,15 +22,14 @@ import {
   BillingNotice,
   BillingStatusBadge,
   formatBillingDate,
-} from '@taucad/billing-ui/components/billing/billing-primitives';
-import { MonthlyCreditsMeter } from '@taucad/billing-ui/components/billing/monthly-credits-meter';
+} from '#components/billing/billing-primitives.js';
+import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
 import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
 import { useBillingBinding } from '#components/billing/use-billing-binding.js';
 import { Button } from '@taucad/ui/components/button';
-import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 
 const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
 const proMonthlyPriceLabel = formatMonthlyPrice(proPlan?.priceLabel ?? '');
@@ -53,8 +51,13 @@ const formatBalance = (atoms: bigint): string =>
 const formatHeld = (atoms: bigint): string =>
   `${formatCreditAtomsDisplay(atoms)} more are on hold for work in progress.`;
 
-/** Billing overview: the plan, monthly credits, purchased credits, auto-reload and cancellation. */
-export function BillingSettings(): React.JSX.Element {
+/**
+ * Billing overview: the plan, monthly credits, purchased credits, auto-reload and cancellation.
+ *
+ * @param props - `accountNotice` is the host app's account notice shown above the plan (its email-deliverability banner).
+ * @returns The billing settings.
+ */
+export function BillingSettings({ accountNotice }: { readonly accountNotice?: React.ReactNode }): React.JSX.Element {
   const entitlements = useEntitlements();
   const credits = useCredits();
   const availableBalance = credits?.balance ?? undefined;
@@ -154,7 +157,7 @@ export function BillingSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-8 pb-4'>
-      <EmailDeliverabilityBanner />
+      {accountNotice}
       {isPastDue ? (
         <BillingNotice tone='warning' role='alert' action={portalButton('Update payment method')}>
           We couldn’t charge your card. Update your payment method within 7 days to keep {planName ?? 'your plan'}. Your

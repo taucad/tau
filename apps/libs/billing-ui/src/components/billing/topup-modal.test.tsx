@@ -5,9 +5,22 @@ import { pathToFileURL } from 'node:url';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactQuery from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { TopupModal } from '#components/billing/topup-modal.js';
+import { BillingLegalLinksProvider } from '#providers/billing-legal-links-provider.js';
+import type { BillingLegalLinks } from '#providers/billing-legal-links-provider.js';
 
-const clientEnvironment = globalThis.window.ENV;
+/** The website the app links legal pages to; the app picks it per deployment (`lib/website-origin`). */
+const website = { origin: 'https://tau.new' };
+const legalLinks: BillingLegalLinks = { legalUrl: (page) => `${website.origin}/legal/${page}` };
+/** The app's providers around the dialog: a router and the legal-page links. */
+function TestHost({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return (
+    <MemoryRouter>
+      <BillingLegalLinksProvider links={legalLinks}>{children}</BillingLegalLinksProvider>
+    </MemoryRouter>
+  );
+}
 const client = vi.hoisted(() => ({
   prepareTopup: vi.fn(),
   confirmPaymentAction: vi.fn(),
@@ -125,9 +138,9 @@ const neverSettles = async (): Promise<never> =>
   });
 const renderModal = (Modal: typeof TopupModal = TopupModal) =>
   render(
-    <MemoryRouter>
+    <TestHost>
       <Modal isOpen onOpenChange={vi.fn()} />
-    </MemoryRouter>,
+    </TestHost>,
   );
 
 describe('TopupModal', () => {
@@ -148,8 +161,7 @@ describe('TopupModal', () => {
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
-    globalThis.window.ENV = clientEnvironment;
+    website.origin = 'https://tau.new';
   });
 
   it.each(['success', 'conflict'])('ignores a delayed %s after A to B to A', async (outcome) => {
@@ -172,15 +184,15 @@ describe('TopupModal', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     session.current = { ...session.current, userId: 'user-a' };
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     settle(wireAction('prepared'));
     await waitFor(() => {
@@ -200,9 +212,9 @@ describe('TopupModal', () => {
     );
     session.current = {};
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     expect(screen.queryByText(/processing payment/i)).toBeNull();
   });
@@ -219,9 +231,9 @@ describe('TopupModal', () => {
     client.getUnresolvedPaymentActions.mockClear();
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <compiledModal.TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     await waitFor(() => {
       expect(client.getUnresolvedPaymentActions).toHaveBeenCalledWith(
@@ -244,9 +256,9 @@ describe('TopupModal', () => {
     client.followPaymentRedirect.mockClear();
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     session.current = { ...session.current, userId: 'user-a' };
     client.getUnresolvedPaymentActions.mockReturnValue(
@@ -255,9 +267,9 @@ describe('TopupModal', () => {
       }),
     );
     view.rerender(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={vi.fn()} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     settle(wireAction('canceled'));
     await waitFor(() => {
@@ -266,7 +278,7 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
-  it('should link Terms to the public website from a build that runs none', async () => {
+  it('should link Terms to the website the app provides', async () => {
     renderModal();
 
     const terms = await screen.findByRole('link', { name: 'Terms' });
@@ -275,12 +287,7 @@ describe('TopupModal', () => {
   });
 
   it('should link Terms to the website of the deployment the app is bound to', async () => {
-    vi.stubEnv('TAU_TARGET', 'desktop');
-    globalThis.window.ENV = {
-      ...clientEnvironment,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
-      TAU_FRONTEND_URL: 'https://taucad.dev',
-    };
+    website.origin = 'https://taucad.dev';
 
     renderModal();
 
@@ -580,9 +587,9 @@ describe('TopupModal', () => {
     client.getUnresolvedPaymentActions.mockReturnValue(neverSettles());
     const onOpenChange = vi.fn();
     render(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={onOpenChange} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     expect(await screen.findByRole('button', { name: 'Continue' })).toHaveAttribute('aria-busy', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -619,9 +626,9 @@ describe('TopupModal', () => {
     client.getPaymentAction.mockResolvedValue({ ...wireAction(state), attention });
     const onOpenChange = vi.fn();
     render(
-      <MemoryRouter>
+      <TestHost>
         <TopupModal isOpen onOpenChange={onOpenChange} />
-      </MemoryRouter>,
+      </TestHost>,
     );
     const dialog = await screen.findByRole('dialog', { name: title });
     expect(dialog).toHaveAccessibleDescription(description);

@@ -32,6 +32,8 @@ type GithubGistManagementProps = {
   readonly locator: ShareLocator;
   readonly protection: ShareProtection;
   readonly collectSnapshot: () => Promise<ShareProjectSnapshot>;
+  /** The link people have now, so an update can say when it changed. */
+  readonly shareUrl?: string | undefined;
   readonly onRepublished: (url: string) => void;
   readonly onUnpublished: () => void;
   /** Where GitHub sends the person back after a reconnect: the share page, or the editor with Share open. */
@@ -47,6 +49,7 @@ export function GithubGistManagement({
   locator,
   protection,
   collectSnapshot,
+  shareUrl,
   onRepublished,
   onUnpublished,
   surface = 'share-page',
@@ -125,7 +128,7 @@ export function GithubGistManagement({
       const provider = await shareProviderRegistry.load('github-gist');
       const providerRepublish = provider.republish;
       if (!providerRepublish) {
-        throw new Error('This sharing method cannot republish projects.');
+        throw new Error('This sharing method cannot update a Gist.');
       }
       const url = await withBrowserShareProviderContext(async (context) => {
         const publication = await providerRepublish(
@@ -138,7 +141,12 @@ export function GithubGistManagement({
           secrets: publication.secrets,
         });
       });
-      toast.success('GitHub Gist republished');
+      /* The link pins the Gist's revision, so an update makes a new link; the one people have keeps the old revision. */
+      toast.success(
+        shareUrl === undefined || url === shareUrl
+          ? 'Gist updated'
+          : 'Gist updated. The link changed, so copy it again.',
+      );
       onRepublished(url);
     } catch (error) {
       handleFailure(error);
@@ -153,11 +161,11 @@ export function GithubGistManagement({
       const provider = await shareProviderRegistry.load('github-gist');
       const providerUnpublish = provider.unpublish;
       if (!providerUnpublish) {
-        throw new Error('This sharing method cannot unpublish projects.');
+        throw new Error('This sharing method cannot delete a Gist.');
       }
       await withBrowserShareProviderContext(async (context) => providerUnpublish({ locator }, context));
       setConfirmOpen(false);
-      toast.success('GitHub Gist unpublished');
+      toast.success('Gist deleted');
       onUnpublished();
     } catch (error) {
       handleFailure(error);
@@ -286,7 +294,7 @@ export function GithubGistManagement({
             }}
           >
             <RefreshCw className='size-4' aria-hidden />
-            Republish Gist
+            Update Gist
           </DropdownMenuItem>
           <DropdownMenuItem
             variant='destructive'
@@ -295,14 +303,14 @@ export function GithubGistManagement({
             }}
           >
             <Trash2 className='size-4' aria-hidden />
-            Unpublish Gist
+            Delete Gist…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Unpublish this GitHub Gist?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this Gist?</AlertDialogTitle>
             <AlertDialogDescription>
               This permanently deletes the Gist from GitHub. Existing Tau and GitHub links will stop working.
             </AlertDialogDescription>
@@ -318,7 +326,7 @@ export function GithubGistManagement({
               }}
             >
               {busy ? <Loader className='size-4' /> : null}
-              Unpublish Gist
+              Delete Gist
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

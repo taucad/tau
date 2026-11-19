@@ -1,5 +1,5 @@
 /**
- * *People with access* — the owner's half of a collaboration (charter W5, D27).
+ * *Collaborators* — the owner's half of a collaboration (charter W5, D27).
  *
  * There is no invitation email. `POST /v1/projects/:id/collaborators` answers
  * the accept token exactly once and nothing stores it afterwards, so the link
@@ -15,6 +15,15 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { UserMinus } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Badge } from '@taucad/ui/components/badge';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { SharePaneSection } from '@taucad/workbench-panes/share/share-pane';
@@ -28,7 +37,7 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
@@ -51,7 +60,7 @@ const statusLabel = (status: CollaboratorEntry['status']): string | undefined =>
 /** Rows shown before "Show all"; the list renders in the pane's one scroll area, so it never scrolls on its own. */
 const collapsedRowCount = 5;
 
-const listFailureMessage = "Couldn't load the people with access. Try again.";
+const listFailureMessage = "Couldn't load collaborators. Try again.";
 
 /**
  * The refusal, in the words of the person who caused it.
@@ -71,7 +80,7 @@ const inviteFailureMessage = (status: number, code: string | undefined): string 
     return 'Enter a valid email address.';
   }
   if (status === 403) {
-    return 'Only the project owner can invite people.';
+    return 'Only the project owner can add collaborators.';
   }
   if (status === 404) {
     return 'This project isn’t in the cloud yet. Back it up to the cloud first.';
@@ -132,7 +141,7 @@ export type RevisionCollaboratorsProps = {
 };
 
 /**
- * Who else may work on this project, and how one more is invited: the Share pane's "People with access" section.
+ * Who else may work on this project, and how one more is invited: the Share pane's "Collaborators" section.
  *
  * Mounted in the Share panel for the owner alone, by {@link ProjectPeopleWithAccess}. A collaborator never sees it:
  * the routes behind it all need `owner`, and offering a control that is always
@@ -148,6 +157,11 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
   const [role, setRole] = useState<'read' | 'write'>('write');
   const [issued, setIssued] = useState<IssuedInvitation>();
   const [failure, setFailure] = useState<string>();
+  /* The person a removal waits to be confirmed for: access cannot be given back without a new invite link. */
+  const [removal, setRemoval] = useState<CollaboratorEntry>();
+  const shouldFocusHeadingRef = useRef(false);
+  /* The row button that asked, so a cancelled removal hands focus back to it. */
+  const removalTriggerRef = useRef<HTMLButtonElement | undefined>(undefined);
 
   const {
     data: people = [],
@@ -239,11 +253,14 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
     },
     async onSuccess() {
       setFailure(undefined);
+      /* The row's button is disabled once its person is removed, so the dialog hands focus to the heading. */
+      shouldFocusHeadingRef.current = true;
+      setRemoval(undefined);
       await refreshPeople();
-      headingRef.current?.focus();
     },
     onError(error: Error) {
       setFailure(error.message);
+      setRemoval(undefined);
     },
   });
 
@@ -279,12 +296,22 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 
   return (
     <SharePaneSection
-      title='People with access'
-      description='People you add here open the project itself and see your latest changes. People with a link see only what you shared.'
+      title='Collaborators'
+      description='Collaborators open this project itself and see your latest changes. People with a link see only what you shared.'
       headingRef={headingRef}
     >
       <div data-slot='share-people' className='flex flex-col gap-4'>
-        <div className='flex flex-col gap-2'>
+        {/* One row, always open, and no Done: the one-time link it creates stays shown until the next invite replaces it. */}
+        <form
+          className='flex flex-col gap-2'
+          aria-label='Add a collaborator'
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (typed !== '' && !busy) {
+              invite.mutate();
+            }
+          }}
+        >
           <div className='flex flex-wrap items-end gap-2'>
             <div className='flex min-w-40 flex-1 flex-col gap-2'>
               <Label htmlFor='collaborator-email'>Email address</Label>
@@ -317,26 +344,15 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
                 <SelectItem value='read'>Can view</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <p id={helpId} className='text-xs text-muted-foreground'>
-            You’ll get an invite link to send them yourself. Tau doesn’t email it.
-          </p>
-          <div className='flex flex-wrap justify-end gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              disabled={typed === '' || busy}
-              aria-busy={invite.isPending}
-              onClick={() => {
-                invite.mutate();
-              }}
-            >
+            <Button type='submit' variant='outline' disabled={typed === '' || busy} aria-busy={invite.isPending}>
               {invite.isPending ? <Loader className='size-4' /> : undefined}
               <span>Create invite link</span>
             </Button>
           </div>
-        </div>
+          <p id={helpId} className='text-xs text-muted-foreground'>
+            You’ll get an invite link to send them yourself. Tau doesn’t email it.
+          </p>
+        </form>
 
         {/*
           The token, once (D27).
@@ -378,13 +394,13 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         )}
 
         {isLoading ? (
-          <div role='status' aria-busy='true' aria-label='Loading people with access' className='flex flex-col gap-2'>
+          <div role='status' aria-busy='true' aria-label='Loading collaborators' className='flex flex-col gap-2'>
             <Skeleton aria-hidden className='h-5 w-48' />
             <Skeleton aria-hidden className='h-5 w-40' />
           </div>
         ) : people.length > 0 ? (
           <>
-            <ul aria-label='People with access' className='flex list-none flex-col gap-3'>
+            <ul aria-label='Collaborators' className='flex list-none flex-col gap-3'>
               {shownPeople.map((person) => {
                 const personStatus = statusLabel(person.status);
                 return (
@@ -399,8 +415,9 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
                             className='shrink-0'
                             disabled={busy || person.status === 'revoked'}
                             aria-label={`Remove access for ${person.email}`}
-                            onClick={() => {
-                              revoke.mutate(person.email);
+                            onClick={(event) => {
+                              removalTriggerRef.current = event.currentTarget;
+                              setRemoval(person);
                             }}
                           >
                             <UserMinus aria-hidden />
@@ -454,10 +471,89 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
             ) : null}
           </>
         ) : isError ? null : (
-          <p className='text-sm text-muted-foreground'>Nobody else has access to this project.</p>
+          <p className='text-sm text-muted-foreground'>No collaborators yet.</p>
         )}
       </div>
+      <RemoveCollaboratorDialog
+        person={removal}
+        isRemoving={revoke.isPending}
+        onConfirm={(person) => {
+          revoke.mutate(person.email);
+        }}
+        onCancel={() => {
+          setRemoval(undefined);
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (shouldFocusHeadingRef.current) {
+            shouldFocusHeadingRef.current = false;
+            headingRef.current?.focus();
+          } else {
+            removalTriggerRef.current?.focus();
+          }
+        }}
+      />
     </SharePaneSection>
+  );
+}
+
+/**
+ * Asks before a person loses access (UX Rule 4): a removed collaborator can only come back through a new invite link,
+ * so the removal is confirmed with their address rather than undone.
+ *
+ * @param props - The person waiting to be removed, whether the removal is running, and what each answer does.
+ * @returns The dialog, open while a person is waiting.
+ */
+function RemoveCollaboratorDialog({
+  person,
+  isRemoving,
+  onConfirm,
+  onCancel,
+  onCloseAutoFocus,
+}: {
+  readonly person: CollaboratorEntry | undefined;
+  readonly isRemoving: boolean;
+  readonly onConfirm: (person: CollaboratorEntry) => void;
+  readonly onCancel: () => void;
+  readonly onCloseAutoFocus: (event: Event) => void;
+}): React.JSX.Element {
+  return (
+    <AlertDialog
+      open={person !== undefined}
+      onOpenChange={(open) => {
+        if (!open && !isRemoving) {
+          onCancel();
+        }
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{`Remove ${person?.email ?? ''} from collaborators?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {person?.status === 'pending'
+              ? 'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.'
+              : 'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isRemoving}>Cancel</AlertDialogCancel>
+          <Button
+            type='button'
+            variant='destructive'
+            disabled={isRemoving}
+            aria-busy={isRemoving}
+            onClick={() => {
+              if (person !== undefined) {
+                onConfirm(person);
+              }
+            }}
+          >
+            {isRemoving ? <Loader className='size-4' /> : null}
+            Remove access
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -510,7 +606,7 @@ function IssuedInviteLink({
 }
 
 /**
- * *People with access* in the Share panel (C4, Q5): the last section of the pane's one scroll area, under every
+ * *Collaborators* in the Share panel (C4, Q5): the last section of the pane's one scroll area, under every
  * sharing method, because it belongs to the project rather than to a link.
  *
  * The owner alone: every route behind the list needs `owner`, so a

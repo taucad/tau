@@ -4,7 +4,6 @@
   "apps/ui/app/components/auth/check-email.tsx": 1,
   "apps/ui/app/components/auth/magic-link-verify.tsx": 1,
   "apps/ui/app/components/auth/verify-email.tsx": 1,
-  "apps/ui/app/components/billing/topup-modal.tsx": 1,
   "apps/ui/app/components/browser/browser-bridge.ts": 1,
   "apps/ui/app/components/browser/browser-pane.tsx": 1,
   "apps/ui/app/components/chat/chat-activity-status.tsx": 1,

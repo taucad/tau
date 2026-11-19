@@ -20,9 +20,9 @@ import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
 import {
   resolveServiceWorkerKillSwitch,
-  resolveTauBuildRelease,
   resolveTauCloudBuildEnabled,
   serviceWorkerKillSwitchVariable,
+  unstampedBuildRelease,
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -503,21 +503,6 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 };
 
 /**
- * Publish `/tau-release.json` (`{ release }`) beside the client assets, which the API polls to admit this release.
- *
- * @param release - The short commit.
- * @returns The plugin.
- */
-const createReleaseManifestPlugin = (release: string): Plugin => ({
-  name: 'tau-release-manifest',
-  apply: 'build',
-  applyToEnvironment: (environment) => environment.config.consumer === 'client',
-  generateBundle() {
-    this.emitFile({ type: 'asset', fileName: 'tau-release.json', source: `${JSON.stringify({ release })}\n` });
-  },
-});
-
-/**
  * Record the build's Sentry release beside the build output (never shipped), so the deploy can attach its commits
  * to the exact release every event from this bundle reports (`sentryRelease` in `#lib/sentry-event.lib`).
  *
@@ -565,11 +550,12 @@ export default defineConfig(({ command, mode }) => {
   const isProductionBuild = command === 'build' && !isTest;
   /*
    * The release label runtime telemetry stamps (short commit). Server graph only, like `tauBuildId`: the page reads
-   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The same value is published as
-   * `/tau-release.json`, the only place the API learns UI releases from.
+   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The build compiles a fixed placeholder
+   * and never reads the commit, so `ui:build`'s cache key holds no commit (ST-9): the deploy stamps the release over
+   * the placeholder and publishes `/tau-release.json`, the only place the API learns UI releases from, with
+   * `scripts/stamp-build-release.mts`.
    */
-  const buildRelease = isProductionBuild ? resolveTauBuildRelease(process.env) : undefined;
-  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(buildRelease ?? '') };
+  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(unstampedBuildRelease) };
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
@@ -658,7 +644,6 @@ export default defineConfig(({ command, mode }) => {
       createAssetIntegrity({ receipt: true }),
       // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
       createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
-      ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
       /*
        * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical

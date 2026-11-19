@@ -93,7 +93,7 @@ const codeMessages: ReadonlyMap<string, string> = new Map([
   ['GITHUB_CONNECTION_NOT_FOUND', 'This GitHub account is no longer connected. Refresh and choose another account.'],
   ['GITHUB_CONNECTION_WRITE_FAILED', 'Tau could not save the GitHub connection. Try again.'],
   ['GITHUB_RECONNECT_REQUIRED', 'Your GitHub connection needs to be renewed. Connect GitHub again.'],
-  ['GITHUB_REPOSITORY_WRITE_DISABLED', 'Enable writes for this repository before pushing.'],
+  ['GITHUB_REPOSITORY_WRITE_DISABLED', 'Allow backups to this repository first.'],
   [
     'GITHUB_REPOSITORY_WRITE_DENIED',
     'GitHub has not granted write access to this repository. Review its access on GitHub.',
@@ -120,7 +120,7 @@ const codeMessages: ReadonlyMap<string, string> = new Map([
   ['PAGE_INVALID', 'That GitHub page could not be loaded. Refresh and try again.'],
   ['GIT_PROXY_REDIRECTED_CREDENTIAL', 'This repository moved on GitHub. Reconnect it to follow the move.'],
   ['GIT_PROXY_UPSTREAM_FAILED', "Tau couldn't reach the Git host. Try again shortly."],
-  ['GIT_PROXY_PORT_REFUSED', 'Tau can only sync with Git hosts on the standard HTTPS port.'],
+  ['GIT_PROXY_PORT_REFUSED', 'Tau can only back up to Git hosts on the standard HTTPS port.'],
   ['GIT_PROXY_RATE_LIMITED', 'Too many Git requests in a short time. Try again in a minute.'],
 ]);
 
@@ -129,7 +129,7 @@ const codeMessage = (code: string | undefined): string | undefined =>
 
 const statusMessage = (status: number): string =>
   status === 401
-    ? 'Your Tau session ended. Sign in again, then retry.'
+    ? 'You’re signed out of Tau. Sign in again, then try again.'
     : status === 404
       ? notFoundMessage
       : status === 429
@@ -179,7 +179,7 @@ export const githubErrorMessage = (error: unknown): string => {
     return 'Tau received an unexpected answer from GitHub. Reload Tau and try again.';
   }
   if (error instanceof TypeError) {
-    return "Tau couldn't reach its server. Check your connection and try again.";
+    return 'Couldn’t reach Tau. Check your connection and try again.';
   }
   return 'The GitHub request failed. Try again.';
 };

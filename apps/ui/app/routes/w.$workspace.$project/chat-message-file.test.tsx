@@ -164,7 +164,7 @@ describe('ChatMessageFileAttachments', () => {
 
     expect(screen.queryByLabelText('Attached image previews')).toBeNull();
     expect(screen.getByRole('link', { name: 'broken.png' })).toBeInTheDocument();
-    expect(screen.getByText('Failed to load image. Click to download.')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t load this image. Click to download it.')).toBeInTheDocument();
     expect(screen.getByText('image/png')).toBeInTheDocument();
   });
 

@@ -8,13 +8,46 @@ import { z } from 'zod';
 const signatureSchema = z.strictObject({
   path: z.string().min(1),
   status: z.literal('Valid'),
+  signatureType: z.string().min(1),
+  osBinary: z.boolean(),
   subject: z.string().min(1),
+  embeddedSubject: z.string().min(1).nullable(),
   timestamp: z.string().min(1).nullable(),
   productVersion: z.string().nullable(),
   productName: z.string().nullable(),
 });
 
-/** Bind Windows' trust verdict to the requested file and complete publisher identity. */
+/** The signtool verdict on a file's embedded signature alone (`signtool verify /pa /all /v` never consults a catalog). */
+export type EmbeddedSignatureVerdict = { verified: boolean; timestamped: boolean };
+
+/**
+ * Read `signtool verify /pa /all /v` output. Verified means signtool reported success with no errors and no catalog;
+ * timestamped means every reported signature carries a verified timestamp.
+ */
+export const parseSigntoolVerification = (output: string): EmbeddedSignatureVerdict => {
+  const signatures = output.match(/^Signature Index: \d+/gmu)?.length ?? 0;
+  const timestamps = output.match(/^The signature is timestamped: /gmu)?.length ?? 0;
+  const verified =
+    signatures > 0 &&
+    !/signed in catalog/iu.test(output) &&
+    /^Successfully verified: /mu.test(output) &&
+    /^Number of errors: 0\s*$/mu.test(output);
+  return { verified, timestamped: signatures > 0 && timestamps === signatures };
+};
+
+/** The signer Windows reports for its own operating-system components through the OS catalog. */
+const windowsComponentSigner = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US';
+
+/**
+ * Bind Windows' trust verdict to the requested file and complete publisher identity.
+ *
+ * Get-AuthenticodeSignature consults the OS catalog before the embedded signature, and the Authenticode hash excludes
+ * the embedded signature. A Windows component that Tau re-signs (Electron ships d3dcompiler_47.dll from a Windows build)
+ * therefore still reports the catalog signer. `allowWindowsComponent` admits exactly that verdict, never for Tau.exe,
+ * when Windows vouches for the bytes as an OS component, the embedded signer is Tau's and signtool independently verified
+ * the embedded signature's chain, bytes and timestamp (`embedded`). Every other file must carry a valid, timestamped,
+ * embedded signature from the exact publisher.
+ */
 export const validateWindowsSignature = (
   value: unknown,
   expected: {
@@ -23,20 +56,43 @@ export const validateWindowsSignature = (
     timestampRequired: boolean;
     expectedVersion?: string;
     expectedProductName?: string;
+    allowWindowsComponent?: boolean;
   },
+  embedded?: EmbeddedSignatureVerdict,
 ): void => {
   const signature = signatureSchema.parse(value);
+  const embeddedPublisher =
+    signature.signatureType === 'Authenticode' &&
+    !signature.osBinary &&
+    signature.subject === expected.publisher &&
+    !(expected.timestampRequired && !signature.timestamp);
+  const windowsComponent =
+    expected.allowWindowsComponent === true &&
+    signature.signatureType === 'Catalog' &&
+    signature.osBinary &&
+    signature.subject === windowsComponentSigner &&
+    win32.basename(expected.path).toLowerCase() !== 'tau.exe' &&
+    embedded?.verified === true &&
+    (!expected.timestampRequired || embedded.timestamped);
   if (
     !win32.isAbsolute(expected.path) ||
     !expected.publisher.trim() ||
     win32.normalize(signature.path).toLowerCase() !== win32.normalize(expected.path).toLowerCase() ||
-    signature.subject !== expected.publisher ||
-    (expected.timestampRequired && !signature.timestamp) ||
+    signature.embeddedSubject !== expected.publisher ||
+    !(embeddedPublisher || windowsComponent) ||
     (expected.expectedVersion !== undefined && signature.productVersion !== expected.expectedVersion) ||
     (expected.expectedProductName !== undefined && signature.productName !== expected.expectedProductName)
   ) {
+    // Certificate subjects and product fields are public identity, never secrets; print them so a failure is diagnosable.
+    // Reports never carry a directory (a runtime update lives under the user's profile), only the file name.
+    const observed = {
+      ...signature,
+      path: win32.basename(signature.path),
+      timestamp: signature.timestamp !== null,
+      embedded,
+    };
     throw new Error(
-      'Windows signature path, publisher, timestamp or signed product identity disagrees with the required identity',
+      `Windows signature path, publisher, timestamp or signed product identity disagrees with the required identity: ${JSON.stringify(observed)}`,
     );
   }
 };
@@ -45,6 +101,7 @@ const execute = promisify(execFile);
 // File names are process data, never PowerShell source. ConvertTo-Json failure is fatal.
 // With stderr redirected, Windows PowerShell 5.1 writes progress records (such as "Preparing modules
 // for first use") to stderr as CLIXML; they are not errors, so the progress stream is silenced.
+// CreateFromSignedFile reads only the embedded signer, so it names Tau's signature even when the verdict is the catalog's.
 const verificationScript = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -52,8 +109,10 @@ $s = Get-AuthenticodeSignature -LiteralPath $env:TAU_SIGNATURE_FILE
 if ($null -eq $s.SignerCertificate) { throw 'Missing signer certificate' }
 $t = $null
 if ($null -ne $s.TimeStamperCertificate) { $t = $s.TimeStamperCertificate.Subject }
+$e = $null
+try { $e = [System.Security.Cryptography.X509Certificates.X509Certificate]::CreateFromSignedFile($env:TAU_SIGNATURE_FILE).Subject } catch { $e = $null }
 $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:TAU_SIGNATURE_FILE)
-[ordered]@{productVersion=$v.ProductVersion;productName=$v.ProductName;path=$s.Path;status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;timestamp=$t} | ConvertTo-Json -Compress
+[ordered]@{productVersion=$v.ProductVersion;productName=$v.ProductName;path=$s.Path;status=$s.Status.ToString();signatureType=$s.SignatureType.ToString();osBinary=[bool]$s.IsOSBinary;subject=$s.SignerCertificate.Subject;embeddedSubject=$e;timestamp=$t} | ConvertTo-Json -Compress
 `;
 
 /**
@@ -78,6 +137,9 @@ export const verifyWindowsSignature = async (options: {
   timestampRequired?: boolean;
   expectedVersion?: string;
   expectedProductName?: string;
+  allowWindowsComponent?: boolean;
+  /** Absolute signtool.exe, required to admit a catalog-vouched Windows component. */
+  signtool?: string;
 }): Promise<void> => {
   if (process.platform !== 'win32') {
     throw new Error('Authenticode verification requires Windows');
@@ -108,5 +170,23 @@ export const verifyWindowsSignature = async (options: {
   if (stderr.trim()) {
     throw new Error(`Windows signature verification reported a tool error: ${stderr.trim().slice(0, 1000)}`);
   }
-  validateWindowsSignature(JSON.parse(stdout), { ...options, timestampRequired: options.timestampRequired ?? true });
+  const verdict: unknown = JSON.parse(stdout);
+  const { signtool, ...expected } = options;
+  let embedded: EmbeddedSignatureVerdict | undefined;
+  if (
+    options.allowWindowsComponent &&
+    signtool &&
+    win32.isAbsolute(signtool) &&
+    signatureSchema.safeParse(verdict).data?.signatureType === 'Catalog'
+  ) {
+    // Without /a, signtool verifies only the embedded signature; a nonzero exit rejects the promise.
+    const report = await execute(signtool, ['verify', '/pa', '/all', '/v', options.path], {
+      timeout: 60_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+    embedded = parseSigntoolVerification(report.stdout);
+  }
+  validateWindowsSignature(verdict, { ...expected, timestampRequired: options.timestampRequired ?? true }, embedded);
 };

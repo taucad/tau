@@ -171,6 +171,7 @@ import {
 import type { RecoveryHooks, RecoveryWindowLike } from '#main/recovery-window.js';
 import { admitRouteQualificationProbe, prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
+import { readDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
@@ -730,12 +731,14 @@ if (recordsBootHealth) {
     log: logMain,
   });
 }
+/* LW8: the commit packaging recorded beside the bundles (`dist/host-build.json`); empty when none was (ST-9). */
+const desktopHostBuild = readDesktopHostBuild(join(import.meta.dirname, '..'));
 const bootHealth: BootHealth | undefined = recordsBootHealth
   ? startBootHealth({
       path: join(app.getPath('userData'), bootHealthFileName),
       build: buildIdentity({
         version: app.getVersion(),
-        sourceCommit: typeof tauDesktopHostBuild === 'string' ? tauDesktopHostBuild : '',
+        sourceCommit: desktopHostBuild,
         packaged: app.isPackaged,
       }),
       version: app.getVersion(),
@@ -1461,6 +1464,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
       TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* LW8: the commit packaging recorded beside the bundles, read above. */
+      TAU_DESKTOP_HOST_BUILD: desktopHostBuild, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
@@ -2784,12 +2789,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
               buttons: context.retryable
-                ? ['Retry saving', 'Keep Tau open', 'Quit anyway']
+                ? ['Try saving again', 'Keep Tau open', 'Quit anyway']
                 : ['Restore workspace', 'Quit anyway'],
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
+              detail: `${context.error ?? ''} Try saving again, or restore the app after pending saves finish. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
             });
             done(
               context.retryable
@@ -2847,7 +2852,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           case 'recoveryReview': {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
-              buttons: installFailed ? ['Retry recovery'] : ['Retry recovery', 'Quit anyway'],
+              buttons: installFailed ? ['Try recovery again'] : ['Try recovery again', 'Quit anyway'],
               defaultId: 0,
               cancelId: 0,
               message: 'Tau is waiting to restore your workspace.',

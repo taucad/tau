@@ -105,3 +105,5 @@ Regenerate with `node tools/formal/src/cli.ts update apps/ui`.
 pnpm nx run ui:formal:tla:library-catalog                 # SANY, the pr configurations, graph and suite freshness
 node tools/formal/src/cli.ts check --tier nightly apps/ui  # the nightly configurations (wide)
 ```
+
+The Tau Cloud naming audit re-pinned the drift after `project-library-commands.ts` reworded a refusal sentence; no action changed.

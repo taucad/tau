@@ -276,7 +276,7 @@ export class EvidenceIngressService {
         });
       }
       case 'fenced': {
-        throw new GoneException({ code: 'PROJECT_DELETED', message: 'This project has been deleted from Tau Cloud.' });
+        throw new GoneException({ code: 'PROJECT_DELETED', message: 'This project has been deleted from the cloud.' });
       }
       case 'capacity': {
         throw new ServiceUnavailableException({

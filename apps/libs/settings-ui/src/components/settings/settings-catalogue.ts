@@ -466,7 +466,7 @@ const baseSections = [
       },
       {
         id: 'tau-cloud-projects',
-        label: 'Tau Cloud projects',
+        label: 'Cloud projects',
         description: 'Choose where your cloud projects appear when you sign in',
         keywords: ['sync', 'backup', 'download', 'materialize', 'sign in'],
       },

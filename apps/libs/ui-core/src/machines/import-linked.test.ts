@@ -260,7 +260,7 @@ describe('a linked import over the import channel', () => {
   it("should carry a fetch's revisions refusal to the page with its code", async () => {
     const provider = new MemoryProvider();
     const session = connect(provider, async () => {
-      throw new RevisionPortError('REMOTE_REF_CONFLICT', 'Remote branch main already names another revision.');
+      throw new RevisionPortError('REMOTE_REF_CONFLICT', 'GitHub already has a different branch named main.');
     });
 
     const failure = await session
@@ -270,7 +270,7 @@ describe('a linked import over the import channel', () => {
 
     expect(failure).toBeInstanceOf(ImportChannelError);
     expect(failure).toMatchObject({
-      message: 'Remote branch main already names another revision.',
+      message: 'GitHub already has a different branch named main.',
       code: 'REMOTE_REF_CONFLICT',
     });
   });

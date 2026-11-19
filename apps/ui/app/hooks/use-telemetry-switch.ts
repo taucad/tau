@@ -24,7 +24,7 @@ export const telemetryCopy = {
   description: 'Send anonymous data about how Tau runs, such as speed and errors',
   /** The detail behind the switch, shown from its info glyph. */
   details: [
-    'Includes which kernels run, how long operations take, how often they fail, memory use, parameter counts, export formats, project sync outcomes and agent usage.',
+    'Includes which kernels run, how long operations take, how often they fail, memory use, parameter counts, export formats, whether backups succeed and agent usage.',
     'Never includes prompts, code, parameter values, file names or geometry.',
     'Signed in, data is rate-limited per account but not stored against it. Signed out, nothing identifies you.',
     'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use "tau telemetry off".',
@@ -34,7 +34,7 @@ export const telemetryCopy = {
   untilActivation: {
     /** True to the switch's reach before PR-7: three legacy producers ignored it. */
     caveat:
-      'For now, kernel operation timings, project sync outcomes and agent usage may still be sent while this is off.',
+      'For now, kernel operation timings, whether backups succeed and agent usage may still be sent while this is off.',
   },
   afterActivation: { caveat: undefined },
   forcedOff: 'Off because your browser sends Global Privacy Control or you declined analytics cookies',

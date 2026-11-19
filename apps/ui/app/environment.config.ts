@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { isMachinesFeatureEnabled } from '@taucad/types/constants';
 import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
 import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
+import { isBuildReleaseLabel } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 type RawEnvironment = Record<string, string | undefined>;
@@ -75,8 +76,10 @@ const environmentSchema = z.preprocess(
       /* A build product, not deployment configuration: the web build defines it for the server graph
        * only, so client chunks keep stable hashes across rebuilds (`#lib/build-identity`). */
       TAU_BUILD_ID: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
-      /* The release label runtime telemetry stamps; a build product like `TAU_BUILD_ID`, server graph only. */
-      TAU_RELEASE: typeof tauBuildRelease === 'string' && tauBuildRelease !== '' ? tauBuildRelease : undefined,
+      /* The release label runtime telemetry stamps; a build product like `TAU_BUILD_ID`, server graph only. An
+       * unstamped web build holds a placeholder, which is not a label, and publishes none. */
+      TAU_RELEASE:
+        typeof tauBuildRelease === 'string' && isBuildReleaseLabel(tauBuildRelease) ? tauBuildRelease : undefined,
       /* eslint-enable @typescript-eslint/naming-convention -- environment variable names */
     };
   },

@@ -295,8 +295,8 @@ describe('ImportRoute GitHub card', () => {
     await renderImport('/import/github.com/octo/part');
 
     expect(
-      await screen.findByText(/^Could not fetch branches\. Import will use the/u, {}, { timeout: 3000 }),
-    ).toHaveTextContent('Could not fetch branches. Import will use the trunk branch.');
+      await screen.findByText(/^Couldn’t list branches\. Import will use the/u, {}, { timeout: 3000 }),
+    ).toHaveTextContent('Couldn’t list branches. Import will use the trunk branch.');
     expect(listBranches).toHaveBeenCalledWith(expect.objectContaining({ owner: 'octo', repo: 'part' }));
   });
 
@@ -502,9 +502,9 @@ describe('ImportRoute GitHub card', () => {
     expect(screen.queryByRole('textbox', { name: 'Public repository URL' })).not.toBeInTheDocument();
     expect(screen.getByText('octo using GitHub’s no-reply address.')).toBeInTheDocument();
     expect(screen.getByText('private')).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Sync project chats with this repository' })).toBeChecked();
-    await user.clear(screen.getByRole('textbox', { name: 'Local and sync branch' }));
-    await user.type(screen.getByRole('textbox', { name: 'Local and sync branch' }), '   ');
+    expect(screen.getByRole('checkbox', { name: 'Include chats' })).toBeChecked();
+    await user.clear(screen.getByRole('textbox', { name: 'Branch name' }));
+    await user.type(screen.getByRole('textbox', { name: 'Branch name' }), '   ');
     expect(screen.getByRole('button', { name: 'Import and link' })).toBeDisabled();
     expect(linkedImport.prepare).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -531,31 +531,31 @@ describe('ImportRoute GitHub card', () => {
 
   it('should drop a refusal of the old branch name once the name is edited', async () => {
     const user = userEvent.setup();
-    linkedImport.prepare.mockRejectedValueOnce(new Error('Remote branch main already names another revision.'));
+    linkedImport.prepare.mockRejectedValueOnce(new Error('GitHub already has a different branch named main.'));
     await renderImport();
     await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
     await user.click(screen.getByRole('button', { name: 'Import and link' }));
     expect(await screen.findByRole('alert', { name: 'Import interrupted' })).toBeInTheDocument();
 
-    await user.type(screen.getByRole('textbox', { name: 'Local and sync branch' }), '-tau');
+    await user.type(screen.getByRole('textbox', { name: 'Branch name' }), '-tau');
 
     expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
   });
   it('should headline a branch name GitHub already holds as a refusal, not an interruption (R4)', async () => {
     const user = userEvent.setup();
     linkedImport.prepare.mockRejectedValueOnce(
-      new RevisionPortError('REMOTE_REF_CONFLICT', 'Remote branch audit-g1 already names another revision.'),
+      new RevisionPortError('REMOTE_REF_CONFLICT', 'GitHub already has a different branch named audit-g1.'),
     );
     await renderImport();
     await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
-    const branch = screen.getByRole('textbox', { name: 'Local and sync branch' });
+    const branch = screen.getByRole('textbox', { name: 'Branch name' });
     await user.clear(branch);
     await user.type(branch, 'audit-g1');
 
     await user.click(screen.getByRole('button', { name: 'Import and link' }));
 
     expect(await screen.findByRole('alert', { name: 'This branch name is taken on GitHub' })).toBeInTheDocument();
-    expect(screen.getByText('Choose another name for the local and sync branch.')).toBeVisible();
+    expect(screen.getByText('Choose another branch name.')).toBeVisible();
     expect(screen.queryByRole('alert', { name: 'Import interrupted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/did not finish/u)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import and link' })).toBeEnabled();
@@ -568,7 +568,7 @@ describe('ImportRoute GitHub card', () => {
   it('should headline the reviewed branch moving on GitHub as a change to review again (R4)', async () => {
     const user = userEvent.setup();
     linkedImport.prepare.mockRejectedValueOnce(
-      new RevisionPortError('REMOTE_REF_CONFLICT', 'Remote branch main already names another revision.'),
+      new RevisionPortError('REMOTE_REF_CONFLICT', 'GitHub already has a different branch named main.'),
     );
     await renderImport();
     await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
@@ -749,15 +749,11 @@ describe('ImportRoute GitHub card', () => {
     const user = userEvent.setup();
     linkedImport.prepare.mockResolvedValueOnce({ request: linkedRequest, generation: 1 });
     importChannel.stage.mockRejectedValueOnce(
-      new ImportChannelError(
-        'Remote branch audit-g1 already names another revision.',
-        undefined,
-        'REMOTE_REF_CONFLICT',
-      ),
+      new ImportChannelError('GitHub already has a different branch named audit-g1.', undefined, 'REMOTE_REF_CONFLICT'),
     );
     await renderImport();
     await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
-    const branch = screen.getByRole('textbox', { name: 'Local and sync branch' });
+    const branch = screen.getByRole('textbox', { name: 'Branch name' });
     await user.clear(branch);
     await user.type(branch, 'audit-g1');
 
@@ -893,7 +889,7 @@ describe('ImportRoute GitHub card', () => {
     await renderImport();
     await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
     /* Turning chat sync off is a change to the declaration. */
-    await user.click(screen.getByRole('checkbox', { name: 'Sync project chats with this repository' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include chats' }));
     expect(screen.getByText(/Add or update/u)).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Import and link' }));

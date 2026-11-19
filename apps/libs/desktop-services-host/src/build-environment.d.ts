@@ -5,7 +5,5 @@
 
 /** Whether the build ships Tau Cloud billing (`TAU_CLOUD_BUILD`). */
 declare const tauCloudBuildEnabled: boolean;
-/** The 12-hex short commit the desktop build was made from, for agent observability (LW8); empty when unknown. */
-declare const tauDesktopHostBuild: string;
 /** Runtime telemetry's Cloud-host build signal (`TAU_TELEMETRY_HOST=cloud`), independent of the billing gate. */
 declare const tauTelemetryHostCloudBuild: boolean;

@@ -72,7 +72,7 @@ const deviceEditorStateFromLegacy = (raw: unknown): EditorState => {
  */
 export class StorageUpgradeBlockedError extends Error {
   public constructor() {
-    super('Local storage could not be opened. Close other Tau tabs and reload.');
+    super('Couldn’t open Tau’s storage on this device. Close other Tau tabs and reload.');
     this.name = 'StorageUpgradeBlockedError';
   }
 }

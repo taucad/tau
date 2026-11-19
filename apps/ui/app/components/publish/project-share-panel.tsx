@@ -340,6 +340,47 @@ const linkFreshnessOf = (
   return relation !== 'missing' && relation.behind === 0 && relation.ahead > 0 ? 'changed' : 'elsewhere';
 };
 
+/**
+ * Who a publish from the not-shared form names as able to open the link, and what the form shows.
+ *
+ * A publish names only what the person picked, so the server keeps the link's own setting (private for a first
+ * publish). A Free plan's first publish names public as the default for a link it makes: private is not theirs to
+ * choose, and a link made meanwhile (on another device) keeps its own setting. A first publish before the plan is
+ * known shows no setting: private would be refused on the Free plan and public is not the person's to assume, so
+ * they pick one before publishing.
+ *
+ * @param args - The link (absent before the first publish), the person's pick, and what the plan allows.
+ * @returns The draft's audience fields, the setting the form shows, and whether it waits for a pick.
+ */
+const publishAudienceOf = (args: {
+  readonly share: ProjectShare | undefined;
+  readonly chosen: PublishVisibility | undefined;
+  readonly isPrivateAllowed: boolean;
+  readonly isPlanResolved: boolean;
+}): {
+  readonly audience: Pick<PublishDraft, 'visibility' | 'defaultVisibility'>;
+  readonly effectiveVisibility: PublishVisibility | undefined;
+  readonly isAwaitingAudience: boolean;
+} => {
+  const { share, chosen, isPrivateAllowed, isPlanResolved } = args;
+  // A pick the plan no longer allows (the entitlements answered after it) is dropped rather than sent.
+  const picked = chosen === 'private' && !isPrivateAllowed ? undefined : chosen;
+  if (picked !== undefined) {
+    return { audience: { visibility: picked }, effectiveVisibility: picked, isAwaitingAudience: false };
+  }
+  if (share === undefined && !isPlanResolved) {
+    return { audience: {}, effectiveVisibility: undefined, isAwaitingAudience: true };
+  }
+  if (!isPrivateAllowed) {
+    return {
+      audience: share === undefined ? { defaultVisibility: 'public' } : {},
+      effectiveVisibility: 'public',
+      isAwaitingAudience: false,
+    };
+  }
+  return { audience: {}, effectiveVisibility: share?.visibility ?? 'private', isAwaitingAudience: false };
+};
+
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
 
 /**
@@ -1198,10 +1239,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
    * confirm until it has read the names, so nothing here waits. The version is never named here: the worker names it
    * (`Shared Nov 19`), and an entry that already is a version is published under its own name.
    *
-   * @param visibility - Who can open the link, for a link that is not shared yet; absent keeps the link's setting.
+   * @param audience - Who can open the link: `visibility` the person picked (absent keeps the link's setting), and
+   *   `defaultVisibility` the setting a link this publish makes takes, which never changes a link made since.
    * @param shouldCopy - Whether the press copies the link the publish brings.
    */
-  const sendPublish = (visibility: PublishVisibility | undefined, shouldCopy: boolean): void => {
+  const sendPublish = (audience: Pick<PublishDraft, 'visibility' | 'defaultVisibility'>, shouldCopy: boolean): void => {
     /* The copy starts here, inside the press; the publish below settles the link it copies. */
     pendingCopyRef.current?.reject(new Error('Another publish started.'));
     pendingCopyRef.current = shouldCopy ? startPublishCopy() : undefined;
@@ -1212,7 +1254,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       projectName,
       entryPath,
       ...(projectDescription.trim() === '' ? {} : { description: projectDescription.trim() }),
-      ...(visibility === undefined ? {} : { visibility }),
+      ...(audience.visibility === undefined ? {} : { visibility: audience.visibility }),
+      ...(audience.defaultVisibility === undefined ? {} : { defaultVisibility: audience.defaultVisibility }),
     };
     commands.publishProject();
     commands.confirmPublish(draft);
@@ -1308,15 +1351,12 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     // Only people you invite needs the Pro plan to choose (T4/T5/AD11), but a link that is already private keeps
     // it after the plan lapses (T16), so its own setting stays on offer. Until the plan is known nothing is locked.
     const isPrivateAllowed = canCreatePrivateShares || !isPlanResolved || share?.visibility === 'private';
-    // A pick the plan no longer allows (the entitlements answered after it) is dropped rather than sent.
-    const picked = chosenVisibility === 'private' && !isPrivateAllowed ? undefined : chosenVisibility;
-    const effectiveVisibility: PublishVisibility =
-      picked ?? (isPrivateAllowed ? (share?.visibility ?? 'private') : 'public');
-    // A publish names only what the person picked, so the server keeps the link's own setting (private for a first
-    // publish). The one derived setting is a Free plan's first publish: there is no link to keep, and private is
-    // not theirs to choose.
-    const submittedVisibility: PublishVisibility | undefined =
-      picked ?? (share === undefined && !isPrivateAllowed ? 'public' : undefined);
+    const { audience, effectiveVisibility, isAwaitingAudience } = publishAudienceOf({
+      share,
+      chosen: chosenVisibility,
+      isPrivateAllowed,
+      isPlanResolved,
+    });
     return (
       <SharePaneFrame isDisabled={busy}>
         <SharePaneSection
@@ -1332,15 +1372,15 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             className='flex flex-col gap-4'
             onSubmit={(event) => {
               event.preventDefault();
-              if (!busy) {
-                sendPublish(submittedVisibility, true);
+              if (!busy && !isAwaitingAudience) {
+                sendPublish(audience, true);
               }
             }}
           >
             <div className='flex flex-col gap-2'>
               <Label id={visibilityLabelId}>Who can open the link</Label>
               <RadioGroup
-                value={effectiveVisibility}
+                value={effectiveVisibility ?? ''}
                 disabled={busy}
                 aria-labelledby={visibilityLabelId}
                 onValueChange={(value) => {
@@ -1386,7 +1426,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
 
             <div className='flex flex-wrap justify-end gap-2'>
-              <Button ref={publishRef} type='submit' disabled={busy} aria-busy={busy}>
+              <Button ref={publishRef} type='submit' disabled={busy || isAwaitingAudience} aria-busy={busy}>
                 {busy ? (
                   <>
                     <Loader className='size-4' />
@@ -1421,7 +1461,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         disabled={isDisabled}
         aria-busy={busy}
         onClick={() => {
-          sendPublish(undefined, false);
+          sendPublish({}, false);
         }}
       >
         {busy ? <Loader className='size-4' /> : null}

@@ -1578,25 +1578,50 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
     expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');
   });
 
-  it('names no setting it derived while the plan is still loading, so the link keeps its own', async () => {
+  it('asks who can open a first link while the plan is still loading, rather than assuming private', async () => {
     useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: false });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const publish = await screen.findByRole('button', { name: /publish and copy link/i });
+    expect(publish).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /only people you invite/i })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /anyone with the link/i })).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole('radio', { name: /anyone with the link/i }));
+    await userEvent.click(publish);
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ visibility: 'public' }),
+    );
+  });
+
+  it('publishes a stopped link again while the plan is still loading, keeping its own setting', async () => {
+    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: false });
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(stoppedEnvelope));
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
+    /* Neither setting is named: the server keeps the link's own. */
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
     expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
       'visibility',
     );
+    expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
+      'defaultVisibility',
+    );
   });
 
-  it('sends public on a first publish, where there is no link to keep and private is not theirs to choose', async () => {
+  it('names public only as the default for a link the first publish makes, so a link made elsewhere keeps its own', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ visibility: 'public' }),
+      expect.objectContaining({ defaultVisibility: 'public' }),
+    );
+    expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
+      'visibility',
     );
   });
 

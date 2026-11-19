@@ -24,13 +24,14 @@ import { UsageLineChart } from '@taucad/billing-ui/components/usage/charts/usage
 import { UsagePieChart } from '@taucad/billing-ui/components/usage/charts/usage-pie-chart';
 import { ReservedTable } from '@taucad/billing-ui/components/usage/reserved-table';
 import { UsageSummaryCards } from '@taucad/billing-ui/components/usage/usage-summary-cards';
-import { UsageTable } from '#routes/usage/usage-table.js';
+import { UsageTable } from '@taucad/billing-ui/components/usage/usage-table';
 import {
   usageActivityKinds,
   usageFilterOptions,
   useUsageFilters,
 } from '@taucad/billing-ui/components/usage/use-usage-filters';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectNames } from '@taucad/billing-ui/components/usage/activity-names';
 import {
   useBillingRevisionMinimum,
@@ -195,6 +196,8 @@ export default function UsagePage(): React.JSX.Element {
     return asking && !isFailed ? 'asking' : 'unavailable';
   }, [projects, isSettled, isFailed, asking]);
   const options = usageFilterOptions(snapshot, filters, projectNames);
+  /* Passed down, not called: the table reads a project's chats only for the row a reader opens. */
+  const { getChatRecordsForResource } = useProjectManager();
 
   return (
     <PageContent className='space-y-6'>
@@ -278,6 +281,7 @@ export default function UsagePage(): React.JSX.Element {
             description='Select an action to see its credit explanation'
             openEventId={openEventId}
             onOpenEventChange={setOpenEventId}
+            getChatRecordsForResource={getChatRecordsForResource}
           />
         </>
       ) : undefined}

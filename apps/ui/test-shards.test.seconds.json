@@ -607,7 +607,6 @@
     "app/routes/settings_/route.test.ts": 0.4,
     "app/routes/sitemap[.]xml/route.test.ts": 0.4,
     "app/routes/usage/route.test.tsx": 3.4,
-    "app/routes/usage/use-chat-name.test.tsx": 1.1,
     "app/routes/w.$workspace.$project/archived-chats.test.tsx": 2.3,
     "app/routes/w.$workspace.$project/chat-agents.test.tsx": 2.8,
     "app/routes/w.$workspace.$project/chat-console.test.tsx": 1.3,

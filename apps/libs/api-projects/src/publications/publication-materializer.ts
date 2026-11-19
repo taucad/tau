@@ -1217,15 +1217,20 @@ export const materializePublishedTags = async (
         if (fresh === undefined || fresh.unpublishedAt !== null || fresh.manifestKey !== superseded) {
           return undefined;
         }
-        /* The tier follows the project's cloud link, read under the same lock a
-           change of who can open it takes; a project with no link repairs to
-           the private tier (stable cloud link blueprint, storage tier). */
+        /* Only the version the link shows follows its tier, read under the same
+           lock a change of who can open it takes. An earlier version is served
+           by nothing, so it repairs to the private tier, as does a project with
+           no link (stable cloud link blueprint, storage tier). */
         const [link] = await transaction
-          .select({ visibility: schema.projectShare.visibility })
-          .from(schema.projectShare)
-          .where(eq(schema.projectShare.projectId, input.projectId))
+          .select({
+            visibility: schema.projectShare.visibility,
+            currentPublicationId: schema.project.currentPublicationId,
+          })
+          .from(schema.project)
+          .leftJoin(schema.projectShare, eq(schema.projectShare.projectId, schema.project.id))
+          .where(eq(schema.project.id, input.projectId))
           .limit(1);
-        const visibility = link?.visibility === 'public' ? 'public' : 'private';
+        const visibility = link?.visibility === 'public' && link.currentPublicationId === row.id ? 'public' : 'private';
         /* Inside the transaction, and first, so the reference counts are taken
            before any blob is looked up or written (D10). */
         const written = await materializePublication(

@@ -370,6 +370,7 @@ type PublicationFixture = {
  */
 const createPublicationDatabase = (
   rows: PublicationFixture[],
+  linkState?: Readonly<{ visibility: 'public' | 'private'; currentPublicationId: string | undefined }>,
 ): Readonly<{
   databaseService: MaterializerDependencies['databaseService'];
   increments: Array<Record<string, unknown>>;
@@ -379,6 +380,8 @@ const createPublicationDatabase = (
   const increments: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
   const counters = { decrements: 0 };
+  /* By default a public link showing the first row. */
+  const link = linkState ?? { visibility: 'public', currentPublicationId: rows[0]?.id };
 
   /** One open transaction's statements, which only a commit makes visible. */
   const openTransaction = (): {
@@ -398,6 +401,10 @@ const createPublicationDatabase = (
           from: vi.fn(() => ({
             where: vi.fn(() => ({
               limit: vi.fn(async () => rows.map((row) => ({ ...row, unpublishedAt: row.unpublishedAt ?? null }))),
+            })),
+            /* The project joined to its cloud link: the tier the repair writes. */
+            leftJoin: vi.fn(() => ({
+              where: vi.fn(() => ({ limit: vi.fn(async () => [link]) })),
             })),
           })),
         })),
@@ -1480,6 +1487,37 @@ describe('materializing the tags a push moved', () => {
     const revision = git(lease.directory, 'rev-parse', 'refs/tags/v1^{commit}').trim();
     expect(materialized.map((version) => version.revisionId)).toStrictEqual([revision]);
     expect(rows[0]?.manifestKey).toBe(`publications/pub_retry/${revision}.json`);
+  });
+
+  /* Only the version the link shows follows its tier: an earlier private
+     version must not repair into public storage under a public link. */
+  it.each([
+    { name: 'the version the link shows', current: 'pub_tier', expected: 'public' },
+    { name: 'an earlier version', current: 'pub_newer', expected: 'private' },
+  ])('should repair $name to the $expected tier under a public link', async ({ current, expected }) => {
+    const lease = await leaseFor(seed(new Map([['main.ts', utf8('// entry\n')]])), 'proj_tier');
+    const { dependencies } = createRecordingStorage();
+    const database = createPublicationDatabase(
+      [
+        {
+          id: 'pub_tier',
+          projectId: 'proj_tier',
+          tag: 'v1',
+          visibility: 'private',
+          entryPath: 'main.ts',
+          manifestKey: '',
+          revisionId: '',
+        },
+      ],
+      { visibility: 'public', currentPublicationId: current },
+    );
+
+    await materializePublishedTags(
+      { ...dependencies, databaseService: database.databaseService },
+      { projectId: 'proj_tier', ownerId: 'user_w4c', directory: lease.directory, tags: movedTag(lease) },
+    );
+
+    expect(database.updates.map((update) => update['visibility'])).toStrictEqual([expected]);
   });
 
   it('should replace the version and move its reference counts when the tag moves', async () => {

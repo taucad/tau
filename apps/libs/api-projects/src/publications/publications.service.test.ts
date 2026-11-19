@@ -32,6 +32,7 @@ import {
 import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
 import { createTableDatabase } from '#testing/table-database.fixture.js';
 import type { TableDatabase } from '#testing/table-database.fixture.js';
+import type { Table } from 'drizzle-orm';
 import type { MaterializerDependencies } from '#publications/publication-materializer.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import type { ObjectStorageServiceContract, PutBlobResult } from '@taucad/api-object-storage';
@@ -458,6 +459,47 @@ function seedLink(
       ],
     ],
   ]);
+}
+
+/** `seedLink` with `pub_newer` as the version the link shows and `pub_test` an earlier one. */
+function seedNewerVersion(args: Parameters<typeof seedLink>[0] = {}): TableDatabase {
+  const database = seedLink({ ...args, project: { currentPublicationId: 'pub_newer' } });
+  database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2', manifestKey: 'm2.json' }));
+  return database;
+}
+
+/**
+ * Runs `commit` once the first read of `table` has answered: what another
+ * request committing between two reads looks like.
+ */
+function afterFirstRead(database: TableDatabase, table: Table, commit: () => void): void {
+  type Builder = PromiseLike<unknown> & Record<string, unknown>;
+  type Select = (...args: never[]) => { from: (from: Table) => Builder };
+  const handle = (database.databaseService as { database: { select: Select } }).database;
+  const select = handle.select.bind(handle);
+  let reads = 0;
+  handle.select = (...args) => {
+    const query = select(...args);
+    return {
+      from: (from) => {
+        const builder = query.from(from);
+        reads += from === table ? 1 : 0;
+        if (from === table && reads === 1) {
+          const then = builder.then.bind(builder);
+          Reflect.set(
+            builder,
+            'then',
+            async (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+              then((value) => {
+                commit();
+                return onFulfilled === undefined ? value : onFulfilled(value);
+              }, onRejected),
+          );
+        }
+        return builder;
+      },
+    };
+  };
 }
 
 /** A service over a table database; every other dependency is a stub unless given. */
@@ -971,6 +1013,21 @@ describe('PublicationsService.getProjectShareEnvelope', () => {
     });
   });
 
+  it('lists invited people newest first', async () => {
+    const service = createLinkService(
+      seedLink({
+        grants: [
+          grantRow({ id: 'sga_old', recipientEmail: 'old@example.com', createdAt: new Date('2026-01-01T00:00:00Z') }),
+          grantRow({ id: 'sga_new', recipientEmail: 'new@example.com', createdAt: new Date('2026-03-01T00:00:00Z') }),
+        ],
+      }),
+    );
+
+    const envelope = await service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' });
+
+    expect(envelope.share?.access.grants.map((grant) => grant.id)).toEqual(['sga_new', 'sga_old']);
+  });
+
   it('answers a stopped link with when it stopped', async () => {
     const stoppedAt = new Date('2026-02-01T00:00:00.000Z');
     const service = createLinkService(seedLink({ link: { disabledAt: stoppedAt } }));
@@ -981,9 +1038,9 @@ describe('PublicationsService.getProjectShareEnvelope', () => {
   });
 
   it('marks a grant whose recipient is undeliverable as not delivered, and only that', async () => {
-    const deliverability = {
+    const deliverability = mock<NonNullable<PublicationsServiceDeps[10]>>({
       undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
-    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+    });
     const service = createLinkService(
       seedLink({ grants: [grantRow(), grantRow({ id: 'sga_2', recipientEmail: 'gone@example.com' })] }),
       { deliverability },
@@ -1021,6 +1078,21 @@ describe('PublicationsService.getShareForViewer', () => {
     expect(result.publication.unpublishedAt).toBeNull();
     expect(result.urls.share).toBe('http://app/s/tau~shr_test');
     expect(result.urls.view).toBe('http://app/s/tau~shr_test');
+  });
+
+  it('serves the version the link showed when it authorized the viewer, even if a publish lands in between', async () => {
+    const database = seedLink({ link: { visibility: 'public' } });
+    database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2' }));
+    /* A publish to people you invite commits right after the first read. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.project)[0] ?? {}, { currentPublicationId: 'pub_newer' });
+      Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'private' });
+    });
+    const service = createLinkService(database, { storage: createStorageForManifest() });
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication.id).toBe('pub_test');
   });
 
   it('takes who can open it from the link, not from the version', async () => {
@@ -1220,6 +1292,23 @@ describe('PublicationsService.updateProjectShare', () => {
     expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
   });
 
+  it('writes nothing when the link already has the setting by the time it holds the project lock', async () => {
+    const database = seedLink();
+    const storage = createManifestStorageStub();
+    /* Another request made the link public after this one first read it. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'public' });
+    });
+    const service = createLinkService(database, { storage });
+
+    await expect(
+      service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'public' }),
+    ).resolves.toMatchObject({ visibility: 'public' });
+
+    expect(database.writes).toEqual([]);
+    expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
+  });
+
   it('needs the entitlement to make a link invite-only, and only then (T4/T16)', async () => {
     const billing = createBillingStub({ canCreatePrivateShares: false });
 
@@ -1366,6 +1455,23 @@ describe('PublicationsService link invitations', () => {
     ]);
   });
 
+  it('answers the committed grant with a skipped email when the email cannot be prepared', async () => {
+    const database = seedLink();
+    const email = createEmailStub();
+    const service = createLinkService(database, { email });
+    vi.spyOn(service, 'loadOwnerSnapshot').mockRejectedValue(new Error('database unavailable'));
+
+    const result = await invite(service);
+
+    expect(result).toMatchObject({
+      recipientEmail: 'new@example.com',
+      status: 'active',
+      email: { status: 'skipped', reason: 'send_failed' },
+    });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+    expect(database.rows(schema.projectShareAccess)).toEqual([expect.objectContaining({ status: 'active' })]);
+  });
+
   it('sends nothing when the caller asks for no email', async () => {
     const email = createEmailStub();
     const service = createLinkService(seedLink(), { email });
@@ -1379,9 +1485,9 @@ describe('PublicationsService link invitations', () => {
   it('reports an undeliverable address without consuming the daily cap', async () => {
     const limiter = createRateLimiterStub();
     const metrics = createMetricsStub();
-    const deliverability = {
+    const deliverability = mock<NonNullable<PublicationsServiceDeps[10]>>({
       undeliverableAmong: vi.fn(async () => new Set(['new@example.com'])),
-    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+    });
     const service = createLinkService(seedLink(), { rateLimiter: limiter, metrics, deliverability });
 
     const result = await invite(service);
@@ -1534,6 +1640,13 @@ describe('PublicationsService.recordView', () => {
     await expect(
       view(createViewService(seedLink({ link: { disabledAt: new Date() } })), { viewerHash: 'h1' }),
     ).rejects.toBeInstanceOf(GoneException);
+  });
+
+  it('throws NotFoundException for a version the link no longer shows', async () => {
+    const database = seedNewerVersion({ link: { visibility: 'public' } });
+
+    await expect(view(createViewService(database), { viewerHash: 'h1' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(database.writes).toEqual([]);
   });
 
   it('short-circuits owner self-view without invoking PFADD or rate limiter', async () => {
@@ -1988,7 +2101,7 @@ describe('PublicationsService derived-state repair', () => {
     await materializePublishedTags(
       {
         databaseService: database.databaseService as MaterializerDependencies['databaseService'],
-        storage: storage as unknown as MaterializerDependencies['storage'],
+        storage,
         git: leaseGitRunner,
         resolveLfsObject: lfsResolver(storage),
       },
@@ -2149,6 +2262,18 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).resolves.toEqual(
       resolved,
     );
+  });
+
+  it('should answer 404 for an earlier version, even under a link anyone can open', async () => {
+    const { service, storage } = createFileService(seedNewerVersion({ link: { visibility: 'public' } }));
+
+    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(vi.mocked(storage.getBlob)).not.toHaveBeenCalled();
   });
 
   it('should normalize ./-prefixed request paths against manifest keys', async () => {

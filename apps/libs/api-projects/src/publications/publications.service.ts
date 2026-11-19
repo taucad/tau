@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import type { PublicationOwnerSnapshot, PublicationVisibility } from '@taucad/types';
 import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import type { InviteEmailOutcome } from '@taucad/types/constants';
@@ -385,9 +386,9 @@ export class PublicationsService {
    * @returns The current version, its manifest and where each file is served from.
    */
   public async getShareForViewer(args: { shareId: string; viewerUserId?: string }): Promise<PublicationViewResponse> {
-    const share = await this.selectShareOrThrow(args.shareId);
+    const { share, current } = await this.selectLinkOrThrow(eq(schema.projectShare.id, args.shareId));
     const viewerRole = await this.authorizeShareViewer(share, args.viewerUserId);
-    const publication = await this.loadCurrentPublicationOrThrow(share);
+    const publication = await this.repairCurrentOrThrow(current);
 
     const { manifestKey, ogImageKey, thumbnailKey } = publication;
     const shareUrl = this.cloudLinkUrl(share.id);
@@ -467,9 +468,14 @@ export class PublicationsService {
     }
 
     const row = await this.selectPublicationOrThrow(args.publicationId);
-    const share = await this.selectShareOfProjectOrThrow(row.projectId);
+    /* Only the version the link shows, read with the link that authorizes it:
+       an earlier version is served by nothing, whoever can open the link now. */
+    const { share, current } = await this.selectLinkOrThrow(eq(schema.projectShare.projectId, row.projectId));
+    if (current?.id !== row.id) {
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+    }
     await this.authorizeShareViewer(share, args.viewerUserId);
-    const publication = await this.repairAndReload(row);
+    const publication = await this.repairCurrentOrThrow(current);
 
     const path = normalizeRelativePath(args.path);
     const manifest = await this.loadStoredManifest(publication.manifestKey);
@@ -572,6 +578,10 @@ export class PublicationsService {
         await assertActiveProjectLocked(transaction, args.projectId);
         const fresh = await this.selectShareOfProject(transaction, args.projectId);
         this.assertShareLive(fresh);
+        /* Another request may have made the same change while this one waited. */
+        if (fresh.visibility === args.visibility) {
+          return;
+        }
 
         const current = await this.selectCurrentPublication(transaction, args.projectId);
         if (current !== undefined) {
@@ -685,15 +695,24 @@ export class PublicationsService {
     const undeliverable = await this.undeliverableRecipients([recipientEmail]);
     let email: InviteEmailOutcome = { status: 'not_requested' };
     if (args.notifyRecipient !== false && existingGrant?.status !== 'active') {
-      const ownerSnapshot = await this.loadOwnerSnapshot(args.ownerId);
-      email = await this.sendLinkInviteEmail({
-        ownerId: args.ownerId,
-        recipientEmail,
-        undeliverable: undeliverable.has(recipientEmail),
-        ownerName: ownerSnapshot?.name ?? 'A Tau user',
-        projectName: project.name,
-        url: this.cloudLinkUrl(share.id),
-      });
+      /* The grant is committed: a failure preparing its email must still answer
+         it, so the owner can copy the link instead. */
+      try {
+        const ownerSnapshot = await this.loadOwnerSnapshot(args.ownerId);
+        email = await this.sendLinkInviteEmail({
+          ownerId: args.ownerId,
+          recipientEmail,
+          undeliverable: undeliverable.has(recipientEmail),
+          ownerName: ownerSnapshot?.name ?? 'A Tau user',
+          projectName: project.name,
+          url: this.cloudLinkUrl(share.id),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Link invite email could not be prepared for owner ${args.ownerId}: ${message}`);
+        this.metrics.publicationInviteEmailsTotal.add(1, { trigger: 'invite', outcome: 'failed' });
+        email = { status: 'skipped', reason: 'send_failed' };
+      }
     }
 
     return { ...this.toAccessGrantDto(grant, undeliverable), email };
@@ -770,6 +789,13 @@ export class PublicationsService {
     if (share.disabledAt !== null) {
       this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
       throw new GoneException({ code: publicationApiCode.GONE, message: 'This link is no longer shared' });
+    }
+
+    /* The link shows one version; a view of any other is not a view of it. */
+    const current = await this.selectCurrentPublication(this.databaseService.database, publication.projectId);
+    if (current?.id !== publication.id) {
+      this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
     }
 
     await this.assertActiveProject(publication.projectId);
@@ -1061,8 +1087,9 @@ export class PublicationsService {
 
   /**
    * Every read of a publication's bytes routes through here, which is where D19
-   * puts the repair: a row behind the manifest is re-derived and then re-read,
-   * so what this returns is never a version the push already superseded.
+   * puts the repair: a row behind the manifest is re-derived and then re-read.
+   * A repair that fails leaves the row as it was, so the read serves the
+   * version it already recorded once the project is checked active again.
    */
   private async repairAndReload(publication: PublicationRow): Promise<PublicationRow> {
     const repaired = await this.rederivePublications(publication);
@@ -1337,18 +1364,31 @@ export class PublicationsService {
     return share;
   }
 
-  /** A live link by its id, of an active project. */
-  private async selectShareOrThrow(shareId: string): Promise<ProjectShareRow> {
-    const [share] = await this.databaseService.database
-      .select()
+  /**
+   * A live link of an active project and the version it shows, read in one
+   * statement so who may open it and what it shows come from the same commit:
+   * a publish between two reads could otherwise swap in a version the
+   * authorization never saw.
+   */
+  private async selectLinkOrThrow(
+    where: SQL | undefined,
+  ): Promise<{ share: ProjectShareRow; current: PublicationRow | undefined }> {
+    const [row] = await this.databaseService.database
+      .select({ share: schema.projectShare, publication: schema.publication })
       .from(schema.projectShare)
-      .where(eq(schema.projectShare.id, shareId))
+      .innerJoin(schema.project, eq(schema.project.id, schema.projectShare.projectId))
+      .leftJoin(
+        schema.publication,
+        and(eq(schema.publication.id, schema.project.currentPublicationId), isNull(schema.publication.unpublishedAt)),
+      )
+      .where(where)
       .limit(1);
+    const share = row?.share;
     if (share !== undefined) {
       await this.assertActiveProject(share.projectId);
     }
     this.assertShareLive(share);
-    return share;
+    return { share, current: row?.publication ?? undefined };
   }
 
   /** The version the project points at, if it still has one. */
@@ -1365,9 +1405,8 @@ export class PublicationsService {
     return current?.publication;
   }
 
-  /** The version a live link shows, repaired when it is behind the push. */
-  private async loadCurrentPublicationOrThrow(share: ProjectShareRow): Promise<PublicationRow> {
-    const current = await this.selectCurrentPublication(this.databaseService.database, share.projectId);
+  /** The version a live link shows, repaired when it is behind the push; the row stays the one authorized. */
+  private async repairCurrentOrThrow(current: PublicationRow | undefined): Promise<PublicationRow> {
     if (current === undefined) {
       throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
     }
@@ -1549,8 +1588,9 @@ export class PublicationsService {
     try {
       return await this.deliverability.undeliverableAmong(recipientEmails);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Email deliverability lookup failed; treating recipients as deliverable: ${message}`);
+      /* The error's message can quote the query, and the query names the addresses. */
+      const name = error instanceof Error ? error.name : 'unknown';
+      this.logger.warn(`Email deliverability lookup failed (${name}); treating recipients as deliverable`);
       return new Set();
     }
   }

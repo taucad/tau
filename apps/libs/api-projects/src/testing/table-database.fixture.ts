@@ -48,8 +48,8 @@ const operandValue = (chunk: unknown, tuple: Tuple): unknown => {
 
 /**
  * Evaluates the conditions the services write: `eq`, `and` and `isNull`, over
- * columns and bound values. Anything else matches every row, so a fixture never
- * hides a row behind a condition it cannot read.
+ * columns and bound values. No condition matches every row; one the fixture
+ * cannot read throws, so a test never passes on a filter that was not applied.
  */
 const matches = (condition: unknown, tuple: Tuple): boolean => {
   if (!is(condition, SQL)) {
@@ -74,7 +74,39 @@ const matches = (condition: unknown, tuple: Tuple): boolean => {
   if (chunks.length === 1) {
     return matches(chunks[0], tuple);
   }
-  return true;
+  throw new Error('The fixture cannot evaluate this condition');
+};
+
+/**
+ * Orders tuples by the `asc(column)`, `desc(column)` or bare columns a
+ * statement names, so a `limit` after it keeps the rows PostgreSQL would.
+ */
+const sortTuples = (tuples: Tuple[], order: readonly unknown[]): Tuple[] => {
+  const keys = order.map((sort) => {
+    if (is(sort, Column)) {
+      return { column: sort, descending: false };
+    }
+    if (is(sort, SQL)) {
+      const column = sort.queryChunks.find((chunk) => is(chunk, Column));
+      const descending = sort.queryChunks.some((chunk) => textOf(chunk)?.trim() === 'desc');
+      if (column !== undefined) {
+        return { column, descending };
+      }
+    }
+    throw new Error('The fixture cannot order by this expression');
+  });
+  return tuples.toSorted((left, right) => {
+    for (const { column, descending } of keys) {
+      const a = columnValue(column, left);
+      const b = columnValue(column, right);
+      const compared =
+        a instanceof Date && b instanceof Date ? a.getTime() - b.getTime() : String(a).localeCompare(String(b));
+      if (compared !== 0) {
+        return descending ? -compared : compared;
+      }
+    }
+    return 0;
+  });
 };
 
 /**
@@ -95,15 +127,7 @@ const thenable = <T>(produce: () => T, extra: Record<string, unknown>): PromiseL
       onRejected?: (reason: unknown) => R2 | PromiseLike<R2>,
     ): Promise<R1 | R2> => {
       settled ??= run();
-      try {
-        const value = await settled;
-        return onFulfilled === undefined ? (value as unknown as R1) : await onFulfilled(value);
-      } catch (error) {
-        if (onRejected === undefined) {
-          throw error;
-        }
-        return onRejected(error);
-      }
+      return settled.then(onFulfilled, onRejected);
     },
   };
 };
@@ -131,20 +155,25 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
 
   const select = (fields?: Record<string, unknown>) => ({
     from: (table: Table) => {
-      let joined: { table: Table; on: unknown } | undefined;
+      const joins: Array<{ table: Table; on: unknown; left: boolean }> = [];
       let condition: unknown;
+      let order: unknown[] = [];
       let limit: number | undefined;
       const run = (): unknown[] => {
         let tuples: Tuple[] = rowsOf(table).map((row) => new Map([[table, row]]));
-        if (joined !== undefined) {
-          const join = joined;
-          tuples = tuples.flatMap((tuple) =>
-            rowsOf(join.table)
+        for (const join of joins) {
+          tuples = tuples.flatMap((tuple) => {
+            const found = rowsOf(join.table)
               .map((other) => new Map([...tuple, [join.table, other]]))
-              .filter((candidate) => matches(join.on, candidate)),
-          );
+              .filter((candidate) => matches(join.on, candidate));
+            /* A left join keeps the row with nothing on the joined side. */
+            return found.length === 0 && join.left ? [tuple] : found;
+          });
         }
-        const selected = tuples.filter((tuple) => matches(condition, tuple)).slice(0, limit);
+        const selected = sortTuples(
+          tuples.filter((tuple) => matches(condition, tuple)),
+          order,
+        ).slice(0, limit);
         return selected.map((tuple) => {
           if (fields === undefined) {
             return { ...tuple.get(table) };
@@ -152,7 +181,15 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
           return Object.fromEntries(
             Object.entries(fields).map(([key, field]) => [
               key,
-              is(field, Table) ? { ...tuple.get(field) } : is(field, Column) ? columnValue(field, tuple) : undefined,
+              is(field, Table)
+                ? tuple.has(field)
+                  ? { ...tuple.get(field) }
+                  : null
+                : is(field, Column)
+                  ? tuple.has(field.table)
+                    ? columnValue(field, tuple)
+                    : null
+                  : undefined,
             ]),
           );
         });
@@ -160,14 +197,21 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
       const builder: Record<string, unknown> = thenable(run, {});
       Object.assign(builder, {
         innerJoin: (other: Table, on: unknown) => {
-          joined = { table: other, on };
+          joins.push({ table: other, on, left: false });
+          return builder;
+        },
+        leftJoin: (other: Table, on: unknown) => {
+          joins.push({ table: other, on, left: true });
           return builder;
         },
         where: (next: unknown) => {
           condition = next;
           return builder;
         },
-        orderBy: () => builder,
+        orderBy: (...sorts: unknown[]) => {
+          order = sorts;
+          return builder;
+        },
         limit: (count: number) => {
           limit = count;
           return builder;
@@ -183,7 +227,7 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
       let conflict: { target: readonly Column[]; set: TableRow } | undefined;
       let doNothing = false;
       const run = (): TableRow[] =>
-        list.map((value) => {
+        list.flatMap((value) => {
           writes.push({ kind: 'insert', table, payload: value });
           const rows = rowsOf(table);
           const target = conflict?.target ?? [];
@@ -197,14 +241,18 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
                   }),
                 );
           if (existing !== undefined) {
-            if (!doNothing && conflict !== undefined) {
+            /* PostgreSQL leaves a skipped row out of `returning`. */
+            if (doNothing) {
+              return [];
+            }
+            if (conflict !== undefined) {
               Object.assign(existing, conflict.set);
             }
-            return { ...existing };
+            return [{ ...existing }];
           }
           const row = { ...value };
           rows.push(row);
-          return { ...row };
+          return [{ ...row }];
         });
       let result: TableRow[] | undefined;
       const once = (): TableRow[] => {
@@ -228,8 +276,13 @@ export const createTableDatabase = (seed: ReadonlyArray<readonly [Table, readonl
               return undefined;
             }, returning);
           },
-          onConflictDoNothing: () => {
+          onConflictDoNothing: (options?: { target?: Column | readonly Column[] }) => {
             doNothing = true;
+            const target = options?.target ?? getTableColumns(table)['id'];
+            if (target === undefined) {
+              throw new Error('The fixture needs a conflict target for a table without an id column');
+            }
+            conflict = { target: Array.isArray(target) ? target : [target as Column], set: {} };
             return thenable(() => {
               once();
               return undefined;

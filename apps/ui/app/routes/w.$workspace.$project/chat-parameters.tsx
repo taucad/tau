@@ -6,7 +6,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { toast } from '@taucad/ui/components/sonner';
-import { ExportSelector } from '#components/files/export-selector.js';
+import { ExportSelector } from '@taucad/files-ui/components/files/export-selector';
 import {
   FloatingPanel,
   FloatingPanelClose,

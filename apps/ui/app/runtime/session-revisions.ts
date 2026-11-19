@@ -690,6 +690,7 @@ export const openRevisionsAheadOfSession =
       if (continueOpen === undefined || !ports.cloudOpen.get(projectId)) {
         return;
       }
+      /* After a hand-over only the client's first publish, or its close, ends this wait: a release no longer can. */
       const status = await firstStatus(client, released.signal);
       const canOpen = ports.cloudOpen.canOpen?.(projectId) ?? true;
       /* Still the gesture's, or a session's that holds this very client: never a released or replaced connection. */

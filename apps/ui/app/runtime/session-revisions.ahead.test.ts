@@ -481,6 +481,25 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
       expect(log).not.toContain('close');
     });
 
+    /* Review of 1cd99a7c (LOW): the answer is the gesture's only while a session still holds that very client. */
+    it('continues nothing when the session that took the client lets it go in the tick its root answers', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true }));
+      answerUser();
+      await settle();
+      const stop = startSessionChild(store.ports);
+      answerUser();
+      await settle();
+      /* The root answers, and the session stops before the continuation reads who holds the client. */
+      publish({ kind: 'none', phase: 'none' });
+      stop();
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+
     it('continues nothing when the account changed after the hand-over, before the first answer', async () => {
       const log: string[] = [];
       const { client, answerUser, publish } = createClient(log);

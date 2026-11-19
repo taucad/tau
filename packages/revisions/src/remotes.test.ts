@@ -960,6 +960,40 @@ describe('the Tau Cloud publish and register legs', () => {
     }
   });
 
+  it('sends the default a new link takes only when the draft names one', async () => {
+    const answered = capture(201, {
+      id: 'pub-1',
+      share: { id: 'shr_1', url: 'https://tau.new/s/tau~shr_1', visibility: 'public' },
+    });
+    try {
+      await publishOverHttp(
+        'https://api.test',
+        { kind: 'cookie' },
+        {
+          projectId: 'p1',
+          projectName: 'Bracket',
+          tag: 'v3',
+          revisionId: 'r1',
+          entryPath: 'main.ts',
+          defaultVisibility: 'public',
+        },
+      );
+
+      const sentBody = answered.calls[0]?.body;
+      expect(typeof sentBody).toBe('string');
+      expect(JSON.parse(sentBody as string)).toStrictEqual({
+        projectId: 'p1',
+        projectName: 'Bracket',
+        tag: 'v3',
+        revisionId: 'r1',
+        entryPath: 'main.ts',
+        defaultVisibility: 'public',
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
   it('refuses an answer without a cloud link', async () => {
     const answered = capture(201, { id: 'pub-1', urls: { share: 'https://tau.new/s/tau~pub-1' } });
     try {

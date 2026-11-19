@@ -663,6 +663,21 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
+  it('22: carries the default a new link takes apart from a chosen setting', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    await settle();
+    const { visibility: _visibility, ...unchosen } = draft;
+    actor.send({ type: 'confirm', draft: { ...unchosen, defaultVisibility: 'public' } });
+    await settle();
+
+    const input = calls.find((call) => call.name === 'createPublication')?.input;
+    expect(input).toMatchObject({ defaultVisibility: 'public' });
+    expect(input).not.toHaveProperty('visibility');
+    actor.stop();
+  });
+
   it('names a version nobody named after the day it is published, in the given locale', () => {
     const day = new Date(2026, 10, 19, 12);
 

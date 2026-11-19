@@ -571,6 +571,7 @@ const publishMachineDefinition = setup({
             entryPath: draft.entryPath,
             ...(draft.description === undefined ? {} : { description: draft.description }),
             ...(draft.visibility === undefined ? {} : { visibility: draft.visibility }),
+            ...(draft.defaultVisibility === undefined ? {} : { defaultVisibility: draft.defaultVisibility }),
           };
         },
         onDone: ({ context, event }, enq) => {

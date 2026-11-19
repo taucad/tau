@@ -10,7 +10,7 @@ export type PublishPublicationActorInput = Readonly<{
   tag: string;
   revisionId: string;
 }> &
-  Pick<PublishDraft, 'projectName' | 'entryPath' | 'description' | 'visibility'>;
+  Pick<PublishDraft, 'projectName' | 'entryPath' | 'description' | 'visibility' | 'defaultVisibility'>;
 
 /**
  * What `createPublication` answers: the version's row, the project's cloud
@@ -52,6 +52,11 @@ export type PublishDraft = Readonly<{
    * a project's first publish is then private.
    */
   visibility?: PublishVisibility;
+  /**
+   * Who can open the link when this publish makes it, and {@link PublishDraft.visibility} is absent. A link that
+   * exists by the time the publish lands keeps its own setting, so a default never changes a link made elsewhere.
+   */
+  defaultVisibility?: PublishVisibility;
 }>;
 
 /** Where a publication is, for the dialog and the projection. @public */

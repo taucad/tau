@@ -881,6 +881,7 @@ export const publishOverHttp = async (
     entryPath: input.entryPath,
     ...(input.description === undefined ? {} : { description: input.description }),
     ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
+    ...(input.defaultVisibility === undefined ? {} : { defaultVisibility: input.defaultVisibility }),
   };
   const response = await globalThis.fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
     method: 'POST',

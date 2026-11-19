@@ -162,6 +162,17 @@ const readJson = async <Value extends NonNullable<unknown>>(path: string): Promi
 export const excludesBuildDiagnostics = (path: string): boolean =>
   !/\.(?:[cm]?[jt]s|css)\.map$|^tau-module-graph.*\.json$/u.test(basename(path));
 
+/** The bundled main/utility imports staged with their runtime dependency closure from the desktop's own install. */
+export const desktopBundledImports = [
+  '@gltf-transform/core',
+  '@gltf-transform/functions',
+  'electron-updater',
+  'fflate',
+  'uint8array-extras',
+  'xstate',
+  '@parcel/watcher',
+] as const;
+
 /**
  * Resolve every runtime package one target stages, failing before the output is touched.
  * @param options - The desktop app and workspace roots, and the packaged target.
@@ -222,15 +233,7 @@ export const resolveRuntimePackages = async (
     });
   }
   const bundledImports = await Promise.all(
-    [
-      '@gltf-transform/core',
-      '@gltf-transform/functions',
-      'electron-updater',
-      'fflate',
-      'uint8array-extras',
-      'xstate',
-      '@parcel/watcher',
-    ].map(async (name) => ({
+    desktopBundledImports.map(async (name) => ({
       ...(await installed(await realpath(resolve(desktopRoot, 'node_modules', name)))),
       name,
     })),

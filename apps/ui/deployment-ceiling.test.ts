@@ -57,14 +57,15 @@ describe('ceilingSpecifier', () => {
 });
 
 describe('cloudCoreModulePattern', () => {
-  it('should hold the Core and the facades, never a Cloud implementation', () => {
+  it('should hold the display-mode owner and its utilities only', () => {
     const root = '/repo/apps/ui/app';
-    expect(cloudCoreModulePattern.test(`${root}/cloud/cloud-port.ts`)).toBe(true);
-    expect(cloudCoreModulePattern.test(`${root}/cloud/root-billing.adaptive.tsx`)).toBe(true);
-    expect(cloudCoreModulePattern.test(`${root}/hooks/use-credit-preflight.adaptive.ts`)).toBe(true);
     expect(cloudCoreModulePattern.test(`${root}/runtime/deployment.machine.ts`)).toBe(true);
-    expect(cloudCoreModulePattern.test('/repo/apps/libs/billing-ui/src/db/billing-snapshot-database.ts')).toBe(true);
-    expect(cloudCoreModulePattern.test(`${root}/cloud/settings-billing.cloud.tsx`)).toBe(false);
-    expect(cloudCoreModulePattern.test('/repo/apps/libs/billing-ui/src/db/billing-snapshot-store.ts')).toBe(false);
+    expect(cloudCoreModulePattern.test(`${root}/runtime/deployment.ts`)).toBe(true);
+    expect(cloudCoreModulePattern.test(`${root}/cloud/deployment-mode.adaptive.ts`)).toBe(true);
+    expect(cloudCoreModulePattern.test('/repo/libs/utils/src/origin-answer.utils.ts')).toBe(true);
+    expect(cloudCoreModulePattern.test('/repo/libs/types/src/deployment.ts')).toBe(true);
+    expect(cloudCoreModulePattern.test(`${root}/runtime/app-runtime.ts`)).toBe(false);
+    expect(cloudCoreModulePattern.test(`${root}/cloud/root-billing.adaptive.tsx`)).toBe(false);
+    expect(cloudCoreModulePattern.test('/repo/apps/libs/billing-ui/src/db/billing-snapshot-database.ts')).toBe(false);
   });
 });

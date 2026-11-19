@@ -281,18 +281,9 @@ export const ceilingSpecifier = (specifier: string, ceiling: TauDeploymentCeilin
   return boundary ? specifier.replace(/\.js$/u, '.self-host.js') : (override ?? specifier);
 };
 
-/** The modules of an adaptive build's `cloud-core` chunk (adaptive app deployment mode D6, gate G1). */
-export const cloudCoreModulePattern = new RegExp(
-  [
-    String.raw`[\\/]apps[\\/]ui[\\/]app[\\/]cloud[\\/](?:cloud-(?:port|loader|surface|mode)|use-deployment-mode|financial-purge\.cloud|[^\\/]+\.adaptive)\.tsx?$`,
-    String.raw`[\\/]apps[\\/]ui[\\/]app[\\/](?:components|hooks|routes)[\\/].+\.adaptive\.tsx?$`,
-    String.raw`[\\/]apps[\\/]ui[\\/]app[\\/]runtime[\\/]deployment(?:\.machine)?\.ts$`,
-    String.raw`[\\/]apps[\\/]libs[\\/]billing-ui[\\/]src[\\/](?:providers[\\/][^\\/]+|db[\\/]billing-snapshot-database)\.tsx?$`,
-    String.raw`[\\/]apps[\\/]libs[\\/]billing[\\/]src[\\/]hooks[\\/]billing-session\.tsx?$`,
-    String.raw`[\\/]libs[\\/](?:utils[\\/]src[\\/](?:origin-answer|deployment-mode)\.utils|types[\\/]src[\\/]deployment)\.ts$`,
-  ].join('|'),
-  'u',
-);
+/** The modules of an adaptive build's `cloud-core` chunk: the display-mode owner and its utilities (gate G1). */
+export const cloudCoreModulePattern =
+  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode\.adaptive)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
 
 const normalizeProvenancePath = (moduleId: string): string => {
   const normalized = moduleId.replaceAll('\\', '/');
@@ -560,19 +551,20 @@ export const createUiReactCompilerPlugin = (): Plugin => {
  * @param buildId - The build id baked into the server graph.
  * @returns The plugin.
  */
+/* The web build's output directory: `build`, or CI's second build beside it (gate G1). */
+const uiBuildDirectory = resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]);
+
 const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   name: 'tau-sentry-release-record',
   // Production builds only, like the server's `tauBuildId` (a test build carries no release).
   apply: (_config, { command, mode }) => command === 'build' && mode !== 'test',
   applyToEnvironment: (environment) => environment.config.consumer === 'server',
   async writeBundle() {
-    await writeFile(path.resolve(__dirname, 'build/sentry-release'), `tau-ui@${String(buildId)}\n`);
+    await writeFile(path.resolve(__dirname, uiBuildDirectory, 'sentry-release'), `tau-ui@${String(buildId)}\n`);
   },
 });
 
 /** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
-/* The web build's output directory: `build`, or CI's second build beside it (gate G1). */
-const uiBuildDirectory = resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]);
 const criticalModuleIdsPath = path.resolve(__dirname, uiBuildDirectory, 'client-module-ids.json');
 
 export default defineConfig(({ command, mode }) => {
@@ -772,23 +764,16 @@ export default defineConfig(({ command, mode }) => {
                 groups: [
                   { name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u },
                   /*
-                   * Adaptive app deployment mode D6, gate G1: an adaptive build's static Cloud Core (the mode owner,
-                   * the financial session providers and purge, the port, the loader, the surface helper and every
-                   * facade) is one request per route class and stays out of the largest chunk. Only the listed
-                   * modules: their dependencies (React, the app runtime, the self-host renderings) stay where the
-                   * pinned builds put them. Pinned builds keep today's chunking (I10).
+                   * Adaptive app deployment mode D6, gate G1: an adaptive build's display-mode owner and its utilities
+                   * go in one named chunk, out of Home's largest chunk. React Router keeps entry signatures exact, so a
+                   * group always takes its modules' dependencies too (here xstate and zod, which the shell loads
+                   * anyway). The financial session providers, the purge and the facades stay in the chunks automatic
+                   * splitting gives them: a group around them took the app runtime with it. Pinned builds keep today's
+                   * chunking (I10).
                    */
-                  ...(deploymentCeiling === 'adaptive'
-                    ? [{ name: 'cloud-core', test: cloudCoreModulePattern, includeDependenciesRecursively: false }]
-                    : []),
+                  ...(deploymentCeiling === 'adaptive' ? [{ name: 'cloud-core', test: cloudCoreModulePattern }] : []),
                 ],
               },
-              /*
-               * A group that leaves its dependencies out can form a cycle between chunks (Core reads the page's
-               * environment; the app runtime reads Core). Rolldown then needs this to keep every module body in source
-               * order, so no Core module runs before what it imports (I1: no startup path may throw).
-               */
-              ...(deploymentCeiling === 'adaptive' ? { strictExecutionOrder: true } : {}),
             },
           },
         },

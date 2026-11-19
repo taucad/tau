@@ -24,7 +24,7 @@ import {
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
-  const m = await import('#components/ui/collapsible-code-block.js');
+  const m = await import('@taucad/editor-ui/components/ui/collapsible-code-block');
   return { default: m.CollapsibleCodeBlock };
 });
 

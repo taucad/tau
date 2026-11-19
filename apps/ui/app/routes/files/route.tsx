@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FileSystemBackend } from '@taucad/types';
-import { ExternalLink } from '#components/external-link.js';
+import { ExternalLink } from '@taucad/editor-ui/components/external-link';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Loader } from '@taucad/ui/components/loader';

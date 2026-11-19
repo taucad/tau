@@ -3,7 +3,7 @@
  * after three failures within 60 s, instead of asking main for a new services utility as fast as it can die.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNodeFsPortBroker } from '#machines/file-manager.worker.node-port.js';
+import { createNodeFsPortBroker } from '#machines/file-manager-worker-node-port.js';
 
 describe('node filesystem port broker', () => {
   beforeEach(() => {

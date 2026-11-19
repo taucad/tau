@@ -14,7 +14,7 @@
  * and stamp that instead (charter D19, R1 AR-R1-5).
  */
 
-import type { BundledTypesMountEntry, BundledTypesPayload } from '#machines/bundled-types-mount.js';
+import type { BundledTypesMountEntry, BundledTypesPayload } from '#lib/bundled-types-mount.js';
 
 /**
  * Package root holding the stamp. `/node_modules` is a guarded mount — only

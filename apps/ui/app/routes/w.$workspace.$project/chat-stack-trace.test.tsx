@@ -133,7 +133,7 @@ vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 

@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PaneSearchProvider, usePaneSearch } from '@taucad/ui/components/pane-search';
-import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
+import { CollapsibleCodeBlock } from '@taucad/editor-ui/components/ui/collapsible-code-block';
 import { reportUiError } from '#lib/error-reporting.js';
 import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';

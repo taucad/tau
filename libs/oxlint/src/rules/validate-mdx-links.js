@@ -18,7 +18,7 @@ const CONTENT_DOCS_SEGMENT = `content${path.sep}docs`;
 const DOCS_PREFIX_REGEX = /^\/docs(?:\/|$)/;
 
 /**
- * Mirrors `resourceRouteExtensions` in `apps/ui/app/components/markdown/markdown-hyperlink.tsx`.
+ * Mirrors `resourceRouteExtensions` in `apps/libs/editor-ui/src/components/markdown/markdown-hyperlink.tsx`.
  * Duplicated rather than imported because `libs/oxlint` must not depend on `apps/ui`.
  * Keep in sync if the canonical list changes.
  *

@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { WatchEvent } from '@taucad/filesystem';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import type { BundledTypesRoot } from '#machines/bundled-types-mount.js';
+import { populateBundledTypesMount } from '#lib/bundled-types-mount.js';
+import type { BundledTypesRoot } from '#lib/bundled-types-mount.js';
 
 const decoder = new TextDecoder();
 

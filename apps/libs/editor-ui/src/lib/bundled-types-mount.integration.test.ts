@@ -8,7 +8,7 @@ import {
   picovoxelTypes,
 } from '@taucad/api-extractor/kernel-types';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
+import { populateBundledTypesMount } from '#lib/bundled-types-mount.js';
 import { describe, expect, it } from 'vitest';
 
 const createMemoryFileService = async (): Promise<WorkspaceFileService> => {

@@ -1,6 +1,6 @@
 # @taucad/revisions-ui
 
-The revisions feature of the Tau UI app: the History branch graph's layout and renderer, the timeline row styles, the Revisions pane region, the naming popover, the History entry title rule, the revision compute worker, the page's revision clients over the worker port protocol, who made each entry, and the history hooks every revision surface reads. None of them read app state: what only the app can reach is injected. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
+The revisions feature of the Tau UI app: the History branch graph's layout and renderer, the timeline row styles, the Revisions pane region, the naming popover, the History entry title rule, the revision compute worker, the page's revision clients over the worker port protocol, who made each entry and the push records it reads, and the history hooks every revision surface reads. None of them read app state: what only the app can reach is injected. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
 
 Cut from `apps/ui/app/{components/revisions,lib,machines}` so the revisions feature builds and tests apart from the app. It grows as the modules it waits on leave the app.
 
@@ -18,6 +18,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./lib/revision-entry-title`                   | The title a person reads for a History entry (`entryTitleOf`)                                                                                                        |
 | `./lib/revision-failure-reporting`             | Which refusals are warnings, and `createRevisionToastReporter(reportUiError)` for every client's error toasts                                                        |
 | `./lib/revision-who`                           | Who made an entry (`revisionWho`), the resolver's view of a joined push store (`revisionPushRecordOf`), `RevisionWhoContext`, `RevisionPushRecord`, `RevisionPusher` |
+| `./lib/revision-push-records`                  | The push route's answer read (`parsePushPage`, `PushPage`, `PushMember`) and joined to the held graph (`joinPushes`)                                                 |
 | `./hooks/use-revision-status`                  | `createRevisionClients(services)`: the worker port and desktop host clients, GitHub credential leases and the command surface; `useRevisionClientStatus`             |
 | `./hooks/use-revisions`                        | `createRevisionHistoryHooks(services)`: every revision surface's history, lanes graph, cards, turn lookup and comparisons; `RevisionCard`, `revisionPageSize`        |
 | `./services/revision-client-registry`          | The one client per project (`revisionClients`, `peekRevisionClient`, `subscribeRevisionClients`)                                                                     |
@@ -38,7 +39,7 @@ The app makes one `createRevisionHistoryHooks` over `RevisionHistoryServices` in
 - `hooks/use-revision-status.test-harness`: the factory for mocks of that app module, typed by `use-cloud-projects`' role.
 - `hooks/use-revisions`: the binding of the app's services and the hooks it exports, at the same path because route suites import and mock it. The binding reads `use-project`, `use-revision-status`, the chat session store, `lib/revision-actor` and `lib/revision-pushes`.
 - `lib/revision-actor`: the account salt fetch (`#environment.config`, `lib/api-request-id`), the anonymity preference and session-user stores, `revisionUserActor`, and `useRevisionWhoContext`, which reads `flags/use-feature` (`tauDebug`) and the push store. Its pure who-resolver is `./lib/revision-who`.
-- `lib/revision-pushes`: the push route's fetch and parse, the graph join and the per-account store (`#environment.config`, `lib/api-request-id`). The snapshot it hands out is typed by `./types/revision-push.types`.
+- `lib/revision-pushes`: the push route's fetch and the per-account store (`#environment.config`, `lib/api-request-id`). It parses and joins with `./lib/revision-push-records`, and the snapshot it hands out is typed by `./types/revision-push.types`.
 - `routes/…/revision-ref-removal`: `#environment.config`.
 - `machines/file-manager.worker.revisions`, `workers/agent-host-revisions` and `runtime/session-revisions`: `window.ENV`, `lib/build-target`, `db/indexeddb-storage` and the file-manager machine.
 - `components/revision-actor-identity`: `lib/auth-client` and `lib/revision-actor`.

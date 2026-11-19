@@ -1564,11 +1564,6 @@
       "rules": { "no-restricted-imports": "off" }
     },
     {
-      // Current revision inversions. -- W8
-      "files": ["apps/ui/app/hooks/use-restore-to-point.ts"],
-      "rules": { "no-restricted-imports": "off" }
-    },
-    {
       // Current publish/import inversions. -- W9
       "files": ["apps/ui/app/lib/github-api.ts"],
       "rules": { "no-restricted-imports": "off" }

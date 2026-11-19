@@ -1,17 +1,29 @@
-import { describe, expect, it } from 'vitest';
-import type { PublicationWireRow } from '#publications/publications.dto.js';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type {
+  ProjectShareAccessInviteResponse as ProjectShareAccessInviteResponseWire,
+  ProjectShareEnvelope as ProjectShareEnvelopeWire,
+  ProjectShare as ProjectShareWire,
+  PublishResponseBody,
+} from '@taucad/types';
+import type {
+  ProjectShare,
+  ProjectShareAccessInviteResponse,
+  ProjectShareEnvelope,
+  PublicationWireRow,
+  PublishResponse,
+} from '#publications/publications.dto.js';
 import {
   publicationOwnerSnapshotSchema,
   publicationRowSchema,
   publicationUrlsSchema,
   publicationViewResponseSchema,
+  projectShareAccessInviteResponseSchema,
   projectShareEnvelopeSchema,
-  invitePublicationAccessSchema,
-  publicationVisibilityUpdateSchema,
+  inviteProjectShareAccessSchema,
   publishResponseSchema,
   publishRequestSchema,
   storedPublicationManifestSchema,
-  updatePublicationVisibilitySchema,
+  updateProjectShareSchema,
 } from '#publications/publications.dto.js';
 
 describe('publishRequestSchema', () => {
@@ -22,7 +34,6 @@ describe('publishRequestSchema', () => {
     revisionId: 'a'.repeat(40),
     entryPath: 'main.ts',
     visibility: 'private',
-    title: 'T',
   };
 
   it('parses a pointer into the graph', () => {
@@ -64,42 +75,30 @@ describe('publishRequestSchema', () => {
     expect(publishRequestSchema.safeParse({ ...valid, visibility: 'secret' }).success).toBe(false);
   });
 
-  it('rejects an empty title', () => {
-    expect(publishRequestSchema.safeParse({ ...valid, title: '' }).success).toBe(false);
+  it('accepts a request without visibility, which keeps the link setting', () => {
+    const { visibility: _visibility, ...withoutVisibility } = valid;
+    expect(publishRequestSchema.safeParse(withoutVisibility).success).toBe(true);
   });
 
-  it('normalizes and deduplicates shared emails for private publications', () => {
+  it('strips the title and invite fields a publish no longer takes', () => {
     const result = publishRequestSchema.safeParse({
       ...valid,
-      sharedEmails: [' Friend@Example.com ', 'friend@example.com', 'TEAM@example.com'],
+      title: 'Old title',
+      sharedEmails: ['friend@example.com'],
+      notifyRecipients: true,
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.sharedEmails).toEqual(['friend@example.com', 'team@example.com']);
+      expect(result.data).not.toHaveProperty('title');
+      expect(result.data).not.toHaveProperty('sharedEmails');
+      expect(result.data).not.toHaveProperty('notifyRecipients');
     }
-  });
-
-  it('rejects shared emails on a public publication', () => {
-    const result = publishRequestSchema.safeParse({
-      ...valid,
-      visibility: 'public',
-      sharedEmails: ['friend@example.com'],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects more than 50 shared emails', () => {
-    const result = publishRequestSchema.safeParse({
-      ...valid,
-      sharedEmails: Array.from({ length: 51 }, (_, index) => `friend${index.toString()}@example.com`),
-    });
-    expect(result.success).toBe(false);
   });
 });
 
-describe('invitePublicationAccessSchema', () => {
+describe('inviteProjectShareAccessSchema', () => {
   it('normalizes email before validation and preserves notifyRecipient', () => {
-    const result = invitePublicationAccessSchema.safeParse({
+    const result = inviteProjectShareAccessSchema.safeParse({
       email: ' Friend@Example.com ',
       notifyRecipient: true,
     });
@@ -110,20 +109,46 @@ describe('invitePublicationAccessSchema', () => {
   });
 });
 
-describe('updatePublicationVisibilitySchema', () => {
+describe('updateProjectShareSchema', () => {
   it('accepts private and public visibility values', () => {
-    expect(updatePublicationVisibilitySchema.safeParse({ visibility: 'private' }).success).toBe(true);
-    expect(updatePublicationVisibilitySchema.safeParse({ visibility: 'public' }).success).toBe(true);
+    expect(updateProjectShareSchema.safeParse({ visibility: 'private' }).success).toBe(true);
+    expect(updateProjectShareSchema.safeParse({ visibility: 'public' }).success).toBe(true);
   });
 
   it('rejects unsupported visibility values', () => {
-    expect(updatePublicationVisibilitySchema.safeParse({ visibility: 'secret' }).success).toBe(false);
+    expect(updateProjectShareSchema.safeParse({ visibility: 'secret' }).success).toBe(false);
   });
 });
 
-describe('publicationVisibilityUpdateSchema', () => {
-  it('serializes the visibility update response shape', () => {
-    expect(publicationVisibilityUpdateSchema.safeParse({ id: 'pub_1', visibility: 'public' }).success).toBe(true);
+describe('projectShareAccessInviteResponseSchema', () => {
+  const grant = {
+    id: 'sga_1',
+    recipientEmail: 'friend@example.com',
+    status: 'active',
+    createdAt: '2026-01-03T00:00:00.000Z',
+    revokedAt: null,
+  };
+
+  it.each([
+    { status: 'sent' },
+    { status: 'not_requested' },
+    { status: 'skipped', reason: 'daily_cap' },
+    { status: 'skipped', reason: 'limiter_unavailable' },
+    { status: 'skipped', reason: 'email_disabled' },
+    { status: 'skipped', reason: 'undeliverable' },
+    { status: 'skipped', reason: 'send_failed' },
+  ])('accepts the email outcome %o', (email) => {
+    expect(projectShareAccessInviteResponseSchema.safeParse({ ...grant, email }).success).toBe(true);
+  });
+
+  it('rejects a skipped email without a known reason', () => {
+    expect(
+      projectShareAccessInviteResponseSchema.safeParse({ ...grant, email: { status: 'skipped', reason: 'other' } })
+        .success,
+    ).toBe(false);
+    expect(projectShareAccessInviteResponseSchema.safeParse({ ...grant, email: { status: 'skipped' } }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -257,12 +282,14 @@ describe('publishResponseSchema', () => {
     const payload = {
       id: 'pub',
       urls: {
-        view: 'https://app.example/s/tau~pub',
-        share: 'https://app.example/s/tau~pub',
+        view: 'https://app.example/s/tau~shr_1',
+        share: 'https://app.example/s/tau~shr_1',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/t.webp',
         manifest: 'https://cdn.example/m.json',
       },
+      share: { id: 'shr_1', url: 'https://app.example/s/tau~shr_1', visibility: 'private' },
+      version: { tag: 'v1' },
       extra: 'strip',
     };
     expect(publishResponseSchema.strict().safeParse(payload).success).toBe(false);
@@ -325,43 +352,73 @@ describe('publicationViewResponseSchema', () => {
 });
 
 describe('projectShareEnvelopeSchema', () => {
-  it('parses unpublished project envelopes', () => {
+  it('parses a project that has no link yet', () => {
     const result = projectShareEnvelopeSchema.safeParse({
       project: { id: 'proj_share', name: null, description: null },
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
+      share: null,
     });
 
     expect(result.success).toBe(true);
   });
 
-  it('parses current publication envelopes with active grants', () => {
+  it('parses a stopped link with its version and invited people', () => {
     const result = projectShareEnvelopeSchema.safeParse({
       project: { id: 'proj_share', name: 'Tray', description: 'Shared source' },
-      currentPublication: {
-        id: 'pub_share',
-        tag: 'main',
-        title: 'Tray',
-        description: null,
+      share: {
+        id: 'shr_1',
+        url: 'https://app.example/s/tau~shr_1',
         visibility: 'private',
-        createdAt: '2026-01-02T00:00:00.000Z',
-        urls: { share: 'https://app.example/s/tau~pub_share' },
+        status: 'stopped',
+        stoppedAt: '2026-01-04T00:00:00.000Z',
+        publishedAt: '2026-01-02T00:00:00.000Z',
+        currentVersion: { publicationId: 'pub_share', tag: 'v4', revisionId: 'a'.repeat(40) },
         access: {
           grants: [
             {
-              id: 'pva_1',
-              publicationId: 'pub_share',
+              id: 'sga_1',
               recipientEmail: 'friend@example.com',
               status: 'active',
               createdAt: '2026-01-03T00:00:00.000Z',
               revokedAt: null,
+              notDelivered: false,
             },
           ],
         },
       },
-      snapshot: { state: 'published-current', lastPublishedAt: '2026-01-02T00:00:00.000Z' },
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('rejects an unknown link status', () => {
+    const result = projectShareEnvelopeSchema.safeParse({
+      project: { id: 'proj_share', name: 'Tray', description: null },
+      share: {
+        id: 'shr_1',
+        url: 'https://app.example/s/tau~shr_1',
+        visibility: 'private',
+        status: 'paused',
+        stoppedAt: null,
+        publishedAt: null,
+        currentVersion: null,
+        access: { grants: [] },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+/* The UI imports these shapes from `@taucad/types`; they are the schemas' own, so neither side can drift. */
+describe('cloud link wire types in @taucad/types', () => {
+  it('match the schemas the API serializes with', () => {
+    expectTypeOf<ProjectShareEnvelope>().toExtend<ProjectShareEnvelopeWire>();
+    expectTypeOf<ProjectShareEnvelopeWire>().toExtend<ProjectShareEnvelope>();
+    expectTypeOf<ProjectShare>().toExtend<ProjectShareWire>();
+    expectTypeOf<ProjectShareWire>().toExtend<ProjectShare>();
+    expectTypeOf<ProjectShareAccessInviteResponse>().toExtend<ProjectShareAccessInviteResponseWire>();
+    expectTypeOf<ProjectShareAccessInviteResponseWire>().toExtend<ProjectShareAccessInviteResponse>();
+    expectTypeOf<PublishResponse>().toExtend<PublishResponseBody>();
+    expectTypeOf<PublishResponseBody>().toExtend<PublishResponse>();
   });
 });

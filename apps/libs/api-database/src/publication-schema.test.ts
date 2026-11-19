@@ -299,6 +299,106 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     await db.delete(schema.user).where(eq(schema.user.id, ownerId));
   });
 
+  /** An owner with one project, for the cloud link rows below. */
+  const seedOwnedProject = async (label: string): Promise<{ ownerId: string; projectId: string }> => {
+    const ownerId = `user_${label}_${Date.now()}`;
+    const projectId = `proj_${label}_${Date.now()}`;
+    await db.insert(schema.user).values({
+      id: ownerId,
+      name: 'Link Owner',
+      email: `${ownerId}@example.com`,
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await db.insert(schema.project).values({
+      id: projectId,
+      ownerId,
+      name: 'Link Project',
+      origin: 'local-mirror',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return { ownerId, projectId };
+  };
+
+  it('should allow one cloud link per project', async () => {
+    const { ownerId, projectId } = await seedOwnedProject('one_link');
+    await db
+      .insert(schema.projectShare)
+      .values({ id: `shr_a_${Date.now()}`, projectId, ownerId, visibility: 'private' });
+
+    await expect(
+      db.insert(schema.projectShare).values({ id: `shr_b_${Date.now()}`, projectId, ownerId, visibility: 'public' }),
+    ).rejects.toThrow();
+    await expect(
+      db.insert(schema.projectShare).values({
+        id: `shr_c_${Date.now()}`,
+        projectId: `${projectId}_other`,
+        ownerId,
+        visibility: 'secret',
+      }),
+    ).rejects.toThrow();
+
+    await db.delete(schema.user).where(eq(schema.user.id, ownerId));
+  });
+
+  it('should cascade a cloud link and its invited people from the project and from the owner', async () => {
+    const first = await seedOwnedProject('link_cascade_project');
+    const shareId = `shr_cascade_${Date.now()}`;
+    await db
+      .insert(schema.projectShare)
+      .values({ id: shareId, projectId: first.projectId, ownerId: first.ownerId, visibility: 'private' });
+    await db.insert(schema.projectShareAccess).values({
+      id: `sga_cascade_${Date.now()}`,
+      shareId,
+      ownerId: first.ownerId,
+      recipientEmail: 'friend@example.com',
+    });
+
+    await db.delete(schema.project).where(eq(schema.project.id, first.projectId));
+
+    expect(await db.select().from(schema.projectShare).where(eq(schema.projectShare.id, shareId))).toEqual([]);
+    expect(
+      await db.select().from(schema.projectShareAccess).where(eq(schema.projectShareAccess.shareId, shareId)),
+    ).toEqual([]);
+
+    const second = await seedOwnedProject('link_cascade_owner');
+    const ownerShareId = `shr_owner_${Date.now()}`;
+    await db
+      .insert(schema.projectShare)
+      .values({ id: ownerShareId, projectId: second.projectId, ownerId: second.ownerId, visibility: 'public' });
+
+    await db.delete(schema.user).where(eq(schema.user.id, second.ownerId));
+
+    expect(await db.select().from(schema.projectShare).where(eq(schema.projectShare.id, ownerShareId))).toEqual([]);
+    await db.delete(schema.user).where(eq(schema.user.id, first.ownerId));
+  });
+
+  it('should keep invited addresses lowercase, one per link, and active or revoked', async () => {
+    const { ownerId, projectId } = await seedOwnedProject('link_access');
+    const shareId = `shr_access_${Date.now()}`;
+    await db.insert(schema.projectShare).values({ id: shareId, projectId, ownerId, visibility: 'private' });
+    const grant = { shareId, ownerId, recipientEmail: 'friend@example.com' };
+    await db.insert(schema.projectShareAccess).values({ id: `sga_1_${Date.now()}`, ...grant });
+
+    await expect(
+      db.insert(schema.projectShareAccess).values({ id: `sga_2_${Date.now()}`, ...grant }),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .insert(schema.projectShareAccess)
+        .values({ id: `sga_3_${Date.now()}`, ...grant, recipientEmail: 'Friend@Example.com' }),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .insert(schema.projectShareAccess)
+        .values({ id: `sga_4_${Date.now()}`, ...grant, recipientEmail: 'other@example.com', status: 'paused' }),
+    ).rejects.toThrow();
+
+    await db.delete(schema.user).where(eq(schema.user.id, ownerId));
+  });
+
   it('should default refcount=0 on blob_ref insert', async () => {
     const sha = createHash('sha256').update(`blob-ref-${Date.now()}-${Math.random()}`).digest('hex');
     await db.insert(schema.blobRef).values({

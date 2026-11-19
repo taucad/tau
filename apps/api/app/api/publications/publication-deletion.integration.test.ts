@@ -93,6 +93,13 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
     if (publication === undefined) {
       throw new Error('Publication fixture failed');
     }
+    /* The project's cloud link shows this version, so the viewer and the file proxy reach it. */
+    const shareId = `shr_${suffix}`;
+    await database
+      .update(schema.project)
+      .set({ currentPublicationId: publicationId })
+      .where(eq(schema.project.id, projectId));
+    await database.insert(schema.projectShare).values({ id: shareId, projectId, ownerId, visibility: 'private' });
     const manifest: StoredPublicationManifest = {
       version: 1,
       projectId,
@@ -103,7 +110,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
       parameters: {},
       createdAt: new Date().toISOString(),
     };
-    return { projectId, ownerId, publicationId, manifestKey, manifest, publication };
+    return { projectId, ownerId, publicationId, shareId, manifestKey, manifest, publication };
   };
   type Fixture = Awaited<ReturnType<typeof seed>>;
 
@@ -186,9 +193,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
       forkedFrom: source.publicationId,
     });
     const viewer = service();
-    expect(
-      await viewer.getPublicationForViewer({ publicationId: fork.publicationId, viewerUserId: fork.ownerId }),
-    ).toMatchObject({ manifest: fork.manifest });
+    expect(await viewer.getShareForViewer({ shareId: fork.shareId, viewerUserId: fork.ownerId })).toMatchObject({
+      manifest: fork.manifest,
+    });
     expect(storage.deleteBlobs).not.toHaveBeenCalled();
     const orphan = digest();
     const sharedBytes = new TextEncoder().encode('surviving fork content');
@@ -504,9 +511,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
         expect(await receipt(source)).toBeUndefined();
       }
       const viewer = service();
-      expect(
-        await viewer.getPublicationForViewer({ publicationId: fork.publicationId, viewerUserId: fork.ownerId }),
-      ).toMatchObject({ manifest: fork.manifest });
+      expect(await viewer.getShareForViewer({ shareId: fork.shareId, viewerUserId: fork.ownerId })).toMatchObject({
+        manifest: fork.manifest,
+      });
       const file = await viewer.openPublicationFile(shared, 'main.ts');
       expect(await readStreamText(file.body)).toBe(content);
       expect(await refcount(shared)).toBe(deleted ? 1 : 2);
@@ -575,26 +582,32 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
     await expect(rejected).rejects.toThrow('Publication is no longer available');
   });
 
-  it('should refuse publication grants and visibility changes for a deleted project', async () => {
+  it('should refuse link invites, setting changes and reads for a deleted project', async () => {
     const fixture = await seed();
     storeManifest(fixture);
     await intent(fixture);
     const viewer = service();
     await expect(
-      viewer.inviteAccess({
-        publicationId: fixture.publicationId,
+      viewer.inviteProjectShareAccess({
+        projectId: fixture.projectId,
         ownerId: fixture.ownerId,
         recipientEmail: 'friend@test.invalid',
       }),
     ).rejects.toBeInstanceOf(GoneException);
     await expect(
-      viewer.updateVisibility({ publicationId: fixture.publicationId, ownerId: fixture.ownerId, visibility: 'public' }),
+      viewer.updateProjectShare({ projectId: fixture.projectId, ownerId: fixture.ownerId, visibility: 'public' }),
+    ).rejects.toBeInstanceOf(GoneException);
+    await expect(
+      viewer.getShareForViewer({ shareId: fixture.shareId, viewerUserId: fixture.ownerId }),
     ).rejects.toBeInstanceOf(GoneException);
     expect(
-      await database.query.publicationAccess.findMany({
-        where: eq(schema.publicationAccess.publicationId, fixture.publicationId),
+      await database.query.projectShareAccess.findMany({
+        where: eq(schema.projectShareAccess.shareId, fixture.shareId),
       }),
     ).toEqual([]);
+    expect(
+      await database.query.projectShare.findFirst({ where: eq(schema.projectShare.id, fixture.shareId) }),
+    ).toMatchObject({ visibility: 'private' });
     expect(
       await database.query.publication.findFirst({ where: eq(schema.publication.id, fixture.publicationId) }),
     ).toMatchObject({ visibility: 'private' });
@@ -620,7 +633,6 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('publicati
         revisionId: 'a'.repeat(40),
         entryPath: 'main.ts',
         visibility: 'public',
-        title: 'Late publish',
       },
     });
     const rejected = expect(publishing).rejects.toBeInstanceOf(GoneException);

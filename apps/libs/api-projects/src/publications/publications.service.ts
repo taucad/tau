@@ -14,9 +14,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, desc, eq, sql } from 'drizzle-orm';
-import type { PublicationOwnerSnapshot } from '@taucad/types';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import type { PublicationOwnerSnapshot, PublicationVisibility } from '@taucad/types';
 import { idPrefix, publicationApiCode } from '@taucad/types/constants';
+import type { InviteEmailOutcome } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Environment } from '@taucad/api-core';
 import type {
@@ -24,9 +25,9 @@ import type {
   PublishRequest,
   PublishResponse,
   PublicationWireRow,
-  PublicationAccessGrant,
-  PublicationAccessList,
-  PublicationVisibilityUpdate,
+  ProjectShare,
+  ProjectShareAccessGrant,
+  ProjectShareAccessInviteResponse,
   ProjectShareEnvelope,
   StoredPublicationManifest,
 } from '#publications/publications.dto.js';
@@ -50,7 +51,7 @@ import { publicationRepositoryLeasesKey } from '#publications/repository-leases.
 import type { PublicationRepositoryLeases, ReadLease } from '#publications/repository-leases.js';
 import { DatabaseService } from '@taucad/api-database';
 import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
-import { buildPublicationViewUrl, EmailDeliverabilityService, EmailService } from '@taucad/api-email';
+import { buildCloudLinkUrl, EmailDeliverabilityService, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#entitlements/commercial-entitlements.js';
 import * as schema from '@taucad/api-database/schema';
@@ -62,9 +63,12 @@ import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** The shared placeholder card image every publication starts with. */
 const defaultOgImageKey = 'defaults/og.png';
-type ProjectShareCurrentPublication = NonNullable<ProjectShareEnvelope['currentPublication']>;
-type ProjectShareProject = ProjectShareEnvelope['project'];
 type PublicationTransaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
+type PublicationRow = typeof schema.publication.$inferSelect;
+type ProjectShareRow = typeof schema.projectShare.$inferSelect;
+type ProjectShareAccessRow = typeof schema.projectShareAccess.$inferSelect;
+/** The database or an open transaction: both read the link the same way. */
+type ShareReader = Pick<PublicationTransaction, 'select'>;
 
 const normalizeRelativePath = (relativePathValue: string): string =>
   relativePathValue.replaceAll('\\', '/').replace(/^\.\/+/, '');
@@ -161,12 +165,6 @@ export class PublicationsService {
     @Optional() private readonly deliverability?: EmailDeliverabilityService,
   ) {}
 
-  /**
-   * Private publications are Pro-gated (tiers doc T4/AD11 — public sharing is
-   * never gated). Grandfathering (T16): a user who lost the entitlement may
-   * still republish content to a project whose current publication is ALREADY
-   * private; only newly-private visibility requires the entitlement.
-   */
   /** What the materializer needs, which this service already holds. */
   private get materializer(): MaterializerDependencies {
     return {
@@ -212,31 +210,27 @@ export class PublicationsService {
   }
 
   /**
-   * Record or re-point one publication on the synced graph (S32, D11, A21).
+   * Record or re-point one version on the synced graph and point the project's
+   * one cloud link at it (S32, D11, A21; stable cloud link blueprint D1).
    *
    * Nothing is uploaded here: by the time this is called the client has pushed
    * the history set — the branch and the named version, LFS objects included —
    * to this project's repository on the Tau Hosted Remote, so the bytes are
    * already on the volume and in R2. What this does is create or re-point the
-   * row and materialize the tagged tree into the same sha256-keyed blob store
-   * the viewer has always read, which is why the CDN and private-proxy paths
-   * are untouched.
+   * version's row and materialize the tagged tree into the same sha256-keyed
+   * blob store the viewer has always read, at the tier the link's setting asks.
    *
-   * Re-publishing the same name re-points the row it already has: the share URL
-   * is stable, the reference counts move from the old manifest to the new one,
-   * and the tag history is the publication history.
+   * The first publish creates the link, private unless the request says
+   * otherwise. Every later one keeps the link's id, its setting and its invited
+   * people, turns a stopped link back on and moves what it shows. Publishing
+   * sends no email (D4).
    *
    * @param args - The owner and the pointer they are publishing.
-   * @returns The publication id and its links.
+   * @returns The version's id, the link and its setting.
    */
   public async publishFromRevision(args: { ownerId: string; request: PublishRequest }): Promise<PublishResponse> {
     const { ownerId, request } = args;
     await assertProjectActive(this.databaseService.database, request.projectId, ownerId);
-    const sharedEmails = request.visibility === 'private' ? (request.sharedEmails ?? []) : [];
-
-    if (request.visibility === 'private') {
-      await this.assertPrivateVisibilityAllowed({ ownerId, projectId: request.projectId });
-    }
 
     /* The other route that reaches `ensureRepository`, checked in the same pass
        as N5. Publishing a named version presupposes the push that created it,
@@ -251,7 +245,6 @@ export class PublicationsService {
       });
     }
 
-    const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
     const ownerSnapshot = await this.loadOwnerSnapshot(ownerId);
     const db = this.databaseService.database;
 
@@ -268,6 +261,12 @@ export class PublicationsService {
       });
     }
 
+    /* Checked before the lease as well as under the lock, so a refused setting
+       costs no hydrate. A first publish is never public by default. */
+    const existingShare = await this.selectShareOfProject(db, request.projectId);
+    const requestedVisibility = this.publishVisibility(request, existingShare);
+    await this.assertVisibilityAllowed({ ownerId, visibility: requestedVisibility, current: existingShare });
+
     /* The lease is the repository: it is hydrated from the manifest, read, and
        disposed here (D9). It stays open across the transaction below because
        that is where the tagged tree is read and the blobs are written — the
@@ -277,9 +276,9 @@ export class PublicationsService {
       async (lease) =>
         db.transaction(async (tx) => {
           /* One writer of this project's publications at a time, the same lock a
-           read-side repair takes: the row this reads decides which manifest is
-           released below, and two writers reading it before either commits
-           would release that manifest twice (review F2). */
+           read-side repair and every link write take: the row this reads decides
+           which manifest is released below, and two writers reading it before
+           either commits would release that manifest twice (review F2). */
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
           await assertProjectActive(tx, request.projectId, ownerId);
 
@@ -299,6 +298,14 @@ export class PublicationsService {
             });
           }
 
+          /* Re-read under the lock: a change of who can open the link may have
+             landed since the check above. */
+          const lockedShare = await this.selectShareOfProject(tx, request.projectId);
+          const visibility = this.publishVisibility(request, lockedShare);
+          if (visibility !== requestedVisibility || lockedShare?.visibility !== existingShare?.visibility) {
+            await this.assertVisibilityAllowed({ ownerId, visibility, current: lockedShare });
+          }
+
           const [currentRow] = await tx
             .select()
             .from(schema.publication)
@@ -315,7 +322,7 @@ export class PublicationsService {
               ownerId,
               directory: lease.directory,
               tag: request.tag,
-              visibility: request.visibility,
+              visibility,
               entryPath: request.entryPath,
             },
             tx,
@@ -332,19 +339,19 @@ export class PublicationsService {
             });
           }
 
-          await this.writePublicationRows({
+          const share = await this.writePublicationRows({
             tx,
             ownerId,
             request,
             publicationId,
-            sharedEmails,
+            visibility,
             ownerSnapshot,
             version,
           });
-          return { version, publicationId, superseded: currentRow?.manifestKey };
+          return { version, publicationId, share, superseded: currentRow?.manifestKey };
         }),
     );
-    const { version: materialized, publicationId } = published;
+    const { version: materialized, publicationId, share } = published;
 
     /* The superseded manifest's counts go back only once the row points at the
      * new one, so a failure above never drops a live reference. The row it came
@@ -353,43 +360,42 @@ export class PublicationsService {
       await releaseManifestBlobs(this.materializer, published.superseded);
     }
 
-    const viewUrl = buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId });
-    if (request.notifyRecipients === true && sharedEmails.length > 0) {
-      await this.sendPublicationInviteNotifications({
-        ownerId,
-        trigger: 'publish',
-        recipientEmails: sharedEmails,
-        ownerName: ownerSnapshot?.name ?? 'A Tau user',
-        publicationTitle: request.title,
-        url: viewUrl,
-      });
-    }
-
+    const shareUrl = this.cloudLinkUrl(share.id);
     return {
       id: publicationId,
       urls: {
-        view: viewUrl,
-        share: viewUrl,
+        view: shareUrl,
+        share: shareUrl,
         og: this.storage.publicUrl(splitNamespaceKey(defaultOgImageKey)),
         thumbnail: this.storage.publicUrl(splitNamespaceKey(materialized.thumbnailKey)),
       },
+      share: { id: share.id, url: shareUrl, visibility: this.linkVisibility(share) },
+      version: { tag: request.tag },
     };
   }
 
-  public async getPublicationForViewer(args: {
-    publicationId: string;
-    viewerUserId?: string;
-  }): Promise<PublicationViewResponse> {
-    const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
-
-    const publication = await this.loadPublicationOrThrow(args.publicationId);
-    const viewerRole = await this.authorizePublicationViewer(publication, args.viewerUserId);
+  /**
+   * The version a cloud link shows, for whoever opens it (`GET /v1/shares/:shareId`).
+   *
+   * Only a link id resolves. A publication id is not a link, so an old
+   * `tau~pub_…` address answers `404` by construction (stable cloud link
+   * blueprint C1). A stopped link answers `410`.
+   *
+   * @param args - The link id and the signed-in viewer, if any.
+   * @returns The current version, its manifest and where each file is served from.
+   */
+  public async getShareForViewer(args: { shareId: string; viewerUserId?: string }): Promise<PublicationViewResponse> {
+    const share = await this.selectShareOrThrow(args.shareId);
+    const viewerRole = await this.authorizeShareViewer(share, args.viewerUserId);
+    const publication = await this.loadCurrentPublicationOrThrow(share);
 
     const { manifestKey, ogImageKey, thumbnailKey } = publication;
+    const shareUrl = this.cloudLinkUrl(share.id);
+    const visibility = this.linkVisibility(share);
 
     const urls = {
-      view: buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id }),
-      share: buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id }),
+      view: shareUrl,
+      share: shareUrl,
       og: this.storage.publicUrl(splitNamespaceKey(ogImageKey ?? 'defaults/og.png')),
       thumbnail: this.storage.publicUrl(splitNamespaceKey(thumbnailKey ?? 'defaults/thumb.webp')),
     };
@@ -401,10 +407,10 @@ export class PublicationsService {
       const sha256Hex = this.sha256HexFromManifestRef(relativePath, shaRef);
 
       // Private bytes are only reachable through the authenticated,
-      // publication-scoped proxy; public publications keep direct CDN URLs
-      // (the public cost model depends on them).
+      // link-authorized proxy; public links keep direct CDN URLs (the public
+      // cost model depends on them).
       files[relativePath] =
-        publication.visibility === 'private'
+        visibility === 'private'
           ? this.buildPublicationFileUrl(publication.id, relativePath)
           : this.storage.publicUrl({ namespace: 'blobs', key: servedKeyOf(publication, relativePath, sha256Hex) });
     }
@@ -418,7 +424,7 @@ export class PublicationsService {
       revisionId: publication.revisionId,
       ownerId: publication.ownerId,
       parentPublicationId: publication.parentPublicationId,
-      visibility: publication.visibility as PublicationWireRow['visibility'],
+      visibility,
       runtimePin: publication.runtimePin,
       kernels: publication.kernels,
       entryPath: publication.entryPath,
@@ -443,9 +449,10 @@ export class PublicationsService {
 
   /**
    * Authorizes and resolves a single publication file for the proxy endpoint.
-   * Re-checks the viewer's grant on EVERY request (revocation is immediate)
-   * and validates the requested path against the publication's own manifest,
-   * so a sha from another publication can never be re-scoped (threat T5).
+   * Re-checks the viewer against the project's cloud link on EVERY request
+   * (removing access or stopping the link takes effect at once) and validates
+   * the requested path against the publication's own manifest, so a sha from
+   * another publication can never be re-scoped (threat T5).
    *
    * The returned `etag` is the content sha — a strong validator the controller
    * uses for `If-None-Match` revalidation without touching storage.
@@ -459,8 +466,10 @@ export class PublicationsService {
       throw new BadRequestException({ code: publicationApiCode.INVALID_PATH, message: 'Missing path query' });
     }
 
-    const publication = await this.loadPublicationOrThrow(args.publicationId);
-    await this.authorizePublicationViewer(publication, args.viewerUserId);
+    const row = await this.selectPublicationOrThrow(args.publicationId);
+    const share = await this.selectShareOfProjectOrThrow(row.projectId);
+    await this.authorizeShareViewer(share, args.viewerUserId);
+    const publication = await this.repairAndReload(row);
 
     const path = normalizeRelativePath(args.path);
     const manifest = await this.loadStoredManifest(publication.manifestKey);
@@ -506,88 +515,20 @@ export class PublicationsService {
     };
   }
 
-  public async listAccessGrants(args: { publicationId: string; ownerId: string }): Promise<PublicationAccessList> {
-    await this.assertPublicationOwner(args);
-
-    const rows = await this.databaseService.database
-      .select()
-      .from(schema.publicationAccess)
-      .where(
-        and(
-          eq(schema.publicationAccess.publicationId, args.publicationId),
-          eq(schema.publicationAccess.status, 'active'),
-        ),
-      )
-      .orderBy(desc(schema.publicationAccess.createdAt));
-
-    return { grants: await this.toAccessGrantDtos(rows) };
-  }
-
-  public async updateVisibility(args: {
-    publicationId: string;
-    ownerId: string;
-    visibility: PublicationVisibilityUpdate['visibility'];
-  }): Promise<PublicationVisibilityUpdate> {
-    const publication = await this.assertPublicationOwner(args);
-
-    if (publication.unpublishedAt) {
-      throw new GoneException({
-        code: publicationApiCode.GONE,
-        message: 'Publication is no longer available',
-      });
-    }
-
-    if (publication.visibility === args.visibility) {
-      return { id: publication.id, visibility: args.visibility };
-    }
-
-    // Changing TO private is the entitlement-gated direction (T4/T16); flipping
-    // back to public is always allowed.
-    if (args.visibility === 'private') {
-      await this.assertPrivateVisibilityAllowed({ ownerId: args.ownerId });
-    }
-
-    return this.withActivePublication(publication, async (transaction, fresh) => {
-      // Storage first, DB second: if any copy/delete fails the publication keeps
-      // its current visibility, so the serving tier never lags the DB flag
-      // (a private flip can never leave bytes only on the anonymous origin, and
-      // a public flip can never emit CDN URLs that 404).
-      await this.reconcileStorageTier(fresh, args.visibility);
-
-      const [updated] = await transaction
-        .update(schema.publication)
-        .set({ visibility: args.visibility })
-        .where(eq(schema.publication.id, publication.id))
-        .returning({
-          id: schema.publication.id,
-          visibility: schema.publication.visibility,
-        });
-
-      if (!updated) {
-        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
-      }
-
-      return {
-        id: updated.id,
-        visibility: updated.visibility as PublicationVisibilityUpdate['visibility'],
-      };
-    });
-  }
-
+  /**
+   * The project and its cloud link, as the owner's Share pane reads them
+   * (`GET /v1/projects/:id/share`). `share` is `null` until the first publish.
+   *
+   * @param args - The project and the signed-in owner.
+   * @returns The project summary and its link.
+   */
   public async getProjectShareEnvelope(args: { projectId: string; ownerId: string }): Promise<ProjectShareEnvelope> {
-    const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
     const db = this.databaseService.database;
     await this.assertActiveProject(args.projectId, args.ownerId);
 
-    const projectRows = await db.select().from(schema.project).where(eq(schema.project.id, args.projectId)).limit(1);
-    const project = projectRows[0];
-
+    const [project] = await db.select().from(schema.project).where(eq(schema.project.id, args.projectId)).limit(1);
     if (!project) {
-      return this.toUnpublishedProjectShareEnvelope({
-        id: args.projectId,
-        name: null,
-        description: null,
-      });
+      return { project: { id: args.projectId, name: null, description: null }, share: null };
     }
 
     if (project.ownerId !== args.ownerId) {
@@ -597,90 +538,130 @@ export class PublicationsService {
       });
     }
 
-    const projectSummary = {
-      id: project.id,
-      name: project.name,
-      description: project.description,
-    };
-
-    if (!project.currentPublicationId) {
-      return this.toUnpublishedProjectShareEnvelope(projectSummary);
-    }
-
-    const publicationRows = await db
-      .select()
-      .from(schema.publication)
-      .where(and(eq(schema.publication.id, project.currentPublicationId), eq(schema.publication.projectId, project.id)))
-      .limit(1);
-    const publication = publicationRows[0];
-
-    if (!publication || publication.unpublishedAt) {
-      return this.toUnpublishedProjectShareEnvelope(projectSummary);
-    }
-
-    const grants = await db
-      .select()
-      .from(schema.publicationAccess)
-      .where(
-        and(eq(schema.publicationAccess.publicationId, publication.id), eq(schema.publicationAccess.status, 'active')),
-      )
-      .orderBy(desc(schema.publicationAccess.createdAt));
-
-    const shareUrl = buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id });
-
+    const share = await this.selectShareOfProject(db, project.id);
     return {
-      project: projectSummary,
-      currentPublication: {
-        id: publication.id,
-        tag: publication.tag,
-        title: publication.title,
-        description: publication.description,
-        visibility: publication.visibility as ProjectShareCurrentPublication['visibility'],
-        createdAt: publication.createdAt.toISOString(),
-        urls: { share: shareUrl },
-        access: { grants: await this.toAccessGrantDtos(grants) },
-      },
-      snapshot: {
-        state: 'published-current',
-        lastPublishedAt: publication.createdAt.toISOString(),
-      },
+      project: { id: project.id, name: project.name, description: project.description },
+      share: share === undefined ? null : await this.toProjectShareDto(share),
     };
   }
 
-  public async inviteAccess(args: {
-    publicationId: string;
+  /**
+   * Changes who can open the project's cloud link (`PATCH /v1/projects/:id/share`).
+   *
+   * Only people you invite needs `canCreatePrivateShares`, unless the link is
+   * already private (T16). Under the project lock the version the link shows is
+   * copied into the target tier first and the link row changes second, so the
+   * row never points at a tier the bytes are not in. Earlier versions are not
+   * touched: nothing serves them.
+   *
+   * @param args - The project, the owner and the new setting.
+   * @returns The link as the envelope shows it.
+   */
+  public async updateProjectShare(args: {
+    projectId: string;
+    ownerId: string;
+    visibility: PublicationVisibility;
+  }): Promise<ProjectShare> {
+    await this.assertProjectOwner(args);
+    const share = await this.selectShareOfProjectOrThrow(args.projectId);
+
+    if (share.visibility !== args.visibility) {
+      await this.assertVisibilityAllowed({ ownerId: args.ownerId, visibility: args.visibility, current: share });
+
+      await this.databaseService.database.transaction(async (transaction) => {
+        await assertActiveProjectLocked(transaction, args.projectId);
+        const fresh = await this.selectShareOfProject(transaction, args.projectId);
+        this.assertShareLive(fresh);
+
+        const current = await this.selectCurrentPublication(transaction, args.projectId);
+        if (current !== undefined) {
+          // Storage first, row second (see the method comment).
+          await this.reconcileStorageTier(current, args.visibility);
+          await transaction
+            .update(schema.publication)
+            .set({ visibility: args.visibility })
+            .where(eq(schema.publication.id, current.id));
+        }
+
+        await transaction
+          .update(schema.projectShare)
+          .set({ visibility: args.visibility, updatedAt: new Date() })
+          .where(eq(schema.projectShare.id, fresh.id));
+      });
+    }
+
+    return this.toProjectShareDto(await this.selectShareOfProjectOrThrow(args.projectId));
+  }
+
+  /**
+   * "Stop sharing" (`DELETE /v1/projects/:id/share`), on every plan (D5).
+   *
+   * Keeps the link id and its invited people; the next publish turns the same
+   * link back on (C4). The viewer, the file proxy and the view ping answer
+   * `410` on their next request, because each reads the link row. No bytes move.
+   * Idempotent, and a project with no link has nothing to stop.
+   *
+   * @param args - The project and the owner.
+   */
+  public async stopProjectShare(args: { projectId: string; ownerId: string }): Promise<void> {
+    await this.assertProjectOwner(args);
+    await this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
+      const at = new Date();
+      await transaction
+        .update(schema.projectShare)
+        .set({ disabledAt: at, updatedAt: at })
+        .where(and(eq(schema.projectShare.projectId, args.projectId), isNull(schema.projectShare.disabledAt)));
+    });
+  }
+
+  /**
+   * Invites an address to open a private cloud link (`POST /v1/projects/:id/share/access`).
+   *
+   * The address is emailed when it gains access (it had no grant, or a removed
+   * one) unless `notifyRecipient` is `false`. The answer says what happened to
+   * that email, so the client never claims an email that was not sent (D7).
+   *
+   * @param args - The project, the owner, the address and whether to email it.
+   * @returns The grant and its email outcome.
+   */
+  public async inviteProjectShareAccess(args: {
+    projectId: string;
     ownerId: string;
     recipientEmail: string;
     notifyRecipient?: boolean;
-  }): Promise<PublicationAccessGrant> {
-    const publication = await this.assertPublicationOwner(args);
+  }): Promise<ProjectShareAccessInviteResponse> {
+    const project = await this.assertProjectOwner(args);
     const recipientEmail = this.normalizeEmail(args.recipientEmail);
 
-    const { grant, existingGrant } = await this.withActivePublication(publication, async (transaction, fresh) => {
-      if (fresh.visibility !== 'private') {
+    const { share, grant, existingGrant } = await this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
+      const share = await this.selectShareOfProject(transaction, args.projectId);
+      this.assertShareLive(share);
+      if (share.visibility !== 'private') {
         throw new BadRequestException({
           code: publicationApiCode.FORBIDDEN,
-          message: 'Only private publications can invite recipients',
+          message: 'Only a link for people you invite can have invited people',
         });
       }
 
-      const existingRows = await transaction
+      const [existingGrant] = await transaction
         .select()
-        .from(schema.publicationAccess)
+        .from(schema.projectShareAccess)
         .where(
           and(
-            eq(schema.publicationAccess.publicationId, publication.id),
-            eq(schema.publicationAccess.recipientEmail, recipientEmail),
+            eq(schema.projectShareAccess.shareId, share.id),
+            eq(schema.projectShareAccess.recipientEmail, recipientEmail),
           ),
         )
         .limit(1);
-      const existingGrant = existingRows[0];
 
+      /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
       const [grant] = await transaction
-        .insert(schema.publicationAccess)
+        .insert(schema.projectShareAccess)
         .values({
-          id: generatePrefixedId(idPrefix.publicationAccess),
-          publicationId: publication.id,
+          id: generatePrefixedId(idPrefix.projectShareAccess),
+          shareId: share.id,
           ownerId: args.ownerId,
           recipientEmail,
           status: 'active',
@@ -688,57 +669,64 @@ export class PublicationsService {
           revokedAt: null,
         })
         .onConflictDoUpdate({
-          target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
+          target: [schema.projectShareAccess.shareId, schema.projectShareAccess.recipientEmail],
           set: { status: 'active', revokedAt: null },
         })
         .returning();
+      /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
 
       if (!grant) {
-        throw new HttpException('Publication invite failed', HttpStatus.INTERNAL_SERVER_ERROR);
+        throw new HttpException('Link invite failed', HttpStatus.INTERNAL_SERVER_ERROR);
       }
 
-      return { grant, existingGrant };
+      return { share, grant, existingGrant };
     });
 
-    if (args.notifyRecipient === true && existingGrant?.status !== 'active') {
-      const ownerSnapshot = await this.resolveOwnerSnapshot(publication);
-      const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
-      await this.sendPublicationInviteNotifications({
+    const undeliverable = await this.undeliverableRecipients([recipientEmail]);
+    let email: InviteEmailOutcome = { status: 'not_requested' };
+    if (args.notifyRecipient !== false && existingGrant?.status !== 'active') {
+      const ownerSnapshot = await this.loadOwnerSnapshot(args.ownerId);
+      email = await this.sendLinkInviteEmail({
         ownerId: args.ownerId,
-        trigger: 'invite',
-        recipientEmails: [recipientEmail],
+        recipientEmail,
+        undeliverable: undeliverable.has(recipientEmail),
         ownerName: ownerSnapshot?.name ?? 'A Tau user',
-        publicationTitle: publication.title,
-        url: buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id }),
+        projectName: project.name,
+        url: this.cloudLinkUrl(share.id),
       });
     }
 
-    return this.toAccessGrantDto(grant, await this.undeliverableRecipients([grant.recipientEmail]));
+    return { ...this.toAccessGrantDto(grant, undeliverable), email };
   }
 
-  public async revokeAccess(args: {
-    publicationId: string;
+  /**
+   * Removes an invited address from the project's cloud link
+   * (`DELETE /v1/projects/:id/share/access/:accessId`). Works on a stopped link too.
+   *
+   * @param args - The project, the owner and the grant.
+   * @returns The removed grant.
+   */
+  public async revokeProjectShareAccess(args: {
+    projectId: string;
     ownerId: string;
     accessId: string;
-  }): Promise<PublicationAccessGrant> {
-    const publication = await this.assertPublicationOwner(args);
-    return this.withActivePublication(publication, async (transaction) => {
+  }): Promise<ProjectShareAccessGrant> {
+    await this.assertProjectOwner(args);
+    return this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
+      const share = await this.selectShareOfProject(transaction, args.projectId);
+      if (share === undefined) {
+        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
+      }
+
       const [grant] = await transaction
-        .update(schema.publicationAccess)
+        .update(schema.projectShareAccess)
         .set({ status: 'revoked', revokedAt: new Date() })
-        .where(
-          and(
-            eq(schema.publicationAccess.id, args.accessId),
-            eq(schema.publicationAccess.publicationId, args.publicationId),
-          ),
-        )
+        .where(and(eq(schema.projectShareAccess.id, args.accessId), eq(schema.projectShareAccess.shareId, share.id)))
         .returning();
 
       if (!grant) {
-        throw new NotFoundException({
-          code: publicationApiCode.NOT_FOUND,
-          message: 'Publication access grant not found',
-        });
+        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link access grant not found' });
       }
 
       return this.toAccessGrantDto(grant, new Set());
@@ -750,8 +738,8 @@ export class PublicationsService {
    * (1) caller is not the owner, (2) the per-identity 5/day cap is not exceeded,
    * (3) Redis HLL `PFADD` reports the viewer as new for the day.
    *
-   * Throws `429 RATE_LIMITED` when the cap is hit, `404` when the publication does not exist,
-   * `410` when it has been unpublished.
+   * Throws `429 RATE_LIMITED` when the cap is hit, `404` when the publication or its
+   * project's cloud link does not exist, `410` when either has been withdrawn.
    */
   public async recordView(args: { publicationId: string; identity: ResolvedViewerIdentity }): Promise<void> {
     const { publicationId, identity } = args;
@@ -771,6 +759,17 @@ export class PublicationsService {
     if (publication.unpublishedAt) {
       this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
       throw new GoneException({ code: publicationApiCode.GONE, message: 'Publication is no longer available' });
+    }
+
+    const share = await this.selectShareOfProject(this.databaseService.database, publication.projectId);
+    if (share === undefined) {
+      this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
+    }
+
+    if (share.disabledAt !== null) {
+      this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
+      throw new GoneException({ code: publicationApiCode.GONE, message: 'This link is no longer shared' });
     }
 
     await this.assertActiveProject(publication.projectId);
@@ -812,29 +811,47 @@ export class PublicationsService {
     }
   }
 
-  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
+  /**
+   * Only people you invite is a paid feature (tiers doc T4/AD11 — anyone with
+   * the link is never gated). Grandfathering (T16): an owner who lost the
+   * entitlement keeps a link that is already private and can still publish to
+   * it; only making a link private needs the entitlement.
+   */
+  private async assertVisibilityAllowed(args: {
+    ownerId: string;
+    visibility: PublicationVisibility;
+    current: Pick<ProjectShareRow, 'visibility'> | undefined;
+  }): Promise<void> {
+    if (args.visibility !== 'private' || args.current?.visibility === 'private') {
+      return;
+    }
+
     const entitlements = await this.entitlementsService.getEntitlements(args.ownerId);
     if (entitlements.canCreatePrivateShares) {
       return;
     }
 
-    if (args.projectId !== undefined) {
-      const [existing] = await this.databaseService.database
-        .select({ visibility: schema.publication.visibility })
-        .from(schema.project)
-        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
-        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
-        .limit(1);
-      if (existing?.visibility === 'private') {
-        // Content-only update to a grandfathered private publication.
-        return;
-      }
-    }
-
     throw new ForbiddenException({
       code: publicationApiCode.ENTITLEMENT_REQUIRED,
-      message: 'Private publications require the Pro plan',
+      message: 'Links for people you invite need the Pro plan',
     });
+  }
+
+  /** The setting a publish leaves the link at: the request's, else the link's, else private. */
+  private publishVisibility(
+    request: Pick<PublishRequest, 'visibility'>,
+    share: Pick<ProjectShareRow, 'visibility'> | undefined,
+  ): PublicationVisibility {
+    return request.visibility ?? (share === undefined ? 'private' : this.linkVisibility(share));
+  }
+
+  private linkVisibility(share: Pick<ProjectShareRow, 'visibility'>): PublicationVisibility {
+    return share.visibility === 'public' ? 'public' : 'private';
+  }
+
+  private cloudLinkUrl(shareId: string): string {
+    const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
+    return buildCloudLinkUrl({ frontendURL: frontendUrl, shareId });
   }
 
   /**
@@ -937,24 +954,28 @@ export class PublicationsService {
   }
 
   /**
-   * The rows one publish writes, inside the transaction that took its counts.
+   * The rows one publish writes, inside the transaction that took its counts:
+   * the project, the version, the project's pointer at it, and the cloud link.
    *
-   * Extracted only so the publish path reads as what it is: one lease, one
-   * transaction, and the same row writes it always made.
+   * The version's title and description are the project's (D3). The link is
+   * created at the first publish and otherwise keeps its id and its invited
+   * people; a publish clears "Stop sharing" and records when it moved.
    *
    * @param args - The open transaction, the request, and the version written.
+   * @returns The link row as it now stands.
    */
   private async writePublicationRows(args: {
-    tx: Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
+    tx: PublicationTransaction;
     ownerId: string;
     request: PublishRequest;
     publicationId: string;
-    sharedEmails: readonly string[];
+    visibility: PublicationVisibility;
     /* oxlint-disable-next-line typescript/no-restricted-types -- `loadOwnerSnapshot` answers `null`, as the nullable column does */
     ownerSnapshot: PublicationOwnerSnapshot | null;
     version: MaterializedPublication;
-  }): Promise<void> {
-    const { tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version } = args;
+  }): Promise<ProjectShareRow> {
+    const { tx, ownerId, request, publicationId, visibility, ownerSnapshot, version } = args;
+    const now = new Date();
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
     await tx
       .insert(schema.project)
@@ -964,12 +985,12 @@ export class PublicationsService {
         name: request.projectName,
         description: request.description,
         origin: 'local-mirror',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
       })
       .onConflictDoUpdate({
         target: schema.project.id,
-        set: { name: request.projectName, description: request.description, updatedAt: new Date() },
+        set: { name: request.projectName, description: request.description, updatedAt: now },
       });
 
     await tx
@@ -980,73 +1001,76 @@ export class PublicationsService {
         ownerId,
         tag: request.tag,
         revisionId: version.revisionId,
-        visibility: request.visibility,
+        visibility,
         manifestKey: version.manifestKey,
         ogImageKey: defaultOgImageKey,
         thumbnailKey: version.thumbnailKey,
         runtimePin: version.runtimePin,
         kernels: [...version.kernels],
         entryPath: request.entryPath,
-        title: request.title,
+        title: request.projectName,
         description: request.description,
         ownerSnapshot,
-        createdAt: new Date(),
+        createdAt: now,
       })
       .onConflictDoUpdate({
         target: [schema.publication.projectId, schema.publication.tag],
         set: {
           revisionId: version.revisionId,
-          visibility: request.visibility,
+          visibility,
           manifestKey: version.manifestKey,
           thumbnailKey: version.thumbnailKey,
           runtimePin: version.runtimePin,
           kernels: [...version.kernels],
           entryPath: request.entryPath,
-          title: request.title,
+          title: request.projectName,
           description: request.description,
           unpublishedAt: null,
         },
       });
-    /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
 
     await tx
       .update(schema.project)
-      .set({ currentPublicationId: publicationId, updatedAt: new Date() })
+      .set({ currentPublicationId: publicationId, updatedAt: now })
       .where(eq(schema.project.id, request.projectId));
 
-    if (sharedEmails.length > 0) {
-      await tx
-        .insert(schema.publicationAccess)
-        .values(
-          sharedEmails.map((recipientEmail) => ({
-            id: generatePrefixedId(idPrefix.publicationAccess),
-            publicationId,
-            ownerId,
-            recipientEmail,
-            status: 'active',
-            createdAt: new Date(),
-            revokedAt: null,
-          })),
-        )
-        .onConflictDoUpdate({
-          target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
-          set: { status: 'active', revokedAt: null },
-        });
+    const [share] = await tx
+      .insert(schema.projectShare)
+      .values({
+        id: generatePrefixedId(idPrefix.projectShare),
+        projectId: request.projectId,
+        ownerId,
+        visibility,
+        disabledAt: null,
+        publishedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.projectShare.projectId,
+        set: { visibility, disabledAt: null, publishedAt: now, updatedAt: now },
+      })
+      .returning();
+    /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+
+    if (!share) {
+      throw new HttpException('Cloud link write failed', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+    return share;
   }
 
-  private async loadPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
-    const publication = await this.selectPublicationOrThrow(publicationId);
-    /* Every read of a publication routes through here, which is where D19 puts
-       the repair: a row behind the manifest is re-derived and then re-read, so
-       what this returns is never a version the push already superseded. */
+  /**
+   * Every read of a publication's bytes routes through here, which is where D19
+   * puts the repair: a row behind the manifest is re-derived and then re-read,
+   * so what this returns is never a version the push already superseded.
+   */
+  private async repairAndReload(publication: PublicationRow): Promise<PublicationRow> {
     const repaired = await this.rederivePublications(publication);
     // Repair can swallow a lifecycle refusal; check again before serving an earlier row.
     await this.assertActiveProject(publication.projectId);
-    return repaired ? this.selectPublicationOrThrow(publicationId) : publication;
+    return repaired ? this.selectPublicationOrThrow(publication.id) : publication;
   }
 
-  /** One publication row, refused when it is absent or withdrawn. */
   private async selectPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
     const rows = await this.databaseService.database
       .select()
@@ -1068,21 +1092,21 @@ export class PublicationsService {
   }
 
   /**
-   * Layered access check for a publication: public → everyone; private →
-   * 401 unauthenticated, 403 unless owner or active email-grantee.
-   * Shared by the envelope route and the file proxy so both boundaries
+   * Layered access check for a cloud link: anyone with the link → everyone;
+   * people you invite → 401 signed out, 403 unless owner or an active invited
+   * address. Shared by the viewer route and the file proxy so both boundaries
    * enforce identical semantics.
    */
-  private async authorizePublicationViewer(
-    publication: { readonly id: string; readonly ownerId: string; readonly visibility: string },
+  private async authorizeShareViewer(
+    share: Pick<ProjectShareRow, 'id' | 'ownerId' | 'visibility'>,
     viewerUserId: string | undefined,
   ): Promise<PublicationViewResponse['viewerRole']> {
     let viewerRole: PublicationViewResponse['viewerRole'] = 'public';
-    if (viewerUserId === publication.ownerId) {
+    if (viewerUserId === share.ownerId) {
       viewerRole = 'owner';
     }
 
-    if (publication.visibility === 'private') {
+    if (this.linkVisibility(share) === 'private') {
       if (viewerUserId === undefined) {
         throw new UnauthorizedException({
           code: publicationApiCode.UNAUTHORIZED,
@@ -1090,19 +1114,16 @@ export class PublicationsService {
         });
       }
 
-      if (viewerUserId !== publication.ownerId) {
+      if (viewerUserId !== share.ownerId) {
         const viewerEmail = await this.loadViewerEmail(viewerUserId);
         const hasGrant = viewerEmail
-          ? await this.hasActivePublicationAccess({
-              publicationId: publication.id,
-              recipientEmail: viewerEmail,
-            })
+          ? await this.hasActiveShareAccess({ shareId: share.id, recipientEmail: viewerEmail })
           : false;
 
         if (!hasGrant) {
           throw new ForbiddenException({
             code: publicationApiCode.FORBIDDEN,
-            message: 'Publication is private',
+            message: 'This link is for invited people only',
           });
         }
 
@@ -1168,7 +1189,7 @@ export class PublicationsService {
    */
   private async reconcileStorageTier(
     publication: Readonly<Pick<typeof schema.publication.$inferSelect, 'id' | 'manifestKey' | 'thumbnailKey'>>,
-    targetVisibility: PublicationVisibilityUpdate['visibility'],
+    targetVisibility: PublicationVisibility,
   ): Promise<void> {
     const manifest = await this.loadStoredManifest(publication.manifestKey);
     const targetTier: StorageTier = targetVisibility === 'private' ? 'private' : 'public';
@@ -1263,33 +1284,119 @@ export class PublicationsService {
   }
   /* oxlint-enable typescript-eslint/no-restricted-types -- end null-type window */
 
-  private async assertPublicationOwner(args: {
-    readonly publicationId: string;
+  /** The project, refused unless it is active and the caller owns it. */
+  private async assertProjectOwner(args: {
+    readonly projectId: string;
     readonly ownerId: string;
-  }): Promise<typeof schema.publication.$inferSelect> {
-    const rows = await this.databaseService.database
+  }): Promise<typeof schema.project.$inferSelect> {
+    await this.assertActiveProject(args.projectId, args.ownerId);
+    const [project] = await this.databaseService.database
       .select()
-      .from(schema.publication)
-      .where(eq(schema.publication.id, args.publicationId))
+      .from(schema.project)
+      .where(eq(schema.project.id, args.projectId))
       .limit(1);
 
-    const publication = rows[0];
-    if (!publication) {
-      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+    if (!project) {
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Project not found' });
     }
 
-    if (publication.ownerId !== args.ownerId) {
+    if (project.ownerId !== args.ownerId) {
       throw new ForbiddenException({
-        code: publicationApiCode.FORBIDDEN,
-        message: 'Publication is owned by another user',
+        code: publicationApiCode.PROJECT_FORBIDDEN,
+        message: 'Project is owned by another user',
       });
     }
 
-    await this.assertActiveProject(publication.projectId);
-    return publication;
+    return project;
   }
 
-  /** Serialize the lifecycle decision with deletion, including cached serving. */
+  private async selectShareOfProject(database: ShareReader, projectId: string): Promise<ProjectShareRow | undefined> {
+    const [share] = await database
+      .select()
+      .from(schema.projectShare)
+      .where(eq(schema.projectShare.projectId, projectId))
+      .limit(1);
+    return share;
+  }
+
+  /** `404` when the link does not exist, `410` when it is stopped. */
+  private assertShareLive(share: ProjectShareRow | undefined): asserts share is ProjectShareRow {
+    if (share === undefined) {
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
+    }
+
+    if (share.disabledAt !== null) {
+      throw new GoneException({ code: publicationApiCode.GONE, message: 'This link is no longer shared' });
+    }
+  }
+
+  /** The project's live link: `404` when it has none, `410` when it is stopped. */
+  private async selectShareOfProjectOrThrow(projectId: string): Promise<ProjectShareRow> {
+    const share = await this.selectShareOfProject(this.databaseService.database, projectId);
+    this.assertShareLive(share);
+    return share;
+  }
+
+  /** A live link by its id, of an active project. */
+  private async selectShareOrThrow(shareId: string): Promise<ProjectShareRow> {
+    const [share] = await this.databaseService.database
+      .select()
+      .from(schema.projectShare)
+      .where(eq(schema.projectShare.id, shareId))
+      .limit(1);
+    if (share !== undefined) {
+      await this.assertActiveProject(share.projectId);
+    }
+    this.assertShareLive(share);
+    return share;
+  }
+
+  /** The version the project points at, if it still has one. */
+  private async selectCurrentPublication(
+    database: ShareReader,
+    projectId: string,
+  ): Promise<PublicationRow | undefined> {
+    const [current] = await database
+      .select({ publication: schema.publication })
+      .from(schema.project)
+      .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
+      .where(and(eq(schema.project.id, projectId), isNull(schema.publication.unpublishedAt)))
+      .limit(1);
+    return current?.publication;
+  }
+
+  /** The version a live link shows, repaired when it is behind the push. */
+  private async loadCurrentPublicationOrThrow(share: ProjectShareRow): Promise<PublicationRow> {
+    const current = await this.selectCurrentPublication(this.databaseService.database, share.projectId);
+    if (current === undefined) {
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
+    }
+
+    return this.repairAndReload(current);
+  }
+
+  private async toProjectShareDto(share: ProjectShareRow): Promise<ProjectShare> {
+    const db = this.databaseService.database;
+    const current = await this.selectCurrentPublication(db, share.projectId);
+    const grants = await db
+      .select()
+      .from(schema.projectShareAccess)
+      .where(and(eq(schema.projectShareAccess.shareId, share.id), eq(schema.projectShareAccess.status, 'active')))
+      .orderBy(desc(schema.projectShareAccess.createdAt));
+
+    return {
+      id: share.id,
+      url: this.cloudLinkUrl(share.id),
+      visibility: this.linkVisibility(share),
+      status: share.disabledAt === null ? 'active' : 'stopped',
+      stoppedAt: share.disabledAt?.toISOString() ?? null,
+      publishedAt: share.publishedAt?.toISOString() ?? null,
+      currentVersion:
+        current === undefined ? null : { publicationId: current.id, tag: current.tag, revisionId: current.revisionId },
+      access: { grants: await this.toAccessGrantDtos(grants) },
+    };
+  }
+
   private async assertActiveProject(projectId: string, userId?: string): Promise<void> {
     await this.databaseService.database.transaction(async (transaction) => {
       await assertActiveProjectLocked(transaction, projectId, userId);
@@ -1333,18 +1440,18 @@ export class PublicationsService {
     return this.normalizeEmail(row.email);
   }
 
-  private async hasActivePublicationAccess(args: {
-    readonly publicationId: string;
+  private async hasActiveShareAccess(args: {
+    readonly shareId: string;
     readonly recipientEmail: string;
   }): Promise<boolean> {
     const rows = await this.databaseService.database
-      .select({ id: schema.publicationAccess.id })
-      .from(schema.publicationAccess)
+      .select({ id: schema.projectShareAccess.id })
+      .from(schema.projectShareAccess)
       .where(
         and(
-          eq(schema.publicationAccess.publicationId, args.publicationId),
-          eq(schema.publicationAccess.recipientEmail, this.normalizeEmail(args.recipientEmail)),
-          eq(schema.publicationAccess.status, 'active'),
+          eq(schema.projectShareAccess.shareId, args.shareId),
+          eq(schema.projectShareAccess.recipientEmail, this.normalizeEmail(args.recipientEmail)),
+          eq(schema.projectShareAccess.status, 'active'),
         ),
       )
       .limit(1);
@@ -1356,93 +1463,79 @@ export class PublicationsService {
     return email.trim().toLowerCase();
   }
 
-  private async sendPublicationInviteNotifications(args: {
+  /**
+   * Emails one link invite and answers what happened (stable cloud link
+   * blueprint E4). The grant exists whatever this answers.
+   *
+   * An address Resend suppresses would be accepted and then silently dropped,
+   * so it is skipped before the owner's daily cap is consumed (bounce blueprint
+   * R9). A deployment without an email provider skips before the cap too. The
+   * limiter fails closed: sender reputation is not best-effort.
+   */
+  private async sendLinkInviteEmail(args: {
     readonly ownerId: string;
-    readonly trigger: 'publish' | 'invite';
-    readonly recipientEmails: readonly string[];
+    readonly recipientEmail: string;
+    readonly undeliverable: boolean;
     readonly ownerName: string;
-    readonly publicationTitle: string;
+    readonly projectName: string;
     readonly url: string;
-  }): Promise<void> {
-    /* An address Resend suppresses would be accepted and then silently dropped, so it is skipped before the
-     * owner's cap is consumed; its grant still exists and reads "Not delivered" (bounce blueprint R9, D5). */
-    const undeliverable = await this.undeliverableRecipients(args.recipientEmails);
-    const recipientEmails = args.recipientEmails.filter(
-      (recipientEmail) => !undeliverable.has(this.normalizeEmail(recipientEmail)),
-    );
-    const skipped = args.recipientEmails.length - recipientEmails.length;
-    if (skipped > 0) {
-      this.logger.log(
-        `Skipping ${skipped} invite notification(s) to undeliverable recipients for owner ${args.ownerId}`,
-      );
-      this.metrics.publicationInviteEmailsSuppressedTotal.add(skipped, {
-        trigger: args.trigger,
-        reason: 'recipient_undeliverable',
-      });
+  }): Promise<InviteEmailOutcome> {
+    const trigger = 'invite';
+    if (args.undeliverable) {
+      this.logger.log(`Skipping an invite email to an undeliverable recipient for owner ${args.ownerId}`);
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(1, { trigger, reason: 'recipient_undeliverable' });
+      return { status: 'skipped', reason: 'undeliverable' };
     }
-    if (recipientEmails.length === 0) {
-      return;
+
+    if (!this.emailService.isDeliveryEnabled) {
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(1, { trigger, reason: 'email_disabled' });
+      return { status: 'skipped', reason: 'email_disabled' };
     }
-    const emailCount = recipientEmails.length;
 
     let limit: { allowed: boolean; count: number };
     try {
-      limit = await this.publicationRateLimiter.consumeInviteEmailSlots({ ownerId: args.ownerId, count: emailCount });
+      limit = await this.publicationRateLimiter.consumeInviteEmailSlots({ ownerId: args.ownerId, count: 1 });
     } catch (error) {
-      // Fail closed: notification is best-effort, but sender reputation is not — if the
-      // limiter is unavailable we drop the emails rather than risk unbounded sending.
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `Invite email rate limiter unavailable; suppressing ${emailCount} notification(s) for owner ${args.ownerId}: ${message}`,
+        `Invite email rate limiter unavailable; suppressing an invite email for owner ${args.ownerId}: ${message}`,
       );
-      this.metrics.publicationInviteEmailsSuppressedTotal.add(emailCount, {
-        trigger: args.trigger,
-        reason: 'limiter_unavailable',
-      });
-      return;
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(1, { trigger, reason: 'limiter_unavailable' });
+      return { status: 'skipped', reason: 'limiter_unavailable' };
     }
 
     if (!limit.allowed) {
       this.logger.warn(
-        `Owner ${args.ownerId} exceeded the daily invite email cap (${limit.count} consumed); suppressing ${emailCount} notification(s)`,
+        `Owner ${args.ownerId} exceeded the daily invite email cap (${limit.count} consumed); suppressing an invite email`,
       );
-      this.metrics.publicationInviteEmailsSuppressedTotal.add(emailCount, {
-        trigger: args.trigger,
-        reason: 'cap_exceeded',
-      });
-      return;
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(1, { trigger, reason: 'cap_exceeded' });
+      return { status: 'skipped', reason: 'daily_cap' };
     }
 
-    await Promise.all(
-      recipientEmails.map(async (recipientEmail) => {
-        try {
-          await this.emailService.sendPublicationInvite({
-            recipientEmail,
-            ownerName: args.ownerName,
-            publicationTitle: args.publicationTitle,
-            url: args.url,
-          });
-          this.metrics.publicationInviteEmailsTotal.add(1, { trigger: args.trigger, outcome: 'sent' });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.logger.warn(`Publication invite email failed for ${this.describeRecipient(recipientEmail)}: ${message}`);
-          this.metrics.publicationInviteEmailsTotal.add(1, { trigger: args.trigger, outcome: 'failed' });
-        }
-      }),
-    );
+    try {
+      const sent = await this.emailService.sendPublicationInvite({
+        recipientEmail: args.recipientEmail,
+        ownerName: args.ownerName,
+        publicationTitle: args.projectName,
+        url: args.url,
+      });
+      if (sent === 'disabled') {
+        this.metrics.publicationInviteEmailsSuppressedTotal.add(1, { trigger, reason: 'email_disabled' });
+        return { status: 'skipped', reason: 'email_disabled' };
+      }
+      this.metrics.publicationInviteEmailsTotal.add(1, { trigger, outcome: 'sent' });
+      return { status: 'sent' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Link invite email failed for ${this.describeRecipient(args.recipientEmail)}: ${message}`);
+      this.metrics.publicationInviteEmailsTotal.add(1, { trigger, outcome: 'failed' });
+      return { status: 'skipped', reason: 'send_failed' };
+    }
   }
 
   private describeRecipient(email: string): string {
     const [, domain = 'unknown-domain'] = email.split('@');
     return `recipient@${domain}`;
-  }
-
-  private toUnpublishedProjectShareEnvelope(project: ProjectShareProject): ProjectShareEnvelope {
-    return {
-      project,
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
-    };
   }
 
   /**
@@ -1462,22 +1555,16 @@ export class PublicationsService {
     }
   }
 
-  private async toAccessGrantDtos(
-    rows: ReadonlyArray<typeof schema.publicationAccess.$inferSelect>,
-  ): Promise<PublicationAccessGrant[]> {
+  private async toAccessGrantDtos(rows: readonly ProjectShareAccessRow[]): Promise<ProjectShareAccessGrant[]> {
     const undeliverable = await this.undeliverableRecipients(rows.map((row) => row.recipientEmail));
     return rows.map((row) => this.toAccessGrantDto(row, undeliverable));
   }
 
-  private toAccessGrantDto(
-    row: typeof schema.publicationAccess.$inferSelect,
-    undeliverable: ReadonlySet<string>,
-  ): PublicationAccessGrant {
+  private toAccessGrantDto(row: ProjectShareAccessRow, undeliverable: ReadonlySet<string>): ProjectShareAccessGrant {
     return {
       id: row.id,
-      publicationId: row.publicationId,
       recipientEmail: row.recipientEmail,
-      status: row.status as PublicationAccessGrant['status'],
+      status: row.status as ProjectShareAccessGrant['status'],
       createdAt: row.createdAt.toISOString(),
       revokedAt: row.revokedAt?.toISOString() ?? null,
       // Only "Not delivered": whether the mailbox is missing or its owner reported the mail is theirs (D5).

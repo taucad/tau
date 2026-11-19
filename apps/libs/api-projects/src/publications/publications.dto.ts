@@ -1,21 +1,19 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { inviteEmailSkipReasons } from '@taucad/types/constants';
 import { isProjectRepositoryId } from '@taucad/api-git-core/git.constants';
-
-const maxPublicationAccessRecipients = 50;
 
 export const normalizedPublicationAccessEmailSchema = z.string().trim().toLowerCase().pipe(z.email());
 
-export const sharedPublicationEmailsSchema = z
-  .array(normalizedPublicationAccessEmailSchema)
-  .max(maxPublicationAccessRecipients)
-  .transform((emails) => [...new Set(emails)]);
+export const publicationVisibilitySchema = z.enum(['private', 'public']);
 
 /**
  * `POST /v1/publications` — a publication is a pointer into the synced graph
- * (D11, A21): `{ projectId, tag, revisionId }` plus the three things only a
- * person decides (who may see it, what it is called, who it is shared with).
- * Nothing is uploaded: the bytes arrived with the push and the server
+ * (D11, A21): `{ projectId, tag, revisionId }`. The project's name and
+ * description become the link's title and description (stable cloud link
+ * blueprint D3). `visibility` sets who can open the project's one cloud link;
+ * without it a live or stopped link keeps its setting and a new link is
+ * private. Nothing is uploaded: the bytes arrived with the push and the server
  * materializes the tagged tree.
  */
 export const publishRequestSchema = z
@@ -32,20 +30,8 @@ export const publishRequestSchema = z
     /** The revision that name points at, as the client observed it. */
     revisionId: z.string().min(1).max(64),
     entryPath: z.string().min(1),
-    visibility: z.enum(['private', 'public']),
-    title: z.string().min(1),
     description: z.string().optional(),
-    sharedEmails: sharedPublicationEmailsSchema.optional(),
-    notifyRecipients: z.boolean().optional(),
-  })
-  .superRefine((request, context) => {
-    if (request.visibility === 'public' && (request.sharedEmails?.length ?? 0) > 0) {
-      context.addIssue({
-        code: 'custom',
-        message: 'sharedEmails can only be used with private publications',
-        path: ['sharedEmails'],
-      });
-    }
+    visibility: publicationVisibilitySchema.optional(),
   })
   .meta({ id: 'PublishRequest' });
 
@@ -65,8 +51,6 @@ export const storedPublicationManifestSchema = z.object({
 });
 
 export type StoredPublicationManifest = z.infer<typeof storedPublicationManifestSchema>;
-
-export const publicationVisibilitySchema = z.enum(['private', 'public']);
 
 export const publicationOwnerSnapshotSchema = z
   .object({
@@ -111,6 +95,13 @@ export const publishResponseSchema = z
   .object({
     id: z.string(),
     urls: publicationUrlsSchema,
+    /** The project's cloud link, which this publish now points at. */
+    share: z.object({
+      id: z.string(),
+      url: z.url(),
+      visibility: publicationVisibilitySchema,
+    }),
+    version: z.object({ tag: z.string() }),
   })
   .meta({ id: 'PublishResponse' });
 
@@ -124,47 +115,75 @@ export const publicationViewResponseSchema = z
   })
   .meta({ id: 'PublicationViewResponse' });
 
-export const publicationAccessStatusSchema = z.enum(['active', 'revoked']);
+export const projectShareAccessStatusSchema = z.enum(['active', 'revoked']);
 
-export const publicationAccessGrantSchema = z
+/** One invited address on a private cloud link. */
+export const projectShareAccessGrantSchema = z
   .object({
     id: z.string(),
-    publicationId: z.string(),
     recipientEmail: z.email(),
-    status: publicationAccessStatusSchema,
+    status: projectShareAccessStatusSchema,
     createdAt: z.iso.datetime(),
     revokedAt: z.iso.datetime().nullable(),
     /** Mail to this recipient cannot be delivered (bounced, reported or suppressed); the reason is not disclosed. */
     notDelivered: z.boolean().optional(),
   })
-  .meta({ id: 'PublicationAccessGrant' });
+  .meta({ id: 'ProjectShareAccessGrant' });
 
-export const invitePublicationAccessSchema = z
+/** What happened to an invite's email (stable cloud link blueprint D7, E4). */
+export const inviteEmailOutcomeSchema = z
+  .discriminatedUnion('status', [
+    z.object({ status: z.literal('sent') }),
+    z.object({ status: z.literal('skipped'), reason: z.enum(inviteEmailSkipReasons) }),
+    z.object({ status: z.literal('not_requested') }),
+  ])
+  .meta({ id: 'InviteEmailOutcome' });
+
+/** `POST /v1/projects/:id/share/access` answers the grant and what happened to its email. */
+export const projectShareAccessInviteResponseSchema = projectShareAccessGrantSchema
+  .extend({ email: inviteEmailOutcomeSchema })
+  .meta({ id: 'ProjectShareAccessInviteResponse' });
+
+/** `POST /v1/projects/:id/share/access`. The email is sent unless `notifyRecipient` is `false`. */
+export const inviteProjectShareAccessSchema = z
   .object({
     email: normalizedPublicationAccessEmailSchema,
     notifyRecipient: z.boolean().optional(),
   })
-  .meta({ id: 'InvitePublicationAccess' });
+  .meta({ id: 'InviteProjectShareAccess' });
 
-export const updatePublicationVisibilitySchema = z
+/** `PATCH /v1/projects/:id/share`: who can open the link. */
+export const updateProjectShareSchema = z
   .object({
     visibility: publicationVisibilitySchema,
   })
-  .meta({ id: 'UpdatePublicationVisibility' });
+  .meta({ id: 'UpdateProjectShare' });
 
-export const publicationVisibilityUpdateSchema = z
+/** A project's cloud link as its owner sees it. */
+export const projectShareSchema = z
   .object({
     id: z.string(),
+    url: z.url(),
     visibility: publicationVisibilitySchema,
+    /** `stopped` after "Stop sharing" (or project deletion); the next publish turns the same link back on. */
+    status: z.enum(['active', 'stopped']),
+    stoppedAt: z.iso.datetime().nullable(),
+    publishedAt: z.iso.datetime().nullable(),
+    /** The version the link shows; `revisionId` lets the client tell whether there are unpublished changes. */
+    currentVersion: z
+      .object({
+        publicationId: z.string(),
+        tag: z.string(),
+        revisionId: z.string(),
+      })
+      .nullable(),
+    access: z.object({
+      grants: z.array(projectShareAccessGrantSchema),
+    }),
   })
-  .meta({ id: 'PublicationVisibilityUpdate' });
+  .meta({ id: 'ProjectShare' });
 
-export const publicationAccessListSchema = z
-  .object({
-    grants: z.array(publicationAccessGrantSchema),
-  })
-  .meta({ id: 'PublicationAccessList' });
-
+/** `GET /v1/projects/:id/share`: the project and its link, `null` before its first publish. */
 export const projectShareEnvelopeSchema = z
   .object({
     project: z.object({
@@ -172,45 +191,27 @@ export const projectShareEnvelopeSchema = z
       name: z.string().nullable(),
       description: z.string().nullable(),
     }),
-    currentPublication: z
-      .object({
-        id: z.string(),
-        tag: z.string(),
-        title: z.string(),
-        description: z.string().nullable(),
-        visibility: publicationVisibilitySchema,
-        createdAt: z.iso.datetime(),
-        urls: z.object({
-          share: z.url(),
-        }),
-        access: z.object({
-          grants: z.array(publicationAccessGrantSchema),
-        }),
-      })
-      .nullable(),
-    snapshot: z.object({
-      state: z.enum(['unpublished', 'published-current']),
-      lastPublishedAt: z.iso.datetime().optional(),
-    }),
+    share: projectShareSchema.nullable(),
   })
   .meta({ id: 'ProjectShareEnvelope' });
 
 export class PublicationUrlsDto extends createZodDto(publicationUrlsSchema) {}
 export class PublishResponseDto extends createZodDto(publishResponseSchema) {}
 export class PublicationViewResponseDto extends createZodDto(publicationViewResponseSchema) {}
-export class InvitePublicationAccessDto extends createZodDto(invitePublicationAccessSchema) {}
-export class UpdatePublicationVisibilityDto extends createZodDto(updatePublicationVisibilitySchema) {}
-export class PublicationVisibilityUpdateDto extends createZodDto(publicationVisibilityUpdateSchema) {}
-export class PublicationAccessGrantDto extends createZodDto(publicationAccessGrantSchema) {}
-export class PublicationAccessListDto extends createZodDto(publicationAccessListSchema) {}
+export class InviteProjectShareAccessDto extends createZodDto(inviteProjectShareAccessSchema) {}
+export class UpdateProjectShareDto extends createZodDto(updateProjectShareSchema) {}
+export class ProjectShareDto extends createZodDto(projectShareSchema) {}
+export class ProjectShareAccessGrantDto extends createZodDto(projectShareAccessGrantSchema) {}
+export class ProjectShareAccessInviteResponseDto extends createZodDto(projectShareAccessInviteResponseSchema) {}
 export class ProjectShareEnvelopeDto extends createZodDto(projectShareEnvelopeSchema) {}
 
 export type PublicationWireRow = z.infer<typeof publicationRowSchema>;
 export type PublishResponse = z.infer<typeof publishResponseSchema>;
 export type PublicationViewResponse = z.infer<typeof publicationViewResponseSchema>;
-export type InvitePublicationAccess = z.infer<typeof invitePublicationAccessSchema>;
-export type UpdatePublicationVisibility = z.infer<typeof updatePublicationVisibilitySchema>;
-export type PublicationVisibilityUpdate = z.infer<typeof publicationVisibilityUpdateSchema>;
-export type PublicationAccessGrant = z.infer<typeof publicationAccessGrantSchema>;
-export type PublicationAccessList = z.infer<typeof publicationAccessListSchema>;
+export type InviteEmailOutcomeDto = z.infer<typeof inviteEmailOutcomeSchema>;
+export type InviteProjectShareAccess = z.infer<typeof inviteProjectShareAccessSchema>;
+export type UpdateProjectShare = z.infer<typeof updateProjectShareSchema>;
+export type ProjectShare = z.infer<typeof projectShareSchema>;
+export type ProjectShareAccessGrant = z.infer<typeof projectShareAccessGrantSchema>;
+export type ProjectShareAccessInviteResponse = z.infer<typeof projectShareAccessInviteResponseSchema>;
 export type ProjectShareEnvelope = z.infer<typeof projectShareEnvelopeSchema>;

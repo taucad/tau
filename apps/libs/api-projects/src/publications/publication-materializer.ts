@@ -1217,6 +1217,15 @@ export const materializePublishedTags = async (
         if (fresh === undefined || fresh.unpublishedAt !== null || fresh.manifestKey !== superseded) {
           return undefined;
         }
+        /* The tier follows the project's cloud link, read under the same lock a
+           change of who can open it takes; a project with no link repairs to
+           the private tier (stable cloud link blueprint, storage tier). */
+        const [link] = await transaction
+          .select({ visibility: schema.projectShare.visibility })
+          .from(schema.projectShare)
+          .where(eq(schema.projectShare.projectId, input.projectId))
+          .limit(1);
+        const visibility = link?.visibility === 'public' ? 'public' : 'private';
         /* Inside the transaction, and first, so the reference counts are taken
            before any blob is looked up or written (D10). */
         const written = await materializePublication(
@@ -1227,7 +1236,7 @@ export const materializePublishedTags = async (
             ownerId: input.ownerId,
             directory: input.directory,
             tag: row.tag,
-            visibility: row.visibility === 'private' ? 'private' : 'public',
+            visibility,
             entryPath: row.entryPath,
           },
           transaction,
@@ -1243,6 +1252,7 @@ export const materializePublishedTags = async (
             /* The name moved, so the row must say which revision a viewer is
              * now being served (the manifest is keyed by it). */
             revisionId: written.revisionId,
+            visibility,
           })
           .where(and(eq(schema.publication.id, row.id), eq(schema.publication.manifestKey, superseded)))
           .returning({ id: schema.publication.id });

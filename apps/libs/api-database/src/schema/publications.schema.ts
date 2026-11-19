@@ -54,29 +54,67 @@ export const publication = pgTable(
   ],
 );
 
-export const publicationAccess = pgTable(
-  'publication_access',
+/**
+ * A project's one stable cloud link (stable cloud link blueprint D1). It shows
+ * `project.current_publication_id`; who can open it and the invited people live
+ * here, not on a version, so they carry across every publish. A row exists only
+ * once a publish has succeeded, so an active link always has a current version.
+ */
+export const projectShare = pgTable(
+  'project_share',
   {
+    /** `shr_<21>`: the reference in `/s/tau~shr_…`. */
     id: text('id').primaryKey(),
-    publicationId: text('publication_id')
+    projectId: text('project_id')
       .notNull()
-      .references(() => publication.id, { onDelete: 'cascade' }),
+      .references(() => project.id, { onDelete: 'cascade' }),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Who can open the link. */
+    visibility: text('visibility').notNull(),
+    /** Set by "Stop sharing" and by project deletion; cleared by the next publish. */
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    /** When the link last changed what it shows; set on every publish. */
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('project_share_project_idx').on(table.projectId),
+    index('project_share_owner_idx').on(table.ownerId),
+    check('project_share_visibility_check', sql`${table.visibility} IN ('private', 'public')`),
+  ],
+);
+
+/** An exact-email invitation to open a private cloud link. */
+export const projectShareAccess = pgTable(
+  'project_share_access',
+  {
+    /** `sga_<21>`. */
+    id: text('id').primaryKey(),
+    shareId: text('share_id')
+      .notNull()
+      .references(() => projectShare.id, { onDelete: 'cascade' }),
     ownerId: text('owner_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     recipientEmail: text('recipient_email').notNull(),
     status: text('status').notNull().default('active'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex('publication_access_publication_email_idx').on(table.publicationId, table.recipientEmail),
-    index('publication_access_recipient_idx')
+    uniqueIndex('project_share_access_share_email_idx').on(table.shareId, table.recipientEmail),
+    index('project_share_access_recipient_idx')
       .on(table.recipientEmail, desc(table.createdAt))
       .where(sql`${table.status} = 'active'`),
-    index('publication_access_owner_idx').on(table.ownerId, desc(table.createdAt)),
-    check('publication_access_status_check', sql`${table.status} IN ('active', 'revoked')`),
-    check('publication_access_email_lower_check', sql`${table.recipientEmail} = lower(${table.recipientEmail})`),
+    index('project_share_access_owner_idx').on(table.ownerId, desc(table.createdAt)),
+    check('project_share_access_status_check', sql`${table.status} IN ('active', 'revoked')`),
+    check('project_share_access_email_lower_check', sql`${table.recipientEmail} = lower(${table.recipientEmail})`),
   ],
 );
 

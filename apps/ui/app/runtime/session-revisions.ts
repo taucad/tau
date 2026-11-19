@@ -646,7 +646,7 @@ export const openRevisionsAheadOfSession =
     };
     aheadOfSession.set(projectId, record);
     try {
-      /* Another account, or none, cannot inherit this connection: it is closed at the change. */
+      /* A different account, or none, cannot inherit this connection: it is closed at the change. */
       unsubscribes.push(
         ports.sessionUser.subscribe(() => {
           if (ports.sessionUser.get()?.id !== account) {

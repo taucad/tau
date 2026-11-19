@@ -1,6 +1,6 @@
 # replicad — Functions
 
-129 top-level symbols. Signatures are verbatim typescript.
+131 top-level symbols. Signatures are verbatim typescript.
 
 // asDir (function)
 export declare function asDir(direction: Direction): gp_Dir;
@@ -64,6 +64,7 @@ export declare function isShape3D(shape: AnyShape): shape is Shape3D;
 // isWire (function)
 export declare function isWire(shape: AnyShape): shape is Wire;
 
+// Yields each distinct sub shape of `topo` kind once, in explorer order
 // iterTopo (function)
 export declare function iterTopo<Entity extends TopoEntity>(shape: TopoDS_Shape, topo: Entity): IterableIterator<TopologyMap[Entity]>;
 
@@ -115,6 +116,9 @@ export declare function measureVolume(shape: Shape3D): number;
 // mirror (function)
 export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 
+// ocScope (function)
+export declare function ocScope(): OcScope;
+
 // resolveDirection (function)
 export declare function resolveDirection(direction: Direction): Point;
 
@@ -131,6 +135,10 @@ export declare function setOperationCache(cache: OperationCache | undefined): Op
 
 // translate (function)
 export declare function translate(shape: TopoDS_Shape, vector: Point): TopoDS_Shape;
+
+// Runs `fn` with a fresh {@link ocScope} and disposes it afterwards, whether `fn` returns or throws
+// withOcScope (function)
+export declare function withOcScope<T>(fn: (scope: OcScope) => T): T;
 
 // addHolesInFace (function)
 export declare function addHolesInFace(face: Face, holes: Wire[]): Face;
@@ -299,6 +307,9 @@ export declare function fuseBlueprints(first: Blueprint, second: Blueprint): nul
 // GCWithObject (function)
 export declare function GCWithObject(obj: any): <Type extends Deletable>(value: Type) => Type;
 
+// DEPRECATED: Values registered here are deleted only after the returned
+function has been garbage collected, which never happens during a
+synchronous model build. Use {@link ocScope}.
 // GCWithScope (function)
 export declare function GCWithScope(): <Type extends Deletable>(value: Type) => Type;
 
@@ -327,6 +338,8 @@ export declare function leftMost(shape: AnyShape, tolerance?: number): ShapeExtr
 // Example:
 //   finder.when(leftMost(shape));
 
+// DEPRECATED: Use {@link ocScope}, which also skips values that were already
+deleted and can release a value with `keep`.
 // localGC (function)
 export declare function localGC(debug?: boolean): [<T extends Deletable>(v: T) => T, () => void, Set<Deletable> | undefined];
 

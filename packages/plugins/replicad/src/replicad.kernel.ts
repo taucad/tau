@@ -59,7 +59,7 @@ import {
   wrapOcForExceptions,
   occtExplicitTessellationDefaults,
 } from '@taucad/occt-core';
-import type { OcctModuleFactory, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcErrorContext, OcRunMainResult, OcTracingSummary } from '@taucad/occt-core';
 
 import {
   isDrawingShape,
@@ -83,6 +83,8 @@ import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { createToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
+import { createHandleEpochs, isUseAfterReleaseMessage } from '#build-epochs.js';
+import type { CollectorGroup, HandleEpochs } from '#build-epochs.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
@@ -271,6 +273,21 @@ type ReplicadContext = {
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
   /** The live tier; undefined when compute reuse is switched off for this kernel. */
   liveTier: LiveTier<BuiltModel> | undefined;
+  /** Build and module epochs: what each delivered handle owns, deleted when the runtime releases it (E12). */
+  epochs: HandleEpochs;
+  /**
+   * Release fallback, first stage: the entry path of each module that returned or used a value its epochs had
+   * deleted, mapped to that module's bundled code and the collector group of its fresh instance. Builds of that code
+   * leave their handles to the collector. When the entry's bundle code changes, the entry is dropped and its group
+   * retired (the old instance never runs again but stays in the module map, so its memo is deleted, not collected),
+   * and the edited module starts with deterministic release again.
+   */
+  collectorModules: Map<string, { readonly code: string; readonly group: CollectorGroup }>;
+  /**
+   * Release fallback, second stage: a module's fresh instance used a deleted value again (state kept outside the
+   * bundle, such as `globalThis`). Every later build in this worker leaves its handles to the collector.
+   */
+  collectorWorker: boolean;
   /** Meshes and boxes kept across renders (E7, N2); made by the first render with the live tier, never without it. */
   meshMemo?: ReplicadMeshMemo;
   /** Display tolerance ladder (E8); only with the `tessellationLadder` option. */
@@ -291,7 +308,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.0' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.2' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -530,6 +547,7 @@ export const replicadKernel = defineKernel({
       tessellationInstancing,
       wasm,
       computeReuse: computeReuseOption,
+      computeReuseBytes,
       tessellationLadder,
     } = options;
 
@@ -625,7 +643,11 @@ export const replicadKernel = defineKernel({
       const liveTier =
         computeReuseOption === false || !seamPresent
           ? undefined
-          : createLiveTier<BuiltModel>({ library: replicadLibrary, releaseScene: releaseBuiltModel });
+          : createLiveTier<BuiltModel>({
+              library: replicadLibrary,
+              releaseScene: releaseBuiltModel,
+              byteBudget: computeReuseBytes,
+            });
       const libraryTrace = createKernelLibraryTracer({
         library: replicadLibrary,
         tracer,
@@ -665,6 +687,9 @@ export const replicadKernel = defineKernel({
         tracingSummary,
         libraryTrace,
         liveTier,
+        epochs: createHandleEpochs(replicadLibrary),
+        collectorModules: new Map(),
+        collectorWorker: false,
         toleranceLadder: tessellationLadder ? createToleranceLadder() : undefined,
       };
     } catch (error) {
@@ -688,7 +713,7 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const executeResult = await runtime.execute(bundleResult.code);
+      const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
       if (!executeResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
       }
@@ -735,22 +760,30 @@ export const replicadKernel = defineKernel({
         return tracedStep(tracer, 'replicad.scene-table-hit', () => {
           const delivered = aliasBuiltModel(revisited);
           tierBuiltHandles.add(delivered.handle);
+          context.epochs.adopt(delivered.handle);
           return delivered;
         });
       }
 
-      const buildGeometry = named('Object.createGeometry', async () => {
-        const executeResult = await runtime.execute(bundleResult.code);
-        if (!executeResult.success) {
-          throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
+      const collector = collectorRelease(context, entryPath, bundleResult.code);
+      let releaseFallback: 'module' | 'worker' | undefined;
+      /** Executes the module, or with `fresh` runs it again and replaces its cached instance. */
+      const executeModule = async (fresh: boolean) => {
+        const result = await context.epochs.inModuleEpoch(async () =>
+          runtime.execute(bundleResult.code, fresh ? { fresh } : undefined),
+        );
+        if (!result.success) {
+          throw new ReplicadBuildError(convertRawIssuesToKernelIssues(result.issues, relativeFilePath));
         }
-        entryUrl = executeResult.entryUrl;
+        entryUrl = result.entryUrl;
+        return result;
+      };
 
-        const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
-          const mainSpan = tracer.startSpan('replicad.run-main', {
-            phase: 'computingGeometry',
-            stage: 'brep',
-          });
+      const buildGeometry = named('Object.createGeometry', async () => {
+        let executeResult = await executeModule(false);
+
+        /** One run of `main` with the tier installed; a delivered value an epoch deleted fails it before `endBuild`. */
+        const runMainOnce = async (): Promise<OcRunMainResult & { released?: boolean }> => {
           const endBuild = documentTier
             ? installOperationTier(context.replicadLibrary, documentTier.operations)
             : undefined;
@@ -770,15 +803,64 @@ export const replicadKernel = defineKernel({
                   firstArg: context.libraryTrace.tracedLibrary,
                 }),
             });
+            if (
+              result.success &&
+              deliveredValues(context.libraryTrace.unwrap(result.value)).some((value) =>
+                context.epochs.wasReleased(value),
+              )
+            ) {
+              // A shape kept in module state and returned after the build that delivered it was released.
+              return { success: false, released: true, issues: [releasedShapeIssue()] };
+            }
             outcome = result.success ? 'delivered' : 'failed';
             return result;
           } finally {
             endBuild?.(outcome);
+          }
+        };
+
+        const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
+          const mainSpan = tracer.startSpan('replicad.run-main', {
+            phase: 'computingGeometry',
+            stage: 'brep',
+          });
+          try {
+            let result = await runMainOnce();
+            // Release fallback (see build-epochs.ts): a use of a value the epochs deleted runs the module fresh and
+            // leaves it to the collector; if the fresh instance fails the same way, the whole worker switches to the
+            // collector and runs it once more. Anything else, or a failure after that, is the build's.
+            while (!result.success && usedReleasedValue(context, result)) {
+              if (!collector.group && !context.collectorWorker) {
+                releaseFallback = 'module';
+                collector.group = context.epochs.collectorGroup();
+                context.collectorModules.set(entryPath, { code: bundleResult.code, group: collector.group });
+              } else if (context.collectorWorker) {
+                break;
+              } else {
+                releaseFallback = 'worker';
+                context.collectorWorker = true;
+              }
+              runtime.logger.warn(
+                releaseFallback === 'module'
+                  ? 'Replicad module used a released shape; running it fresh with collector release'
+                  : 'Replicad module used a released shape again; switching this worker to collector release',
+                { data: { filePath: relativeFilePath } },
+              );
+              // oxlint-disable-next-line eslint/no-await-in-loop -- at most two retries, each after the last one failed.
+              executeResult = await executeModule(true);
+              // oxlint-disable-next-line eslint/no-await-in-loop -- the retry runs the module just executed.
+              result = await runMainOnce();
+            }
+            return result;
+          } finally {
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
+            const fallback: Record<string, string> = releaseFallback ? { releaseFallback } : {};
             if (documentTier) {
-              const { hits, misses, stored, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
+              const { hits, misses, stored, opaque, failureHits, evicted, entries, bytes } =
+                documentTier.operations.stats();
               mainSpan.end({
+                ...fallback,
                 tierHits: hits,
                 tierMisses: misses,
                 tierStored: stored,
@@ -786,9 +868,10 @@ export const replicadKernel = defineKernel({
                 tierFailureHits: failureHits,
                 tierEvicted: evicted,
                 tierEntries: entries,
+                tierBytes: bytes,
               });
             } else {
-              mainSpan.end();
+              mainSpan.end(fallback);
             }
           }
         });
@@ -858,6 +941,10 @@ export const replicadKernel = defineKernel({
         tierBuiltHandles.add(built.handle);
       }
       documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
+      // After the worker switch, state may live outside the bundle: no group is retired, the collector frees it all.
+      context.epochs.adopt(built.handle, {
+        collector: context.collectorWorker || (collector.group ?? false),
+      });
       return built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
@@ -1219,7 +1306,7 @@ export const replicadKernel = defineKernel({
     if (serialized.format !== replicadSnapshotFormat) {
       throw new Error(`Unsupported replicad native-handle snapshot format: ${String(serialized.format)}`);
     }
-    return {
+    return context.epochs.adopt({
       ...serialized,
       shapes: serialized.shapes.map((entry) => ({
         shape:
@@ -1228,7 +1315,12 @@ export const replicadKernel = defineKernel({
             : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
-    };
+    });
+  },
+
+  // E12: the runtime releases a handle once nothing it keeps reaches it; its build epoch deletes what it alone owns.
+  releaseHandle({ handle }, _runtime, context) {
+    context.epochs.release(handle);
   },
 
   // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
@@ -1239,11 +1331,83 @@ export const replicadKernel = defineKernel({
   async onDispose(context) {
     try {
       context.meshMemo?.dispose();
+      // Released shapes still parked for the next build are deleted with the kernel (E12).
+      context.epochs.dispose();
       context.liveTier?.dispose();
     } finally {
       context.occt.release();
     }
   },
+});
+
+/**
+ * Whether builds of an entry's module leave their handles to the collector (release fallback, first stage). An entry
+ * whose bundle code changed since it fell back is dropped. The map is empty unless a module fell back, so the normal
+ * path reads no key.
+ * @param context - The kernel context.
+ * @param entryPath - The entry being built.
+ * @param code - Its bundled code.
+ * @returns The module's collector group, if it fell back; the build sets it when it falls back.
+ */
+const collectorRelease = (
+  context: ReplicadContext,
+  entryPath: string,
+  code: string,
+): { group: CollectorGroup | undefined } => {
+  if (context.collectorModules.size === 0) {
+    return { group: undefined };
+  }
+  const fellBack = context.collectorModules.get(entryPath);
+  if (fellBack === undefined || fellBack.code === code) {
+    return { group: fellBack?.group };
+  }
+  context.collectorModules.delete(entryPath);
+  if (!context.collectorWorker) {
+    fellBack.group.retire();
+  }
+  return { group: undefined };
+};
+
+/**
+ * Whether a failed run of `main` used a value the epochs deleted: it returned one, or it threw Replicad's or embind's
+ * exact use-after-release message after the epochs had deleted something.
+ * @param context - The kernel context.
+ * @param result - The failed run.
+ * @returns True when the release fallback answers it.
+ */
+const usedReleasedValue = (
+  context: ReplicadContext,
+  result: { readonly released?: boolean; readonly issues: readonly KernelIssue[] },
+): boolean =>
+  result.released === true ||
+  (context.epochs.stats().deleted > 0 && result.issues.some(({ message }) => isUseAfterReleaseMessage(message)));
+
+/**
+ * The values a `main` result delivers, in the forms `normalizeRenderShapes` accepts: a shape, a `{ shape }` entry, an
+ * array of either, or a model with `shapes`.
+ * @param value - What `main` returned, unwrapped.
+ * @returns The candidate shape values.
+ */
+const deliveredValues = (value: unknown): unknown[] => {
+  const shapeOf = (item: unknown): unknown => (isRecordObject(item) && 'shape' in item ? item['shape'] : item);
+  if (Array.isArray(value)) {
+    return value.map((item) => shapeOf(item));
+  }
+  if (isRecordObject(value) && Array.isArray(value['shapes'])) {
+    return value['shapes'].map((item: unknown) => shapeOf(item));
+  }
+  return [shapeOf(value)];
+};
+
+/**
+ * The issue of a build whose `main` returned a shape released with an earlier build.
+ * @returns The issue.
+ */
+const releasedShapeIssue = (): KernelIssue => ({
+  message: 'This object has been deleted',
+  code: 'RUNTIME',
+  type: 'runtime',
+  severity: 'error',
 });
 
 type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; clone(): Aliasable };

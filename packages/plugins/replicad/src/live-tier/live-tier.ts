@@ -10,7 +10,7 @@
  */
 import type * as ReplicadModule from 'replicad';
 import { createOperationTier } from '#live-tier/operation-tier.js';
-import type { OperationTier, OperationTierOptions } from '#live-tier/operation-tier.js';
+import type { ByteBudget, OperationTier, OperationTierOptions } from '#live-tier/operation-tier.js';
 
 type ReplicadLibrary = typeof ReplicadModule;
 
@@ -47,13 +47,17 @@ export type DocumentTier<Scene> = {
 /** The kernel's live tier: one document tier per entry path, the least recently used evicted first. @internal */
 export type LiveTier<Scene> = {
   readonly documents: number;
+  /** The byte budget every document's operation tier shares. */
+  readonly budget: Readonly<ByteBudget>;
   forEntry(entryPath: string): DocumentTier<Scene>;
   dispose(): void;
 };
 
 /** Bounds of the live tier. @internal */
-export type LiveTierOptions<Scene> = Omit<OperationTierOptions, 'library'> & {
+export type LiveTierOptions<Scene> = Omit<OperationTierOptions, 'library' | 'byteBudget'> & {
   readonly library: ReplicadLibrary;
+  /** Estimated resident bytes all documents' operation tiers keep at most (default {@link defaultTierBytes}). */
+  readonly byteBudget?: number;
   /** Deletes the aliases a scene owns. */
   readonly releaseScene: (scene: Scene) => void;
   /** Documents kept at most. */
@@ -61,6 +65,14 @@ export type LiveTierOptions<Scene> = Omit<OperationTierOptions, 'library'> & {
   /** Scenes kept at most per document. */
   readonly sceneCap?: number;
 };
+
+/**
+ * Estimated resident bytes the live tier keeps by default, across documents: a sixth of the standard device's 1.5 GiB
+ * recycle threshold, so a drag reuses its recent operations without pushing the worker towards a recycle. Phones run
+ * without the tier (`computeReuse: false`).
+ * @internal
+ */
+export const defaultTierBytes = 256 * 2 ** 20;
 
 /**
  * Canonical text of a parameter record: keys sorted at every depth, numbers by exact value with `-0` kept.
@@ -136,7 +148,8 @@ const createSceneTable = <Scene>(cap: number, release: (scene: Scene) => void): 
  * @internal
  */
 export const createLiveTier = <Scene>(options: LiveTierOptions<Scene>): LiveTier<Scene> => {
-  const { releaseScene, documentCap = 4, sceneCap = 8, ...operationOptions } = options;
+  const { releaseScene, documentCap = 4, sceneCap = 8, byteBudget = defaultTierBytes, ...operationOptions } = options;
+  const budget: ByteBudget = { limit: byteBudget, used: 0 };
   const documents = new Map<string, DocumentTier<Scene>>();
   const disposeDocument = (document: DocumentTier<Scene>): void => {
     document.scenes.dispose();
@@ -149,7 +162,7 @@ export const createLiveTier = <Scene>(options: LiveTierOptions<Scene>): LiveTier
         documents.delete(entryPath);
       } else {
         document = {
-          operations: createOperationTier(operationOptions),
+          operations: createOperationTier({ ...operationOptions, byteBudget: budget }),
           scenes: createSceneTable(sceneCap, releaseScene),
         };
       }
@@ -161,11 +174,19 @@ export const createLiveTier = <Scene>(options: LiveTierOptions<Scene>): LiveTier
         documents.delete(path);
         disposeDocument(oldest);
       }
+      // Pressure from earlier builds is relieved by the documents edited least recently, before this one builds.
+      for (const other of documents.values()) {
+        if (budget.used <= budget.limit) {
+          break;
+        }
+        other.operations.relieve();
+      }
       return document;
     },
     get documents() {
       return documents.size;
     },
+    budget,
     dispose() {
       for (const document of documents.values()) {
         disposeDocument(document);

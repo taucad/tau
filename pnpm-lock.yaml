@@ -3891,6 +3891,9 @@ importers:
       '@taucad/workbench-panes':
         specifier: workspace:*
         version: link:../../../packages/workbench-panes
+      '@xstate/react':
+        specifier: 7.0.0-alpha.3
+        version: 7.0.0-alpha.3(@types/react@19.2.17)(react@19.3.1)(xstate@6.0.0-alpha.59)
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1

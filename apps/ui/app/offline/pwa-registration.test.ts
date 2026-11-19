@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* oxlint-disable typescript/no-restricted-types -- `ServiceWorkerRegistration.waiting` and `installing` are `null` when absent; the double models the platform. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerVerdict } from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
 import { skipWaitingMessageType } from '#offline/pwa-messages.js';
 
 import { startServiceWorker, updateAction } from '#offline/pwa-registration.js';

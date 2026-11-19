@@ -25,12 +25,46 @@
  */
 
 import type { ContentChangeEvent, FileContentService } from '@taucad/fs-client/file-content-service';
-import type { ActorRefFrom } from 'xstate';
-import type { editorMachine } from '#machines/editor.machine.js';
-import type { ProjectFileActivityOperation, projectMachine } from '#machines/project.machine.js';
+
+/** The filesystem operations reported to the project as activity on its own content. */
+export type ProjectFileActivityOperation =
+  | 'written'
+  | 'batchWritten'
+  | 'directoryCreated'
+  | 'fileCopied'
+  | 'directoryCopied'
+  | 'renamed'
+  | 'directoryRenamed'
+  | 'deleted'
+  | 'directoryDeleted';
+
+/** The editor intents a participant sends, and the open tabs it reads: the app's editor actor satisfies it. */
+export type FileOperationEditorRef = {
+  send(
+    event:
+      | { readonly type: 'renameFile'; readonly oldPath: string; readonly newPath: string }
+      | { readonly type: 'closeFile'; readonly path: string },
+  ): void;
+  getSnapshot(): { readonly context: { readonly openFiles: ReadonlyArray<{ readonly path: string }> } };
+};
+
+/** The project intents a participant sends: the app's project actor satisfies it. */
+export type FileOperationProjectRef = {
+  send(
+    event:
+      | { readonly type: 'fileMoved'; readonly oldPath: string; readonly newPath: string }
+      | { readonly type: 'fileDeleted'; readonly path: string }
+      | { readonly type: 'directoryDeleted'; readonly path: string }
+      | {
+          readonly type: 'projectFileActivity';
+          readonly operation: ProjectFileActivityOperation;
+          readonly paths: readonly string[];
+        },
+  ): void;
+};
 
 const sendProjectFileActivity = (
-  projectRef: ActorRefFrom<typeof projectMachine>,
+  projectRef: FileOperationProjectRef,
   operation: ProjectFileActivityOperation,
   paths: readonly string[],
 ): void => {
@@ -50,8 +84,8 @@ const sendProjectFileActivity = (
  */
 export function mountFileOperationParticipants(init: {
   readonly contentService: FileContentService;
-  readonly editorRef: ActorRefFrom<typeof editorMachine>;
-  readonly projectRef: ActorRefFrom<typeof projectMachine>;
+  readonly editorRef: FileOperationEditorRef;
+  readonly projectRef: FileOperationProjectRef;
   /** The transactional sidecar mover: prepared before the source mutation, committed or rolled back with it. */
   readonly parameterFiles?: Readonly<{
     prepareFileOperation: Parameters<FileContentService['addFileOperationParticipant']>[0];

@@ -10,7 +10,7 @@ import { reportUiError } from '#lib/error-reporting.js';
 import { isTransientNetworkFailure } from '@taucad/ui-core/lib/network-failure';
 import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
-import type { ServerVerdict } from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import {
   isStaleModuleError,

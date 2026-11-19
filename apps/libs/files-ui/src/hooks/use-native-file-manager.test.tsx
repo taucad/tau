@@ -2,8 +2,8 @@
 import { act, render, renderHook } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
-import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
   NativeFileManagerIcon,
@@ -18,15 +18,12 @@ const mockOpen = vi.fn(async (_path: string) => undefined);
 const mockReveal = vi.fn(async (_path: string) => undefined);
 const mockWorkspaceRoot = vi.fn(async (projectId: string) => `/home/${projectId}`);
 
-vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
+vi.mock('#filesystem/desktop-bridge.js', () => ({
   desktopBridge: () => bridge,
   nodeHomeRoot: () => '/home',
 }));
-vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
+vi.mock('#filesystem/handle-store.js', () => ({
   getProjectFileSystemConfig: async () => config,
-}));
-vi.mock('#lib/agent-host-placement.js', () => ({
-  desktopWorkspaceRoot: async (projectId: string) => mockWorkspaceRoot(projectId),
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
 
@@ -37,6 +34,9 @@ const directories = {
   open: mockOpen,
   reveal: mockReveal,
 } as const;
+
+/** The app resolves the folder the desktop agent host works in. */
+const services = { resolveProjectFolder: async (projectId: string) => mockWorkspaceRoot(projectId) };
 
 const project: Parameters<typeof useOpenProjectInFileManager>[0] = {
   id: 'proj_one',
@@ -113,7 +113,7 @@ describe('useRevealInFileManager', () => {
 
 describe('useOpenProjectInFileManager', () => {
   it('should open a disk-backed project folder and report failures', async () => {
-    const { result } = renderHook(() => useOpenProjectInFileManager(project));
+    const { result } = renderHook(() => useOpenProjectInFileManager(project, services));
     expect(result.current).toMatchObject({
       label: 'Open in Finder',
       icon: 'finder',
@@ -137,7 +137,7 @@ describe('useOpenProjectInFileManager', () => {
         relativeDirectory: 'one',
       },
     };
-    expect(renderHook(() => useOpenProjectInFileManager(stored)).result.current).toBeUndefined();
+    expect(renderHook(() => useOpenProjectInFileManager(stored, services)).result.current).toBeUndefined();
   });
 });
 

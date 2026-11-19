@@ -1,31 +1,37 @@
-import { useState } from 'react';
-import { FolderOpen, PanelsTopLeft } from 'lucide-react';
-import { resolveRootedPath } from '@taucad/utils/path';
-import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { toast } from '@taucad/ui/components/sonner';
-import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
-import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
-import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
+/**
+ * The app's binding of the native file manager actions (`@taucad/files-ui/hooks/use-native-file-manager`).
+ *
+ * The actions live in files-ui; this binding passes the folder the desktop agent host works in
+ * (`#lib/agent-host-placement`), read when a folder is opened, so a suite that mocks that module reaches the action
+ * through it. App readers import the actions from here, so a suite that mocks this module replaces them for all of
+ * them.
+ */
+import {
+  NativeFileManagerIcon as NativeFileManagerGlyph,
+  useOpenProjectInFileManager as useOpenProjectFolder,
+  useRevealInFileManager as useRevealProjectPath,
+} from '@taucad/files-ui/hooks/use-native-file-manager';
+import type {
+  OpenProjectInFileManager,
+  OpenProjectInFileManagerServices,
+  RevealInFileManager,
+} from '@taucad/files-ui/hooks/use-native-file-manager';
 import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
 
-type NativeDirectories = NonNullable<DesktopBridge['directories']>;
-
-/** The host's own file manager glyph: Finder, File Explorer, or a folder elsewhere. */
-export function NativeFileManagerIcon({ icon }: { readonly icon: NativeDirectories['openIcon'] }): React.JSX.Element {
-  if (icon === 'finder') {
-    return <SvgIcon id='finder' aria-hidden />;
-  }
-  return icon === 'file-explorer' ? <PanelsTopLeft aria-hidden /> : <FolderOpen aria-hidden />;
-}
-
-/** Opening a whole project's folder, as the sidebar and project cards offer it. */
-export type OpenProjectInFileManager = {
-  readonly label: string;
-  readonly icon: NativeDirectories['openIcon'];
-  readonly isOpening: boolean;
-  readonly open: () => Promise<void>;
+const openProjectServices: OpenProjectInFileManagerServices = {
+  resolveProjectFolder: async (projectId) => desktopWorkspaceRoot(projectId),
 };
+
+/**
+ * The host's own file manager glyph: Finder, File Explorer, or a folder elsewhere.
+ *
+ * @param props - The host's file manager icon.
+ * @returns The glyph.
+ */
+export function NativeFileManagerIcon(props: Parameters<typeof NativeFileManagerGlyph>[0]): React.JSX.Element {
+  return <NativeFileManagerGlyph {...props} />;
+}
 
 /**
  * Open a disk-backed project's folder in the host's file manager.
@@ -36,62 +42,8 @@ export type OpenProjectInFileManager = {
 export function useOpenProjectInFileManager(
   project: Pick<ProjectListItem, 'id' | 'name'> & Partial<Pick<ProjectListItem, 'locator'>>,
 ): OpenProjectInFileManager | undefined {
-  /* A row the listing snapshot remembered has no locator until the listing names it (A13). */
-  const directories = project.locator?.backend === 'node' ? desktopBridge()?.directories : undefined;
-  const [isOpening, setIsOpening] = useState(false);
-  if (!directories) {
-    return undefined;
-  }
-  return {
-    label: directories.openLabel,
-    icon: directories.openIcon,
-    isOpening,
-    async open() {
-      if (isOpening) {
-        return;
-      }
-      setIsOpening(true);
-      try {
-        await directories.open(await desktopWorkspaceRoot(project.id));
-      } catch (error) {
-        toast.error(`Could not open ${project.name}`, {
-          description: error instanceof Error ? error.message : 'Try opening the folder again.',
-        });
-      } finally {
-        setIsOpening(false);
-      }
-    },
-  };
+  return useOpenProjectFolder(project, openProjectServices);
 }
-
-/**
- * Select one project file or folder in the host's file manager.
- *
- * @param projectId - Project whose files the path is relative to.
- * @param path - Project-relative path; `''` is the project root.
- * @throws When the host cannot reveal paths, the project is not on disk, or the path is gone.
- */
-export const revealProjectPathInFileManager = async (projectId: string, path: string): Promise<void> => {
-  const directories = desktopBridge()?.directories;
-  if (!directories) {
-    throw new Error('This build of Tau cannot open the file manager.');
-  }
-  const config = await getProjectFileSystemConfig(projectId);
-  if (config?.backend !== 'node') {
-    throw new Error('This project is stored in the browser, so it has no folder on disk.');
-  }
-  const relative = resolveRootedPath(path);
-  const root = `${config.path ?? nodeHomeRoot()}/${config.providerBasePath}`;
-  await directories.reveal(relative ? `${root}/${relative}` : root);
-};
-
-/** Revealing project paths, as the file tree and pane tabs offer it. */
-export type RevealInFileManager = {
-  readonly label: string;
-  readonly icon: NativeDirectories['openIcon'];
-  /** Resolves once revealed or once the failure has been reported. */
-  readonly reveal: (path: string) => Promise<void>;
-};
 
 /**
  * Reveal project paths in the host's file manager, reporting failures as toasts.
@@ -100,22 +52,5 @@ export type RevealInFileManager = {
  * @returns The action, or `undefined` when this host has no native file manager.
  */
 export function useRevealInFileManager(projectId: string | undefined): RevealInFileManager | undefined {
-  const directories = desktopBridge()?.directories;
-  if (!directories || projectId === undefined) {
-    return undefined;
-  }
-  return {
-    label: directories.revealLabel,
-    icon: directories.openIcon,
-    async reveal(path) {
-      try {
-        await revealProjectPathInFileManager(projectId, path);
-      } catch (error) {
-        const name = path.split('/').findLast((segment) => segment.length > 0) ?? 'the project';
-        toast.error(`Could not reveal ${name}`, {
-          description: error instanceof Error ? error.message : 'Try revealing it again.',
-        });
-      }
-    },
-  };
+  return useRevealProjectPath(projectId);
 }

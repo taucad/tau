@@ -23,7 +23,7 @@
  * script for updates, so the retiring worker every build ships at the old URL would never reach it: left to the rule,
  * the old worker would keep its pages and its caches for as long as a tab stays open.
  */
-import type { ServerVerdict } from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
 import { retiredServiceWorkerUrl, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerInstallStatus, ServiceWorkerMessage } from '#offline/pwa-messages.js';
 

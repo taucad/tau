@@ -31,9 +31,13 @@ export const idPrefix = {
    */
   publicationViewer: 'pvv',
   /**
-   * A private-publication exact-email access grant.
+   * A project's stable cloud link (`project_share.id`), the reference in `/s/tau~shr_…`.
    */
-  publicationAccess: 'pva',
+  projectShare: 'shr',
+  /**
+   * An exact-email invitation to open a private cloud link (`project_share_access.id`).
+   */
+  projectShareAccess: 'sga',
   /**
    * Opaque blob record identifiers stored locally when keyed independently from SHA (`blob_ref` is keyed by SHA — placeholder prefix).
    */

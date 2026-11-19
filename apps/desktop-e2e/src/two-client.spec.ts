@@ -379,7 +379,7 @@ const readBrowserFile = async (
     [slug, ...path],
   );
 
-/** Open the product's persisted-share form, selecting Tau Hosted sharing when necessary. */
+/** Open the cloud link in Share, selecting it when necessary, and wait for its first publish button. */
 const openHostedShare = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await page.getByRole('button', { name: 'Share', exact: true }).first().click({ timeout: 120_000 });
@@ -390,7 +390,7 @@ const openHostedShare = async (client: PageClient): Promise<void> => {
     await page.getByText('Cloud link', { exact: true }).last().click();
   }
   await page
-    .getByRole('combobox', { name: /Version name/iu })
+    .getByRole('button', { name: /Publish and copy link/iu })
     .first()
     .waitFor({ state: 'visible', timeout: 60_000 });
 };
@@ -926,11 +926,9 @@ describe('a project on the browser client', () => {
       await gitOutput(await tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`]),
     ).toContain(`oid sha256:${browserDigest}`);
 
-    /* The named version is authored through the product, then read from each
-     * destination's own revision store — not inferred from the remote tag or
-     * from the unpublished Share authoring form. */
+    /* The version is made through the product's cloud link (the pane names it "Shared <date>"), then read from
+     * each destination's own revision store — not inferred from the remote tag. */
     await openHostedShare(source);
-    await source.page.getByRole('combobox', { name: /Version name/iu }).fill('Ready for print');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
       .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v2^{}']), {

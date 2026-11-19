@@ -3,7 +3,7 @@ title: 'Netlify Function region (single-region tradeoff)'
 description: Documents the Netlify Terraform `functions_region` field and why Tau stays on a single AWS region for SSR Functions, with future multi-PoP options.
 status: active
 created: '2026-05-06'
-updated: '2026-09-20'
+updated: '2026-11-19'
 category: architecture
 related:
   - docs/research/netlify-production-performance-audit.md
@@ -14,7 +14,7 @@ related:
 
 ## Decision
 
-Tau keeps **one Netlify site per environment** with **standard SSR Functions (Node.js Lambda) in a single AWS region**. Distant-PoP latency on cacheable SSR routes is addressed with **Durable / Edge cache** headers (`cdnBackedSsrRouteHeaders` on `/` and `/v/:id`) rather than multi-region Lambda.
+Tau keeps **one Netlify site per environment** with **standard SSR Functions (Node.js Lambda) in a single AWS region**. Multi-region Lambda is not used to cut distant-PoP latency. No SSR document is stored on the edge today: the last one, the cloud link viewer (`/s/tau~shr_…`), is `private, no-store`, because the link always shows the version last published and stops working on Stop sharing.
 
 ## Terraform reality
 

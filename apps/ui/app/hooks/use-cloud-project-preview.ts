@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 class PreviewResponseError extends Error {

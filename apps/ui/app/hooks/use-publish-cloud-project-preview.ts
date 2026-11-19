@@ -2,7 +2,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 

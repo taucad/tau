@@ -12,7 +12,7 @@ import { authQueryKeys } from '@better-auth-ui/core';
 import { createElement } from 'react';
 import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.

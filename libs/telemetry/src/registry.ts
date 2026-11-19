@@ -668,7 +668,16 @@ export const TauMetrics = {
     description: 'Invite notification emails suppressed before send, by reason',
     attributes: z.object({
       trigger: z.enum(['publish', 'invite']).optional(),
-      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable', 'email_disabled']).optional(),
+    }),
+  }),
+
+  projectInviteEmailsTotal: defineCounter({
+    name: 'project.invite_emails',
+    unit: '{email}',
+    description: 'Collaborator invitation emails by outcome: sent, or why it was skipped',
+    attributes: z.object({
+      outcome: z.enum(['sent', 'email_disabled', 'undeliverable', 'send_failed']).optional(),
     }),
   }),
 

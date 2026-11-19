@@ -125,6 +125,15 @@ describe('native project identity', () => {
     expect(await readdir(join(root, '.tau'))).toEqual(['project.json']);
     expect(JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId: id });
   });
+  it('should refuse a manifest it cannot read on admission rather than mint an identity it may contradict', async () => {
+    const root = await project();
+    await mkdir(join(root, 'tau.json'));
+
+    await expect(resolveNodeProjectIdentity({ workspaceRoot: root, bootstrap: true })).rejects.toThrow(
+      /must be a regular file/u,
+    );
+    await expect(readFile(join(root, '.tau/project.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
   it('should allow explicit empty-root admission without creating an authored manifest', async () => {
     const root = await project();
     expect(await resolveNodeProjectIdentity({ workspaceRoot: root })).toBeUndefined();

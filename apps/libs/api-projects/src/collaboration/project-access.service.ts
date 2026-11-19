@@ -201,8 +201,8 @@ export class ProjectAccessService {
    *
    * The account's email must be verified and must be the invited address: the
    * invitation is issued to an address, and only a proven holder of that address
-   * may spend it. This is the rule `publication_access` already applies to
-   * private publications.
+   * may spend it. This is the rule `project_share_access` already applies to
+   * private cloud links.
    *
    * @param token - The raw token from the invitation link.
    * @param userId - The authenticated account accepting.

@@ -28,8 +28,21 @@ export type QualifyStep = {
   readonly call?: number;
   readonly action?: string;
   readonly content?: string;
-  /** Stop-latency trial outcome; its timings are data the summarizer reports, not part of this contract. */
-  readonly abort?: { readonly valid: boolean };
+  /**
+   * Stop-latency trial outcome. Its timings are data the summarizer reports, except `nextBuildAfterIssue`, which CI
+   * bounds, and the superseded render's outcome, which CI requires to be `cancelled` for a pack trial.
+   */
+  readonly abort?: {
+    /** The phase the supersede was placed on: the superseded build's `main()`, or its render's GLB pack. */
+    readonly target?: 'main' | 'pack';
+    readonly valid: boolean;
+    /** The superseded render's operation outcome, for a pack trial. */
+    readonly supersededRender?: string;
+    /** Parts the superseded render packed into its GLB, for a pack trial. */
+    readonly packParts?: number;
+    /** Milliseconds from the supersede to the start of the committed edit's `main()`. */
+    readonly nextBuildAfterIssue?: number;
+  };
   readonly counts: QualifyCounts;
   readonly output?: {
     readonly sha256?: string;
@@ -55,7 +68,12 @@ export type QualifyOptions = {
   readonly steps?: readonly string[];
   readonly histories?: number;
   readonly seed?: number;
+  /** Milliseconds the arm may run before it is killed and fails with its label; 10 minutes by default. */
+  readonly armTimeout?: number;
 };
+
+/** An arm's whole run, well inside the 30-minute `beforeAll` that waits for a batch of them. */
+const defaultArmTimeout = 600_000;
 
 /** A scratch directory for the reports of one test file. */
 export const qualifyScratch = async (name: string): Promise<string> =>
@@ -91,12 +109,26 @@ export const runQualifyArm = async (options: QualifyOptions, workspace: string):
   child.stderr.on('data', (chunk: string) => {
     stderr += chunk;
   });
+  const armTimeout = options.armTimeout ?? defaultArmTimeout;
+  // Read after the child closes; a plain `let` narrows to its initial value across the callback.
+  const killed = { byTimer: false };
+  const timer = setTimeout(() => {
+    killed.byTimer = true;
+    child.kill('SIGKILL');
+  }, armTimeout);
   const code = await new Promise<number>((resolve, reject) => {
     child.on('error', reject);
     child.on('close', (status) => {
       resolve(status ?? -1);
     });
+  }).finally(() => {
+    clearTimeout(timer);
   });
+  if (killed.byTimer) {
+    throw new Error(
+      `qualification arm ${label} did not finish within ${armTimeout} ms (load ${loadavg()[0]!.toFixed(2)}):\n${stderr.slice(-4000)}`,
+    );
+  }
   if (code !== 0) {
     throw new Error(
       `qualification arm ${label} exited ${code} (load ${loadavg()[0]!.toFixed(2)}):\n${stderr.slice(-4000)}`,

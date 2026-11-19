@@ -67,7 +67,11 @@ import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
 import { applyCameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
-import type { CameraInputRouting, CameraPivotPicker } from '#graphics/three/controls/camera-wheel-router.js';
+import type {
+  CameraInputRouting,
+  CameraPivotPicker,
+  OrbitStyle,
+} from '#graphics/three/controls/camera-wheel-router.js';
 import { hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
@@ -375,7 +379,9 @@ export const createControlsAdapter = ({
      */
     const straightenTurntable = (snapshot: CameraDriverSnapshot): void => {
       const { source } = snapshot.lastChange;
-      if (observing || unstraightenedSources.has(source) || getCameraRouting?.()?.cameraInput.orbitStyle === 'tumble') {
+      // Turntable only, by name: every other orbit style keeps its roll. An unset style is Turntable, the default.
+      const orbitStyle: OrbitStyle = getCameraRouting?.()?.cameraInput.orbitStyle ?? 'turntable';
+      if (observing || unstraightenedSources.has(source) || orbitStyle !== 'turntable') {
         return;
       }
       const axis = getUpAxis();

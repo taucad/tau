@@ -360,11 +360,26 @@ describe('orbit style in the browser (TA5)', () => {
     expect(after.top && after.bottom).toBe(false);
   });
 
-  it('keeps the roll of a saved view adopted in Tumble', () => {
-    const viewer = mountViewer('tumble');
-    adoptSavedView(viewer, sidewaysView);
-    expect(readView(viewer).up.angleTo(unit(sidewaysView.up))).toBeLessThan(1e-9);
-  });
+  /*
+   * Only Turntable is straightened, by name: Tumble keeps every roll, and so does any other style (the id `'free'` that
+   * replaces `'tumble'`, read here before the rename as a style that is not Turntable).
+   */
+  it.each([['tumble' as OrbitStyle], ['free' as unknown as OrbitStyle]])(
+    'keeps the roll of a view restored or adopted in the %s orbit style',
+    (orbitStyle) => {
+      const restored = mountViewer(orbitStyle, 'perspective', sidewaysView);
+      expect(readView(restored).up.angleTo(unit(sidewaysView.up))).toBeLessThan(1e-9);
+      expect(lastSource(restored)).not.toBe('persisted');
+
+      const adopted = mountViewer(orbitStyle);
+      adoptSavedView(adopted, sidewaysView);
+      expect(readView(adopted).up.angleTo(unit(sidewaysView.up))).toBeLessThan(1e-9);
+      expect(lastSource(adopted)).toBe('persisted');
+      const { revision } = adopted.graphics.getSnapshot().context.cameraRef.getSnapshot().context.lastChange;
+      adopted.settle();
+      expect(adopted.graphics.getSnapshot().context.cameraRef.getSnapshot().context.lastChange.revision).toBe(revision);
+    },
+  );
 
   it('keeps a rolled view straight down the world up in Turntable, and drags on from it without a jump', () => {
     // At the pole the world up is parallel to the view: the camera keeps the roll, as `setUpDirection` does there.

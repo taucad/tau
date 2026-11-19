@@ -84,6 +84,25 @@ describe('buildLayer', () => {
     ]);
   });
 
+  it('should record the cadmpeg-ts version a build names in cadmpeg-engines.json (EQ1 option A)', async () => {
+    const root = await scratch();
+    const source = await client(root);
+    await writeFile(
+      join(source, 'cadmpeg-engines.json'),
+      JSON.stringify({ schemaVersion: 1, package: 'cadmpeg-ts', version: '0.1.0-beta.5', path: '/cadmpeg-engines/' }),
+    );
+
+    const record = await buildLayer({ client: source, out: join(root, 'out') });
+
+    expect(record.engines).toEqual({ package: 'cadmpeg-ts', version: '0.1.0-beta.5' });
+    expect(JSON.parse(await readFile(join(root, 'out', 'tau-layer.json'), 'utf8'))).toEqual(record);
+
+    await writeFile(join(source, 'cadmpeg-engines.json'), '{"package":"cadmpeg-ts"}');
+    await expect(buildLayer({ client: source, out: join(root, 'again') })).rejects.toThrow(
+      /names no cadmpeg-ts version/u,
+    );
+  });
+
   it('should refuse a layer over the size line', async () => {
     const root = await scratch();
 

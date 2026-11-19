@@ -46,6 +46,30 @@ export type LayerRecord = {
   readonly fileCount: number;
   /** Source maps left out of the layer (X2): never served, never shipped. */
   readonly excludedSourceMaps: { readonly fileCount: number; readonly byteLength: number };
+  /**
+   * The `cadmpeg-ts` whose engines the layer loads from the daemon (cadmpeg engine delivery charter EQ1 option A), from
+   * the build's `cadmpeg-engines.json`; absent for a build that names none. `tau serve` refuses to mount another
+   * version's engines.
+   */
+  readonly engines?: { readonly package: 'cadmpeg-ts'; readonly version: string };
+};
+
+/**
+ * The `cadmpeg-ts` version a serve build's `cadmpeg-engines.json` names, if it has one.
+ * @param client - The client directory.
+ * @returns The package and version, or `undefined`.
+ * @throws {Error} When the file exists and names no `cadmpeg-ts` version.
+ */
+const layerEngines = async (client: string): Promise<LayerRecord['engines']> => {
+  const text = await readFile(join(client, 'cadmpeg-engines.json'), 'utf8').catch(() => undefined);
+  if (text === undefined) {
+    return undefined;
+  }
+  const manifest = JSON.parse(text) as { readonly package?: unknown; readonly version?: unknown };
+  if (manifest.package !== 'cadmpeg-ts' || typeof manifest.version !== 'string' || manifest.version === '') {
+    throw new Error(`${client}/cadmpeg-engines.json names no cadmpeg-ts version.`);
+  }
+  return { package: 'cadmpeg-ts', version: manifest.version };
 };
 
 /**
@@ -208,6 +232,7 @@ export const buildLayer = async (options: {
       `The layer is ${String(byteLength)} bytes gzipped, over the ${String(maximumBytes)}-byte line (X2). Trim the serve build before publishing it.`,
     );
   }
+  const engines = await layerEngines(client);
   const record: LayerRecord = {
     schemaVersion: 1,
     asset: layerAsset,
@@ -217,6 +242,7 @@ export const buildLayer = async (options: {
     unpackedByteLength: files.reduce((sum, file) => sum + file.size, 0),
     fileCount: files.length,
     excludedSourceMaps: maps,
+    ...(engines === undefined ? {} : { engines }),
   };
   await writeFile(join(options.out, 'tau-layer.json'), `${JSON.stringify(record, undefined, 2)}\n`);
   return record;

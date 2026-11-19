@@ -131,17 +131,23 @@ import type { HostRevisionActorResolver } from '#revision-actor.js';
  * One value for every composition in this module, and the same pair the browser
  * worker injects, so a conflict re-derived here settles as it was recorded.
  */
+const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
+
 /**
  * Names a draft nobody named. Only the host has a locale, so the auto name is made here, not in the machine: by the
- * `publish` verb and by a page's `confirmPublish`, which the Share pane sends with no name.
+ * `publish` verb and by a page's `confirmPublish`, which the Share pane sends with no name. A page's draft is not
+ * validated before it reaches here, so a missing name reads as empty rather than throwing.
  *
+ * @internal
  * @param draft - The draft as asked.
  * @returns The draft, with `autoVersionName` as its name when it is auto-named and empty.
  */
-const autoNamed = (draft: PublishDraft): PublishDraft =>
-  draft.isAutoNamed === true && draft.tag.trim() === '' ? { ...draft, tag: autoVersionName(new Date()) } : draft;
-
-const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
+export const autoNamed = (draft: PublishDraft): PublishDraft => {
+  const tag: unknown = draft.tag;
+  return draft.isAutoNamed === true && (typeof tag === 'string' ? tag : '').trim() === ''
+    ? { ...draft, tag: autoVersionName(new Date()) }
+    : draft;
+};
 
 /**
  * Where one prepared turn runs, and what it descends from.

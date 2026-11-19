@@ -188,6 +188,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // oxlint-disable-next-line typescript/no-restricted-types -- the cloud link wire format uses null.
 const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
 
+/** One invited person, as the link's `access.grants` lists them. */
+const isAccessGrant = (value: unknown): value is ProjectShare['access']['grants'][number] =>
+  isRecord(value) &&
+  typeof value['id'] === 'string' &&
+  typeof value['recipientEmail'] === 'string' &&
+  (value['status'] === 'active' || value['status'] === 'revoked') &&
+  typeof value['createdAt'] === 'string' &&
+  isNullableString(value['revokedAt']) &&
+  (value['notDelivered'] === undefined || typeof value['notDelivered'] === 'boolean');
+
 /**
  * Reads the project's cloud link as `GET`/`PATCH /v1/projects/:id/share` answer it.
  *
@@ -209,6 +219,10 @@ const parseProjectShare = (value: unknown): ProjectShare | undefined => {
     !isRecord(access) ||
     !Array.isArray(access['grants'])
   ) {
+    return undefined;
+  }
+  const grants: unknown[] = access['grants'];
+  if (!grants.every((grant) => isAccessGrant(grant))) {
     return undefined;
   }
   let version: ProjectShare['currentVersion'] = null;
@@ -235,7 +249,7 @@ const parseProjectShare = (value: unknown): ProjectShare | undefined => {
     stoppedAt,
     publishedAt,
     currentVersion: version,
-    access: { grants: access['grants'] as ProjectShare['access']['grants'] },
+    access: { grants: grants.filter((grant) => isAccessGrant(grant)) },
   };
 };
 
@@ -974,7 +988,13 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
   const visibilityLabelId = useId();
 
+  /* Each read takes a number; only the latest may set what the pane shows, so an earlier read that answers late
+     (an invite's refresh racing Stop sharing's) never puts back a link that has since changed. */
+  const envelopeGenerationRef = useRef(0);
   const loadEnvelope = useCallback(async (): Promise<ProjectShareEnvelope | undefined> => {
+    envelopeGenerationRef.current += 1;
+    const generation = envelopeGenerationRef.current;
+    const isLatest = (): boolean => generation === envelopeGenerationRef.current;
     setLoadingEnvelope(true);
     setEnvelopeFailure(undefined);
     let status: number | undefined;
@@ -994,13 +1014,19 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         throw new Error('INVALID_SHARE_ENVELOPE');
       }
 
-      setEnvelope(nextEnvelope);
+      if (isLatest()) {
+        setEnvelope(nextEnvelope);
+      }
       return nextEnvelope;
     } catch {
-      setEnvelopeFailure(shareEnvelopeFailureOf(status));
+      if (isLatest()) {
+        setEnvelopeFailure(shareEnvelopeFailureOf(status));
+      }
       return undefined;
     } finally {
-      setLoadingEnvelope(false);
+      if (isLatest()) {
+        setLoadingEnvelope(false);
+      }
     }
   }, [shareEndpoint]);
 
@@ -1068,17 +1094,17 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     pending?.resolve(publishShareUrl);
     let cancelled = false;
     const finishPublish = async (): Promise<void> => {
+      /* The choice is saved on the link now; a later publish starts from the link's own setting. */
+      setChosenVisibility(undefined);
       if (pending === undefined) {
         /* Publish changes: the link did not change, so nothing is copied; the toast names what it now shows. */
         const next = await loadEnvelope();
         if (!cancelled) {
           const tag = next?.share?.currentVersion?.tag;
           const version = tag === undefined ? undefined : versionNumberLabel(tag);
-          toast.success(
-            version === undefined
-              ? 'Published. The link now shows it.'
-              : `Published ${version}. The link now shows it.`,
-          );
+          /* Only a link that is on shows anything: a stopped one is acknowledged without the claim. */
+          const shows = next?.share?.status === 'active' ? ' The link now shows it.' : '';
+          toast.success(version === undefined ? `Published.${shows}` : `Published ${version}.${shows}`);
           setIsCopyRefused(false);
         }
       } else {
@@ -1168,6 +1194,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         throw recordApiRequestId(new Error('VISIBILITY_UPDATE_FAILED'), response);
       }
 
+      setChosenVisibility(undefined);
       await loadEnvelope();
       toast.success(
         nextVisibility === 'private'
@@ -1229,7 +1256,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     const visibility = chosenVisibility ?? share?.visibility ?? 'private';
     // Free tier publishes public-only (T4/T5/AD11); derived so an async
     // entitlements load never strands a locked selection in form state.
-    const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
+    // Until the plan is known nothing is derived: the radio shows the link's
+    // setting and a publish names only what the person picked, so the server
+    // keeps the link's setting (private for a first publish).
+    const effectiveVisibility: PublishVisibility = canCreatePrivateShares || !isPlanResolved ? visibility : 'public';
+    const submittedVisibility = isPlanResolved || chosenVisibility !== undefined ? effectiveVisibility : undefined;
     return (
       <SharePaneFrame isDisabled={busy}>
         <SharePaneSection
@@ -1246,7 +1277,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             onSubmit={(event) => {
               event.preventDefault();
               if (!busy) {
-                sendPublish(effectiveVisibility, true);
+                sendPublish(submittedVisibility, true);
               }
             }}
           >

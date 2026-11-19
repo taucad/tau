@@ -226,6 +226,10 @@ jobs:
           # The same host serves the cadmpeg engines by digest (`layout: 'digest'`; the loader verifies the
           # gzip, decompresses it and verifies the module). `ui:build` keys on it.
           CADMPEG_ENGINES_BASE: ${{ steps.site.outputs.dependencies_base }}
+          # Staging only, temporary: ships the service worker kill switch, so `/service-worker.js` retires the
+          # PL7 worker that stalls page loads (Brain `research/pl7-service-worker-staging-defects-blueprint.md`).
+          # Production stays `false` (it has no PL7 worker). Remove once FP1 and FP3 of that blueprint are deployed.
+          TAU_SERVICE_WORKER_KILL_SWITCH: ${{ inputs.environment == 'staging' && 'true' || 'false' }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

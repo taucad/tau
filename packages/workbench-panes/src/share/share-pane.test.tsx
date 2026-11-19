@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link2 } from 'lucide-react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { WorkbenchPanesHostProvider } from '#host/workbench-host.jsx';
 import type { WorkbenchPanesHost } from '#host/workbench-host.jsx';
-import { SharePane, SharePaneFrame } from '#share/share-pane.jsx';
+import { SharePane, SharePaneFrame, SharePaneSection } from '#share/share-pane.jsx';
 import type { ShareLinkExtension, ShareLinkMethod, ShareLinkRequest, ShareSource } from '#share/share-source.js';
 
 const directMethod = (overrides: Partial<ShareLinkMethod> = {}): ShareLinkMethod => ({
@@ -14,34 +14,34 @@ const directMethod = (overrides: Partial<ShareLinkMethod> = {}): ShareLinkMethod
   label: 'Direct link',
   icon: Link2,
   description: 'Create a self-contained link.',
-  notice: {
-    icon: <span data-testid='notice-icon' />,
-    title: 'No upload through Tau',
-    text: 'The project stays in the URL.',
-  },
-  encryption: {
-    minBytes: 4,
-    maxBytes: 8,
-    notice: { title: 'Password-encrypted', text: 'Share the password apart.' },
-  },
-  action: { label: 'Copy direct link', icon: Link2 },
-  copiedMessage: 'Direct link copied',
+  encryption: { minBytes: 4, maxBytes: 8 },
+  action: { label: 'Create link', icon: Link2 },
   share: vi.fn(async () => ({
     url: 'https://tau.example/s/direct#v=2&zip=abc',
   })),
   ...overrides,
 });
 
-const renderPane = (share: ShareSource): ReturnType<typeof render> => {
+const renderPane = (share: ShareSource, extraSections?: React.ReactNode): ReturnType<typeof render> => {
   const host: WorkbenchPanesHost = { useUnits: () => [], share };
   return render(
     <WorkbenchPanesHostProvider value={host}>
       <TooltipProvider>
-        <SharePane />
+        <SharePane extraSections={extraSections} />
       </TooltipProvider>
     </WorkbenchPanesHostProvider>,
   );
 };
+
+const customMethod = (render: () => React.ReactNode) =>
+  ({
+    kind: 'custom',
+    id: 'tau',
+    label: 'Cloud link',
+    icon: Link2,
+    description: 'Publish a version and choose who can open it.',
+    render,
+  }) as const;
 
 const writeText = vi.fn<(text: string) => Promise<void>>();
 
@@ -61,13 +61,46 @@ afterEach(() => {
 });
 
 describe('SharePane', () => {
-  it('should draw the frame without a picker when the host offers one method', () => {
+  it('should name the method and say what it is when the host offers one method', () => {
     renderPane({ methods: [directMethod()] });
 
-    expect(screen.getByRole('heading', { name: 'Share project' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Share project' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Share project' })).toHaveClass('sr-only');
+    expect(screen.getByRole('heading', { level: 3, name: 'Direct link' })).toBeInTheDocument();
     expect(screen.getByText('Create a self-contained link.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /share with/i })).not.toBeInTheDocument();
-    expect(screen.getByText('No upload through Tau')).toBeInTheDocument();
+  });
+
+  it('should draw the picker, the method and the host sections in one scroll area', () => {
+    renderPane(
+      { methods: [directMethod(), customMethod(() => <p>Hosted body</p>)] },
+      <SharePaneSection title='People with access' description='Who opens the project itself.'>
+        <p>Nobody else has access to this project.</p>
+      </SharePaneSection>,
+    );
+
+    const region = screen.getByRole('region', { name: 'Share project' });
+    const scroller = region.querySelector('[data-slot=share-pane-scroll]');
+    expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass('overflow-y-auto');
+    expect(scroller).toContainElement(screen.getByRole('button', { name: 'Share with Direct link' }));
+    expect(scroller).toContainElement(screen.getByRole('button', { name: 'Create link' }));
+    const people = screen.getByRole('region', { name: 'People with access' });
+    expect(scroller).toContainElement(people);
+    expect(within(people).getByText('Who opens the project itself.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share with Direct link' })).toHaveAccessibleDescription(
+      'Create a self-contained link.',
+    );
+  });
+
+  it('should describe each method in its picker row', async () => {
+    renderPane({ methods: [directMethod(), customMethod(() => <p>Hosted body</p>)] });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
+
+    expect(screen.getByRole('option', { name: /^Cloud link/u })).toHaveTextContent(
+      'Publish a version and choose who can open it.',
+    );
   });
 
   it('should make the link, copy it, announce it and confirm with a tick', async () => {
@@ -75,13 +108,13 @@ describe('SharePane', () => {
     const method = directMethod();
     renderPane({ methods: [method], notify });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Copy direct link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('https://tau.example/s/direct#v=2&zip=abc');
     });
     expect(method.share).toHaveBeenCalledWith(expect.objectContaining({ protection: { kind: 'none' }, options: {} }));
-    expect(notify).toHaveBeenCalledWith('Direct link copied');
+    expect(notify).toHaveBeenCalledWith('Link copied');
     expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveValue('https://tau.example/s/direct#v=2&zip=abc');
     const copy = screen.getByRole('button', { name: 'Copy link' });
     expect(copy.querySelector('.lucide-check')).not.toBeNull();
@@ -98,13 +131,24 @@ describe('SharePane', () => {
     renderPane({ methods: [method] });
 
     await userEvent.click(screen.getByRole('checkbox', { name: 'Encrypt with a password' }));
-    expect(screen.getByText('Password-encrypted')).toBeInTheDocument();
-    const button = screen.getByRole('button', { name: 'Copy direct link' });
-    await userEvent.type(screen.getByLabelText('Password'), 'toolongpassword');
+    expect(
+      screen.getByText('The project is encrypted on this device. People need the password to open it.'),
+    ).toBeVisible();
+    const button = screen.getByRole('button', { name: 'Create link' });
+    const field = screen.getByLabelText('Password');
+    expect(field).toHaveAccessibleDescription('Use at least 4 characters.');
+    await userEvent.type(field, 'toolongpassword');
     expect(button).toBeDisabled();
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAccessibleDescription('This password is too long. Use a shorter one.');
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(field).toHaveAttribute('type', 'text');
     await userEvent.clear(screen.getByLabelText('Password'));
     await userEvent.type(screen.getByLabelText('Password'), 'secret');
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Include password in the link' }));
+    const include = screen.getByRole('checkbox', { name: 'Include password in the link' });
+    expect(include).toHaveAccessibleDescription('Anyone with the link can open the project.');
+    await userEvent.click(include);
+    expect(include).toHaveAccessibleDescription('People need the link and the password. Send the password separately.');
     await userEvent.click(button);
 
     await waitFor(() => {
@@ -128,31 +172,50 @@ describe('SharePane', () => {
     renderPane({
       methods: [
         directMethod({
-          options: [{ id: 'public-gist', label: 'Publish publicly' }],
+          options: [{ id: 'public-gist', label: 'Publish publicly', description: 'Listed on your profile.' }],
           share,
         }),
       ],
     });
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Publish publicly' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Copy direct link' }));
+    const option = screen.getByRole('checkbox', { name: 'Publish publicly' });
+    expect(option).toHaveAccessibleDescription('Listed on your profile.');
+    await userEvent.click(option);
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
-    expect(await screen.findByText('This project is too large for a direct URL.')).toBeInTheDocument();
-    expect(screen.getByText('Shared with 1 unresolved dependency.')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('This project is too large for a direct URL.');
+    expect(screen.getByRole('status')).toHaveTextContent('Shared with 1 unresolved dependency.');
     expect(share.mock.calls[0]?.[0].options).toEqual({ 'public-gist': true });
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('should keep the link when the clipboard refuses it', async () => {
+  it('should keep the link, focused and selected, when the clipboard refuses it', async () => {
     writeText.mockRejectedValue(new Error('denied'));
     renderPane({ methods: [directMethod()] });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Copy direct link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
-    expect(
-      await screen.findByText('The link was created but clipboard access was denied. Copy it below.'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Share link' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't copy the link. Select it above and copy it.");
+    const field = screen.getByRole('textbox', { name: 'Share link' });
+    await waitFor(() => {
+      expect(field).toHaveFocus();
+    });
+  });
+
+  it('should say the link could not be made when a share throws', async () => {
+    renderPane({
+      methods: [
+        directMethod({
+          share: vi.fn(async () => {
+            throw new Error('ECONNRESET');
+          }),
+        }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't create the link. Try again.");
   });
 
   it('should let an extension replace the action, add callouts and actions, and share in its place', async () => {
@@ -185,7 +248,7 @@ describe('SharePane', () => {
       </WorkbenchPanesHostProvider>,
     );
     expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Copy direct link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('https://tau.example/s/github-gist~abc');
     });
@@ -204,7 +267,7 @@ describe('SharePane', () => {
     });
 
     expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy direct link' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create link' })).not.toBeInTheDocument();
   });
 
   it('should list the methods, follow a pick and draw a custom method inside the frame', async () => {
@@ -212,38 +275,28 @@ describe('SharePane', () => {
     renderPane({
       methods: [
         directMethod(),
-        {
-          kind: 'custom',
-          id: 'tau',
-          label: 'Cloud link',
-          icon: Link2,
-          render: () => (
-            <SharePaneFrame description='Publish a snapshot.'>
+        customMethod(() => (
+          <SharePaneFrame>
+            <SharePaneSection title='Publish a version'>
               <p>Hosted body</p>
-            </SharePaneFrame>
-          ),
-        },
+            </SharePaneSection>
+          </SharePaneFrame>
+        )),
       ],
       onMethodChange,
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
-    await userEvent.click(screen.getByRole('option', { name: 'Cloud link' }));
+    await userEvent.click(screen.getByRole('option', { name: /^Cloud link/u }));
 
     expect(onMethodChange).toHaveBeenCalledWith('tau');
-    expect(screen.getByText('Hosted body')).toBeInTheDocument();
-    expect(screen.getByText('Publish a snapshot.')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Publish a version' })).getByText('Hosted body')).toBeVisible();
+    expect(screen.getByText('Publish a version and choose who can open it.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share with Cloud link' })).toBeInTheDocument();
   });
 
   it('should show the method the host keeps, and the first one when that is not offered', () => {
-    const tau = {
-      kind: 'custom',
-      id: 'tau',
-      label: 'Cloud link',
-      icon: Link2,
-      render: () => <p>Hosted body</p>,
-    } as const;
+    const tau = customMethod(() => <p>Hosted body</p>);
     const { unmount } = renderPane({
       methods: [directMethod(), tau],
       method: 'tau',
@@ -256,17 +309,11 @@ describe('SharePane', () => {
       method: 'github-gist',
       initialMethod: 'tau',
     });
-    expect(screen.getByText('No upload through Tau')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeInTheDocument();
   });
 
   it('should open on the initial method when the host does not keep the choice', () => {
-    const tau = {
-      kind: 'custom',
-      id: 'tau',
-      label: 'Cloud link',
-      icon: Link2,
-      render: () => <p>Hosted body</p>,
-    } as const;
+    const tau = customMethod(() => <p>Hosted body</p>);
     renderPane({ methods: [directMethod(), tau], initialMethod: 'tau' });
 
     expect(screen.getByText('Hosted body')).toBeInTheDocument();
@@ -275,18 +322,13 @@ describe('SharePane', () => {
   it('should disable the picker while a share runs', async () => {
     const pending = Promise.withResolvers<{ url: string }>();
     const share = vi.fn(async () => pending.promise);
-    const tau = {
-      kind: 'custom',
-      id: 'tau',
-      label: 'Cloud link',
-      icon: Link2,
-      render: () => <p>Hosted body</p>,
-    } as const;
+    const tau = customMethod(() => <p>Hosted body</p>);
     renderPane({ methods: [directMethod({ share }), tau] });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Copy direct link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
     expect(screen.getByRole('button', { name: 'Share with Direct link' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create link' })).toHaveAttribute('aria-busy', 'true');
     pending.resolve({ url: 'https://tau.example/s/direct#v=2&zip=abc' });
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Share with Direct link' })).toBeEnabled();

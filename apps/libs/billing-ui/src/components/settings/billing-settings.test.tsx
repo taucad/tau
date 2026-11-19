@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactQuery from '@tanstack/react-query';
 import { BillingSettings } from '#components/settings/billing-settings.js';
-import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
+import { createSettingsCatalogue } from '@taucad/settings-ui/components/settings/settings-catalogue';
+import { SettingsSectionsProvider } from '@taucad/settings-ui/components/settings/settings-item';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const createPortalAction = vi.hoisted(() => vi.fn());
@@ -17,7 +18,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useIsFetching: () => query.fetching,
   useQueryClient: () => ({ invalidateQueries: query.invalidateQueries }),
 }));
-vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => ({
+vi.mock('#lib/billing-payment-client.js', () => ({
   purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
   createPortalAction,
@@ -32,16 +33,13 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
     userId: 'user-a',
   }),
 }));
-vi.mock('#components/auth/settings/account/email-deliverability-banner.js', () => ({
-  EmailDeliverabilityBanner: () => undefined,
-}));
 vi.mock('#components/billing/topup-modal.js', () => ({
   TopupModal: () => <div>Top-up modal</div>,
 }));
-vi.mock('@taucad/billing-ui/components/billing/auto-reload-settings', () => ({
+vi.mock('#components/billing/auto-reload-settings.js', () => ({
   AutoReloadSettings: () => <div>Automatic reload controls</div>,
 }));
-vi.mock('@taucad/billing-ui/components/billing/cancel-plan-settings', () => ({
+vi.mock('#components/billing/cancel-plan-settings.js', () => ({
   CancelPlanSettings: () => <div>Cancel plan controls</div>,
 }));
 
@@ -73,13 +71,18 @@ const entitlement = (tier: 'free' | 'pro' | 'enterprise') => ({
   canCreateGeoSpecEvidenceReports: false,
   geospecEvidenceRetentionDays: 0,
 });
-const renderSettings = () =>
+/** The Tau Cloud catalogue as the app offers it by default: automatic reload stays behind its feature flag. */
+const deploymentSections = createSettingsCatalogue([]).map((section) => ({
+  ...section,
+  entries: section.entries.filter((entry) => entry.id !== 'automatic-reload'),
+}));
+const renderSettings = (accountNotice?: React.ReactNode) =>
   render(
     <MemoryRouter>
       <TooltipProvider>
-        <DeploymentSettingsProvider>
-          <BillingSettings />
-        </DeploymentSettingsProvider>
+        <SettingsSectionsProvider sections={deploymentSections}>
+          <BillingSettings accountNotice={accountNotice} />
+        </SettingsSectionsProvider>
       </TooltipProvider>
     </MemoryRouter>,
   );
@@ -90,6 +93,12 @@ describe('BillingSettings', () => {
     query.fetching = 0;
     useCredits.mockReturnValue(balance);
     useEntitlements.mockReturnValue(entitlement('pro'));
+  });
+
+  it('shows the account notice the app supplies above the plan', () => {
+    renderSettings(<p>Check your email address</p>);
+    const notice = screen.getByText('Check your email address');
+    expect(notice.compareDocumentPosition(screen.getByText('$20/month'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('renders source balances and holds from the C03 explanation', () => {

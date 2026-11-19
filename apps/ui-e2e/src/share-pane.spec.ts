@@ -70,7 +70,7 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
   expect(restoredBounds?.x).toBeCloseTo(splitBounds.x, 0);
 
   await target.expectAttribute(
-    shareRegion().getByRole('checkbox', { name: 'Encrypt with a password' }),
+    shareRegion().getByRole('checkbox', { name: 'Protect with a password' }),
     'data-state',
     'unchecked',
   );

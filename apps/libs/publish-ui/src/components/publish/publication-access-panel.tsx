@@ -72,7 +72,9 @@ export function PublicationAccessPanel({
   onGrantsChanged,
 }: PublicationAccessPanelProps): React.JSX.Element {
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
-  const [mutating, setMutating] = useState(false);
+  // A count, not a flag: Undo can run from its toast while an invite is still in flight.
+  const [activeMutations, setActiveMutations] = useState(0);
+  const mutating = activeMutations > 0;
   const [isListExpanded, setIsListExpanded] = useState(false);
   const helpId = useId();
   const endpoint = `${apiBaseUrl}/v1/publications/${publicationId}/access`;
@@ -80,13 +82,18 @@ export function PublicationAccessPanel({
   const controlsDisabled = mutating || visibilityMutating;
   const canAdd = visibility === 'private' && pendingEmails.length > 0 && !emailError && !controlsDisabled;
 
-  const invite = async (email: string): Promise<void> => {
+  /**
+   * Grants one address access. The API upserts the grant by address, so asking again for a removed address makes the
+   * same grant active again; `notifyRecipient` decides whether the invite email goes out, and the API only sends it to
+   * an address that had no active grant.
+   */
+  const invite = async (email: string, notifyRecipient: boolean): Promise<void> => {
     // A network failure is named by its address too, never by the transport's message.
     const response = await fetch(endpoint, {
       method: 'POST',
       credentials: 'include',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, notifyRecipient: true }),
+      body: JSON.stringify({ email, notifyRecipient }),
     });
     // The failure ends at the toast below and is never reported, so no request id is recorded on it.
     if (!response.ok) {
@@ -100,9 +107,9 @@ export function PublicationAccessPanel({
       return;
     }
 
-    setMutating(true);
+    setActiveMutations((count) => count + 1);
     try {
-      const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email)));
+      const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email, true)));
       const failed = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'rejected');
       const invited = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'fulfilled');
       setPendingEmails(failed);
@@ -114,12 +121,25 @@ export function PublicationAccessPanel({
         toast.error(inviteToast(failed, true));
       }
     } finally {
-      setMutating(false);
+      setActiveMutations((count) => count - 1);
+    }
+  };
+
+  /* Undo puts the same grant back without a second invite email: the person was invited once already. */
+  const handleRestore = async (email: string): Promise<void> => {
+    setActiveMutations((count) => count + 1);
+    try {
+      await invite(email, false);
+      await onGrantsChanged();
+    } catch {
+      toast.error(`Couldn't give ${email} access again. Invite them again.`);
+    } finally {
+      setActiveMutations((count) => count - 1);
     }
   };
 
   const handleRevoke = async (grant: PublicationAccessGrant): Promise<void> => {
-    setMutating(true);
+    setActiveMutations((count) => count + 1);
     try {
       const response = await fetch(`${endpoint}/${grant.id}`, {
         method: 'DELETE',
@@ -132,11 +152,18 @@ export function PublicationAccessPanel({
       }
 
       await onGrantsChanged();
-      toast.success(`Removed access for ${grant.recipientEmail}.`);
+      toast.success(`Removed access for ${grant.recipientEmail}.`, {
+        action: {
+          label: 'Undo',
+          onClick() {
+            void handleRestore(grant.recipientEmail);
+          },
+        },
+      });
     } catch {
       toast.error(`Couldn't remove access for ${grant.recipientEmail}. Try again.`);
     } finally {
-      setMutating(false);
+      setActiveMutations((count) => count - 1);
     }
   };
 
@@ -196,7 +223,7 @@ export function PublicationAccessPanel({
 
           <div className='flex flex-col gap-2'>
             <div className='flex items-center justify-between gap-2'>
-              {/* Who can open this link; the project's own members are People with access, below it (C2). */}
+              {/* Who can open this link; the project's own members are Collaborators, below it (C2). */}
               <Heading level={4} variant='overline'>
                 {`Invited (${String(grants.length)})`}
               </Heading>

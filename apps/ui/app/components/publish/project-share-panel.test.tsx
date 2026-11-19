@@ -334,7 +334,9 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByLabelText('Encrypt with a password'));
+    await userEvent.click(screen.getByLabelText('Protect with a password'));
+    /* Protection fills a generated password; this row shares one the person chose instead. */
+    await userEvent.clear(screen.getByLabelText('Password'));
     await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery staple 12345');
     await userEvent.click(screen.getByLabelText('Include password in the link'));
     await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
@@ -554,12 +556,13 @@ describe('ProjectSharePanel', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Update Gist' }));
     await waitFor(() => {
       expect(screen.getByLabelText('Share link')).toHaveValue(
         `https://tau.example/s/github-gist~abc123.${'b'.repeat(40)}`,
       );
     });
+    expect(toastSuccessMock).toHaveBeenCalledWith('Gist updated. The link changed, so copy it again.');
     expect(portableProviderRepublish).toHaveBeenCalledWith(
       {
         locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
@@ -570,10 +573,10 @@ describe('ProjectSharePanel', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unpublish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete Gist…' }));
     await userEvent.click(
-      within(screen.getByRole('alertdialog', { name: 'Unpublish this GitHub Gist?' })).getByRole('button', {
-        name: 'Unpublish Gist',
+      within(screen.getByRole('alertdialog', { name: 'Delete this Gist?' })).getByRole('button', {
+        name: 'Delete Gist',
       }),
     );
 
@@ -608,7 +611,7 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Create Gist and copy link' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
     getGithubGistConnectionStatus.mockResolvedValue('not-connected');
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Update Gist' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
 
     expect(connectGithubGist).toHaveBeenCalledWith({
@@ -816,13 +819,26 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
   });
 
-  it('copies the machine\u2019s share link once and releases the machine', async () => {
+  it('starts the copy inside the publish press, copies the link the machine makes and releases the machine', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
-    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
 
-    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    view.rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~proj_ok');
@@ -836,6 +852,96 @@ describe('ProjectSharePanel', () => {
     /* The publish button went away with the form; focus lands on the new primary. */
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Copy link' })).toHaveFocus();
+    });
+  });
+
+  it('settles the copy of a second publish that brings the same link', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    /* A fresh element each time: React skips a rerender handed the same element. */
+    const panel = (): React.JSX.Element => (
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+    const link = 'https://tau.example/s/tau~proj_ok';
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
+    });
+
+    /* The reset returns the machine to idle and keeps the link it made. */
+    publishFacet({ phase: 'idle', shareUrl: link });
+    view.rerender(panel());
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledTimes(2);
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2);
+    expect(toastSuccessMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands the clipboard a pending link in the publish press, before the machine has made it', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope));
+    const write = vi.fn<(items: unknown[]) => Promise<void>>(async () => undefined);
+    Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: write });
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        declare public readonly items: unknown;
+
+        public constructor(items: unknown) {
+          Object.assign(this, { items });
+        }
+      },
+    );
+    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+
+    /* The machine has not answered: the write is already running, so Safari counts the press as its gesture. */
+    expect(write).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator.clipboard, 'write');
+  });
+
+  it('says Published and selects the link when the clipboard refuses the publish copy', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    view.rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Published');
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveFocus();
     });
   });
 
@@ -1102,7 +1208,8 @@ describe('ProjectSharePanel', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Copy link' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't copy the link. Select it above and copy it.");
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveFocus();
   });
 

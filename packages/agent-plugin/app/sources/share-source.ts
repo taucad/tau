@@ -79,6 +79,8 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
     minBytes: sharePasswordLimits.minBytes,
     maxBytes: sharePasswordLimits.maxBytes,
   },
+  /* The link is the project as it is now, so every press packs it again and nothing is held. */
+  shouldRemakeLink: true,
   action: { label: 'Copy link', icon: directIcon },
   share: async ({ protection, signal }: ShareLinkRequest): Promise<ShareLinkOutcome> => {
     let warning: string | undefined;

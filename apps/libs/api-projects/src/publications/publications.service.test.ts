@@ -1667,6 +1667,54 @@ describe('PublicationsService access grants', () => {
     expect(email.sendPublicationInvite).not.toHaveBeenCalled();
   });
 
+  /* The Share pane's Undo after removing someone asks for the address again with `notifyRecipient: false`. */
+  it('should make a removed grant active again, same row, without an email when told not to notify', async () => {
+    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
+    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
+    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
+
+    const revokedRow = { ...accessRow, status: 'revoked', revokedAt: new Date() };
+    const existingLimit = vi.fn().mockResolvedValue([revokedRow]);
+    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
+    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
+
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: existingFrom });
+    const returning = vi.fn().mockResolvedValue([accessRow]);
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
+    const email = createEmailStub();
+    const service = createTestService(
+      database,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      email,
+      createBillingStub(),
+      ...leaseDependencies(''),
+    );
+
+    const result = await service.inviteAccess({
+      publicationId: 'pub_access',
+      ownerId: 'user_owner',
+      recipientEmail: 'friend@example.com',
+      notifyRecipient: false,
+    });
+
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ set: { status: 'active', revokedAt: null } }),
+    );
+    expect(result).toMatchObject({ id: 'pva_1', status: 'active' });
+    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
+  });
+
   it('should send notification with a frontend publication URL when inviting a new grant', async () => {
     const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
     const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });

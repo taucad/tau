@@ -228,7 +228,86 @@ describe('PublicationAccessPanel', () => {
       });
     });
     expect(onGrantsChanged).toHaveBeenCalledTimes(1);
-    expect(toastSuccessMock).toHaveBeenCalledWith('Removed access for friend@example.com.');
+    const [message, options] = toastSuccessMock.mock.calls[0] as [string, { action: { label: string } }];
+    expect(message).toBe('Removed access for friend@example.com.');
+    expect(options.action.label).toBe('Undo');
+  });
+
+  it('puts a removed grant back on Undo without a second invite email', async () => {
+    const onGrantsChanged = vi.fn();
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        visibility='private'
+        grants={[
+          {
+            id: 'pva_1',
+            publicationId: 'pub_panel',
+            recipientEmail: 'friend@example.com',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            revokedAt: null,
+          },
+        ]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={onGrantsChanged}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    const [, options] = toastSuccessMock.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    options.action.onClick();
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenLastCalledWith('https://api.example/v1/publications/pub_panel/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'friend@example.com', notifyRecipient: false }),
+      });
+    });
+    await waitFor(() => {
+      expect(onGrantsChanged).toHaveBeenCalledTimes(2);
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('says so when Undo cannot put the grant back', async () => {
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        visibility='private'
+        grants={[
+          {
+            id: 'pva_1',
+            publicationId: 'pub_panel',
+            recipientEmail: 'friend@example.com',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            revokedAt: null,
+          },
+        ]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce({ ok: false } as Response);
+    const [, options] = toastSuccessMock.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    options.action.onClick();
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith("Couldn't give friend@example.com access again. Invite them again.");
+    });
   });
 
   it('lists five invited people in flow and the rest on request', async () => {

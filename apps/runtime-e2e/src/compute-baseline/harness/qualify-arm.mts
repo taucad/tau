@@ -500,16 +500,62 @@ const run = async () => {
     // one (`qualify-worker.mts`), so where a supersede lands does not depend on this machine's speed.
     const phaseEnds = new BroadcastChannel(qualifyPhaseChannel);
     const waiters: Array<{ span: string; settle: () => void }> = [];
-    phaseEnds.onmessage = ({ data }: MessageEvent<{ span: string }>) => {
+    const ready = Promise.withResolvers<void>();
+    let released: unknown;
+    phaseEnds.onmessage = ({ data }: MessageEvent<{ span?: string; ready?: boolean; released?: unknown }>) => {
+      if (data.ready) ready.resolve();
+      if (data.released) released = data.released;
       const index = waiters.findIndex((waiter) => waiter.span === data.span);
       if (index >= 0) waiters.splice(index, 1)[0]!.settle();
     };
+    // The worker holds at the targeted span's end until the supersede is issued (`qualify-worker.mts`), so the
+    // supersede lands as that phase starts: before main()'s first OCCT call, and before the GLB pack's first poll even
+    // for a one-part model.
+    const gate = new Int32Array(new SharedArrayBuffer(8));
+    const gateCodes = { main: 1, pack: 2 } as const;
+    const release = () => {
+      Atomics.store(gate, 0, 0);
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1);
+    };
     const phaseEnd = (span: string) => new Promise<void>((settle) => waiters.push({ span, settle }));
+    // The client can stop only an operation whose progress notice (its abort sequence and generation) it has already
+    // read. That notice and the phase end travel on different channels, so the supersede waits for both: the progress
+    // event of the targeted operation, then a turn of the event loop so every listener of that notice has run.
+    const progressPhase = (document: any, phase: 'evaluate' | 'render') =>
+      new Promise<void>((settle) => {
+        const off = document.on('progress', (event: { phase: string; detail?: Record<string, unknown> }) => {
+          const key = phase === 'evaluate' ? 'abortGeneration' : 'abortSequence';
+          if (event.phase === phase && typeof event.detail?.[key] === 'number') {
+            off();
+            settle();
+          }
+        });
+      });
+    /** Fail with what was awaited instead of hanging until the test's `beforeAll` gives up. */
+    const within = async (promise: Promise<unknown>, what: string) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`abort scenario on ${model.name}: no ${what} within 120 s`)),
+              120_000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     const { client, state } = openClient();
     await client.connect();
     const session = liveSession(client, content);
     try {
       await measure(state, { token: 'base', phase: 'open' }, () => session.step('base'));
+      phaseEnds.postMessage({ gate: gate.buffer });
+      await within(ready.promise, 'gate handshake with the worker');
       // Every build below uses a parameter value not seen before (the scrub ladder), so each is a real rebuild in
       // every arm. The first is a warm edit.
       const key = model.scrub.key;
@@ -535,12 +581,29 @@ const run = async () => {
           async () => {
             const document = session.document();
             // `kernel.execute` ends as main() starts; `replicad.render-output` ends as the GLB pack starts.
-            const landed = phaseEnd(target === 'main' ? 'kernel.execute' : 'replicad.render-output');
+            const span = target === 'main' ? 'kernel.execute' : 'replicad.render-output';
+            const operation = target === 'main' ? 'evaluate' : 'render';
+            const landed = Promise.all([phaseEnd(span), progressPhase(document, operation)]);
+            Atomics.store(gate, 1, 0);
+            Atomics.store(gate, 0, gateCodes[target]);
+            released = undefined;
+            let committed: Promise<unknown> = Promise.resolve();
             const pending = document.update({ parameters: frame(first) });
-            await landed;
-            if (delay > 0) await new Promise((settle) => setTimeout(settle, delay));
-            issued = performance.timeOrigin + performance.now();
-            const committed = document.update({ parameters: frame(second) });
+            try {
+              await within(
+                landed,
+                `${operation} progress and ${span} end for trial ${trial} (${target}) at ${key}=${String(first)}`,
+              );
+              await new Promise((settle) => setImmediate(settle));
+              if (delay > 0) await new Promise((settle) => setTimeout(settle, delay));
+              issued = performance.timeOrigin + performance.now();
+              committed = document.update({ parameters: frame(second) });
+              // The document handle reaches the session's update, which signals the abort word, a few microtasks
+              // later: release the worker only after they ran, so it resumes into a stopped operation.
+              await new Promise((settle) => setImmediate(settle));
+            } finally {
+              release();
+            }
             const [one, two] = await Promise.allSettled([pending, committed]);
             firstOutcome =
               one.status === 'fulfilled'
@@ -585,6 +648,13 @@ const run = async () => {
           // The superseded render's outcome: `cancelled` when packing stopped at the supersede.
           supersededRender: render?.detail?.['operation.outcome'],
           renderAfterIssueMs: render ? +(endOf(render) - issued).toFixed(1) : undefined,
+          // How the worker left the gate: `ok` once the arm released it, `timed-out` if it never did.
+          released,
+          packParts: render
+            ? byStart('replicad.mesh-to-gltf').find(
+                (entry) => startOf(entry) >= startOf(render) && startOf(entry) <= endOf(render),
+              )?.detail?.shapeCount
+            : undefined,
           // From the supersede to the committed edit's `main()`: the stop, its unwinding and the next build's setup.
           nextBuildAfterIssue: next ? +(startOf(next) - issued).toFixed(1) : undefined,
           supersededMainStatus: stopped?.detail?.status ?? stopped?.detail?.error,
@@ -595,6 +665,7 @@ const run = async () => {
         console.error(`[qualify] abort trial ${trial}: ${JSON.stringify((step as any).abort)}`);
       }
     } finally {
+      release();
       session.close();
       phaseEnds.close();
       await client.shutdown({ drain: true });

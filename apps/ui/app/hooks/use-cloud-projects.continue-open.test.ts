@@ -18,10 +18,13 @@ const { revisionClientTestApi } = await import('#hooks/use-revision-status.js');
 const projectId = 'prj_continue000000000000000';
 const worker = { name: 'shared-worker' } as unknown as Worker;
 
-/** The project's client as the open's hold reads it: a projection a row moves. */
+/** The project's client as the open's hold reads it: open, with the root's first answer, and a projection a row moves. */
 const adoptClient = (on: Worker = worker) => {
   const listeners = new Set<() => void>();
-  let status: RevisionStatusProjection | undefined;
+  let status: RevisionStatusProjection | undefined = {
+    remote: { kind: 'none', phase: 'none' },
+    sync: { state: 'checking' },
+  } as unknown as RevisionStatusProjection;
   const client = {
     status: () => status,
     subscribe: (listener: () => void) => {
@@ -38,6 +41,13 @@ const adoptClient = (on: Worker = worker) => {
         remote: { kind: 'tau', phase: 'connecting' },
         sync: { state: 'checking', ...sync },
       } as unknown as RevisionStatusProjection;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    /* Closed as a client closes: no projection, and its listeners told; the registry keeps the same object. */
+    close: () => {
+      status = undefined;
       for (const listener of listeners) {
         listener();
       }
@@ -108,6 +118,49 @@ describe('continueCloudOpen (STO-25 SP6)', () => {
     const connect = vi.fn(async () => undefined);
     expect(await continueCloudOpen({ projectId, account: 'usr_ada', connect, asserted: true })).toBe(false);
     expect(connect).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Review of 1cd99a7c (MEDIUM): another tab holds the S20 lock while this tab's open waits for it; the person leaves
+   * the project and its session closes the client, which the registry keeps. When the lock comes, nothing may be sent
+   * to the closed client (it would queue `connectRemote` for the client's next open, under whoever opens it then), and
+   * the lock is let go at once instead of held for the stall bound.
+   */
+  it('connects nothing to a client that closed while the open waited for the lock, and lets the lock go', async () => {
+    const client = adoptClient();
+    const held = Promise.withResolvers<void>();
+    const granted: string[] = [];
+    const released: string[] = [];
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: async (name: string, ...rest: unknown[]) => {
+          const callback = rest.at(-1) as () => Promise<unknown>;
+          await held.promise;
+          granted.push(name);
+          try {
+            return await callback();
+          } finally {
+            released.push(name);
+          }
+        },
+      },
+    });
+    try {
+      const connect = vi.fn(async () => undefined);
+      const opening = continueCloudOpen({ projectId, account: 'usr_ada', connect, asserted: true });
+      client.close();
+      held.resolve();
+      await vi.waitFor(() => {
+        expect(granted).toHaveLength(1);
+      });
+      await Promise.resolve();
+      expect(connect).not.toHaveBeenCalled();
+      expect(await opening).toBe(false);
+      expect(released).toHaveLength(1);
+    } finally {
+      Reflect.deleteProperty(navigator, 'locks');
+    }
   });
 
   /* Review of d158d3e7 (LOW): an open in flight stands for its own client only. */

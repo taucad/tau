@@ -424,8 +424,12 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
     });
   });
 
-  /* Review of d158d3e7 (LOW): the wait for the root's first answer ends with the gesture's ownership. */
-  describe('the first-answer wait ends at hand-over and when the client closes', () => {
+  /*
+   * Review of d158d3e7 (LOW): the wait for the root's first answer ends when the gesture is released or the client
+   * closes, so a later reopen's answer is never the gesture's. A hand-over to a session on the same connection does not
+   * end it (SP3-local 5bc7b961 gap 2).
+   */
+  describe('the first-answer wait ends at a release and when the client closes, not at hand-over', () => {
     it('never continues the open on a later reopen after a session took the client before its first answer', async () => {
       const log: string[] = [];
       const { client, answerUser, publish } = createClient(log);
@@ -443,6 +447,89 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
       stops.push(startSessionChild(store.ports));
       answerUser();
       await settle();
+      publish({ kind: 'none', phase: 'none' });
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+
+    /*
+     * SP3-local 5bc7b961 gap 2: the session's `revisions` child takes the client a few milliseconds after the gesture
+     * opens it, well before the root first answers. The open the gesture started is still this connection's: ending the
+     * wait at the hand-over left `info/refs` to the route's connector, after the route rendered and a listing.
+     */
+    it('continues the owed open when a session takes the client before its first answer, on the same connection', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      const release = openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true });
+      answerUser();
+      await settle();
+      expect(log.at(-1)).toBe('open');
+      /* The session takes the client while the root has not answered yet; the gesture's navigation then settles. */
+      stops.push(startSessionChild(store.ports));
+      answerUser();
+      await settle();
+      release();
+      expect(store.continued).toStrictEqual([]);
+      publish({ kind: 'none', phase: 'none' });
+      await settle();
+      expect(store.continued).toHaveLength(1);
+      expect(store.continued[0]).toMatchObject({ projectId, account: ada.id, client, asserted: true });
+      /* The session holds the connection now: nothing the gesture does ends the open it continued. */
+      expect(store.continued[0]?.signal.aborted).toBe(false);
+      expect(log).not.toContain('close');
+    });
+
+    /* Review of 1cd99a7c (LOW): the answer is the gesture's only while a session still holds that very client. */
+    it('continues nothing when the session that took the client lets it go in the tick its root answers', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true }));
+      answerUser();
+      await settle();
+      const stop = startSessionChild(store.ports);
+      answerUser();
+      await settle();
+      /* The root answers, and the session stops before the continuation reads who holds the client. */
+      publish({ kind: 'none', phase: 'none' });
+      stop();
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+
+    it('continues nothing when the account changed after the hand-over, before the first answer', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true }));
+      answerUser();
+      await settle();
+      stops.push(startSessionChild(store.ports));
+      answerUser();
+      await settle();
+      /* An identity change is an event on the open client, never a reopen: the same connection answers as Grace. */
+      store.signIn(grace);
+      answerUser();
+      await settle();
+      publish({ kind: 'none', phase: 'none' });
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+
+    it('continues nothing once the gesture was released before any session took the client', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      const release = openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true });
+      answerUser();
+      await settle();
+      release();
+      expect(log.slice(-2)).toStrictEqual(['setCredential:withdrawn', 'close']);
       publish({ kind: 'none', phase: 'none' });
       await settle();
       expect(store.continued).toStrictEqual([]);

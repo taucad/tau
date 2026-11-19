@@ -472,7 +472,7 @@ type AheadOfSession = Readonly<{
   account: string;
   /** End the gesture's ownership: withdraw and close, unless a session holds the client. */
   release: () => void;
-  /** A session took the client: stop following, close nothing, and let a continued open run on. */
+  /** A session took the client: stop following, close nothing, and let the owed open continue, or run on. */
   handOver: () => void;
 }>;
 
@@ -578,7 +578,9 @@ const firstStatus = async (
  * Ownership: nothing starts while a session holds the project's client, or with nobody signed in. The project's
  * session takes the connection when its `revisions` child takes the client (same client, same account); until then
  * the returned release ends it, and so does any change of who is signed in. A release closes the client only while
- * no session holds it and it is still the project's client; a continued open's lock wait ends with it.
+ * no session holds it and it is still the project's client; a continued open's lock wait ends with it. An owed open
+ * still waiting for the root's first answer at the hand-over continues on that answer, for the same account, while a
+ * session holds the same client: the session takes the client long before the root answers.
  *
  * @param ports - The session user, anonymity, salt, cloud open and fault ports.
  * @returns The opener: its release, which is idempotent and a no-op once a session took the connection.
@@ -602,8 +604,14 @@ export const openRevisionsAheadOfSession =
     const account = user.id;
     /* The gesture's ownership: released ends it and a continued open's lock wait and hold with it. */
     const ended = new AbortController();
-    /* The wait for the root's first answer: it ends with the ownership, at a release or a hand-over alike. */
-    const owned = new AbortController();
+    /*
+     * The wait for the root's first answer: a release ends it, a hand-over does not. A session takes the client a few
+     * milliseconds after the gesture opens it, long before the root answers (SP3-local 5bc7b961 gap 2), and that answer
+     * is still this connection's: an identity change is an event on it, never a reopen, and a close ends the wait.
+     */
+    const released = new AbortController();
+    /* Set at hand-over: the session that took the client holds the same connection the gesture opened. */
+    const custody: { handedOver: boolean } = { handedOver: false };
     const unsubscribes: Array<() => void> = [];
     const stopFollowing = (): void => {
       runIsolated(unsubscribes.splice(0), ports.reportFault);
@@ -627,7 +635,7 @@ export const openRevisionsAheadOfSession =
         }
         aheadOfSession.delete(projectId);
         ended.abort();
-        owned.abort();
+        released.abort();
         stopFollowing();
         if ((sessionHolds.get(projectId) ?? 0) === 0 && peekRevisionClient(projectId) === client) {
           // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
@@ -638,8 +646,8 @@ export const openRevisionsAheadOfSession =
       handOver: () => {
         if (aheadOfSession.get(projectId) === record) {
           aheadOfSession.delete(projectId);
-          /* From here the session's route owns the remote's connection; an open already continued runs on. */
-          owned.abort();
+          /* From here the session owns the connection; an open continued, or still waiting to, runs on under it. */
+          custody.handedOver = true;
           stopFollowing();
         }
       },
@@ -682,11 +690,16 @@ export const openRevisionsAheadOfSession =
       if (continueOpen === undefined || !ports.cloudOpen.get(projectId)) {
         return;
       }
-      const status = await firstStatus(client, owned.signal);
+      /* After a hand-over only the client's first publish, or its close, ends this wait: a release no longer can. */
+      const status = await firstStatus(client, released.signal);
       const canOpen = ports.cloudOpen.canOpen?.(projectId) ?? true;
+      /* Still the gesture's, or a session's that holds this very client: never a released or replaced connection. */
+      const continues =
+        aheadOfSession.get(projectId) === record ||
+        (custody.handedOver && (sessionHolds.get(projectId) ?? 0) > 0 && peekRevisionClient(projectId) === client);
       if (
         status === undefined ||
-        aheadOfSession.get(projectId) !== record ||
+        !continues ||
         !canOpen ||
         ports.sessionUser.get()?.id !== account ||
         nextTauCloudStep('open', { auth: 'authed', isResolved: true, canSyncFiles: true }, status) !== 'connect'

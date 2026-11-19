@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
-import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
+import type { PublishDraft, Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import { autoVersionName } from '@taucad/revisions/publish-machine';
 import type { RevisionTreeInput } from '@taucad/revisions/algorithms';
@@ -2516,6 +2516,36 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         command: 'confirmPublish',
         draft: { tag: '', isAutoNamed: true, projectName: 'alpha', entryPath: 'main.scad' },
       });
+      await vi.waitFor(
+        async () => {
+          const [head] = await root.log();
+          expect(head?.tags).toEqual([autoVersionName(new Date())]);
+        },
+        { timeout: 10_000 },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }, 20_000);
+
+  it('should name an auto-named publish whose draft arrives with no name at all', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('', { status: 503 }));
+
+    try {
+      alpha.send({ command: 'publishProject', apiBaseUrl: 'https://api.test' });
+      /* A page's draft is not validated on the way to the worker. */
+      const draft = { isAutoNamed: true, projectName: 'alpha', entryPath: 'main.scad' } as unknown as PublishDraft;
+      alpha.send({ command: 'confirmPublish', draft });
       await vi.waitFor(
         async () => {
           const [head] = await root.log();

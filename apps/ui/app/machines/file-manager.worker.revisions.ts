@@ -1707,14 +1707,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'confirmPublish': {
-          /* Only a host has a locale, so a draft nobody named is named here, as the host's `publish` verb names it. */
+          /* Only a host has a locale, so a draft nobody named is named here, as the host's `publish` verb names it.
+             The page's draft is not validated on the way here, so a missing name reads as empty. */
           const { draft } = command;
+          const tag: unknown = draft.tag;
           actor.send({
             type: 'publish',
             event: {
               type: 'confirm',
               draft:
-                draft.isAutoNamed === true && draft.tag.trim() === ''
+                draft.isAutoNamed === true && (typeof tag === 'string' ? tag : '').trim() === ''
                   ? { ...draft, tag: autoVersionName(new Date()) }
                   : draft,
             },

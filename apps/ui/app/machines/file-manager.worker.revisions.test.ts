@@ -44,6 +44,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import { mayCreateChat } from '#runtime/project-runtime.helpers.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 
 type Harness = {
@@ -2373,6 +2374,54 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       /* The first advertisement came before the PUT, and the next after it. */
       expect(advertisements.slice(0, 2)).toEqual([requests.indexOf(puts[0]!), requests.indexOf(puts[0]!) + 1]);
     } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  /*
+   * A cold Tau Cloud open reads the checkout before the page attaches its remote: no remote, no head, so complete. The
+   * attach makes its tree unknown again, so nothing that waits on the entry closure (the chats, and the chat the focused
+   * chat's ensure would make) opens on that completeness while the remote's tree is still to come (I7, SP2h).
+   */
+  it('should not carry a no-remote project’s completeness across a Tau Cloud remote attach (I7)', async () => {
+    let releaseFetch: (() => void) | undefined;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      /* Tau Cloud holds a tree for the project, which this open has not fetched yet. */
+      listRemoteRefs: async () => [{ name: 'refs/heads/main', head: revisionId('a'.repeat(40)) }],
+      fetch: async (input) => {
+        await new Promise<void>((resolve) => {
+          releaseFetch = resolve;
+        });
+        return port.fetch(input);
+      },
+    }));
+    const alpha = await fixture.open('alpha');
+    const statuses = (): RevisionStatusProjection[] =>
+      alpha.frames.flatMap((frame) => (frame.type === 'status' ? [frame.status] : []));
+    expect(statuses().at(-1)).toMatchObject({ remote: { phase: 'none' }, readiness: 'filled' });
+    expect(statuses().at(-1)?.headRevisionId).toBeUndefined();
+    const before = statuses().length;
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    ) as unknown as typeof globalThis.fetch;
+
+    try {
+      alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      alpha.send({ command: 'connectRemote', kind: 'tau' });
+      await vi.waitFor(() => {
+        expect(statuses().at(-1)?.remote.kind).toBe('tau');
+      });
+      await alpha.settle();
+      const attached = statuses().slice(before);
+      for (const status of attached.filter((candidate) => candidate.remote.phase !== 'none')) {
+        expect(status.readiness).not.toBe('filled');
+        expect(mayCreateChat(status, true, true)).toBe(false);
+      }
+      expect(attached.at(-1)?.readiness).toBe('connected');
+    } finally {
+      releaseFetch?.();
       globalThis.fetch = original;
     }
   });

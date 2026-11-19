@@ -185,6 +185,48 @@ describe('settleReadiness', () => {
     expect(settleReadiness(filled, switched).tree).toBe('other:h1:0');
   });
 
+  /*
+   * A cold Tau Cloud open reads the checkout before its remote is attached: no remote, no head, so complete. The
+   * remote's attach makes the tree unknown again, and that completeness must not carry across it (I7).
+   */
+  it('lets a remote attached to a project with no head replace its local completeness (I7)', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    expect(local.state).toBe('filled');
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    expect(connecting.state).toBe('connected');
+    const applying = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, sync: { ...source().sync, pullPhase: 'applying' } }), false),
+    );
+    expect(applying.state).toBe('treeReady');
+    expect(reachesReadiness(applying.state, 'entryReady')).toBe(false);
+    /* The tree write announces its own tree and moves forward from there. */
+    const writing = settleReadiness(
+      applying,
+      readinessOf(source({ headRevisionId: undefined, applyingRoots: ['/projects/p'] }), false, 1),
+    );
+    expect(writing).toEqual({ state: 'treeReady', tree: 'live::1' });
+  });
+
+  it('keeps a local project with no head complete while no remote is attached', () => {
+    const local = source({ headRevisionId: undefined, remote: remote('none') });
+    const first = settleReadiness(readinessOf(source({ ...local, registrySettled: false })), readinessOf(local));
+    expect(first.state).toBe('filled');
+    expect(settleReadiness(first, readinessOf(local, false))).toEqual(first);
+    /* Its first revision is a new tree, complete on its own reading. */
+    expect(settleReadiness(first, readinessOf(source({ remote: remote('none') }))).state).toBe('filled');
+  });
+
+  it('keeps a project with a head as it is when a remote is attached', () => {
+    const local = readinessOf(source({ remote: remote('none') }));
+    const connecting = readinessOf(source({ remote: remote('connecting') }));
+    expect(connecting.tree).toBe(local.tree);
+    expect(settleReadiness(local, connecting)).toEqual({ state: 'filled', tree: 'live:h1:0' });
+  });
+
   it('takes the first reading as it is', () => {
     const first = readinessOf(source({ registrySettled: false }));
     expect(settleReadiness(undefined, first)).toBe(first);

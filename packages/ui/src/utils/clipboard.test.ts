@@ -36,7 +36,13 @@ class FakeBlob {
 /** The text inside the first item handed to `write`, once its promise settles. */
 const writtenText = async (): Promise<string> => {
   const [item] = write.mock.calls[0]?.[0] ?? [];
-  const blob = (await (item as unknown as FakeClipboardItem).items['text/plain']) as unknown as FakeBlob;
+  if (!(item instanceof FakeClipboardItem)) {
+    throw new TypeError('write was not handed a FakeClipboardItem');
+  }
+  const blob = await item.items['text/plain'];
+  if (!(blob instanceof FakeBlob)) {
+    throw new TypeError('the pending item did not settle to a FakeBlob');
+  }
   return blob.parts.join('');
 };
 
@@ -45,7 +51,10 @@ beforeEach(() => {
   writeText.mockResolvedValue(undefined);
   write.mockReset();
   write.mockImplementation(async (items) => {
-    await (items[0] as unknown as FakeClipboardItem).items['text/plain'];
+    const [item] = items;
+    if (item instanceof FakeClipboardItem) {
+      await item.items['text/plain'];
+    }
   });
 });
 

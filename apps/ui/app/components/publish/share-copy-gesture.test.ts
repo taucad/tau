@@ -25,7 +25,29 @@ const codeOf = (source: string): string => source.replaceAll(/\/\*[\s\S]*?\*\//g
 const functionOpening = /=>\s*\{|\bfunction\b[^{;]*\{/gu;
 
 /**
- * The `copyText` calls that something awaits before, inside the same function.
+ * Whether a body that opens with the last character of `from` is still open where `from` ends.
+ *
+ * @param from - Source from the body's opening brace up to the call.
+ * @returns True when the braces after the opening one never close it.
+ */
+const isStillOpen = (from: string): boolean => {
+  let depth = 0;
+  for (const character of from) {
+    if (character === '{') {
+      depth += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return false;
+      }
+    }
+  }
+  return depth > 0;
+};
+
+/**
+ * The `copyText` calls that something awaits before, inside the same function. The function is the innermost one
+ * still open at the call, so a callback that closed before the call does not hide an earlier `await`.
  *
  * @param code - Source without comments.
  * @returns One line per offending call.
@@ -33,7 +55,9 @@ const functionOpening = /=>\s*\{|\bfunction\b[^{;]*\{/gu;
 const awaitedBeforeCopy = (code: string): string[] =>
   [...code.matchAll(/\bcopyText\(/gu)].flatMap((call) => {
     const openings = [...code.slice(0, call.index).matchAll(functionOpening)];
-    const opening = openings.at(-1);
+    const opening = openings.findLast((candidate) =>
+      isStillOpen(code.slice(candidate.index + candidate[0].length - 1, call.index)),
+    );
     const start = opening === undefined ? 0 : opening.index + opening[0].length;
     const before = code.slice(start, call.index).replace(/await\s*$/u, '');
     return /\bawait\b/u.test(before) ? [code.slice(start, call.index + 'copyText('.length).trim()] : [];
@@ -47,6 +71,11 @@ describe('Share copy gesture', () => {
     expect(awaitedBeforeCopy('const copy = async () => {\n  const { isCopied } = await copyText(link());\n};')).toEqual(
       [],
     );
+    expect(
+      awaitedBeforeCopy(
+        'const copy = async () => {\n  await publish();\n  emails.forEach((email) => {\n    log(email);\n  });\n  await copyText(link);\n};',
+      ),
+    ).toHaveLength(1);
   });
 
   it.each(shareCopyModules)('should copy through copyText inside the press in %s', (path) => {

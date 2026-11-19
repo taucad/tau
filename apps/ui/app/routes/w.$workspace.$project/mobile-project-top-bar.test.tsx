@@ -246,6 +246,24 @@ describe('selectProjectStatusLine', () => {
     expect(result.tone).toBe(tone);
   });
 
+  /* R2-016: the header's GitHub line still starts “Saved”, so the phone shortens it to Saved. */
+  it('shortens the header’s Saved · Not on GitHub yet to Saved', () => {
+    const projection = status({
+      remote: {
+        ...revisionStatusHarness.status.remote,
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+      },
+      sync: { ...revisionStatusHarness.status.sync, state: 'manual' },
+    });
+    const { sentence } = selectRevisionFacts(projection, onMain);
+    expect(sentence).toMatch(/^Saved/u);
+    expect(sentence).toContain('Not on GitHub yet');
+    expect(line(projection).text).toBe('Saved');
+  });
+
   it('keeps the viewer’s access in the line where Saved alone would hide it', () => {
     expect(line(status(), { ...onMain, role: 'read' }).text).toBe('Saved · View only');
   });

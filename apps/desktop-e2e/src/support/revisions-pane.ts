@@ -129,7 +129,7 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
   const strip = revisionStrip(page);
   const chooser = line.getByRole('radiogroup', { name: 'Where to back up' });
   const connected = line.getByRole('status', { name: /^Backup (?:status|connection progress)$/u });
-  const backUp = line.getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  const backUp = line.getByRole('button', { name: 'Back up to the cloud', exact: true });
   const save = strip.getByRole('button', { name: 'Save', exact: true });
   const nothingSaved = revisionStatus(page).filter({ hasText: 'Nothing saved yet' });
   type Offer = 'chooser' | 'connected' | 'unsaved' | 'nothingSaved' | 'backUp';
@@ -184,7 +184,7 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
  */
 export const connectTauCloud = async (page: Page): Promise<void> => {
   const chooser = backupLine(page).getByRole('radiogroup', { name: 'Where to back up' });
-  const choice = chooser.getByRole('radio', { name: 'Tau Cloud' });
+  const choice = chooser.getByRole('radio', { name: 'Tau', exact: true });
   const stillOffered = await expect
     .poll(async () => choice.isVisible(), { timeout: 30_000 })
     .toBe(false)
@@ -197,6 +197,6 @@ export const connectTauCloud = async (page: Page): Promise<void> => {
   }
   await choice.click();
   await backupLine(page)
-    .getByRole('button', { name: /^(?:Back up to Tau Cloud|Change backup)$/u })
+    .getByRole('button', { name: /^(?:Back up to the cloud|Change backup)$/u })
     .click();
 };

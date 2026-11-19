@@ -286,7 +286,7 @@ describe('ProjectAccessService', () => {
   });
 
   it.each([
-    { label: 'owner', userId: ownerId, error: GoneException, message: 'deleted from Tau Cloud' },
+    { label: 'owner', userId: ownerId, error: GoneException, message: 'deleted from the cloud' },
     { label: 'collaborator', userId: collaboratorId, error: NotFoundException, message: 'Project not found' },
   ])(
     'should fence a cached $label on another replica as soon as deletion intent exists',
@@ -392,7 +392,7 @@ describe('ProjectAccessService', () => {
       const args = { projectId, ownerId, email: 'invitee@example.test', role: 'read' } as const;
       const mutation = service[operation](args);
       await expect(mutation).rejects.toThrow(GoneException);
-      await expect(mutation).rejects.toThrow('deleted from Tau Cloud');
+      await expect(mutation).rejects.toThrow('deleted from the cloud');
       expect(invitationWrites).toStrictEqual([]);
       expect(invitationUpdates).toStrictEqual([]);
       expect(collaboratorWrites).toStrictEqual([]);

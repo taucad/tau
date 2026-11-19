@@ -82,7 +82,7 @@ describe('createShareSource', () => {
     expect(methods.map(({ id, label }) => [id, label])).toEqual([['direct', 'Direct link']]);
     expect(methods[0]).toMatchObject({
       kind: 'link',
-      description: 'Create a self-contained link that works without a Tau account or storage.',
+      description: 'Create a link that carries the whole project. No account needed.',
       notice: { title: 'No upload through Tau' },
       encryption: { minBytes: 32, maxBytes: 128 },
       action: { label: 'Copy direct link' },

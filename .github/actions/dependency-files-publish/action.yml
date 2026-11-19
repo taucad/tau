@@ -1,6 +1,8 @@
 name: 'Dependency files publish'
 description: >-
-  Downloads the dependency files of one name that a tau-plugin.json pins by URL, refuses unless each
+  Downloads the dependency files of one name that a tau-plugin.json pins by URL (source `manifest`),
+  or the engine assets of the taucad/cadmpeg-ts release a tag names, pinned by the digests GitHub
+  states (source `release`), refuses unless each
   matches its pinned integrity and byte length and the tag names their bytes, writes each once under
   `blobs/sha256/<hex>` to one environment's locked dependency bucket, and reads every blob back from
   that environment's public host. It is the one step implementation `dependency-files-publish.yml`
@@ -12,15 +14,25 @@ inputs:
   environment:
     description: '`production` or `staging`: selects the expected bucket and the host every blob is read back from'
     required: true
+  source:
+    description: >-
+      `manifest` (the default): the files of `name` that `manifest` pins, tagged `dependency@<tag-name>-<16 hex>`.
+      `release`: the taucad/cadmpeg-ts release a `dependency@cadmpeg-engines-<version>-<16 hex>` tag names,
+      recovered from the tag; manifest, name and tag-name are then ignored
+    required: false
+    default: manifest
   manifest:
-    description: 'The tau-plugin.json that pins the files'
-    required: true
+    description: 'With source `manifest`: the tau-plugin.json that pins the files'
+    required: false
+    default: ''
   name:
-    description: 'The dependency file name, such as `dotnet`'
-    required: true
+    description: 'With source `manifest`: the dependency file name, such as `dotnet`'
+    required: false
+    default: ''
   tag-name:
-    description: 'The tag name before its key: the tag is `dependency@<tag-name>-<16 hex>`'
-    required: true
+    description: 'With source `manifest`: the tag name before its key'
+    required: false
+    default: ''
   bucket:
     description: 'The environment variable DEPENDENCY_R2_BUCKET'
     required: false
@@ -47,13 +59,30 @@ runs:
     - name: Download and verify every pinned file against the tag
       shell: bash
       env:
+        SOURCE: ${{ inputs.source }}
         MANIFEST: ${{ inputs.manifest }}
         FILE_NAME: ${{ inputs.name }}
         TAG_NAME: ${{ inputs.tag-name }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        node scripts/src/mirror-dependency-files.ts fetch --manifest "$MANIFEST" --name "$FILE_NAME" \
-          --tag-name "$TAG_NAME" --tag "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/dependency-files"
+        case "$SOURCE" in
+          release)
+            # The tag carries the version; the run reads no pin from its commit. `fetch --tag` recomputes the
+            # key from the release's bytes, so a tag whose key does not match refuses.
+            release="$(node scripts/src/mirror-dependency-files.ts release-of --tag "$GITHUB_REF_NAME")"
+            node scripts/src/mirror-dependency-files.ts fetch --release "${release#release=}" \
+              --tag "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/dependency-files"
+            ;;
+          manifest)
+            node scripts/src/mirror-dependency-files.ts fetch --manifest "$MANIFEST" --name "$FILE_NAME" \
+              --tag-name "$TAG_NAME" --tag "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/dependency-files"
+            ;;
+          *)
+            echo "::error::Unknown dependency files source '$SOURCE'; nothing is published."
+            exit 1
+            ;;
+        esac
     - name: Write every blob once
       shell: bash
       env:

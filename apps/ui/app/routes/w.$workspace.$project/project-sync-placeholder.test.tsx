@@ -68,7 +68,7 @@ describe('model files placeholder', () => {
   });
 
   it('offers a retry in the viewer when the download failed', async () => {
-    mocks.facet = facet({ phase: 'failed', error: 'The remote did not answer in time.' });
+    mocks.facet = facet({ phase: 'failed', error: 'Backup is taking too long. Tau will try again.' });
     render(<ProjectSyncPlaceholder state='filesFailed' />);
     expect(screen.getByRole('region', { name: 'Couldn’t download model files' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -115,20 +115,20 @@ describe('project files placeholder', () => {
     mocks.status = status({ reason: 'rejected', error: 'The remote refused refs/heads/main.' });
     render(<ProjectSyncPlaceholder state='failed' />);
     expect(screen.getByRole('region', { name: 'Couldn’t back up this project' })).toBeInTheDocument();
-    expect(screen.queryByText('Couldn’t download this project')).not.toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t open this project')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
   it('says a conflicted open needs a decision', () => {
     mocks.status = status({ phase: 'connected' }, { state: 'conflicted' });
     render(<ProjectSyncPlaceholder state='failed' />);
-    expect(screen.getByRole('region', { name: 'This project needs a decision' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Needs your decision' })).toBeInTheDocument();
   });
 
   it('keeps the download copy for a failure that names no class', () => {
     mocks.status = status({ reason: 'unknown', error: 'The download stopped.' });
     render(<ProjectSyncPlaceholder state='failed' />);
-    expect(screen.getByRole('region', { name: 'Couldn’t download this project' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Couldn’t open this project' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 });

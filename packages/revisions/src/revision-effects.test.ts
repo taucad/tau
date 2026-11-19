@@ -695,7 +695,7 @@ it.each(['live', 'linked'])(
       await result;
       expect(pushed).toBe(false);
       expect(actor.getSnapshot().children.sync?.getSnapshot().context.error).toBe(
-        'Closing stopped the transfer; this project will try again.',
+        'Closing stopped the backup. It continues the next time you open this project.',
       );
       expect(await appliedFilesystem.readFile('main.ts', 'utf8')).toBe('remote');
       expect(await context.port.readRef(branch)).toBe(head);
@@ -3963,7 +3963,7 @@ describe('independent sync record failures', () => {
     const refusing: RevisionPort = {
       ...context.port,
       push: async () => {
-        throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+        throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to the cloud is a paid plan feature.');
       },
     };
     const actors = createRevisionActors({
@@ -3976,7 +3976,7 @@ describe('independent sync record failures', () => {
 
     await expect(run(actors.sync.push, { remote: 'tau', branch: 'main', leases: {} })).rejects.toMatchObject({
       code: 'REMOTE_NOT_ENTITLED',
-      message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      message: 'Syncing files to the cloud is a paid plan feature.',
     });
   }, 30_000);
 

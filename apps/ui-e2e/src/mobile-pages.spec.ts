@@ -219,7 +219,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
       selectors.getByText(`Tau now opens ${seededProjects[0]} from this folder`, { exact: true }),
       30_000,
     );
-    await target.expectCount(selectors.getByText(/^Could not open /u), 0);
+    await target.expectCount(selectors.getByText(/^(?:Could not|Couldn’t) open /u), 0);
     await target.expectVisible(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }));
     await target.click(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }), {
       touch: true,
@@ -275,7 +275,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
   test('PG-AUTH-1: sign-in says when the session cannot be checked, then offers its forms', async () => {
     await openTouchPhone(viewport, '/auth/sign-in');
     // No API answers here, so the session check fails and the page says so, with a way on.
-    const alert = selectors.getByRole('alert').filter({ hasText: "We couldn't check your session." });
+    const alert = selectors.getByRole('alert').filter({ hasText: "Couldn't check that you're signed in." });
     const proceed = selectors.getByRole('button', { name: 'Continue to sign in', exact: true });
     await target.expectVisible(proceed, 60_000);
     await target.expectVisible(alert);

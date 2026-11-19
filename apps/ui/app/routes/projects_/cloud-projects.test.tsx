@@ -317,7 +317,7 @@ describe('useMaterializeCloudProjects', () => {
   it('should leave the mark of a project already on this device as it was, and not ask again', async () => {
     materializeOnSignIn.set({ kind: 'home' });
     tauCloudIntent.set('proj_bbbbbbbbbbbbbbbbbbbbb', 'noticed');
-    mockCreateProject.mockRejectedValue(new Error('That project is already on this device'));
+    mockCreateProject.mockRejectedValue(new Error('This project is already on this device.'));
     mockGetProjectFileSystemConfig.mockResolvedValue({ kind: 'indexeddb' });
     const { rerender } = renderHook(() => {
       useMaterializeCloudProjects({

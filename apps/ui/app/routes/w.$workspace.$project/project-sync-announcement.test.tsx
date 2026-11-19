@@ -229,7 +229,7 @@ describe('model wait reporting', () => {
     mocks.remote = { phase: 'failed', reason: 'rejected', error: 'The remote refused refs/heads/main.' };
     const view = render(<ProjectSyncAnnouncement />);
     expect(view.container).toHaveTextContent('Couldn’t back up this project');
-    expect(view.container).not.toHaveTextContent('Couldn’t download this project');
+    expect(view.container).not.toHaveTextContent('Couldn’t open this project');
   });
 
   /* SP3-local 674f6460 gap 9: every pane was open at 7.5 s, but the status said "Preparing project files" until the
@@ -246,7 +246,7 @@ describe('model wait reporting', () => {
     mocks.project = 'preparing';
     mocks.firstView = 'preparing';
     const view = render(<ProjectSyncAnnouncement />);
-    expect(view.container).toHaveTextContent('Preparing project files');
+    expect(view.container).toHaveTextContent('Preparing files');
   });
 
   /* STO-25 SP6 review: `first_view` is what this route shows, not the root's own readiness. */

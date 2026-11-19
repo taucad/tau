@@ -38,7 +38,8 @@ describe('readBuildRelease', () => {
     expect(readBuildRelease()).toBe('1.2.3');
   });
 
-  it.each([undefined, '', 'main', 'v1.2.3'])('should answer the unknown release for %s', (release) => {
+  /* `@TAU_RELEASE` is what an unstamped web build's server graph holds (`apps/ui/scripts/stamp-build-release.mts`). */
+  it.each([undefined, '', 'main', 'v1.2.3', '@TAU_RELEASE'])('should answer the unknown release for %s', (release) => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- the host contract names window.ENV and its keys.
     vi.stubGlobal('window', { ENV: { TAU_RELEASE: release } });
 

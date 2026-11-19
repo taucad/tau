@@ -80,6 +80,11 @@ jobs:
   # exactly one shard, and the caller's required check needs every shard to pass. agent-host's 46 runs
   # measure 2,797 JVM-seconds (job 134332529778, 23.7 min on one runner at two JVMs); on four runners the
   # slowest shard is its longest config, `TurnSettlement.two-turns.cfg` at 392 s.
+  # This file is the caller's copy (`main`'s, at the release gate), but the tiers run the checked-out commit's
+  # formal runner. A release candidate cut before #2560 has no `--shard` and no run seconds, and four shards
+  # each failed on `Unknown option '--shard'` (gate run 44222563188, candidate 7abb090f). So a check tier is
+  # sharded only when the checkout carries tools/formal/run-seconds.json, which came with `--shard`; otherwise
+  # it runs whole in one job (every config, 23.7 min measured, inside the 120-minute budget).
   # A project with a `formal:nightly:mutants` target runs its mutant matrix there, split into
   # `MUTANT_SHARDS` jobs (ST-3, lane budget): each re-runs the same-seed simulation, deals the mutants
   # by the measured seconds in tools/formal/mutant-seconds.json (`formal nightly --mutants-only --shard
@@ -138,7 +143,7 @@ jobs:
             # One job per project and target; a `formal:nightly:check` or `formal:nightly:mutants` tier is one
             # job per shard.
             shards=1
-            if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi
+            if [ "$target" = formal:nightly:check ] && [ -f tools/formal/run-seconds.json ]; then shards=$CHECK_SHARDS; fi
             if [ "$target" = formal:nightly:mutants ]; then shards=$MUTANT_SHARDS; fi
             tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
               --argjson shards "$shards" \

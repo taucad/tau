@@ -69,7 +69,7 @@ describe('PublicationAccessPanel', () => {
     );
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /revoke friend@example.com/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove access for friend@example.com/i })).toBeInTheDocument();
   });
 
   // Email bounce blueprint R9 and D5: "Not delivered", with no reason.
@@ -106,7 +106,7 @@ describe('PublicationAccessPanel', () => {
     );
 
     expect(screen.getAllByText('Can view')).toHaveLength(1);
-    expect(screen.getByText('Can view · Not delivered')).toBeInTheDocument();
+    expect(screen.getByText('Can view · Email not delivered')).toBeInTheDocument();
     expect(screen.queryByText(/spam|bounced|complain/iu)).not.toBeInTheDocument();
   });
 
@@ -132,11 +132,11 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    await userEvent.hover(screen.getByRole('button', { name: /revoke friend@example.com/i }));
+    await userEvent.hover(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Revoke access');
-    expect(screen.getByRole('button', { name: /revoke friend@example.com/i })).toHaveAccessibleDescription(
-      'Revoke access',
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Remove access');
+    expect(screen.getByRole('button', { name: /remove access for friend@example.com/i })).toHaveAccessibleDescription(
+      'Remove access',
     );
   });
 
@@ -154,8 +154,8 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    await userEvent.type(screen.getByRole('combobox', { name: /share with emails/i }), 'Friend@Example.com{Enter}');
-    await userEvent.click(screen.getByRole('button', { name: /add access/i }));
+    await userEvent.type(screen.getByRole('combobox', { name: 'Invite people by email' }), 'Friend@Example.com{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_panel/access', {
@@ -191,7 +191,7 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /revoke friend@example.com/i }));
+    await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_panel/access/pva_1', {
@@ -225,8 +225,8 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Public');
+    expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent('Anyone with the link');
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: /share with emails/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Invite people by email' })).not.toBeInTheDocument();
   });
 });

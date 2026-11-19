@@ -205,6 +205,7 @@ import type {
   CheckoutRecord,
   ConflictRecord,
   RevisionPortErrorCode,
+  Remote,
   RemoteRef,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
@@ -3223,6 +3224,56 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   let validatedListing:
     | Readonly<{ remote: string; identity: string | undefined; refs: readonly RemoteRef[] }>
     | undefined;
+  /*
+   * STO-25 SP6: a Tau Cloud connect's advertisement, asked for as the connect is written, beside the store's creation,
+   * its Start version and the config write that `validate` otherwise waits for. Tau Cloud has no credential to
+   * authorize (the session is the credential), and `probe` already lists an unrecorded address the same way (R2).
+   * Kept for the `validate` of that connect alone: another connect or a removed remote forgets it, and `validate` takes
+   * it only for the destination it was asked for. A failed listing answers `undefined`, so it never rejects unhandled
+   * and `validate` asks again.
+   */
+  let earlyListing:
+    | Readonly<{ address: RevisionRemoteAddress; listing: Promise<readonly RemoteRef[] | undefined> }>
+    | undefined;
+  const listEarly = (input: RemoteWriteActorInput): void => {
+    earlyListing = undefined;
+    if (input.kind !== 'tau' || input.provider !== undefined || input.fetchOnly === true) {
+      return;
+    }
+    let address: RevisionRemoteAddress;
+    try {
+      address = remoteAddressOf(input);
+    } catch {
+      /* The write reports a missing address itself. */
+      return;
+    }
+    // async-iife: bootstrap -- the listing is taken by `validate`; a failure answers `undefined` and is asked again.
+    const listing = (async (): Promise<readonly RemoteRef[] | undefined> => {
+      try {
+        return await port.listRemoteRefs(address);
+      } catch {
+        return undefined;
+      }
+    })();
+    earlyListing = { address, listing };
+  };
+  /* The early listing, taken once, when the recorded remote is still the Tau destination it was asked for. */
+  const takeEarlyListing = async (configured: Remote | undefined): Promise<readonly RemoteRef[] | undefined> => {
+    const early = earlyListing;
+    earlyListing = undefined;
+    if (
+      early === undefined ||
+      configured?.kind !== 'tau' ||
+      configured.name !== early.address.name ||
+      configured.url !== early.address.url ||
+      configured.provider !== undefined ||
+      configured.repositoryId !== undefined ||
+      configured.fetchOnly === true
+    ) {
+      return undefined;
+    }
+    return early.listing;
+  };
   const remoteIdentity = async (name: string): Promise<string | undefined> => {
     const remotes = await port.listRemotes();
     const remote = remotes.find((entry) => entry.name === name);
@@ -6329,6 +6380,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
+        listEarly(input);
         await ensureStore();
         const { name, url } = remoteAddressOf(input);
         const [current] = await port.listRemotes();
@@ -6369,6 +6421,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * remote is ever offered it.
        */
       removeRemote: fromAuthorityPromise<void, Readonly<{ name: string }>>(async ({ input }) => {
+        earlyListing = undefined;
         await ensureStore();
         await port.removeRemote(input.name);
       }),
@@ -6404,8 +6457,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         validatedListing = undefined;
         const identity = await remoteIdentity(input.remote);
         const remotes = await port.listRemotes();
-        const kind = remotes.find((remote) => remote.name === input.remote)?.kind;
-        const listed = await listRegistered(kind, async () => port.listRemoteRefs(input.remote));
+        const configured = remotes.find((remote) => remote.name === input.remote);
+        const kind = configured?.kind;
+        const listed =
+          (await takeEarlyListing(configured)) ??
+          (await listRegistered(kind, async () => port.listRemoteRefs(input.remote)));
         if (!signal.aborted && validation === validations) {
           validatedListing = { remote: input.remote, identity, refs: listed };
         }

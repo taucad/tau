@@ -67,6 +67,15 @@ describe('CopyButton', () => {
     expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalledWith('https://tau.new/invitations/tok_abcdef');
   });
 
+  it('should start the clipboard write inside the press, before any await', () => {
+    stubClipboard(async () => undefined);
+    renderButton(() => 'https://tau.new/s/x');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('https://tau.new/s/x');
+  });
+
   it('should never report a copy when the clipboard write is rejected', async () => {
     stubClipboard(async () => {
       throw new DOMException('Write permission denied.', 'NotAllowedError');

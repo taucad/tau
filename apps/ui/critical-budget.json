@@ -11,8 +11,8 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 1937973,
-        "requests": 308,
+        "brotliBytes": 1958140,
+        "requests": 309,
         "largestChunkBrotliBytes": 167393,
         "knownHeavy": {}
       },

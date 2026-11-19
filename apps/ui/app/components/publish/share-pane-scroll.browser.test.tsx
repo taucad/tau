@@ -8,8 +8,8 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
 
 /*
- * The Share pane scrolls as one, at phone and desktop sizes, with People with access present: the reported failure was
- * a cloud link and People with access on a phone, where three scrollers and a pinned header left almost nothing to
+ * The Share pane scrolls as one, at phone and desktop sizes, with Collaborators present: the reported failure was
+ * a cloud link and Collaborators on a phone, where three scrollers and a pinned header left almost nothing to
  * scroll. Only host and network authorities are fixtures; the pane, its sections and the shipped styles are real.
  */
 vi.mock('#environment.config.js', async (importOriginal) => ({

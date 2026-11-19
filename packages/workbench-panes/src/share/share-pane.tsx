@@ -102,7 +102,7 @@ export type SharePaneSectionProperties = Readonly<{
  * ```tsx
  * import { SharePane, SharePaneSection } from '@taucad/workbench-panes/share/share-pane';
  *
- * <SharePane extraSections={<SharePaneSection title='People with access'>…</SharePaneSection>} />;
+ * <SharePane extraSections={<SharePaneSection title='Collaborators'>…</SharePaneSection>} />;
  * ```
  */
 export function SharePaneSection({

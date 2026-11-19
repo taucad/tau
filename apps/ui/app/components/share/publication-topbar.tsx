@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { Download, LayoutGrid, Link2 } from 'lucide-react';
 import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
@@ -10,6 +10,9 @@ import { ProjectExportAction } from '#routes/w.$workspace.$project/project-expor
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { toast } from '@taucad/ui/components/sonner';
+import { Input } from '@taucad/ui/components/input';
+import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
+import { copyText } from '@taucad/ui/utils/clipboard';
 
 type PublicationTopbarProps = {
   readonly publication: ParsedPublication;
@@ -51,17 +54,25 @@ export function PublicationTopbar({
     anchor.click();
     URL.revokeObjectURL(url);
   }, [archive, publication.title]);
-  const copyShareUrl = useCallback(async () => {
+  /* Where the clipboard refused the link, it is shown selected under the button for the person to copy. */
+  const [isCopyRefused, setIsCopyRefused] = useState(false);
+  const refusedLinkRef = useRef<HTMLInputElement>(null);
+  /* The popover has no trigger, so a keyboard close hands focus back to Copy link itself. */
+  const copyLinkRef = useRef<HTMLButtonElement>(null);
+  const closedByKeyboardRef = useRef(false);
+  /* The write starts inside the press, before any await, so a browser that needs the gesture still allows it. */
+  const copyShareUrl = async (): Promise<void> => {
     if (!shareUrl) {
       return;
     }
-    try {
-      await navigator.clipboard.writeText(shareUrl);
+    const { isCopied } = await copyText(shareUrl);
+    if (isCopied) {
+      setIsCopyRefused(false);
       toast.success('Link copied');
-    } catch {
-      toast.error("Couldn't copy the link. Try again.");
+    } else {
+      setIsCopyRefused(true);
     }
-  }, [shareUrl]);
+  };
   /* A builtin example leads back to its card in the gallery; other shares have no gallery. */
   const { slug } = useParams();
   const builtinLocator = slug?.startsWith(builtinSlugPrefix) ? slug.slice(builtinSlugPrefix.length) : undefined;
@@ -113,19 +124,54 @@ export function PublicationTopbar({
       {/* At phone widths the workbench trigger shares this row; desktop also reserves native window controls. */}
       <div className='flex shrink-0 items-center gap-1 sm:gap-2'>
         {shareUrl ? (
-          <Button
-            type='button'
-            size='sm'
-            variant='ghost'
-            aria-label='Copy link'
-            className={actionButtonClassName}
-            onClick={() => {
-              void copyShareUrl();
-            }}
-          >
-            <Link2 className={actionIconClassName} aria-hidden />
-            <span className={actionLabelClassName}>Copy link</span>
-          </Button>
+          <Popover open={isCopyRefused} onOpenChange={setIsCopyRefused}>
+            <PopoverAnchor asChild>
+              <Button
+                ref={copyLinkRef}
+                type='button'
+                size='sm'
+                variant='ghost'
+                aria-label='Copy link'
+                className={actionButtonClassName}
+                onClick={() => {
+                  void copyShareUrl();
+                }}
+              >
+                <Link2 className={actionIconClassName} aria-hidden />
+                <span className={actionLabelClassName}>Copy link</span>
+              </Button>
+            </PopoverAnchor>
+            <PopoverContent
+              align='end'
+              className='flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2'
+              onOpenAutoFocus={(event) => {
+                event.preventDefault();
+                refusedLinkRef.current?.focus();
+                refusedLinkRef.current?.select();
+              }}
+              onEscapeKeyDown={() => {
+                closedByKeyboardRef.current = true;
+              }}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                if (closedByKeyboardRef.current) {
+                  closedByKeyboardRef.current = false;
+                  copyLinkRef.current?.focus();
+                }
+              }}
+            >
+              <Input
+                ref={refusedLinkRef}
+                aria-label='Share link'
+                readOnly
+                value={shareUrl}
+                onFocus={(event) => {
+                  event.target.select();
+                }}
+              />
+              <p className='text-xs text-muted-foreground'>Select the link and copy it.</p>
+            </PopoverContent>
+          </Popover>
         ) : null}
         {managementActions}
         {archive ? (

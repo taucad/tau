@@ -99,10 +99,10 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
-/* C4: People with access is the pane's last section; its own rules are `revision-collaborators.test.tsx`'s. */
+/* C4: Collaborators is the pane's last section; its own rules are `revision-collaborators.test.tsx`'s. */
 vi.mock('#routes/w.$workspace.$project/revision-collaborators.js', () => ({
   ProjectPeopleWithAccess: ({ projectId }: { readonly projectId: string }) => (
-    <section aria-label='People with access'>{projectId}</section>
+    <section aria-label='Collaborators'>{projectId}</section>
   ),
 }));
 
@@ -177,7 +177,7 @@ beforeEach(() => {
 });
 
 describe('ProjectShareWorkbenchPanel', () => {
-  it('hands People with access to the pane as its last section, inside its one scroll area (C4)', () => {
+  it('hands Collaborators to the pane as its last section, inside its one scroll area (C4)', () => {
     render(
       <MemoryRouter initialEntries={['/w/home/share-fixture']}>
         <ProjectShareWorkbenchPanel />
@@ -186,8 +186,8 @@ describe('ProjectShareWorkbenchPanel', () => {
 
     const panel = screen.getByText(/Share panel fixture/u);
     /* Rendered by the pane through `extraSections`, never stacked beside it as a second region. */
-    expect(panel).toContainElement(screen.getByRole('region', { name: 'People with access' }));
-    expect(screen.getByRole('region', { name: 'People with access' })).toHaveTextContent(project.id);
+    expect(panel).toContainElement(screen.getByRole('region', { name: 'Collaborators' }));
+    expect(screen.getByRole('region', { name: 'Collaborators' })).toHaveTextContent(project.id);
   });
 
   /* E1: the entry's CAD actor owns its operation timeout, so a unit this panel has to spawn for the

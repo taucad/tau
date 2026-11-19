@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * The Share pane scrolls as one (`@taucad/workbench-panes`' `share-scroll.test.ts` holds the frame's half): the
- * sections this app draws inside it — the cloud link body, link access, the email field and People with access — never
+ * sections this app draws inside it — the cloud link body, link access, the email field and Collaborators — never
  * scroll on their own, bound their height or pin a row. The phone sheet leaves the pane under 300 px with the keyboard
  * open, so each of those takes height from the one region that scrolls. Overlays keep their primitive's scroll.
  */

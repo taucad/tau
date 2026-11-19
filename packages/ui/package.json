@@ -124,6 +124,7 @@
       "types": "./src/styles/tokens.css.d.ts",
       "default": "./src/styles/tokens.css"
     },
+    "./utils/clipboard": "./src/utils/clipboard.ts",
     "./utils/cn": "./src/utils/cn.ts",
     "./utils/keys": "./src/utils/keys.ts",
     "./utils/label": "./src/utils/label.ts",
@@ -528,6 +529,11 @@
       "./styles/tokens.css": {
         "types": "./dist/styles/tokens.css.d.ts",
         "default": "./dist/styles/tokens.css"
+      },
+      "./utils/clipboard": {
+        "types": "./dist/utils/clipboard.d.mts",
+        "import": "./dist/utils/clipboard.mjs",
+        "default": "./dist/utils/clipboard.mjs"
       },
       "./utils/cn": {
         "types": "./dist/utils/cn.d.mts",

@@ -107,9 +107,9 @@ describe('desktop share links', () => {
     await connectTauCloud(page);
     await expectVisible(page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Cloud' }), 180_000);
 
-    /* C4 (dbee175fd2): People with access moved from History to Share. */
+    /* C4 (dbee175fd2): Collaborators moved from History to Share. */
     await page.getByRole('button', { name: 'Share', exact: true }).first().click();
-    const people = page.getByRole('region', { name: 'People with access' });
+    const people = page.getByRole('region', { name: 'Collaborators' });
     const email = people.getByLabel('Email address');
     await expectVisible(email, 180_000);
     await email.fill(invitee);

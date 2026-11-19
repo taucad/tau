@@ -63,6 +63,8 @@ Document results carry `issues`. Successful evaluations offer ordered view and e
 
 <auto-type-table path='./props/types.ts' name='AssetDependency' />
 
+<auto-type-table path='./props/types.ts' name='BundleDependency' />
+
 `FileDependency.path` is a canonical root-relative [runtime path](../concepts/path-namespaces), shared by filesystem and cache identity.
 
 ## Filesystem Types
@@ -101,7 +103,7 @@ Document results carry `issues`. Successful evaluations offer ordered view and e
 
 <auto-type-table path='./props/types.ts' name='ViewInstance' />
 
-`evaluate` returns an opaque handle plus ordered view and export IDs; the first view is the default. `render` selects one view and optional named instance without evaluating again.
+`evaluate` returns an opaque handle plus ordered view and export IDs; the first view is the default. `render` selects one view and optional named instance without re-evaluating.
 
 <auto-type-table path='./props/types.ts' name='EvaluateInput' />
 
@@ -112,8 +114,6 @@ Document results carry `issues`. Successful evaluations offer ordered view and e
 <auto-type-table path='./props/types.ts' name='RenderOutput' />
 
 <auto-type-table path='./props/types.ts' name='TessellationReport' />
-
-Evaluations carry a `BuildReport`.
 
 <auto-type-table path='./props/types.ts' name='KernelBuildReport' />
 
@@ -171,7 +171,7 @@ Node hosts persist batches through `openTelemetryFileSink()`, a non-blocking `Te
 
 ## Content and Capability Types
 
-Framework content requirements stay separate from plugin option schemas. A route advertises supported content and an `ExportFidelity` (`'brep' | 'mesh'`) used by route ranking.
+Framework content requirements stay separate from plugin option schemas. A route advertises supported content and an `ExportFidelity` (`'brep' | 'mesh'`) used for ranking.
 
 <auto-type-table path='./props/types.ts' name='RuntimeContentInput' />
 

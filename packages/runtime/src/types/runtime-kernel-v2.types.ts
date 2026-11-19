@@ -292,6 +292,17 @@ export type KernelDefinitionV2<
   readonly builtinPackages?: Readonly<Record<string, InstalledPackageManifest>>;
   readonly name: string;
   readonly version: string;
+  /**
+   * What the build key reads for the model's sources. `'files'` (the default) hashes each resolved
+   * file's bytes. `'bundle'` hashes the bundler's output instead, so a comment-only or
+   * formatting-only edit that prints the same bundle reuses the previous build.
+   *
+   * Declare `'bundle'` only when `resolve` answers from `runtime.bundler.resolveDependencies` and
+   * every hook reads the model's sources only through `runtime.bundler.bundle` output: the code it
+   * executes, and the source map for error locations only. A kernel that reads a source file itself
+   * (a header comment, a JSDoc annotation, raw text for any purpose) keeps `'files'`.
+   */
+  readonly sourceIdentity?: 'files' | 'bundle';
   readonly implementationAssets?: readonly RuntimeImplementationAsset[];
   readonly optionsSchema?: OptionsSchema;
   readonly evaluateOptionsSchema?: EvaluateSchema;

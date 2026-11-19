@@ -140,6 +140,11 @@
     "unified": "catalog:",
     "vscode-json-languageservice": "catalog:",
     "vscode-uri": "catalog:",
+    "workbox-core": "catalog:",
+    "workbox-expiration": "catalog:",
+    "workbox-precaching": "catalog:",
+    "workbox-routing": "catalog:",
+    "workbox-strategies": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"
   },
@@ -159,7 +164,8 @@
     "@vitejs/plugin-react": "catalog:",
     "bson": "^6.10.4",
     "oxc-transform-react": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "workbox-build": "catalog:"
   },
   "files": [
     "build"

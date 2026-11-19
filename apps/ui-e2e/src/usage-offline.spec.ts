@@ -3,8 +3,9 @@
  * Browser runtime proof of the offline usage contract (C13-C, closing C10-U6).
  *
  * Everything under test is the real production UI build served by the harness:
- * the prerendered `/usage` document, the generated offline-shell worker
- * (C10-U5) and the `tau-billing` snapshot store (C10-U4). The API is *not*
+ * the prerendered `/usage` document, the web app's one service worker
+ * (progressive loading PL7, which folded in C10-U5's offline shell) and the
+ * `tau-billing` snapshot store (C10-U4). The API is *not*
  * running — it is stubbed at the page's `fetch` boundary — and the two ways it
  * can be unreachable are kept apart on purpose:
  *
@@ -13,10 +14,10 @@
  * - **Everything offline** (`context.setOffline`) is the shell's own contract
  *   (B5 R4): only CacheStorage can answer the navigation.
  *
- * After the first visit the worker is active, so every later navigation goes
- * through it, on the manifest path `/usage` itself: the server answers it with
- * `301 → /usage/`, and the worker must store and pass through that document
- * without its redirect identity (see the `both the origin and the API
+ * After the first visit the worker is active, so every later navigation to
+ * `/usage` goes through it: network-first within 3 s, the precached document
+ * (`/usage/index.html`) as the fallback. A precached document must be stored
+ * without a redirect identity (see the `both the origin and the API
  * unreachable` case, which pins exactly that).
  */
 import { beforeEach, describe, expect, test } from 'vitest';
@@ -48,8 +49,10 @@ const offlineSaving = selectors.getByTestId('usage-offline-saving');
 const creditsUsed = selectors.getByTestId('credits-used');
 const modelsFilter = selectors.getByRole('button', { name: /Models/u });
 
-/** The manifest document path; the server answers it with `301 → /usage/`, which the worker must absorb. */
+/** The usage page's URL; the server answers it with `301 → /usage/`. */
 const servedUsagePath = '/usage';
+/** The document the worker precaches for it. */
+const precachedUsageDocument = '/usage/index.html';
 
 const snapshotA = usageSnapshotFixture(accountA);
 const snapshotB = usageSnapshotFixture(accountB, { asOf: '2026-09-11T22:15:00.000Z', snapshotRevision: '9' });
@@ -93,24 +96,26 @@ const cutTheApi = async (account: StubbedAccount, snapshot = snapshotA): Promise
  *
  * `TAU_CLOUD_ENABLED=true` is a *build-time* input: without it `app/routes.ts`
  * drops the `/usage` route and `react-router.config.ts`'s `buildEnd` never
- * generates the offline shell, so there is no contract here to be right or
- * wrong about. Asked of the served bytes rather than of this runner's
+ * precaches it, so there is no contract here to be right or wrong about. Asked of the served bytes rather than of this runner's
  * environment, because an Nx dependency task inherits only the caller's
  * environment — the build that is running is the only thing that decides.
  */
 const cloudBuildServed = async (): Promise<boolean> => {
-  await target.navigate('/offline-shell-worker.js');
+  await target.navigate('/robots.txt');
   return target.evaluate(async () => {
-    const response = await fetch('/offline-shell-worker.js');
-    return response.ok;
+    const response = await fetch('/service-worker.js');
+    const source = await response.text();
+    return response.ok && source.includes('"/usage/index.html"');
   });
 };
 
 describe('Offline usage contract', () => {
   beforeEach(async ({ skip }) => {
+    // The offline contract is the service worker's: open the target with it allowed.
+    await target.commands.uiOpenTarget({ serviceWorker: true });
     skip(
       !(await cloudBuildServed()),
-      'The harness is serving a self-host UI build, which has no /usage route and no offline shell: rerun after `TAU_CLOUD_ENABLED=true nx run ui:build`.',
+      'The harness is serving a self-host UI build, which has no /usage route for the service worker to precache: rerun after `TAU_CLOUD_ENABLED=true nx run ui:build`.',
     );
   });
 
@@ -158,12 +163,11 @@ describe('Offline usage contract', () => {
   test('should serve the usage shell with both the origin and the API unreachable', async () => {
     await signInAndSave(accountA);
     const shell = await waitForOfflineShell();
-    expect(shell).toMatch(/^tau-offline-shell-/u);
+    expect(shell).toMatch(/^tau-precache-/u);
 
-    const stored = await readCachedShellDocument('/usage');
+    const stored = await readCachedShellDocument(precachedUsageDocument);
     // A navigation request's redirect mode is `manual`, so a stored response carrying
-    // the redirect flag is a network error the moment the worker replays it — which is
-    // what `express.static`'s `/usage` → `/usage/` directory redirect leaves behind.
+    // the redirect flag is a network error the moment the worker replays it.
     expect(stored, 'the shell must store the usage document as a non-redirected response').toMatchObject({
       redirected: false,
       status: 200,
@@ -192,16 +196,17 @@ describe('Offline usage contract', () => {
     const report = await readShellCaches([stubSessionToken, accountA.userId, subjectIdFor(accountA), snapshotA.asOf]);
 
     expect(report.leakedMarkers).toEqual([]);
-    expect(report.cacheNames).toEqual([shellCache]);
-    // Exactly U5's generated allowlist — its static assets, its neutral prerendered
-    // documents and the readiness sentinel written last. Nothing else is cached at
-    // all, so no API response can be.
-    const manifest = await readOfflineShellManifest();
-    expect([...report.entryUrls].sort()).toEqual(
-      [...manifest.assets, ...manifest.documents, `/__tau-offline-shell/${manifest.version}.ready`].sort(),
-    );
-    expect(manifest.documents).toEqual(['/usage']);
-    expect(manifest.assets.filter((path) => !path.startsWith('/'))).toEqual([]);
+    // The precache, and the cache of hashed files used once; nothing else is cached at all.
+    expect(report.cacheNames.filter((name) => name !== shellCache && name !== 'tau-assets')).toEqual([]);
+    // The precache holds the generated list: the registry's documents and their interactive tiers.
+    const entries = await readOfflineShellManifest();
+    const precache = entries.map((entry) => entry.url);
+    expect(precache).toContain(precachedUsageDocument);
+    expect(report.entryUrls).toEqual(expect.arrayContaining(precache));
+    // Anything else is a hashed or digest-addressed file cached on first use, never an API, auth or data response.
+    expect(
+      report.entryUrls.filter((url) => !precache.includes(url) && !/^\/(?:assets|csharp-language)\//u.test(url)),
+    ).toEqual([]);
   });
 
   test('should leave no saved usage behind after a sign-out', async () => {

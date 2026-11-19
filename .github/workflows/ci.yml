@@ -183,7 +183,7 @@ jobs:
           # lane runs for every selected project when the diff touches one of them, and not at all otherwise.
           # "closure": the lane runs for the selected projects whose own dependency closure holds a project the
           # diff touches, walked without entering QUEUE_HUBS, so a hub change alone does not select them. "never": the
-          # lane never runs in the merge queue. The formal nightly tiers (the nightly, then the release gate RG-1) run
+          # lane never runs in the merge queue. The release gate (RG-1, which replaced the formal nightly's schedule) runs
           # every `formal:nightly` project, the release gate every viewer-parity fixture, and the candidate gate the full
           # shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule but "never".
           LANE_SELECTORS: >-
@@ -1121,7 +1121,7 @@ jobs:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
       # The suites that open no chat, so capture no chat log for the empty-capture rule to find: e2e-nightly.yml's list.
-      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:filesystem-scenarios"]'
+      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -98,6 +98,7 @@ export type { KnownArtifact } from '#types/runtime-artifact.js';
 export type * from '#types/runtime-tracer.types.js';
 export type {
   AssetDependency,
+  BundleDependency,
   ContentDependency,
   Dependency,
   ExportDependency,

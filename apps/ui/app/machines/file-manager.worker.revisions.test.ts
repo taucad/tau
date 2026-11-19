@@ -2481,7 +2481,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       });
       alpha.send({
         command: 'confirmPublish',
-        draft: { tag: 'v1', projectName: 'alpha', entryPath: 'main.scad', visibility: 'public', title: 'Alpha' },
+        draft: { tag: 'v1', projectName: 'alpha', entryPath: 'main.scad', visibility: 'public' },
       });
       await vi.waitFor(
         async () => {

@@ -40,7 +40,11 @@ describe('the early open’s cloud-open port (STO-25 SP6)', () => {
   it('connects the Tau remote, holds the open, and lets it go when the gesture’s end aborts it', async () => {
     const sent: Array<Readonly<{ command: string; kind?: string; url?: string }>> = [];
     const listeners = new Set<() => void>();
-    let status: RevisionStatusProjection | undefined;
+    /* Opened, with the root's first answer: the early open continues only from there. */
+    let status: RevisionStatusProjection | undefined = {
+      remote: { kind: 'none', phase: 'none' },
+      sync: { state: 'checking' },
+    } as unknown as RevisionStatusProjection;
     const client = {
       status: () => status,
       subscribe: (listener: () => void) => {

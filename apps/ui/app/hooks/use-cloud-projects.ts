@@ -722,25 +722,42 @@ export type CloudOpenContinuation = Readonly<{
   signal?: AbortSignal;
 }>;
 
+/* A registered client with no projection is closed, or not opened yet: a frame sent to it waits for its next open. */
+const isOpenOrAbsent = (client: RevisionClient | undefined): boolean =>
+  client === undefined || client.status() !== undefined;
+
 const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
   const { projectId, account, connect, signal } = input;
   try {
     if (input.asserted !== true) {
       await assertCloudProjectActive(projectId);
     }
-    const owed = (): boolean =>
-      signal?.aborted !== true &&
-      /* The route's own check, shared by every caller: a gesture's assertion does not outlive a deletion. */
-      getCloudDeletionState(projectId) === undefined &&
-      getRevisionSessionUser()?.id === account &&
-      tauCloudIntent.get(projectId) === 'open' &&
-      canOpenCloudProject(projectId);
     /*
      * S20: one cold open per device. A second tab waits here and finds the open done. The client is
      * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
      * whose client is replaced lets it go.
      */
     let opened = peekRevisionClient(projectId);
+    const alive = (): boolean => {
+      const current = peekRevisionClient(projectId);
+      opened ??= current;
+      return current === opened;
+    };
+    const owed = (): boolean =>
+      signal?.aborted !== true &&
+      /* The route's own check, shared by every caller: a gesture's assertion does not outlive a deletion. */
+      getCloudDeletionState(projectId) === undefined &&
+      getRevisionSessionUser()?.id === account &&
+      tauCloudIntent.get(projectId) === 'open' &&
+      canOpenCloudProject(projectId) &&
+      /*
+       * The client this open began on, still open (it has a projection). A client closed while the open waited for
+       * the lock keeps its registry entry, and `connect` would queue `connectRemote` on it for its next open, under
+       * whoever opens it then, while this tab held the lock for nothing. With no client at all, `connect` sends
+       * nothing.
+       */
+      alive() &&
+      isOpenOrAbsent(peekRevisionClient(projectId));
     return await holdCloudOpen({
       projectId,
       owed,
@@ -748,11 +765,7 @@ const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
       source: {
         status: () => peekRevisionClient(projectId)?.status(),
         subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
-        alive: () => {
-          const current = peekRevisionClient(projectId);
-          opened ??= current;
-          return current === opened;
-        },
+        alive,
       },
       ...(signal === undefined ? {} : { signal }),
     });

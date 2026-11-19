@@ -2543,9 +2543,15 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     try {
       alpha.send({ command: 'publishProject', apiBaseUrl: 'https://api.test' });
-      /* A page's draft is not validated on the way to the worker. */
-      const draft = { isAutoNamed: true, projectName: 'alpha', entryPath: 'main.scad' } as unknown as PublishDraft;
-      alpha.send({ command: 'confirmPublish', draft });
+      /* A page's draft is not validated on the way to the worker: one that lost its `tag` still arrives. */
+      const { tag: _tag, ...untagged }: PublishDraft = {
+        tag: '',
+        isAutoNamed: true,
+        projectName: 'alpha',
+        entryPath: 'main.scad',
+      };
+      /* One narrowing cast, not a double one: the command's type requires the `tag` this draft lacks. */
+      alpha.send({ command: 'confirmPublish', draft: untagged as PublishDraft });
       await vi.waitFor(
         async () => {
           const [head] = await root.log();

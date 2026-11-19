@@ -13,7 +13,11 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright({ launchOptions: { channel: 'chromium' } }),
+      provider: playwright({
+        launchOptions: { channel: 'chromium' },
+        /* `clipboard.browser.test.tsx` reads back what a press copied. */
+        contextOptions: { permissions: ['clipboard-read', 'clipboard-write'] },
+      }),
       instances: [{ browser: 'chromium' }],
     },
   },

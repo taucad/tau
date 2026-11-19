@@ -855,6 +855,45 @@ describe('ProjectSharePanel', () => {
     });
   });
 
+  it('settles the copy of a second publish that brings the same link', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    /* A fresh element each time: React skips a rerender handed the same element. */
+    const panel = (): React.JSX.Element => (
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+    const link = 'https://tau.example/s/tau~proj_ok';
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
+    });
+
+    /* The reset returns the machine to idle and keeps the link it made. */
+    publishFacet({ phase: 'idle', shareUrl: link });
+    view.rerender(panel());
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledTimes(2);
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2);
+    expect(toastSuccessMock).toHaveBeenCalledTimes(2);
+  });
+
   it('hands the clipboard a pending link in the publish press, before the machine has made it', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope));
     const write = vi.fn<(items: unknown[]) => Promise<void>>(async () => undefined);

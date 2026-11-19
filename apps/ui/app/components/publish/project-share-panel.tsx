@@ -922,6 +922,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const publishFacet = status?.publish ?? emptyPublishFacet;
   const commands = useRevisionCommands();
   const publishShareUrl = publishFacet.shareUrl;
+  const publishSucceeded = publishFacet.phase === 'success';
   const publishError = publishFacet.error;
 
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
@@ -1041,8 +1042,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   );
 
   useEffect(() => {
-    /* The reset after each publish clears the link, so the next publish is handled even when it brings the same link. */
-    if (!publishShareUrl) {
+    /*
+     * One publish is one stay in `success`: the reset after it returns the machine to idle while the link is kept, so the
+     * marker clears outside `success` and the next publish is handled even when it brings the same link.
+     */
+    if (!publishSucceeded || !publishShareUrl) {
       lastHandledShareUrlRef.current = undefined;
       return;
     }
@@ -1079,7 +1083,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [commands, loadEnvelope, publishShareUrl, triggerCopiedTick]);
+  }, [commands, loadEnvelope, publishShareUrl, publishSucceeded, triggerCopiedTick]);
 
   const busy = publishFacet.phase === 'working';
   const sharedEmailError = effectiveVisibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;

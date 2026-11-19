@@ -171,7 +171,7 @@ describe('ProjectActionDropdown', () => {
         />,
       );
       await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
-      expect(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Delete cloud copy…' })).toBeInTheDocument();
       expect(
         screen.getByRole('menuitem', { name: deletedAt === undefined ? 'Move to Trash' : 'Restore' }),
       ).toBeInTheDocument();

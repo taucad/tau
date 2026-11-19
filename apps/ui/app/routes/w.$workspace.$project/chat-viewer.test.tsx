@@ -1226,7 +1226,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockSyncStatus = { sync: { state: 'checking' } };
     const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('region', { name: 'Connecting to Tau Cloud' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Opening project…' })).toBeInTheDocument();
     expect(screen.queryByText('File not found')).not.toBeInTheDocument();
 
     act(() => {

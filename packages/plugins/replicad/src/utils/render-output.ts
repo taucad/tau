@@ -5,7 +5,7 @@ import type { GeometrySvg, RuntimeSpanTracer, TessellationReport } from '@taucad
 import { resolveOcctTessellation } from '@taucad/occt-core';
 import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 import type { ShapeConfig } from '#model.js';
-import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
+import { addSurfaceCoordinates, needsSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { MemoMesh, ReplicadMeshMemo } from '#utils/mesh-memo.js';
@@ -396,7 +396,9 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
     material: shapeConfig.material,
   });
   // A kept mesh without edges cannot serve a render that collects them: that is a miss, meshed again.
-  const kept = meshMemo.lookup(info, key, (mesh) => mesh.edges !== undefined || !options.collectBrepEdges);
+  const kept = meshMemo.lookup(info, key, {
+    usable: (mesh) => mesh.edges !== undefined || !options.collectBrepEdges,
+  });
   if (kept) {
     return geometryFromMemo(shapeConfig, kept, options.collectBrepEdges);
   }
@@ -536,7 +538,9 @@ function groupMeshableInstances(
     }
   }
 
-  const groups = [...candidates.values()].filter((group) => group.instances.length > 1);
+  // A partner-less shape is a group of one (catalogue N5): meshed unplaced like any prototype, with its placement
+  // applied afterwards, so moving it changes no mesh the memo keeps.
+  const groups = [...candidates.values()];
   const grouped = new Set<MeshableConfiguration>();
   for (const group of groups) {
     for (const instance of group.instances) {
@@ -639,15 +643,37 @@ type PrototypeGroupOptions = {
 };
 
 /**
- * An instanced group, from the memo when every instance is where it was. The prototype's surface coordinates depend on
- * every instance's material and the prototype's own placement, so the key names each instance in group order.
+ * Memo key of a group's prototype mesh beyond the partner: its orientation, the exact tolerances and, when an
+ * instance's material asks for surface coordinates, that material and the prototype's placement (its tangent frames are
+ * brought back through the prototype's location). Placement otherwise plays no part: the prototype is meshed unplaced.
+ * @param group - The group.
+ * @param tessellation - The exact resolved tolerances.
+ * @returns The key.
+ */
+function prototypeMemoKey(group: PrototypeGroup, tessellation: Tessellation): string {
+  const surface = group.instances.find((instance) => needsSurfaceCoordinates(instance.config.material));
+  return [
+    'prototype',
+    group.prototype.info.orientation,
+    tessellation.linearTolerance,
+    tessellation.angularTolerance,
+    surface === undefined ? '' : JSON.stringify(surface.config.material),
+    surface === undefined ? '' : group.prototype.info.locationMatrix.join(','),
+  ].join('|');
+}
+
+/**
+ * An instanced group, from the memo when every instance is where it was. Otherwise the prototype's unplaced mesh comes
+ * from the memo when it has one (a pose edit moves instances, not prototypes) and only the placement is applied again.
+ * The placed meshes are kept under a key naming each instance in group order, the prototype's under
+ * {@link prototypeMemoKey}.
  * @param options - The group and how to mesh it.
  * @returns Each instance's configuration and geometry.
  */
 function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableConfiguration, GeometryReplicad]> {
   const { group, tessellation, collectBrepEdges, meshMemo } = options;
   if (!meshMemo) {
-    return meshPrototypeGroup(options);
+    return expandPrototypeGroup(options, meshPrototype(options));
   }
   const prototype = group.prototype.info;
   const key = [
@@ -666,7 +692,23 @@ function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableCo
       geometryFromMemo(instance.config, kept[index]!, collectBrepEdges),
     ]);
   }
-  const rendered = meshPrototypeGroup(options);
+  const prototypeKey = prototypeMemoKey(group, tessellation);
+  // The group's parts count as reused when the prototype's unplaced mesh is kept: only the placement is applied again.
+  const keptPrototype = meshMemo.lookup(prototype, prototypeKey, {
+    usable: (mesh) => mesh.edges !== undefined || !collectBrepEdges,
+    parts: group.instances.length,
+  });
+  let prototypeGeometry: GeometryReplicad;
+  if (keptPrototype) {
+    prototypeGeometry = geometryFromMemo(group.prototype.config, keptPrototype, collectBrepEdges);
+  } else {
+    prototypeGeometry = meshPrototype(options);
+    meshMemo.store(prototype, prototypeKey, {
+      faces: prototypeGeometry.faces,
+      ...(collectBrepEdges ? { edges: prototypeGeometry.edges } : {}),
+    });
+  }
+  const rendered = expandPrototypeGroup(options, prototypeGeometry);
   meshMemo.storeGroup(
     prototype,
     key,
@@ -675,17 +717,24 @@ function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableCo
   return rendered;
 }
 
-function meshPrototypeGroup({
+/**
+ * A group's prototype, meshed unplaced, with the surface coordinates its instances' materials ask for.
+ * @param options - The group and how to mesh it.
+ * @returns The prototype's geometry.
+ */
+function meshPrototype({
   group,
   openCascade,
   tessellation,
   collectBrepEdges,
   tracer,
-}: PrototypeGroupOptions): Array<[MeshableConfiguration, GeometryReplicad]> {
+}: PrototypeGroupOptions): GeometryReplicad {
   const prototypeConfig = group.prototype.config;
   const prototypeGeometry = createEmptyReplicadGeometry(prototypeConfig);
   const shapeNames = group.instances.map((instance) => instance.config.name).join(',');
   const sharedAttributes = {
+    // A group of one is a partner-less shape (N5): its spans name it as the flat path did.
+    ...(group.instances.length === 1 ? { shapeName: prototypeConfig.name } : {}),
     partnerKey: group.prototype.info.partnerKey,
     instanceCount: group.instances.length,
     shapeNames,
@@ -723,6 +772,19 @@ function meshPrototypeGroup({
     });
   }
 
+  return prototypeGeometry;
+}
+
+/**
+ * Each instance of a group: the prototype's mesh at the instance's placement, with its names and appearance.
+ * @param options - The group.
+ * @param prototypeGeometry - The prototype's unplaced geometry.
+ * @returns Each instance's configuration and geometry.
+ */
+function expandPrototypeGroup(
+  { group, tracer }: PrototypeGroupOptions,
+  prototypeGeometry: GeometryReplicad,
+): Array<[MeshableConfiguration, GeometryReplicad]> {
   return withSpan({
     tracer,
     name: 'replicad.tessellation-instancing.expand',

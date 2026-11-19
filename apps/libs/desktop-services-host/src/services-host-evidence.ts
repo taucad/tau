@@ -4,7 +4,7 @@
  * user data. It works the same whether or not a renderer is open. A project only reports when the server's current
  * answer for this account and project allows summaries; a signed-out desktop sends nothing and keeps nothing.
  *
- * Desktop parity (blueprint LW8): every fact names the build its bundle was stamped with (`tauDesktopHostBuild`), and
+ * Desktop parity (blueprint LW8): every fact names the build its app was packaged from (`TAU_DESKTOP_HOST_BUILD`), and
  * the account's ratings wait in a second owner-only queue per project, apart from the summaries, so a rating given
  * before a restart is still sent after it under the feedback grant.
  */
@@ -19,14 +19,17 @@ import { ownerOnlyFiles } from '@taucad/agent-observability/node-pending-files';
 import { filePendingStore } from '@taucad/agent-observability/pending-stores';
 
 /**
- * The commit this bundle was built from, as the build stamped it; a bundle stamped with none reports no build. The
- * gateway transport sends the same id with each model call (LW17), so the API's facts name the build the host's do.
+ * The commit this app was packaged from, which main reads from the record beside its bundles and passes as
+ * `TAU_DESKTOP_HOST_BUILD`; an app packaged with none reports no build. The gateway transport sends the same id with
+ * each model call (LW17), so the API's facts name the build the host's do.
  *
- * @returns The build id, or `undefined`.
+ * @returns The 12-hex build id, or `undefined`.
  * @internal
  */
-export const desktopHostBuild = (): string | undefined =>
-  tauDesktopHostBuild === '' ? undefined : tauDesktopHostBuild;
+export const desktopHostBuild = (): string | undefined => {
+  const build = process.env['TAU_DESKTOP_HOST_BUILD'];
+  return build !== undefined && /^[\da-f]{12}$/u.test(build) ? build : undefined;
+};
 
 /** What one project's observer is composed from. @internal */
 export type DesktopEvidenceOptions = Readonly<{

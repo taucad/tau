@@ -64,7 +64,7 @@ const savedKeys = async (surface?: TargetSurface): Promise<readonly string[]> =>
   return store.snapshotKeys;
 };
 const savedLine = (account: StubbedAccount, asOf: string): string =>
-  `Offline — saved usage for ${subjectIdFor(account)}, last updated ${asOf}. Reconnect for the latest usage.`;
+  `Offline — saved usage for ${subjectIdFor(account)}, last updated ${asOf}. Go online for the latest usage.`;
 
 /** Signs in online and waits until the page has both rendered and saved the snapshot. */
 const signInAndSave = async (account: StubbedAccount, snapshot = snapshotA): Promise<void> => {

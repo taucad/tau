@@ -705,7 +705,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
       throw error;
     }
   }, [projectManager, reloadWorkspaceColumns, telemetry]);
@@ -718,7 +718,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
         toast.success(`Connected workspace "${connected.workspace.name}"`);
       }
     } catch {
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
     }
   }, [projectManager, reloadWorkspaceColumns]);
 
@@ -730,7 +730,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
         disconnected = await workspace.disconnectWorkspace(target.workspaceId);
       } catch (error) {
         console.error('Failed to disconnect workspace:', error);
-        toast.error('Failed to disconnect workspace.');
+        toast.error('Couldn’t disconnect the folder. Try again.');
         return;
       } finally {
         setBusyWorkspaceId(undefined);
@@ -760,7 +760,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
               restored = await workspace.restoreWorkspaceHandle(target.workspaceId, disconnected.handle);
             } catch (error) {
               console.error('Failed to undo workspace disconnect:', error);
-              toast.error('Failed to reconnect workspace.');
+              toast.error('Couldn’t reconnect the folder. Try again.');
               return;
             }
             try {

@@ -159,4 +159,71 @@ describe('replicad exports compose kept meshes', () => {
     },
     renderTimeout,
   );
+
+  it(
+    'should reuse a part prototype mesh in an export after a pose edit, with the bytes reuse off exports',
+    async () => {
+      const posed = `
+        import { makeBaseBox, makeCylinder } from 'replicad';
+        export const defaultParams = { angle: 0 };
+        export default function main(p = defaultParams) {
+          return [
+            { shape: makeBaseBox(20, 10, 4), name: 'Base' },
+            { shape: makeCylinder(2, 12).rotate(p.angle, [0, 0, 0], [0, 0, 1]).translate([5, 0, 4]), name: 'Arm' },
+          ];
+        }
+      `;
+      const tolerances = { linearTolerance: 0.05, angularTolerance: 10 };
+      const exported = async (computeReuse: boolean, angles: readonly number[]) => {
+        const client = createRuntimeClient({
+          transport: inProcessTransport({
+            runtime: defineRuntime({
+              kernels: [replicadKernel({ wasm: 'single', ...(computeReuse ? {} : { computeReuse: false }) })],
+              bundlers: [esbuildBundler()],
+            }),
+            fileSystem: fromMemoryFs({ 'main.ts': posed }),
+            compute: { mode: 'memory' },
+          }),
+        });
+        const spans: string[] = [];
+        client.on('telemetry', (batch) => {
+          spans.push(...batch.entries.map(({ name }) => name));
+        });
+        const document = client.open({ source: { path: 'main.ts' }, parameters: { angle: angles[0] }, watch: false });
+        const delivered: Array<{ digest: string; meshed: number }> = [];
+        try {
+          for (const [index, angle] of angles.entries()) {
+            if (index > 0) {
+              await document.update({ parameters: { angle } });
+            }
+            const before = spans.length;
+            const result = await document.export('glb', { options: { tessellation: tolerances } });
+            if (!result.success) {
+              throw new Error('export failed');
+            }
+            await new Promise((resolve) => {
+              setTimeout(resolve, 50);
+            });
+            delivered.push({
+              digest: createHash('sha256').update(result.files[0].bytes).digest('hex').slice(0, 16),
+              meshed: spans.slice(before).filter((name) => name === 'replicad.tessellate.faces').length,
+            });
+          }
+        } finally {
+          document.close();
+          await client.shutdown();
+        }
+        return delivered;
+      };
+
+      const [, reference] = await exported(false, [0, 30]);
+      const [first, afterPose] = await exported(true, [0, 30]);
+
+      expect(first!.meshed).toBeGreaterThan(0);
+      // The arm moved: its unplaced prototype mesh is kept, so nothing is meshed again.
+      expect(afterPose!.meshed).toBe(0);
+      expect(afterPose!.digest).toBe(reference!.digest);
+    },
+    renderTimeout,
+  );
 });

@@ -183,7 +183,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
           await projectManager.connectWorkspace();
           await loadRef.current(false);
         } catch {
-          toast.error('Failed to reconnect the folder.');
+          toast.error('Couldn’t reconnect the folder. Try again.');
         }
         return;
       }
@@ -216,7 +216,9 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         }
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
         toast.error(
-          isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect the folder.',
+          isWorkspaceIdentityConflictError(error)
+            ? workspaceIdentityConflictCopy
+            : 'Couldn’t reconnect the folder. Try again.',
         );
       }
     },
@@ -348,7 +350,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
       await loadRef.current(false);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
-      toast.error('Failed to connect the folder.');
+      toast.error('Couldn’t connect the folder. Try again.');
     }
   }, [projectManager, telemetry]);
 

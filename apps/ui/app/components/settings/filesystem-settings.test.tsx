@@ -314,14 +314,14 @@ describe('FileSystemSettings workspace disconnect', () => {
     await act(async () => options.action.onClick());
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith('Failed to reconnect workspace.');
+      expect(mockToastError).toHaveBeenCalledWith('Couldn’t reconnect the folder. Try again.');
     });
     expect(error).toHaveBeenCalled();
   });
 });
 
 /** D20: materialize on sign-in is off by default and names one workspace when on. */
-describe('FileSystemSettings Tau Cloud projects', () => {
+describe('FileSystemSettings cloud projects', () => {
   const workspace = {
     workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
     name: 'Parts',
@@ -341,14 +341,14 @@ describe('FileSystemSettings Tau Cloud projects', () => {
   it('should leave materialize on sign-in off by default', async () => {
     render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    expect(await screen.findByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Off');
+    expect(await screen.findByRole('combobox', { name: 'Cloud projects' })).toHaveTextContent('Off');
   });
 
-  it('should remember the one workspace that receives Tau Cloud projects', async () => {
+  it('should remember the one workspace that receives cloud projects', async () => {
     const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
     render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    const select = await screen.findByRole('combobox', { name: 'Tau Cloud projects' });
+    const select = await screen.findByRole('combobox', { name: 'Cloud projects' });
     await screen.findAllByText('Parts');
     Element.prototype.scrollIntoView = vi.fn();
     select.focus();
@@ -357,7 +357,7 @@ describe('FileSystemSettings Tau Cloud projects', () => {
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
 
     expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-    expect(screen.getByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Parts');
+    expect(screen.getByRole('combobox', { name: 'Cloud projects' })).toHaveTextContent('Parts');
   });
 
   it('should not offer the setting on a plan without backup', async () => {
@@ -365,7 +365,7 @@ describe('FileSystemSettings Tau Cloud projects', () => {
     render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     await screen.findAllByText('Parts');
-    expect(screen.queryByRole('combobox', { name: 'Tau Cloud projects' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Tau Cloud projects')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Cloud projects' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Cloud projects')).not.toBeInTheDocument();
   });
 });

@@ -74,15 +74,20 @@ export type ReplicadMeshMemo = {
   /** Pack facts (glTF) of the kept meshes (N6), keyed by their `faces`: a fact is dropped with its mesh. */
   readonly packFacts: ReplicadPackFacts;
   /**
-   * The mesh kept for an occurrence under a key, if one is kept and `usable` accepts it. Counts a hit only for a mesh
-   * it returns, and a miss otherwise.
+   * The mesh kept for an occurrence under a key, if one is kept and `usable` accepts it. Counts `parts` (default 1)
+   * hits for a mesh it returns, and `parts` misses otherwise: a group's prototype counts its instances.
    */
-  lookup(info: ReplicadShapeOccurrenceInfo, key: string, usable?: (mesh: MemoMesh) => boolean): MemoMesh | undefined;
+  lookup(
+    info: ReplicadShapeOccurrenceInfo,
+    key: string,
+    options?: Readonly<{ usable?: (mesh: MemoMesh) => boolean; parts?: number }>,
+  ): MemoMesh | undefined;
   /** Keeps an occurrence's mesh under a key. */
   store(info: ReplicadShapeOccurrenceInfo, key: string, mesh: MemoMesh): void;
   /**
    * The meshes kept for an instanced group of `instances` led by a prototype occurrence, if every one is kept and
-   * `usable` accepts them. Counts `instances` hits for meshes it returns, and `instances` misses otherwise.
+   * `usable` accepts them. Counts `instances` hits for meshes it returns; on a miss the prototype lookup that follows
+   * counts the group's parts.
    */
   lookupGroup(
     prototype: ReplicadShapeOccurrenceInfo,
@@ -323,13 +328,13 @@ export function createReplicadMeshMemo({
   return {
     readOccurrence,
     packFacts: createReplicadPackFacts(),
-    lookup(info, key, usable) {
+    lookup(info, key, { usable, parts = 1 } = {}) {
       const mesh = kept(info, key) as MemoMesh | undefined;
       if (mesh && (usable === undefined || usable(mesh))) {
-        counters.hits++;
+        counters.hits += parts;
         return mesh;
       }
-      counters.misses++;
+      counters.misses += parts;
       return undefined;
     },
     store(info, key, mesh) {
@@ -341,7 +346,6 @@ export function createReplicadMeshMemo({
         counters.hits += instances;
         return meshes;
       }
-      counters.misses += instances;
       return undefined;
     },
     storeGroup(prototype, key, meshes) {

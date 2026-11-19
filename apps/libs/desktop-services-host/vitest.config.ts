@@ -5,7 +5,6 @@ export default defineConfig({
   define: {
     tauCloudBuildEnabled: 'false',
     tauTelemetryHostCloudBuild: 'false',
-    tauDesktopHostBuild: '""',
   },
   test: {
     environment: 'node',

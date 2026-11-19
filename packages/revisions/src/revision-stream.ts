@@ -206,7 +206,7 @@ export const watchRevisionStream = (options: RevisionStreamOptions, handlers: Re
       const auth = options.auth();
       try {
         if (apiBaseUrl === undefined || auth === undefined) {
-          throw new Error('This host is not signed in to Tau Cloud.');
+          throw new Error('Sign in with `tau auth login` to back up to the cloud.');
         }
         const url = new URL(
           `${apiBaseUrl.replace(/\/$/u, '')}/v1/streams/${encodeURIComponent(revisionStreamId(options.projectId))}/events`,

@@ -281,10 +281,10 @@ export const conflictedRevisionRefusal = 'it carries a revision that still needs
 export const authorshipRefusals = {
   /** The commit's Tau record, or its author address, names an account other than the pusher. */
   GIT_PUSH_ACTOR_NOT_PUSHER:
-    'it does not name the account pushing it. Tau Cloud backs up a revision only for the account that recorded it, or the account an agent worked for.',
+    'it does not name the account pushing it. Tau backs up a revision only for the account that recorded it, or the account an agent worked for.',
   /** A Tau-written commit whose author address is not a Tau no-reply address (Q11, I3). */
   GIT_PUSH_AUTHOR_ADDRESS:
-    'Tau recorded it with an email address as its author, and Tau Cloud keeps only Tau no-reply addresses. Start a new project to back up this work.',
+    'Tau recorded it with an email address as its author, and Tau keeps only its own no-reply addresses. Start a new project to back up this work.',
   /**
    * A commit with no Tau record, on a project that is not linked to GitHub,
    * whose author or committer is not the pusher's own Tau identity.
@@ -780,7 +780,7 @@ while read -r _old _new ref; do
   case "$_new" in
     *[!0]*) ;;
     *)
-      echo "Tau: refused $ref — Tau Cloud never deletes a ref; retention is decided on the server." >&2
+      echo "Tau: refused $ref — Tau never deletes a ref; retention is decided on the server." >&2
       status=1
       continue
       ;;

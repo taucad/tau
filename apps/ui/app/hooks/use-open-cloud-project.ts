@@ -101,7 +101,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
         }
         await assertCloudProjectActive(entry.id);
         if (getRevisionSessionUser()?.id !== account) {
-          throw new Error('Your account changed. Refresh the project before opening it.');
+          throw new Error('You’re signed in to a different account now. Open the project again.');
         }
         const previous = tauCloudIntent.get(entry.id);
         tauCloudIntent.set(entry.id, 'open');
@@ -111,7 +111,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
           hasCreated = true;
           await assertCloudProjectActive(entry.id);
           if (getRevisionSessionUser()?.id !== account) {
-            throw new Error('Your account changed. Refresh the project before opening it.');
+            throw new Error('You’re signed in to a different account now. Open the project again.');
           }
           return created;
         } catch (error) {

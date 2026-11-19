@@ -778,7 +778,7 @@ describe('serializeMessage', () => {
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (large object not on this device yet): models/part.step\n</tool_result>',
+        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (still downloading): models/part.step\n</tool_result>',
       );
     });
 

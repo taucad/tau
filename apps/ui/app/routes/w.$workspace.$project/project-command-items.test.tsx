@@ -358,7 +358,7 @@ describe('ProjectCommandPaletteItems', () => {
         ['New branch…', true],
       ],
     );
-    expect(item('connect-tau-cloud')?.label).toBe('Back up to Tau Cloud');
+    expect(item('connect-tau-cloud')?.label).toBe('Back up to the cloud');
     item('switch-branch')?.action?.();
     expect(openPanel).toHaveBeenLastCalledWith('revisions');
     expect(getBranchControlRequest('project-1')).toBe('switch-branch');

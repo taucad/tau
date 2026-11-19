@@ -239,11 +239,11 @@ const fetchAccountSalt = async (workspace: string): Promise<string> => {
     { credentials: 'include', headers: { Accept: 'application/json' } },
   );
   if (!response.ok) {
-    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
+    throw recordApiRequestId(new Error(`Couldn’t read this account’s salt (${String(response.status)})`), response);
   }
   const { salt } = (await response.json()) as { salt?: unknown };
   if (typeof salt !== 'string' || salt === '') {
-    throw new Error('Tau Cloud answered without a salt');
+    throw new Error('The salt response had no salt');
   }
   return salt;
 };

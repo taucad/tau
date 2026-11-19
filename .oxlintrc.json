@@ -122,6 +122,14 @@
     "tau-lint/no-impl-in-index": "error",
     "tau-lint/no-test-bridge-redeclaration": "error",
     "tau-lint/plugin-capability-filename": "error",
+    // First-party plugin surface (filename-scoped in each rule; each plugin's own lint enforces it on itself):
+    // named-only implementation modules, no default import of a plugin module, the package-named `definePlugin`
+    // binding, and no non-`const` type assertion in a kernel module. The cross-file entry re-export check is
+    // `assertPluginContractSurface` from `@taucad/runtime-testing`, called by each plugin's `index.test.ts`.
+    "tau-lint/no-plugin-default-export": "error",
+    "tau-lint/no-plugin-default-import": "error",
+    "tau-lint/require-plugin-package-binding": "error",
+    "tau-lint/no-kernel-type-assertion": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",
     // Agent substrate contract (docs/policy/xstate-policy.md, MC-R1–MC-R30). No options, so no override can replace them.

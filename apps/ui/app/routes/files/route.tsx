@@ -42,7 +42,11 @@ import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
-import { folderStatusOf, useRootStatuses, workspaceStorageRootKey } from '#components/filesystem/folder-status.js';
+import {
+  folderStatusOf,
+  useRootStatuses,
+  workspaceStorageRootKey,
+} from '@taucad/files-ui/components/filesystem/folder-status';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 

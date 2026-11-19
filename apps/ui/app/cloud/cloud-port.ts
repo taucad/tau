@@ -1,5 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { Topic } from '@taucad/events';
+import { createAskDeadlines } from '#lib/ask-deadline.js';
+import type { AskDeadlineTimer } from '#lib/ask-deadline.js';
 
 /**
  * The Cloud port (adaptive app deployment mode charter D6, I4): plan facts as data, stored per financial identity and
@@ -26,6 +28,17 @@ export type CloudFacts = Readonly<Record<string, unknown>>;
 
 /** The port's store. @public */
 export type CloudPortStore = Readonly<{
+  /**
+   * Bind the page's current identity, or none: what a fact used outside render reads when it is called (I4). Binding
+   * an identity with no facts yet starts its wait, which reads `unavailable` after the deadline (I15).
+   */
+  bind: (identityKey: string | undefined) => void;
+  /** The bound identity's key, read when a callable fact is called (I4). */
+  current: () => string | undefined;
+  /** The person's Retry: the identity's wait starts its deadline again. */
+  recheck: (identityKey: string | undefined) => void;
+  /** Whether a bound identity still waits within its deadline (`checking`) or has outlived it (`unavailable`). */
+  wait: (identityKey: string | undefined) => 'checking' | 'unavailable';
   /** The facts published for an identity, or `undefined`. */
   read: (identityKey: string | undefined) => CloudFacts | undefined;
   /** Publish an identity's facts, replacing what it held. */
@@ -41,10 +54,32 @@ export type CloudPortStore = Readonly<{
  * @returns The store.
  * @public
  */
-export const createCloudPortStore = (): CloudPortStore => {
+export const createCloudPortStore = (timer?: AskDeadlineTimer): CloudPortStore => {
   const entries = new Map<string, CloudFacts>();
   const changed = new Topic<void>({ name: 'cloud-port' });
+  const deadlines = createAskDeadlines(timer);
+  let bound: string | undefined;
   return {
+    bind: (identityKey) => {
+      if (identityKey === bound) {
+        return;
+      }
+      if (bound !== undefined && !deadlines.expired(bound)) {
+        deadlines.cancel(bound);
+      }
+      bound = identityKey;
+      if (identityKey !== undefined && !entries.has(identityKey)) {
+        deadlines.start(identityKey);
+      }
+      changed.emit(undefined);
+    },
+    current: () => bound,
+    recheck: (identityKey) => {
+      if (identityKey !== undefined && !entries.has(identityKey)) {
+        deadlines.restart(identityKey);
+      }
+    },
+    wait: (identityKey) => (deadlines.expired(identityKey) ? 'unavailable' : 'checking'),
     read: (identityKey) => (identityKey === undefined ? undefined : entries.get(identityKey)),
     publish: (identityKey, facts) => {
       entries.set(identityKey, facts);
@@ -53,12 +88,20 @@ export const createCloudPortStore = (): CloudPortStore => {
     clear: (identityKey) => {
       if (identityKey === undefined) {
         entries.clear();
+        deadlines.cancel();
       } else {
         entries.delete(identityKey);
       }
       changed.emit(undefined);
     },
-    subscribe: (listener) => changed.subscribe(listener),
+    subscribe: (listener) => {
+      const offPort = changed.subscribe(listener);
+      const offDeadlines = deadlines.subscribe(listener);
+      return () => {
+        offPort();
+        offDeadlines();
+      };
+    },
   };
 };
 

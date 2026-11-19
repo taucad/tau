@@ -45,7 +45,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { GithubGistServicesProvider } from '#components/share/github-gist-services.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
-import { versionNumberOfTag } from '@taucad/revisions';
+import { publishFailureMessage, versionNumberOfTag } from '@taucad/revisions';
 import type {
   PublishDraft,
   PublishFacet,
@@ -1097,7 +1097,10 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const [envelopeFailure, setEnvelopeFailure] = useState<ReturnType<typeof shareEnvelopeFailureOf>>();
   /* What the person picked before a publish; the link's own setting until they pick. */
   const [chosenVisibility, setChosenVisibility] = useState<PublishVisibility>();
-  const { canCreatePrivateShares, isResolved: isPlanResolved, requestUpgrade } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
+  const isPlanResolved = plan.isResolved;
+  /* C1: only a resolved plan can refuse private; an unresolved one sends the person's choice and the API decides. */
+  const isPrivateRefused = plan.isResolved && !plan.canCreatePrivateShares;
   const [visibilityMutating, setVisibilityMutating] = useState(false);
   const [isStopDialogOpen, setIsStopDialogOpen] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -1323,8 +1326,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     }
     // Switching TO private is Pro-gated (T4/T5); the server 403s anyway — route
     // the user to the upgrade surface instead of a failing request.
-    if (nextVisibility === 'private' && !canCreatePrivateShares) {
-      requestUpgrade();
+    if (nextVisibility === 'private' && plan.isResolved && !plan.canCreatePrivateShares) {
+      plan.requestUpgrade();
       return;
     }
 
@@ -1411,7 +1414,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const notShared = (share: ProjectShare | undefined): React.JSX.Element => {
     // Only people you invite needs the Pro plan to choose (T4/T5/AD11), but a link that is already private keeps
     // it after the plan lapses (T16), so its own setting stays on offer. Until the plan is known nothing is locked.
-    const isPrivateAllowed = canCreatePrivateShares || !isPlanResolved || share?.visibility === 'private';
+    const isPrivateAllowed = !isPrivateRefused || share?.visibility === 'private';
     const { audience, effectiveVisibility, isAwaitingAudience } = publishAudienceOf({
       share,
       chosen: chosenVisibility,
@@ -1463,7 +1466,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                       type='button'
                       className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
                       onClick={() => {
-                        requestUpgrade();
+                        plan.requestUpgrade();
                       }}
                     >
                       <CommercialUpgradeLabel />
@@ -1484,7 +1487,16 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 Publishing…
               </p>
             ) : null}
-            {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
+            {publishError === undefined ? null : (
+              <PublishErrorNotice
+                message={publishError}
+                signIn={signIn}
+                onPublishPublic={() => {
+                  setChosenVisibility('public');
+                  sendPublish({ visibility: 'public' }, true);
+                }}
+              />
+            )}
 
             <div className='flex flex-wrap justify-end gap-2'>
               <Button ref={publishRef} type='submit' disabled={busy || isAwaitingAudience} aria-busy={busy}>
@@ -1561,7 +1573,16 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               Publishing…
             </p>
           ) : null}
-          {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
+          {publishError === undefined ? null : (
+            <PublishErrorNotice
+              message={publishError}
+              signIn={signIn}
+              onPublishPublic={() => {
+                setChosenVisibility('public');
+                sendPublish({ visibility: 'public' }, true);
+              }}
+            />
+          )}
           <div className='flex flex-wrap justify-end gap-2'>
             {/* A link with no version yet is given one without the sentence. Where the head of `main` is not known,
                 or this device is behind the version the link shows, a publish could take the link back: none. */}
@@ -1797,18 +1818,28 @@ export function ProjectSharePanel(properties: ProjectSharePanelProps): React.JSX
  * @param properties - The sentence, and where signing in leads.
  * @returns The error notice, with a Sign in button when the sentence asks for it.
  */
+/** What the API's plan refusal of a private link reads as (`@taucad/revisions` owns the sentence). */
+const privateLinkRefusal = publishFailureMessage(403, 'ENTITLEMENT_REQUIRED');
+
 function PublishErrorNotice({
   message,
   signIn,
+  onPublishPublic,
 }: {
   readonly message: string;
   readonly signIn: string;
+  /** The one action a plan refusal offers (C1): publish the link for anyone instead. */
+  readonly onPublishPublic: () => void;
 }): React.JSX.Element {
   return (
     <ShareNotice
       tone='error'
       actions={
-        message.startsWith('Sign in') ? (
+        message === privateLinkRefusal ? (
+          <Button type='button' variant='outline' size='sm' onClick={onPublishPublic}>
+            Publish as public
+          </Button>
+        ) : message.startsWith('Sign in') ? (
           <Button asChild variant='outline' size='sm'>
             <NavLink to={signIn}>Sign in</NavLink>
           </Button>

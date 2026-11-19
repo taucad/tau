@@ -1,10 +1,12 @@
+import type { RuntimeClient } from '@taucad/runtime';
+import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import { assertRootedPath } from '@taucad/utils/path';
 import { mimeTypes } from '@taucad/types/constants';
-import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { getComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
+import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 
 type PreviewProjectFileOptions = {
   readonly path: string;
@@ -12,8 +14,27 @@ type PreviewProjectFileOptions = {
   readonly runtimeFileSystem: RuntimeFileSystem;
 };
 
-/** Convert one disk-backed project file when needed and open native macOS Quick Look. */
-export const previewProjectFileInQuickLook = async (options: PreviewProjectFileOptions): Promise<void> => {
+/** What only the app supplies to a Quick Look conversion: its desktop kernel and its runtime telemetry. */
+export type QuickLookServices = {
+  /** The project's desktop kernel options, resolved when a file needs converting to USDZ. */
+  readonly resolveKernelOptions: (
+    projectId: string,
+    computeMode: ComputeReuseMode,
+  ) => Promise<(deps: { readonly fileSystem: RuntimeFileSystem }) => RuntimeClientOptionsWithTransport>;
+  /** Load the observer that reports the conversion's runtime attempts; it returns the observation's stop. */
+  readonly loadRuntimeObserver: () => Promise<(client: RuntimeClient) => () => void>;
+};
+
+/**
+ * Convert one disk-backed project file when needed and open native macOS Quick Look.
+ *
+ * @param options - The project-relative path, its project and the runtime filesystem the conversion reads.
+ * @param services - The app's desktop kernel and runtime observer.
+ */
+export const previewProjectFileInQuickLook = async (
+  options: PreviewProjectFileOptions,
+  services: QuickLookServices,
+): Promise<void> => {
   const quickLook = desktopBridge()?.quickLook;
   if (!quickLook) {
     throw new Error('Quick Look is not available in this build of Tau.');
@@ -39,14 +60,14 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     return;
   }
 
-  const [{ createRuntimeClient }, resolveOptions, { observeRuntimeClient }] = await Promise.all([
+  const [{ createRuntimeClient }, resolveOptions, observeRuntimeClient] = await Promise.all([
     import('@taucad/runtime/client'),
-    desktopKernelOptions(options.projectId, undefined, getComputeReuseMode())(),
-    import('#telemetry/runtime-telemetry.js'),
+    services.resolveKernelOptions(options.projectId, getComputeReuseMode()),
+    services.loadRuntimeObserver(),
   ]);
   const client = createRuntimeClient(resolveOptions({ fileSystem: options.runtimeFileSystem }));
   /* Runtime observability (FR-14): the conversion's attempts, reported by the renderer that issues them. */
-  const stopObserving = observeRuntimeClient(client, 'quicklook');
+  const stopObserving = observeRuntimeClient(client);
   const document = client.open({ source: { path }, watch: false });
   try {
     const exported = await document.export('usdz');

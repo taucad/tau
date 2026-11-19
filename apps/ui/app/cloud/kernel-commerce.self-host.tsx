@@ -6,14 +6,6 @@ export function KernelCommercialBadge(_props: { readonly kernelId: KernelProvide
   return undefined;
 }
 
-export const useKernelCommercialAccess = (): {
-  readonly isAllowed: (kernel: KernelProvider) => boolean;
-  readonly requestUpgrade: () => void;
-} => ({
-  isAllowed: useCallback(() => true, []),
-  requestUpgrade: useCallback(() => undefined, []),
-});
-
 /**
  * The plan fact for routing: a self-hosted Tau has no plan gate (blueprint Appendix C).
  *

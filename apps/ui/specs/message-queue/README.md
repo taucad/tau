@@ -93,3 +93,5 @@ DC-10 revisions-ui slice 2 re-pinned the drift after `use-turn-admission.ts` beg
 The Tau Cloud naming audit re-pinned the drift after `chat-session-store.ts` reworded its queue-updates error sentence; no action changed.
 
 DC-10 files-ui slice 9 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/files-ui`; no action changed.
+
+The adaptive app deployment mode C6 change re-pinned the drift after `chat-turn-host.tsx` began rebuilding `snapshot.kernel` from the plan read at admission; no action changed.

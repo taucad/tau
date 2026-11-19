@@ -76,7 +76,7 @@ import {
   DropdownMenuLabel,
 } from '@taucad/ui/components/dropdown-menu';
 import { useProject } from '#hooks/use-project.js';
-import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
+import { mountFileOperationParticipants } from '@taucad/files-ui/filesystem/file-operation-participants';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { ViewerNode } from '@taucad/workbench';
@@ -140,7 +140,9 @@ import {
   getFileTreeDownloadPolicy,
 } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
+import { previewProjectFileInQuickLook } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import type { QuickLookServices } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
 
@@ -169,6 +171,15 @@ type RowPresentation = FileProvenanceLabel & {
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
+/** Quick Look converts through the project's desktop kernel, its attempts reported as `quicklook`. */
+const quickLookServices: QuickLookServices = {
+  resolveKernelOptions: async (projectId, computeMode) => desktopKernelOptions(projectId, undefined, computeMode)(),
+  async loadRuntimeObserver() {
+    const { observeRuntimeClient } = await import('#telemetry/runtime-telemetry.js');
+    return (client) => observeRuntimeClient(client, 'quicklook');
+  },
+};
+
 const readOnlyPathMessage = (path: string): string => {
   const copy = workspaceMutationErrorCopy.READ_ONLY_MOUNT;
   return typeof copy === 'function' ? copy({ path }) : copy;
@@ -1416,7 +1427,7 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
       const name = path.split('/').pop() ?? path;
-      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }), {
+      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }, quickLookServices), {
         loading: `Preparing ${name} for Quick Look…`,
         success: `Opened ${name} in Quick Look`,
         error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),

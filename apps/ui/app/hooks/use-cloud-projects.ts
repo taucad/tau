@@ -629,15 +629,25 @@ export const useTauCloudIntent = (projectId: string): TauCloudIntent | undefined
     () => undefined,
   );
 
-/** Who is asking, as far as backup by default cares (D19). @public */
+/**
+ * Who is asking, as far as backup by default cares (D19). The plan is resolved only when it was read from a pinned
+ * build or confirmed by this page load's answer: data never moves on a remembered or `404` reading (adaptive app
+ * deployment mode D5, consumer C4), and an unresolved plan has no entitlement to read.
+ *
+ * @public
+ */
 export type TauCloudEligibility = Readonly<{
   /** `useResolvedAuth`'s answer. */
   auth: 'authed' | 'anonymous' | 'indeterminate';
-  /** Whether the plan is known yet; nothing is decided before it is. */
-  isResolved: boolean;
-  /** W8's entitlement: closed only for a plan that cannot sync (an Enterprise override). */
-  canSyncFiles: boolean;
-}>;
+}> &
+  (
+    | Readonly<{ isResolved: false }>
+    | Readonly<{
+        isResolved: true;
+        /** W8's entitlement: closed only for a plan that cannot sync (an Enterprise override). */
+        canSyncFiles: boolean;
+      }>
+  );
 
 /** What a project's session does about its intent now. @public */
 export type TauCloudStep = 'announce' | 'connect' | 'forget' | 'wait';
@@ -696,8 +706,10 @@ export const nextTauCloudStep = (
  */
 export const useTauCloudEligibility = (): TauCloudEligibility => {
   const auth = useResolvedAuth();
-  const { isResolved, canSyncFiles } = useCommercialFeatures();
-  return { auth, isResolved, canSyncFiles };
+  const plan = useCommercialFeatures();
+  return plan.isResolved && (plan.basis === 'pinned' || plan.basis === 'confirmed')
+    ? { auth, isResolved: true, canSyncFiles: plan.canSyncFiles }
+    : { auth, isResolved: false };
 };
 
 /*

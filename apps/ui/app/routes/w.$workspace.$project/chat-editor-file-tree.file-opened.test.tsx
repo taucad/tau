@@ -52,7 +52,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
-vi.mock('#filesystem/file-operation-participants.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/file-operation-participants', () => ({
   mountFileOperationParticipants: () => () => undefined,
 }));
 vi.mock('#workbench-records/view-actions.js', () => ({

@@ -54,7 +54,7 @@ describe('web /s/:slug desktop offer', () => {
   });
 
   it('offers the app beside the publication the page is already showing', async () => {
-    mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
+    mountAt('tau~shr_123', { publication: {}, viewerRole: 'public' });
 
     expect(await screen.findByText('publication workbench')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open in Tau Desktop' })).toBeInTheDocument();
@@ -67,7 +67,7 @@ describe('web /s/:slug desktop offer', () => {
   });
 
   it('should keep the offer at the bottom-right with the browser continuation action', async () => {
-    mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
+    mountAt('tau~shr_123', { publication: {}, viewerRole: 'public' });
 
     const openInDesktop = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
     const offer = openInDesktop.closest('.fixed');
@@ -105,7 +105,7 @@ describe('web /s/:slug desktop offer', () => {
   it('offers nothing on the desktop build', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
 
-    mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
+    mountAt('tau~shr_123', { publication: {}, viewerRole: 'public' });
 
     expect(screen.queryByRole('button', { name: 'Open in Tau Desktop' })).not.toBeInTheDocument();
   });

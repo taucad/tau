@@ -15,13 +15,18 @@ import type { BuildReport, KernelBuildReport } from '#types/runtime-kernel-v2.ty
  * @internal
  */
 export const admitKernelBuildReport = (value: unknown): KernelBuildReport | undefined => {
-  const costliest: unknown = (value as { costliest?: unknown } | undefined)?.costliest;
-  const parsed = kernelBuildReportSchema.safeParse(
-    Array.isArray(costliest)
-      ? { ...(value as Readonly<Record<string, unknown>>), costliest: costliest.slice(0, 3) }
-      : value,
-  );
-  return parsed.success ? parsed.data : undefined;
+  // Reading the report runs plugin code (a getter, a proxy trap): any throw drops the report, not the evaluation.
+  try {
+    const costliest: unknown = (value as { costliest?: unknown } | undefined)?.costliest;
+    const parsed = kernelBuildReportSchema.safeParse(
+      Array.isArray(costliest)
+        ? { ...(value as Readonly<Record<string, unknown>>), costliest: costliest.slice(0, 3) }
+        : value,
+    );
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 /**

@@ -26,7 +26,12 @@
  * @module
  */
 
-import { computeMethods, openComputeConnection, transfersArguments } from '#compute-worker/compute-worker.js';
+import {
+  computeMethods,
+  openComputeConnection,
+  transfersArguments,
+  withInflateObject,
+} from '#compute-worker/compute-worker.js';
 import type { ComputeConnection, ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
 import { ComputeWorkerCrashedError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -105,6 +110,8 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
   const silence = options.callDeadline ?? 120_000;
   const heartbeat = options.heartbeat ?? Math.max(1, Math.min(5000, Math.floor(silence / 4)));
   const maxInFlight = options.maxInFlight ?? 4;
+  /* A fallback built before `inflateObject` serves it from its own inflate and sha1, as reads did before. */
+  const fallback = options.fallback === undefined ? undefined : withInflateObject(options.fallback);
   let current: Readonly<{ handle: ComputeWorkerHandle; connection: ComputeConnection }> | undefined;
   let spawned = 0;
   let restarts: number[] = [];
@@ -162,7 +169,7 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
      * module workers): its calls are not its fault, so they go to the
      * fallback rather than fail. One that had spoken fails what it held.
      */
-    const failedCalls = stop('crashed', cause, options.fallback !== undefined && !current.connection.spoke());
+    const failedCalls = stop('crashed', cause, fallback !== undefined && !current.connection.spoke());
     options.onCrash?.({ failedCalls, restarts: restarts.length, abandoned });
   };
 
@@ -230,7 +237,7 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
     if (current !== undefined) {
       return current.connection.compute;
     }
-    return workerOnly.has(method) ? undefined : options.fallback;
+    return workerOnly.has(method) ? undefined : fallback;
   };
 
   const slot = async (): Promise<void> => {
@@ -270,7 +277,6 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
         try {
           return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
         } catch (error) {
-          const { fallback } = options;
           if (fallback === undefined || !(error instanceof Error) || !unloaded.has(error)) {
             throw error;
           }

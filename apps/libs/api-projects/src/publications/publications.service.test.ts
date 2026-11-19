@@ -2626,6 +2626,28 @@ describe('PublicationsService invite-only entitlement gate on publish (T4/T16)',
     ).resolves.toMatchObject({ share: { visibility: 'private' } });
   });
 
+  it('makes a first publish at the default it names, when it names no setting', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false });
+
+    await expect(
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: { ...withoutVisibility(repositoryPath), defaultVisibility: 'public' },
+      }),
+    ).resolves.toMatchObject({ share: { visibility: 'public' } });
+  });
+
+  it('keeps a link made since the client looked at its own setting, whatever default the publish names', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false, link: { visibility: 'private' } });
+
+    await expect(
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: { ...withoutVisibility(repositoryPath), defaultVisibility: 'public' },
+      }),
+    ).resolves.toMatchObject({ share: { visibility: 'private' } });
+  });
+
   it('refuses switching a public link to invite-only on publish without the entitlement', async () => {
     const { service, repositoryPath } = createGateService({ entitled: false, link: { visibility: 'public' } });
 

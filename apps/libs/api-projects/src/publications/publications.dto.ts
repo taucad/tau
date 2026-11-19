@@ -12,8 +12,8 @@ export const publicationVisibilitySchema = z.enum(['private', 'public']);
  * (D11, A21): `{ projectId, tag, revisionId }`. The project's name and
  * description become the link's title and description (stable cloud link
  * blueprint D3). `visibility` sets who can open the project's one cloud link;
- * without it a live or stopped link keeps its setting and a new link is
- * private. Nothing is uploaded: the bytes arrived with the push and the server
+ * without it a live or stopped link keeps its setting and a new link takes
+ * `defaultVisibility`, else private. Nothing is uploaded: the bytes arrived with the push and the server
  * materializes the tagged tree.
  */
 export const publishRequestSchema = z
@@ -32,6 +32,12 @@ export const publishRequestSchema = z
     entryPath: z.string().min(1),
     description: z.string().optional(),
     visibility: publicationVisibilitySchema.optional(),
+    /**
+     * Who can open the link when this publish makes it and names no
+     * `visibility`. Decided under the project's lock, so a link made since the
+     * client last looked keeps its own setting.
+     */
+    defaultVisibility: publicationVisibilitySchema.optional(),
   })
   .meta({ id: 'PublishRequest' });
 

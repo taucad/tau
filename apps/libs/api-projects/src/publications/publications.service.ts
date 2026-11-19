@@ -263,7 +263,7 @@ export class PublicationsService {
     }
 
     /* Checked before the lease as well as under the lock, so a refused setting
-       costs no hydrate. A first publish is never public by default. */
+       costs no hydrate. A first publish is private unless the request names another default. */
     const existingShare = await this.selectShareOfProject(db, request.projectId);
     const requestedVisibility = this.publishVisibility(request, existingShare);
     await this.assertVisibilityAllowed({ ownerId, visibility: requestedVisibility, current: existingShare });
@@ -867,12 +867,18 @@ export class PublicationsService {
     });
   }
 
-  /** The setting a publish leaves the link at: the request's, else the link's, else private. */
+  /**
+   * The setting a publish leaves the link at: the request's, else the link's; a link the publish makes takes the
+   * request's default, else private. Read under the lock, a default never changes a link made since the client looked.
+   */
   private publishVisibility(
-    request: Pick<PublishRequest, 'visibility'>,
+    request: Pick<PublishRequest, 'visibility' | 'defaultVisibility'>,
     share: Pick<ProjectShareRow, 'visibility'> | undefined,
   ): PublicationVisibility {
-    return request.visibility ?? (share === undefined ? 'private' : this.linkVisibility(share));
+    return (
+      request.visibility ??
+      (share === undefined ? (request.defaultVisibility ?? 'private') : this.linkVisibility(share))
+    );
   }
 
   private linkVisibility(share: Pick<ProjectShareRow, 'visibility'>): PublicationVisibility {

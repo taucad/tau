@@ -80,6 +80,13 @@ describe('publishRequestSchema', () => {
     expect(publishRequestSchema.safeParse(withoutVisibility).success).toBe(true);
   });
 
+  it('keeps the default a new link takes, and refuses a bad one', () => {
+    const { visibility: _visibility, ...withoutVisibility } = valid;
+    const result = publishRequestSchema.safeParse({ ...withoutVisibility, defaultVisibility: 'public' });
+    expect(result.success && result.data.defaultVisibility).toBe('public');
+    expect(publishRequestSchema.safeParse({ ...valid, defaultVisibility: 'secret' }).success).toBe(false);
+  });
+
   it('strips the title and invite fields a publish no longer takes', () => {
     const result = publishRequestSchema.safeParse({
       ...valid,

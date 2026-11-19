@@ -97,8 +97,10 @@ export const copyText = async (text: string | PromiseLike<string>): Promise<Copy
   if (typeof text === 'string') {
     return { text, isCopied: await writeKnownText(text) };
   }
-  const writing = writePendingText(text);
-  const resolved = await text;
+  // One native promise for both readers: a bare thenable may settle differently for each subscriber.
+  const pending = Promise.resolve(text);
+  const writing = writePendingText(pending);
+  const resolved = await pending;
   if (writing !== undefined && (await writing)) {
     return { text: resolved, isCopied: true };
   }

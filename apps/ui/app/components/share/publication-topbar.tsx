@@ -57,6 +57,9 @@ export function PublicationTopbar({
   /* Where the clipboard refused the link, it is shown selected under the button for the person to copy. */
   const [isCopyRefused, setIsCopyRefused] = useState(false);
   const refusedLinkRef = useRef<HTMLInputElement>(null);
+  /* The popover has no trigger, so a keyboard close hands focus back to Copy link itself. */
+  const copyLinkRef = useRef<HTMLButtonElement>(null);
+  const closedByKeyboardRef = useRef(false);
   /* The write starts inside the press, before any await, so a browser that needs the gesture still allows it. */
   const copyShareUrl = async (): Promise<void> => {
     if (!shareUrl) {
@@ -124,6 +127,7 @@ export function PublicationTopbar({
           <Popover open={isCopyRefused} onOpenChange={setIsCopyRefused}>
             <PopoverAnchor asChild>
               <Button
+                ref={copyLinkRef}
                 type='button'
                 size='sm'
                 variant='ghost'
@@ -144,6 +148,16 @@ export function PublicationTopbar({
                 event.preventDefault();
                 refusedLinkRef.current?.focus();
                 refusedLinkRef.current?.select();
+              }}
+              onEscapeKeyDown={() => {
+                closedByKeyboardRef.current = true;
+              }}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                if (closedByKeyboardRef.current) {
+                  closedByKeyboardRef.current = false;
+                  copyLinkRef.current?.focus();
+                }
               }}
             >
               <Input

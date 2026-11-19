@@ -72,7 +72,9 @@ export function PublicationAccessPanel({
   onGrantsChanged,
 }: PublicationAccessPanelProps): React.JSX.Element {
   const [pendingEmails, setPendingEmails] = useState<string[]>([]);
-  const [mutating, setMutating] = useState(false);
+  // A count, not a flag: Undo can run from its toast while an invite is still in flight.
+  const [activeMutations, setActiveMutations] = useState(0);
+  const mutating = activeMutations > 0;
   const [isListExpanded, setIsListExpanded] = useState(false);
   const helpId = useId();
   const endpoint = `${apiBaseUrl}/v1/publications/${publicationId}/access`;
@@ -105,7 +107,7 @@ export function PublicationAccessPanel({
       return;
     }
 
-    setMutating(true);
+    setActiveMutations((count) => count + 1);
     try {
       const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email, true)));
       const failed = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'rejected');
@@ -119,25 +121,25 @@ export function PublicationAccessPanel({
         toast.error(inviteToast(failed, true));
       }
     } finally {
-      setMutating(false);
+      setActiveMutations((count) => count - 1);
     }
   };
 
   /* Undo puts the same grant back without a second invite email: the person was invited once already. */
   const handleRestore = async (email: string): Promise<void> => {
-    setMutating(true);
+    setActiveMutations((count) => count + 1);
     try {
       await invite(email, false);
       await onGrantsChanged();
     } catch {
       toast.error(`Couldn't give ${email} access again. Invite them again.`);
     } finally {
-      setMutating(false);
+      setActiveMutations((count) => count - 1);
     }
   };
 
   const handleRevoke = async (grant: PublicationAccessGrant): Promise<void> => {
-    setMutating(true);
+    setActiveMutations((count) => count + 1);
     try {
       const response = await fetch(`${endpoint}/${grant.id}`, {
         method: 'DELETE',
@@ -161,7 +163,7 @@ export function PublicationAccessPanel({
     } catch {
       toast.error(`Couldn't remove access for ${grant.recipientEmail}. Try again.`);
     } finally {
-      setMutating(false);
+      setActiveMutations((count) => count - 1);
     }
   };
 

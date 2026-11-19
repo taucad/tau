@@ -1041,7 +1041,12 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   );
 
   useEffect(() => {
-    if (!publishShareUrl || lastHandledShareUrlRef.current === publishShareUrl) {
+    /* The reset after each publish clears the link, so the next publish is handled even when it brings the same link. */
+    if (!publishShareUrl) {
+      lastHandledShareUrlRef.current = undefined;
+      return;
+    }
+    if (lastHandledShareUrlRef.current === publishShareUrl) {
       return;
     }
 

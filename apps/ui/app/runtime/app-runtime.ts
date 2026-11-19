@@ -22,6 +22,7 @@ import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-stor
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
+import type { FocusMachine } from '#machines/focus.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
 import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
@@ -71,6 +72,8 @@ import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime
 import type {
   SessionRuntimeOpener,
   SessionWiring,
+  SessionsAheadFocusView,
+  SessionsAheadRegistryView,
   SessionsObservable,
   SessionsOpenAhead,
 } from '#services/sessions-store.js';
@@ -603,34 +606,7 @@ export const createAppRuntime = ({
     openAhead: createSessionsOpenAhead({
       loadRevisions: loadSessionRevisions,
       worker: host.sharedWorker,
-      focus: {
-        get: () => {
-          const snapshot = focus.getSnapshot();
-          const { answer, request } = snapshot.context;
-          return {
-            ...(request === undefined ? {} : { request }),
-            ...(snapshot.hasTag('focused') && answer?.projectId !== undefined ? { focusedOn: answer.projectId } : {}),
-            ...(snapshot.hasTag('held') && answer?.projectId !== undefined && answer.answer.status !== 'ready'
-              ? { heldOn: answer.projectId }
-              : {}),
-          };
-        },
-        subscribe: (listener) => {
-          const subscription = focus.subscribe(listener);
-          return () => {
-            subscription.unsubscribe();
-          };
-        },
-      },
-      registry: {
-        get: () => registry.getSnapshot().context,
-        subscribe: (listener) => {
-          const subscription = registry.subscribe(listener);
-          return () => {
-            subscription.unsubscribe();
-          };
-        },
-      },
+      ...openAheadPorts(focus, registry),
     }),
   });
   composed.runtime = runtime;
@@ -759,6 +735,53 @@ export const selectRuntimeIdleFileManagers = (runtime: AppRuntime): boolean | un
  * @public
  */
 export const selectRuntimeSafeMode = (runtime: AppRuntime): boolean => safeModeRuntimes.has(runtime);
+
+/**
+ * Focus and the registry as the early open reads them (STO-25 SP6): the route's request, the project focus is focused
+ * on, the project it holds on an answer that opens nothing, and the registry's sessions. Exported for the composition
+ * row that drives it over a real focus and registry.
+ *
+ * @param focus - The runtime's focus.
+ * @param registry - The runtime's sessions registry.
+ * @returns The early open's focus and registry ports.
+ * @public
+ */
+export const openAheadPorts = (
+  focus: ActorRefFrom<FocusMachine>,
+  registry: ActorRefFrom<typeof sessionsMachine>,
+): Readonly<{
+  focus: SessionsObservable<SessionsAheadFocusView>;
+  registry: SessionsObservable<SessionsAheadRegistryView>;
+}> => ({
+  focus: {
+    get: () => {
+      const snapshot = focus.getSnapshot();
+      const { answer, request } = snapshot.context;
+      return {
+        ...(request === undefined ? {} : { request }),
+        ...(snapshot.hasTag('focused') && answer?.projectId !== undefined ? { focusedOn: answer.projectId } : {}),
+        ...(snapshot.hasTag('held') && answer?.projectId !== undefined && answer.answer.status !== 'ready'
+          ? { heldOn: answer.projectId }
+          : {}),
+      };
+    },
+    subscribe: (listener) => {
+      const subscription = focus.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+  registry: {
+    get: () => registry.getSnapshot().context,
+    subscribe: (listener) => {
+      const subscription = registry.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+});
 
 /**
  * The runtime's early open for the *Open* gesture (STO-25 SP6): start a project's revision client and Tau Cloud open

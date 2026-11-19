@@ -1,4 +1,4 @@
-/** A running in-page AR session. */
+import { load } from '#lib/code-loading.js'; /** A running in-page AR session. */
 export type WebXrArPresentation = Readonly<{
   /** Whether the session is still running; false once it ended, even before the scene loaded. */
   isActive: () => boolean;
@@ -118,7 +118,7 @@ export async function startWebXrAr({
   onStarted?.(presentation);
 
   try {
-    const { presentGlbInArSession } = await import('#components/cad/ar-webxr-scene.js');
+    const { presentGlbInArSession } = await load(async () => import('#components/cad/ar-webxr-scene.js'));
     const dispose = await presentGlbInArSession(session, glb, {
       onPlaced() {
         overlay.hint.textContent = movedHint;

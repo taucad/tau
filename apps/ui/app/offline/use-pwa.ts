@@ -22,6 +22,7 @@ import { Topic } from '@taucad/events';
 import { queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
+import { load } from '#lib/code-loading.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -141,7 +142,7 @@ export function useServiceWorker(): void {
       // async-iife: bootstrap -- registering must never block the view the visitor came for.
       void (async () => {
         try {
-          const { startServiceWorker } = await import('#offline/pwa-registration.js');
+          const { startServiceWorker } = await load(async () => import('#offline/pwa-registration.js'));
           if (!stopped) {
             stop = startServiceWorker({
               inWorkspace,

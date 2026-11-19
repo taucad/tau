@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
+import { load } from '#lib/code-loading.js';
 
 export type NewProjectComposerProperties = {
   readonly adoptedEarlyInput?: EarlyChatInput;
@@ -17,7 +18,7 @@ let composerLoad: Promise<NewProjectComposerModule> | undefined;
 /** Import the composer's chunk; a failure clears the memo so the next call fetches again. */
 const importComposer = async (): Promise<NewProjectComposerModule> => {
   try {
-    return await import('#components/chat/new-project-chat-composer.js');
+    return await load(async () => import('#components/chat/new-project-chat-composer.js'));
   } catch (error) {
     composerLoad = undefined;
     throw error;

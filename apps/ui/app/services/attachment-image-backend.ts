@@ -1,4 +1,5 @@
 import type { AttachmentImageBackend } from '#services/attachment-image.service.js';
+import { load } from '#lib/code-loading.js';
 
 /**
  * Browser conversion: a dedicated module worker running the raster-only attachment runtime. Everything is imported on
@@ -9,10 +10,10 @@ export const attachmentImageBackend: AttachmentImageBackend = {
   async createClient() {
     const [{ createRuntimeClient }, { webWorkerTransport }, { fromMemoryFs }, { observeRuntimeClient }] =
       await Promise.all([
-        import('@taucad/runtime/client'),
-        import('@taucad/runtime/transport/web'),
-        import('@taucad/runtime/filesystem'),
-        import('#telemetry/runtime-telemetry.js'),
+        load(async () => import('@taucad/runtime/client')),
+        load(async () => import('@taucad/runtime/transport/web')),
+        load(async () => import('@taucad/runtime/filesystem')),
+        load(async () => import('#telemetry/runtime-telemetry.js')),
       ]);
     const client = createRuntimeClient({
       transport: webWorkerTransport({

@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useSyncExternalStore } from 'react';
+import { memo, Suspense, useSyncExternalStore } from 'react';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PartThumbnailProvider } from '#providers/part-thumbnail-provider.js';
 import { PartGalleryProvider } from '#components/geometry/cad/part-gallery.js';
@@ -8,6 +8,7 @@ import {
   loadChatInterfaceDesktop,
   loadChatInterfaceMobile,
 } from '#routes/w.$workspace.$project/chat-interface-layouts.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /* B-27, D-UI-16: each layout is its own chunk, so a phone never loads the
  * desktop shell (the dockview workbench and its panels) and a desktop never

@@ -39,6 +39,7 @@ import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { load } from '#lib/code-loading.js';
 
 /** The surface to adopt: none when a host above already owns the native input (`adoptedEarlyInput`, `enableEarlyInput`). */
 const handOffTarget = (
@@ -425,8 +426,9 @@ export const ChatTextarea = memo(function ({
         if (!cadRef) {
           throw new Error('No CAD view available for image capture');
         }
-        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } =
-          await import('#services/headless-capture.js');
+        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } = await load(
+          async () => import('#services/headless-capture.js'),
+        );
         const graphicsRef = resolveGraphicsRefForEntry(entryPath);
         const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef,

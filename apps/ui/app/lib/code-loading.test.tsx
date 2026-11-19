@@ -1,13 +1,34 @@
 // @vitest-environment jsdom
 // oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
 import '@testing-library/jest-dom/vitest';
-import { Suspense } from 'react';
+import { Component, Suspense } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isModuleLoadFailure, lazy, load, setCodeLoadFailureHandler } from '#lib/code-loading.js';
+import { isModuleLoadFailure, load, setCodeLoadFailureHandler } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 const chunkFailure = (): TypeError =>
   new TypeError('Failed to fetch dynamically imported module: https://tau.new/assets/agent-host.impl-Bu.js');
+
+class Boundary extends Component<
+  { readonly children: ReactNode; readonly onCatch: (error: unknown) => void },
+  { readonly hasCaught: boolean }
+> {
+  public static getDerivedStateFromError(): { readonly hasCaught: boolean } {
+    return { hasCaught: true };
+  }
+
+  public override state = { hasCaught: false };
+
+  public override componentDidCatch(error: unknown): void {
+    this.props.onCatch(error);
+  }
+
+  public override render(): ReactNode {
+    return this.state.hasCaught ? <p role='alert'>Failed</p> : this.props.children;
+  }
+}
 
 afterEach(() => {
   setCodeLoadFailureHandler(undefined);
@@ -47,7 +68,11 @@ describe('load', () => {
     setCodeLoadFailureHandler(handler);
     const failure = chunkFailure();
 
-    await expect(load(async () => Promise.reject(failure))).rejects.toBe(failure);
+    await expect(
+      load(async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
 
     expect(handler).toHaveBeenCalledExactlyOnceWith(failure);
   });
@@ -57,7 +82,11 @@ describe('load', () => {
     setCodeLoadFailureHandler(handler);
     const thrown = new ReferenceError('window is not defined');
 
-    await expect(load(async () => Promise.reject(thrown))).rejects.toBe(thrown);
+    await expect(
+      load(async () => {
+        throw thrown;
+      }),
+    ).rejects.toBe(thrown);
 
     expect(handler).not.toHaveBeenCalled();
   });
@@ -67,7 +96,14 @@ describe('load', () => {
     setCodeLoadFailureHandler(handler);
     const failure = chunkFailure();
 
-    await expect(load(async () => Promise.reject(failure), { optional: true })).rejects.toBe(failure);
+    await expect(
+      load(
+        async () => {
+          throw failure;
+        },
+        { optional: true },
+      ),
+    ).rejects.toBe(failure);
 
     expect(handler).not.toHaveBeenCalled();
   });
@@ -75,14 +111,25 @@ describe('load', () => {
   it('should reject unchanged where no recovery is installed (a worker, the server)', async () => {
     const failure = chunkFailure();
 
-    await expect(load(async () => Promise.reject(failure))).rejects.toBe(failure);
+    await expect(
+      load(async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
   });
 });
 
 describe('lazy', () => {
   it('should render the declared fallback when optional code fails to load', async () => {
     const Fancy = lazy(
-      async () => ({ default: (await load(async () => Promise.reject(chunkFailure()), { optional: true })) as never }),
+      async () => ({
+        default: await load<ComponentType>(
+          async () => {
+            throw chunkFailure();
+          },
+          { optional: true },
+        ),
+      }),
       { fallback: () => <span>flat</span> },
     );
 
@@ -100,20 +147,23 @@ describe('lazy', () => {
 
   it('should throw a failure to the nearest boundary when no fallback is declared', async () => {
     const failure = chunkFailure();
-    const View = lazy(async () => ({ default: await load(async () => Promise.reject(failure)) }));
+    const View = lazy(async () => ({
+      default: await load<ComponentType>(async () => {
+        throw failure;
+      }),
+    }));
     const caught = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     render(
-      <Suspense fallback={<span>loading</span>}>
-        <View />
-      </Suspense>,
-      { onCaughtError: caught, onUncaughtError: caught },
+      <Boundary onCatch={caught}>
+        <Suspense fallback={<span>loading</span>}>
+          <View />
+        </Suspense>
+      </Boundary>,
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
 
-    expect(caught).toHaveBeenCalledWith(failure, expect.anything());
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(caught).toHaveBeenCalledWith(failure);
   });
 });

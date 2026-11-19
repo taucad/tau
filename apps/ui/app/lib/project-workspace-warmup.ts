@@ -1,4 +1,5 @@
 import type * as ProjectWorkspace from '#routes/w.$workspace.$project/project-live-sessions.js';
+import { load } from '#lib/code-loading.js';
 
 type ProjectWorkspaceModule = typeof ProjectWorkspace;
 
@@ -15,10 +16,10 @@ type ProjectWorkspaceLoad = Promise<ProjectWorkspaceModule> & {
   reason?: unknown;
 };
 
-let load: ProjectWorkspaceLoad | undefined;
+let warmLoad: ProjectWorkspaceLoad | undefined;
 
 const importProjectWorkspace = async (): Promise<ProjectWorkspaceModule> =>
-  import('#routes/w.$workspace.$project/project-live-sessions.js');
+  load(async () => import('#routes/w.$workspace.$project/project-live-sessions.js'));
 
 const tagSettlement = async (pending: ProjectWorkspaceLoad): Promise<void> => {
   try {
@@ -29,8 +30,8 @@ const tagSettlement = async (pending: ProjectWorkspaceLoad): Promise<void> => {
     pending.status = 'rejected';
     pending.reason = error;
     // A failed import is forgotten so the next caller retries it.
-    if (load === pending) {
-      load = undefined;
+    if (warmLoad === pending) {
+      warmLoad = undefined;
     }
   }
 };
@@ -38,12 +39,12 @@ const tagSettlement = async (pending: ProjectWorkspaceLoad): Promise<void> => {
 /** The one workspace shell import, shared by link warming, the project route and `use`. */
 // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the tagged promise itself, which an async function would wrap.
 export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
-  if (load) {
-    return load;
+  if (warmLoad) {
+    return warmLoad;
   }
   const pending: ProjectWorkspaceLoad = importProjectWorkspace();
   pending.status = 'pending';
-  load = pending;
+  warmLoad = pending;
   void tagSettlement(pending);
   return pending;
 };

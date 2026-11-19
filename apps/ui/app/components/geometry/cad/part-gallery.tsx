@@ -1,13 +1,15 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useState } from 'react';
+import { createContext, Suspense, useCallback, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ModelComponentPreviewRequest } from '@taucad/workbench-panes/component-menu/component-actions';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /** Which part to show first, and where focus returns when the gallery closes. */
 export type PartGalleryRequest = ModelComponentPreviewRequest;
 
 const PartGalleryContext = createContext<((request: PartGalleryRequest) => void) | undefined>(undefined);
 const ProjectPartGallery = lazy(async () => {
-  const module = await import('#components/geometry/cad/project-part-gallery.js');
+  const module = await load(async () => import('#components/geometry/cad/project-part-gallery.js'));
   return { default: module.ProjectPartGallery };
 });
 

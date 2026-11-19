@@ -19,14 +19,22 @@ export const billingWaitCopy: Readonly<Record<DeploymentModeProblem, string>> = 
   'safe-mode': 'Billing is off in safe mode. Restart normally to see it.',
 };
 
-function BillingWait({ copy, onRetry }: { readonly copy: string; readonly onRetry?: () => void }): React.JSX.Element {
+function BillingWait({
+  copy,
+  onRetry,
+  retryLabel = 'Retry',
+}: {
+  readonly copy: string;
+  readonly onRetry?: () => void;
+  readonly retryLabel?: string;
+}): React.JSX.Element {
   return (
     <SettingsGroup>
       <div role='status' className='flex flex-wrap items-center gap-2 text-sm text-muted-foreground'>
         <span>{copy}</span>
         {onRetry === undefined ? undefined : (
           <Button variant='outline' size='xs' onClick={onRetry}>
-            Retry
+            {retryLabel}
           </Button>
         )}
       </div>
@@ -36,12 +44,27 @@ function BillingWait({ copy, onRetry }: { readonly copy: string; readonly onRetr
 
 /** While the Cloud chunk loads: loading for the import deadline, then a stated failure with Retry (I8, I15). */
 function BillingLoading(): React.JSX.Element {
-  const failed = useSyncExternalStore(
+  const failure = useSyncExternalStore(
     cloudSurfaces.subscribe,
-    () => cloudSurfaces.state().status === 'failed',
-    () => false,
+    () => {
+      const state = cloudSurfaces.state();
+      return state.status === 'failed' ? (state.retryable ? 'retryable' : 'reload') : undefined;
+    },
+    () => undefined,
   );
-  return failed ? (
+  if (failure === 'reload') {
+    // The chunk failed to load: it fails again for the life of the page, so only a reload can load it (PL7 FP9).
+    return (
+      <BillingWait
+        copy='Billing couldn’t load.'
+        retryLabel='Reload'
+        onRetry={() => {
+          globalThis.location.reload();
+        }}
+      />
+    );
+  }
+  return failure === 'retryable' ? (
     <BillingWait
       copy='Billing couldn’t load.'
       onRetry={() => {

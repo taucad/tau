@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { ChatEditorBinaryWarning } from '@taucad/project-workspace/components/chat-editor-binary-warning';
@@ -10,6 +10,8 @@ import { sniffNativeImageFormat } from '@taucad/project-workspace/utils/native-i
 import { NativeImageViewer } from '#routes/w.$workspace.$project/file-viewers/native-image-viewer.js';
 import { printerFileKind } from '#components/printer/printer-file-kind.js';
 import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /*
  * The viewers' bodies load when a file first opens in one (progressive loading PL5): the code viewer brings
@@ -17,15 +19,15 @@ import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-
  * pane's frame stay on the project route's interactive tier; a body draws inside the frame when it arrives.
  */
 const ChatEditorCodeViewer = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-editor-code-viewer.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-editor-code-viewer.js'));
   return { default: module.ChatEditorCodeViewer };
 });
 const ChatEditorMarkdownViewer = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js'));
   return { default: module.ChatEditorMarkdownViewer };
 });
 const PrinterViewer = lazy(async () => {
-  const module = await import('#components/printer/printer-viewer.js');
+  const module = await load(async () => import('#components/printer/printer-viewer.js'));
   return { default: module.PrinterViewer };
 });
 

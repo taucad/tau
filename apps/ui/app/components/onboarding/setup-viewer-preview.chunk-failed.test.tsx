@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 
 const capture = vi.hoisted(() => vi.fn());
 const chunk = vi.hoisted(() => ({ loads: 0 }));
@@ -18,14 +17,14 @@ vi.mock('#components/onboarding/setup-live-preview.js', () => {
 const { SetupViewerPreview } = await import('#components/onboarding/setup-viewer-preview.js');
 
 describe('setup step 3 when the preview chunk does not load', () => {
-  it('shows the diagram with Try again, reports chunk_failed, and Try again loads the chunk afresh', async () => {
-    const user = userEvent.setup();
+  /* PL7 FP9 (D17): a module that failed to load fails again for the life of the page, so the diagram offers no Try
+     again that could never load it. */
+  it('shows the diagram without Try again and reports chunk_failed', async () => {
     render(<SetupViewerPreview mapping='alt' cameraInput={{ preset: 'alt' }} gizmoStyle='cube' isGizmoShown />);
     const fallback = await screen.findByTestId('setup-preview-fallback');
     expect(fallback).toHaveAttribute('data-reason', 'chunk_failed');
     expect(capture).toHaveBeenCalledWith('onboarding_preview_fallback_shown', { reason: 'chunk_failed' });
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByTestId('setup-live-preview')).toBeInTheDocument();
-    expect(screen.queryByTestId('setup-preview-fallback')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(screen.queryByTestId('setup-live-preview')).toBeNull();
   });
 });

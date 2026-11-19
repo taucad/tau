@@ -1,4 +1,4 @@
-/**
+import { load } from '#lib/code-loading.js'; /**
  * Warm the next step (progressive loading PL8, LB9): once a page whose route class names a class it `warms` is idle,
  * prefetch that class's interactive tier, so the click that most likely follows downloads no module. From Home that
  * is the project route: a project row and the composer's first send both open it, and its modules are the same for
@@ -90,7 +90,7 @@ const warmQuietly = async (warm: WarmClass, target: string, loaded: string): Pro
 };
 
 const warmFromManifest: WarmClass = async (target, loaded) => {
-  const { warmRouteClass } = await import('#lib/warm-route-class.js');
+  const { warmRouteClass } = await load(async () => import('#lib/warm-route-class.js'));
   return warmRouteClass({ target, loaded });
 };
 

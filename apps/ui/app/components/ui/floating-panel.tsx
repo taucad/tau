@@ -12,6 +12,7 @@ import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } fr
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PaneSearchProvider, usePaneSearch } from '@taucad/ui/components/pane-search';
 import { CollapsibleCodeBlock } from '@taucad/editor-ui/components/ui/collapsible-code-block';
+import { isModuleLoadFailure } from '#lib/code-loading.js';
 import { reportUiError } from '#lib/error-reporting.js';
 import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -599,6 +600,7 @@ function FloatingPanelErrorContent({
 }: FloatingPanelErrorContentProps): React.JSX.Element {
   const errorMessage = error?.message;
   const errorStack = error?.stack;
+  const isCodeFailure = isModuleLoadFailure(error);
   const displayDescription =
     description ?? (errorMessage ? undefined : 'An unexpected error occurred. Please try again.');
 
@@ -641,13 +643,16 @@ function FloatingPanelErrorContent({
         ) : undefined}
       </div>
 
-      {/* Action Buttons */}
+      {/* Action Buttons. A module that failed to load fails again for the life of the page (PL7 FP9): rendering
+          again cannot load it, so a code failure offers Reload only. */}
       <div className='flex flex-wrap items-center justify-center gap-2'>
-        <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
-          <RotateCcw className='size-4' />
-          Try Again
-        </Button>
-        <Button variant='outline' size='sm' className='gap-2' onClick={onReload}>
+        {isCodeFailure ? null : (
+          <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
+            <RotateCcw className='size-4' />
+            Try Again
+          </Button>
+        )}
+        <Button variant={isCodeFailure ? 'default' : 'outline'} size='sm' className='gap-2' onClick={onReload}>
           <RefreshCcw className='size-4' />
           Reload Page
         </Button>

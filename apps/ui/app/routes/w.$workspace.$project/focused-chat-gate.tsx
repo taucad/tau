@@ -1,6 +1,6 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -9,10 +9,12 @@ import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { ENV } from '#environment.config.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { isModuleLoadFailure, load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
 const DebugProbes = lazy(async () => {
-  const module = await import('#chat-clients/debug-probes.js');
+  const module = await load(async () => import('#chat-clients/debug-probes.js'));
   return { default: module.DebugProbes };
 });
 
@@ -27,9 +29,15 @@ const DebugProbes = lazy(async () => {
  */
 export function FocusedChatErrorPanel({ error }: { readonly error: Error }): React.JSX.Element {
   const { editorRef } = useProject();
+  // A module that failed to load fails again for the life of the page (PL7 FP9): only a reload can load it.
+  const isCodeFailure = isModuleLoadFailure(error);
   const onRetry = useCallback(() => {
+    if (isCodeFailure) {
+      globalThis.location.reload();
+      return;
+    }
     editorRef.send({ type: 'retryEnsureFocusedChat' });
-  }, [editorRef]);
+  }, [editorRef, isCodeFailure]);
 
   return (
     <div
@@ -43,7 +51,7 @@ export function FocusedChatErrorPanel({ error }: { readonly error: Error }): Rea
         <p className='text-xs text-muted-foreground'>{error.message}</p>
       </div>
       <Button onClick={onRetry} variant='outline' size='sm'>
-        Try again
+        {isCodeFailure ? 'Reload' : 'Try again'}
       </Button>
     </div>
   );

@@ -9,6 +9,7 @@ import { registerEditorView } from '@taucad/editor-ui/lib/editor-navigation-serv
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { Button } from '@taucad/ui/components/button';
 import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/editor-symbol-path.js';
+import { load } from '#lib/code-loading.js';
 
 export function ChatEditorCodeViewer({
   paneId,
@@ -69,14 +70,14 @@ function MountedCodeEditor({
     activeLanguageLoad.current?.controller.abort();
     activeLanguageLoad.current?.dispose?.();
     const controller = new AbortController();
-    const load: { controller: AbortController; dispose?: () => void } = { controller };
-    activeLanguageLoad.current = load;
+    const languageLoad: { controller: AbortController; dispose?: () => void } = { controller };
+    activeLanguageLoad.current = languageLoad;
     const fail = (error: unknown): void => {
       if (!controller.signal.aborted) {
         console.error('Editor language service failed to start or stopped unexpectedly', error);
         controller.abort();
-        load.dispose?.();
-        load.dispose = undefined;
+        languageLoad.dispose?.();
+        languageLoad.dispose = undefined;
         setSemantic(undefined);
         setSemanticFailure({
           document,
@@ -86,7 +87,7 @@ function MountedCodeEditor({
       }
     };
     try {
-      const { acquireEditorLanguage } = await import('#lib/editor-language-runtime.js');
+      const { acquireEditorLanguage } = await load(async () => import('#lib/editor-language-runtime.js'));
       controller.signal.throwIfAborted();
       const lease = await acquireEditorLanguage({
         languageId: language,
@@ -99,7 +100,7 @@ function MountedCodeEditor({
         lease.dispose();
         return;
       }
-      load.dispose = lease.dispose;
+      languageLoad.dispose = lease.dispose;
       setSemanticFailure(undefined);
       markCodeEditorMilestone('semantics-ready', paneId);
       setSemantic({ document, language, extensions: lease.extensions });

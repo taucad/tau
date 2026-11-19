@@ -14,7 +14,13 @@
  * other lazy import. On such
  * a failure the page asks the server which build it runs (`/health/build`):
  *
- * - The same build, or no answer: the failure is genuine (`current`) and is reported.
+ * - The same build (PL7 blueprint FP9): the failure is transient, since a realm keeps a failed module for its life
+ *   and only a new one can load it. The page reloads into the same build once, under the same window, budget and
+ *   input rule as below (`reloading`), else it offers the reload (`transient`; every code error panel offers Reload).
+ *   The reload is recorded per tab (`transientReloadKey`, never cleared on arrival), so a failure that repeats on the
+ *   same build within `autoReloadBudgetWindow` of it is genuine (`current`). The error tracker's own SDK never
+ *   reloads: a content blocker refuses it on every load.
+ * - No answer: the failure is genuine (`current`) and is reported.
  * - A different build, and reloading cannot lose work: the page loaded within the last
  *   `autoReloadWindow` milliseconds and nobody has pointed, typed, scrolled, pasted or
  *   dropped anything on it since. Then it reloads once (`reloading`). The app has no
@@ -59,6 +65,7 @@ import {
   sendWaitingErrors,
   setErrorDescriber,
 } from '#lib/error-reporting.js';
+import { setCodeLoadFailureHandler } from '#lib/code-loading.js';
 import { isPageHidden, notePageHide, notePageShow } from '@taucad/ui-core/lib/page-visibility';
 import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
 import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
@@ -68,12 +75,19 @@ import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
  *
  * - `reloading`: a deploy replaced this build and the page is reloading into it.
  * - `superseded`: a deploy replaced this build; the update control offers the reload.
- * - `current`: the server still runs this build (or could not say), so the failure is genuine.
+ * - `transient`: the server still runs this build, and only a new realm can load the module: the reload is offered.
+ * - `current`: the failure is genuine: it repeated after a reload into the same build, or the server could not say.
  */
-export type StaleBuildOutcome = 'reloading' | 'superseded' | 'current';
+export type StaleBuildOutcome = 'reloading' | 'superseded' | 'transient' | 'current';
 
 /** `sessionStorage` key holding the `from>to` build pair this tab last reloaded across. */
 export const staleBuildReloadKey = 'tau-stale-build-reload';
+
+/**
+ * `sessionStorage` key recording this tab's last automatic reload into the build it already ran (`<build>@<time>`),
+ * so a failure that repeats after it is genuine. Never cleared on arrival: the arrival is the point.
+ */
+export const transientReloadKey = 'tau-stale-build-transient-reload';
 
 /** Milliseconds after load within which an untouched page may reload on its own. */
 export const autoReloadWindow = 15_000;
@@ -159,11 +173,11 @@ export type LiveBuildSource = {
 
 /**
  * What the error tracker is told about a chunk failure, as a tag (`stale_build`): a deploy explains
- * it (`superseded`), the live build still has the failure (`current`), the server did not say
+ * it (`superseded`), the live build failed to load it once and the page reloaded or offered a reload (`transient`), the live build still has the failure (`current`), the server did not say
  * (`unknown`), or the page was hidden while its decision was still being made, so the event went
  * before there was one (`undecided`). Operators filter on it; the page never drops the event.
  */
-export type StaleBuildTag = 'superseded' | 'current' | 'unknown' | 'undecided';
+export type StaleBuildTag = 'superseded' | 'transient' | 'current' | 'unknown' | 'undecided';
 
 /**
  * The channel a failure arrived through. Whether Sentry captures that channel itself decides
@@ -343,6 +357,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
+  /** What this page's own automatic reload is for: a deploy (`replaced`) or a new realm of the same build. */
+  let reloadKind: 'replaced' | 'transient' = 'replaced';
+
   const isCapturedBySentry = (record: FailureRecord): boolean => record.seenByTracker;
   /** Whether the tracker is still owed a failure: nobody handed it over, Sentry did not see it, and it is no SDK load. */
   const isOwedToTracker = (record: FailureRecord): boolean =>
@@ -432,8 +449,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     const record = recordOf(failure);
     let outcome = decided;
     if (decided === 'reloading' && !hasLeft && readReloadState() !== 'pending') {
-      // The reload was already found stalled (`superseded`) or taken back by a live verdict (`current`).
-      outcome = readReloadState() === 'stalled' ? 'superseded' : 'current';
+      // The reload was already found stalled (offered: `superseded`, or `transient` for one into the same build) or
+      // taken back by a live verdict (`current`).
+      outcome = readReloadState() === 'stalled' ? (reloadKind === 'transient' ? 'transient' : 'superseded') : 'current';
     }
     record.provisional = outcome === 'reloading' && !hasLeft;
     if (record.provisional) {
@@ -529,7 +547,58 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     return liveBuild.readVerdict();
   };
 
-  const decide = async (): Promise<StaleBuildOutcome> => {
+  /** Whether this tab already reloaded into this build within the budget window: a failure now repeats. */
+  const hasReloadedIntoThisBuild = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): boolean => {
+    const [build, at] = (storage.getItem(transientReloadKey) ?? '').split('@');
+    const elapsed = now() - Number(at);
+    return build === String(options.buildId) && elapsed >= 0 && elapsed < autoReloadBudgetWindow;
+  };
+
+  /**
+   * A failure on the build the server still runs (FP9): only a new realm can load the module. Reload into the same
+   * build once when that cannot lose work and the budget allows, else offer it; one that repeats after it is genuine.
+   */
+  const decideTransient = (isSdk: boolean): StaleBuildOutcome => {
+    const { storage } = options;
+    if (isSdk) {
+      return 'current';
+    }
+    if (storage === undefined) {
+      return 'transient';
+    }
+    if (readReloadState() === 'stalled' && reloadKind === 'transient') {
+      return 'transient';
+    }
+    try {
+      if (hasReloadedIntoThisBuild(storage)) {
+        return 'current';
+      }
+      if (!options.canReloadSafely() || !hasAutoReloadLeft(storage)) {
+        return 'transient';
+      }
+      storage.setItem(transientReloadKey, `${String(options.buildId)}@${String(now())}`);
+    } catch {
+      return 'transient';
+    }
+    try {
+      chargeAutoReload(storage);
+    } catch {
+      try {
+        storage.removeItem(transientReloadKey);
+      } catch {
+        // Nothing more to undo.
+      }
+      return 'transient';
+    }
+    reloadKind = 'transient';
+    return reloadAndWatch();
+  };
+
+  /**
+   * @param isSdk - Settles once it is known whether the failure is the error tracker's own load ({@link FailureSource}),
+   *   which a content blocker refuses on every load, so it never reloads.
+   */
+  const decide = async (isSdk: () => Promise<boolean>): Promise<StaleBuildOutcome> => {
     // A failure while this page's own reload is under way shares its explanation, whatever the server says now.
     if (readReloadState() === 'pending') {
       return 'reloading';
@@ -537,6 +606,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     const verdict = await askVerdict();
     if (readReloadState() === 'pending') {
       return 'reloading';
+    }
+    if (verdict === 'live') {
+      const isSdkLoadFailure = await isSdk();
+      if (readReloadState() === 'pending') {
+        return 'reloading';
+      }
+      return decideTransient(isSdkLoadFailure);
     }
     if (verdict !== 'replaced') {
       return 'current';
@@ -567,6 +643,12 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       return supersede(serverBuildId);
     }
+    reloadKind = 'replaced';
+    return reloadAndWatch();
+  };
+
+  /** Reload, and decide what the reload covered again if the page is still here after the timeout. */
+  const reloadAndWatch = (): StaleBuildOutcome => {
     setReloadState('pending');
     options.reload();
     /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
@@ -583,6 +665,14 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         // What the reload covered was provisional; the page is still here, so it is decided normally.
         const covered = [...coveredByReload];
         coveredByReload.clear();
+        if (reloadKind === 'transient' && stillVerdict !== 'replaced') {
+          // A reload into the same build that did not leave: offer it, and keep the record of it.
+          setReloadState('stalled');
+          for (const failure of covered) {
+            settle(failure, 'transient');
+          }
+          return;
+        }
         if (stillVerdict === 'live') {
           setReloadState('idle');
           for (const failure of covered) {
@@ -604,6 +694,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 
   const tagOf = (outcome: StaleBuildOutcome, verdict: ServerVerdict | undefined): StaleBuildTag => {
+    if (outcome === 'transient' || (outcome === 'reloading' && verdict === 'live')) {
+      return 'transient';
+    }
     if (outcome !== 'current') {
       return 'superseded';
     }
@@ -613,7 +706,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   return {
     async recover(failure, source = 'boundary') {
       if (!isWeakKey(failure)) {
-        return decide();
+        return decide(async () => source === 'sdk');
       }
       const record = recordOf(failure);
       record.sources.add(source);
@@ -624,7 +717,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         if (source === 'preload') {
           identifySdkLoad(record, failure);
         }
-        const decided = decide();
+        const decided = decide(async () => {
+          await record.sdkLoadKnown;
+          return isSdkLoad(record.sources);
+        });
         record.decision = decided;
         // async-iife: bootstrap -- the settled outcome is published once the decision lands.
         void (async () => {
@@ -641,8 +737,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       if (record?.outcome !== undefined) {
         return tagOf(record.outcome, record.verdict);
       }
+      // Undecided: a deploy explains it, or on the live build it is transient until it repeats after a reload.
       const verdict = liveBuild.readVerdict();
-      return verdict === 'replaced' ? 'superseded' : tagOf('current', verdict);
+      return verdict === 'replaced' ? 'superseded' : verdict === 'live' ? 'transient' : 'unknown';
     },
     async classifySettled(failure, bound = staleBuildTagWait) {
       const record = isWeakKey(failure) ? records.get(failure) : undefined;
@@ -896,6 +993,11 @@ export const recoverFromCaughtError = (error: unknown): void => {
  */
 export const installStaleBuildRecovery = (): (() => void) => {
   getPageRecovery().confirmArrival();
+  // Every page-realm code load (`#lib/code-loading`) hands its failures here.
+  setCodeLoadFailureHandler((failure) => {
+    // async-iife: bootstrap -- the loader rejects to its caller; the decision acts on its own.
+    void recoverFromStaleBuild(failure);
+  });
   const recoverFrom = (failure: unknown, source: FailureSource): void => {
     if (isStaleModuleError(failure)) {
       // async-iife: bootstrap -- an event listener cannot await; the decision acts on its own.
@@ -982,6 +1084,7 @@ export const installStaleBuildRecovery = (): (() => void) => {
   globalThis.addEventListener('pageshow', onPageShow);
   globalThis.document.addEventListener('visibilitychange', onVisibilityChange);
   return () => {
+    setCodeLoadFailureHandler(undefined);
     globalThis.removeEventListener('pagehide', onPageHide);
     globalThis.removeEventListener('pageshow', onPageShow);
     globalThis.document.removeEventListener('visibilitychange', onVisibilityChange);

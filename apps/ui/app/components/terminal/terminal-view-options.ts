@@ -10,13 +10,14 @@ import {
   readTerminalTheme,
   terminalTextRendering,
 } from '#components/terminal/terminal-theme.js';
+import { load } from '#lib/code-loading.js';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
 export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
 
 /** The default loader: the renderer module is imported only when a Terminal tab first draws. @public */
 export const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
+  const { createTerminalRenderer } = await load(async () => import('#components/terminal/terminal-renderer.js'));
   return createTerminalRenderer(options);
 };
 

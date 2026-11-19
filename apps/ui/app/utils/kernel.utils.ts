@@ -1,6 +1,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
+import { load } from '#lib/code-loading.js';
 
 // Helper function to get kernel option by id
 export function getKernelOption(kernelId: KernelProvider): KernelConfiguration {
@@ -50,7 +51,7 @@ export async function getKernelDependencies(kernelId: KernelProvider): Promise<R
     return {};
   }
 
-  const { kernelLibraries } = await import('#utils/kernel-libraries.js');
+  const { kernelLibraries } = await load(async () => import('#utils/kernel-libraries.js'));
   return { ...kernelLibraries[kernelId] };
 }
 
@@ -63,26 +64,26 @@ export async function getKernelProjectTemplate(kernelId: KernelProvider): Promis
   switch (kernelId) {
     case 'build123d': {
       const [pyproject, pylock, uvLock] = await Promise.all([
-        import('@taucad/build123d/project/pyproject.toml?raw'),
-        import('@taucad/build123d/project/pylock.toml?raw'),
-        import('@taucad/build123d/project/uv.lock?raw'),
+        load(async () => import('@taucad/build123d/project/pyproject.toml?raw')),
+        load(async () => import('@taucad/build123d/project/pylock.toml?raw')),
+        load(async () => import('@taucad/build123d/project/uv.lock?raw')),
       ]);
       return { 'pyproject.toml': pyproject.default, 'pylock.toml': pylock.default, 'uv.lock': uvLock.default };
     }
 
     case 'smlibpy': {
       const [pyproject, pylock, uvLock] = await Promise.all([
-        import('@taucad/smlibpy/project/pyproject.toml?raw'),
-        import('@taucad/smlibpy/project/pylock.toml?raw'),
-        import('@taucad/smlibpy/project/uv.lock?raw'),
+        load(async () => import('@taucad/smlibpy/project/pyproject.toml?raw')),
+        load(async () => import('@taucad/smlibpy/project/pylock.toml?raw')),
+        load(async () => import('@taucad/smlibpy/project/uv.lock?raw')),
       ]);
       return { 'pyproject.toml': pyproject.default, 'pylock.toml': pylock.default, 'uv.lock': uvLock.default };
     }
 
     case 'picogk': {
       const [csproj, lock] = await Promise.all([
-        import('@taucad/picogk/project/project.csproj?raw'),
-        import('@taucad/picogk/project/packages.lock.json?raw'),
+        load(async () => import('@taucad/picogk/project/project.csproj?raw')),
+        load(async () => import('@taucad/picogk/project/packages.lock.json?raw')),
       ]);
       return { 'project.csproj': csproj.default, 'packages.lock.json': lock.default };
     }

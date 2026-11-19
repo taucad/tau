@@ -3,6 +3,7 @@ import { gpuAdapterIdentity, isSoftwareGpuAdapter } from '@taucad/viewer/graphic
 import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backend';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
+import { load } from '#lib/code-loading.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
 
@@ -38,14 +39,14 @@ export const headlessImageBackend: HeadlessImageBackend = {
   isGpuAvailable: hasGpuAdapter,
   isAutomaticGpuAvailable: automaticAdapterAvailable,
   renderSvg: async (content, format, options) => {
-    const { renderSvgPng, renderSvgWebp } = await import('@taucad/image/svg');
+    const { renderSvgPng, renderSvgWebp } = await load(async () => import('@taucad/image/svg'));
     return format === 'webp' ? renderSvgWebp(content, options) : renderSvgPng(content, options);
   },
   async createImageClient() {
     const [{ createRuntimeClient }, { webWorkerTransport }, { observeRuntimeClient }] = await Promise.all([
-      import('@taucad/runtime/client'),
-      import('@taucad/runtime/transport/web'),
-      import('#telemetry/runtime-telemetry.js'),
+      load(async () => import('@taucad/runtime/client')),
+      load(async () => import('@taucad/runtime/transport/web')),
+      load(async () => import('#telemetry/runtime-telemetry.js')),
     ]);
     const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({

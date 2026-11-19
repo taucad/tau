@@ -5,7 +5,7 @@
  * lives in that chunk, so a page without a tour never requests it.
  */
 
-import { Component, lazy, Suspense, useSyncExternalStore } from 'react';
+import { Component, Suspense, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { DeviceRecord, OnboardingState } from '@taucad/preferences';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
@@ -15,9 +15,11 @@ import { tourSession } from '#components/tour/tour-session.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 const TourRuntime = lazy(async () => {
-  const module = await import('#components/tour/tour-runtime.js');
+  const module = await load(async () => import('#components/tour/tour-runtime.js'));
   return { default: module.TourRuntime };
 });
 

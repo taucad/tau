@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -93,10 +93,12 @@ import {
   useMaterializeCloudProjects,
 } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
 const ProjectCardLivePreview = lazy(async () => {
-  const module = await import('#components/project-card-live-preview.js');
+  const module = await load(async () => import('#components/project-card-live-preview.js'));
   return { default: module.ProjectCardLivePreview };
 });
 

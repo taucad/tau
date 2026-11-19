@@ -30,6 +30,7 @@ import type {
   AppRuntimeClient,
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
+import { load } from '#lib/code-loading.js';
 export type LatestRenderingOutcome = 'success' | 'failure' | undefined;
 
 type CadTag = 'cad-loading' | 'cad-runtime-error';
@@ -309,10 +310,10 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   // None of the kernel module graph depends on the filesystem, so load it while we wait for it.
   const modules = Promise.all([
-    import('@taucad/runtime/client'),
-    import('@taucad/runtime/filesystem'),
+    load(async () => import('@taucad/runtime/client')),
+    load(async () => import('@taucad/runtime/filesystem')),
     lazyKernelOptionsFactory(),
-    import('#telemetry/runtime-telemetry.js'),
+    load(async () => import('#telemetry/runtime-telemetry.js')),
   ]);
   // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
   modules.catch(() => undefined);

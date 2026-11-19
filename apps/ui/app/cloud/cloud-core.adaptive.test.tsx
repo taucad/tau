@@ -104,9 +104,31 @@ const scripted = <Module,>(importer: () => Promise<Module>) => {
 };
 
 describe('cloud loader', () => {
-  it('should retry a rejected import once on its own, then wait for the person, reporting once (T-BA10)', async () => {
+  /* PL7 FP9 (D17): a module that failed to load fails again for the life of the page, so the loader neither retries it
+     on its own nor lets the person retry it in place; the recovery hears it, and the surface offers a reload. */
+  it('should never retry a chunk that failed to load in place, reporting and recovering it once', async () => {
     const importer = vi.fn(async (): Promise<{ ok: boolean }> => {
       throw new TypeError('Failed to fetch dynamically imported module');
+    });
+    const { loader, reported, recovered } = scripted(importer);
+    loader.load();
+    await waitFor(() => {
+      expect(loader.state()).toEqual({ status: 'failed', retryable: false });
+    });
+    loader.retry();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(importer).toHaveBeenCalledOnce();
+    expect(reported).toHaveLength(1);
+    expect(recovered).toHaveLength(1);
+    expect(loader.state()).toEqual({ status: 'failed', retryable: false });
+  });
+
+  it('should retry a rejected import once on its own, then wait for the person, reporting once (T-BA10)', async () => {
+    const importer = vi.fn(async (): Promise<{ ok: boolean }> => {
+      throw new Error('The Cloud chunk threw while it ran');
     });
     const { loader, reported, recovered } = scripted(importer);
     loader.load();

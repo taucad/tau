@@ -1,5 +1,6 @@
 import { Topic } from '@taucad/events';
 import { reportUiError } from '#lib/error-reporting.js';
+import { isModuleLoadFailure } from '#lib/code-loading.js';
 import { recoverFromCaughtError } from '#lib/stale-build-recovery.js';
 import { onceBootStage } from '#lib/boot-signals.js';
 
@@ -8,7 +9,8 @@ import { onceBootStage } from '#lib/boot-signals.js';
  *
  * One memoised import per entry, with a deadline. A rejection, or the deadline passing, clears the memo and is
  * reported once; the first failure is retried once automatically, later ones only when the person asks
- * (`retry`). A failure goes to the existing stale-build recovery, which alone may reload the page. Nothing renders
+ * (`retry`). A module that failed to load is never retried in place: it fails again for the life of the page (PL7
+ * blueprint FP9), so it ends `failed` and not `retryable`, and the surface offers a reload. A failure goes to the existing stale-build recovery, which alone may reload the page. Nothing renders
  * from an unsettled `lazy()`: a surface reads {@link CloudLoader.state} and renders its non-Cloud rendering until the
  * entry is `loaded`. Part of Core.
  */
@@ -21,7 +23,10 @@ export type CloudLoadState<Module> =
   | Readonly<{ status: 'idle' }>
   | Readonly<{ status: 'loading' }>
   | Readonly<{ status: 'loaded'; module: Module }>
-  /** `retryable`: no automatic retry is left; the surface offers Retry (I8). */
+  /**
+   * `retryable`: no automatic retry is left; the surface offers Retry (I8). Not retryable: the chunk failed to load,
+   * which only a reload can recover (PL7 FP9); the surface offers Reload.
+   */
   | Readonly<{ status: 'failed'; retryable: boolean }>;
 
 /** One entry's loader. @public */
@@ -119,6 +124,10 @@ export const createCloudLoader = <Module>({
         report(error);
       }
       recover(error);
+      if (isModuleLoadFailure(error)) {
+        set({ status: 'failed', retryable: false });
+        return;
+      }
       if (failures === 1) {
         start(); // I8: one automatic retry.
         return;
@@ -156,7 +165,7 @@ export const createCloudLoader = <Module>({
       }
     },
     retry: () => {
-      if (state.status === 'failed') {
+      if (state.status === 'failed' && state.retryable) {
         start();
       }
     },

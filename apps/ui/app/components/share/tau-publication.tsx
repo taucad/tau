@@ -1,4 +1,3 @@
-import { lazy } from 'react';
 import type { ComponentProps } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import {
@@ -14,9 +13,11 @@ import { getEnvironment } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { authClient } from '#lib/auth-client.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 const SharedProjectWorkbench = lazy(async () => {
-  const module = await import('#components/share/shared-project-workbench.js');
+  const module = await load(async () => import('#components/share/shared-project-workbench.js'));
   return { default: module.SharedProjectWorkbench };
 });
 

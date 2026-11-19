@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -15,10 +15,12 @@ import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
 const CommunityCardLivePreview = lazy(async () => {
-  const module = await import('#components/community-card-live-preview.js');
+  const module = await load(async () => import('#components/community-card-live-preview.js'));
   return { default: module.CommunityCardLivePreview };
 });
 

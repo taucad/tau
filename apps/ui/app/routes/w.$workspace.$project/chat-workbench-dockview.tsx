@@ -19,7 +19,6 @@ import type { BrowserPanelParameters } from '#components/browser/browser-workben
 import {
   createContext,
   Fragment,
-  lazy,
   memo,
   Suspense,
   useCallback,
@@ -152,6 +151,8 @@ import type {
   ResolvedFileViewer,
 } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /*
  * Each Workbench pane's body is its own chunk, loaded when its pane first mounts (progressive loading PL5), as the
@@ -160,63 +161,63 @@ import { useTourAnchor } from '#components/tour/tour-anchors.js';
  * configuration forms, the exporter or the debug panes. A body draws inside its pane's frame when it arrives.
  */
 const BrowserPane = lazy(async () => {
-  const module = await import('#components/browser/browser-pane.js');
+  const module = await load(async () => import('#components/browser/browser-pane.js'));
   return { default: module.BrowserPane };
 });
 const ParametersPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-parameters.js'));
   return { default: module.ParametersPanelBody };
 });
 const KinematicsPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-kinematics.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-kinematics.js'));
   return { default: module.KinematicsPanelBody };
 });
 const ModelPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-explorer.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-explorer.js'));
   return { default: module.ModelPanelBody };
 });
 const RevisionsPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-revisions.js'));
   return { default: module.RevisionsPanelBody };
 });
 const AgentsPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-agents.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-agents.js'));
   return { default: module.AgentsPanelBody };
 });
 const JobsPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-jobs.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-jobs.js'));
   return { default: module.JobsPanelBody };
 });
 const PrintPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-print.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-print.js'));
   return { default: module.PrintPanelBody };
 });
 const ConverterPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-converter.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-converter.js'));
   return { default: module.ConverterPanelBody };
 });
 const DetailsPanelBody = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-details.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-details.js'));
   return { default: module.DetailsPanelBody };
 });
 const TelemetryPanelContent = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-kernel.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-kernel.js'));
   return { default: module.TelemetryPanelContent };
 });
 const ChatConsole = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-console.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/chat-console.js'));
   return { default: module.ChatConsole };
 });
 const ProjectTerminalPane = lazy(async () => {
-  const module = await import('#components/terminal/terminal-pane.js');
+  const module = await load(async () => import('#components/terminal/terminal-pane.js'));
   return { default: module.ProjectTerminalPane };
 });
 const AgentSignInTab = lazy(async () => {
-  const module = await import('#components/terminal/agent-sign-in-tab.js');
+  const module = await load(async () => import('#components/terminal/agent-sign-in-tab.js'));
   return { default: module.AgentSignInTab };
 });
 const ProjectShareWorkbenchPanel = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/project-share-action.js');
+  const module = await load(async () => import('#routes/w.$workspace.$project/project-share-action.js'));
   return { default: module.ProjectShareWorkbenchPanel };
 });
 

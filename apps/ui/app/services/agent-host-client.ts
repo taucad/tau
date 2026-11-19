@@ -37,6 +37,7 @@ import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-tra
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 import { markDeviceViewFieldsSet } from '#workbench-records/view-fields-set.js';
+import { load } from '#lib/code-loading.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */
 const telemetryContextOf = (
@@ -205,7 +206,7 @@ const watchSession = (signal: { listen: (listener: () => void) => unknown } | un
 /** The signed-in user, as the auth client reads the session; no user when there is none or it cannot be read. */
 const readSession = async (): Promise<SessionRead> => {
   try {
-    const { authClient } = await import('#lib/auth-client.js');
+    const { authClient } = await load(async () => import('#lib/auth-client.js'));
     watchSession(authClient.$store.atoms['$sessionSignal']);
     const { data, error } = await authClient.getSession();
     return { principal: data?.user.id, answered: error === null };

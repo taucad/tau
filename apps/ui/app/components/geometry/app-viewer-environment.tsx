@@ -11,9 +11,11 @@ import {
   resolveViewerGraphicsBackendPreference,
 } from '@taucad/ui-core/utils/graphics-backend-override';
 import { parseRenderTierQueryOverride, renderTierOverrideAllowed } from '#components/geometry/render-tier-override.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
-const SectionViewTestBridge = React.lazy(async () => {
-  const module = await import('#components/geometry/debug/section-view-test-bridge.js');
+const SectionViewTestBridge = lazy(async () => {
+  const module = await load(async () => import('#components/geometry/debug/section-view-test-bridge.js'));
   return { default: module.SectionViewTestBridge };
 });
 

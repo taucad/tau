@@ -6,6 +6,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { load } from '#lib/code-loading.js';
 
 /**
  * Where one project's chats work, as the page records it.
@@ -45,7 +46,7 @@ const ChatWorkspaceAuthorityContext = createContext<ChatWorkspaceAuthorityContex
 export const readRootedBridgeCapabilities = async (
   openConnection: () => FileSystemBridgeConnection,
 ): Promise<ProviderCapabilities> => {
-  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
   const proxy = createFileSystemBridgeProxy(openConnection());
   try {
     await proxy.ready;

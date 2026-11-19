@@ -10,6 +10,7 @@ import { decorateForGraphicsContextUnavailable } from '#lib/graphics-context-fai
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
+import { load } from '#lib/code-loading.js';
 
 /*
  * What every Sentry event from the UI carries and how it is scrubbed, without the SDK: the page's
@@ -27,7 +28,8 @@ let stackParserLoad: Promise<StackParser | undefined> | undefined;
 /** Import the parser's chunk; a failure clears the memo so the next load tries again. */
 const importStackParser = async (): Promise<StackParser | undefined> => {
   try {
-    const parserModule = await import('#lib/sentry-stack-parser.js');
+    // Optional (PL7 FP9): error reporting degrades to frames without a parser and never reloads the page.
+    const parserModule = await load(async () => import('#lib/sentry-stack-parser.js'), { optional: true });
     stackParser = parserModule.parseSentryStack;
     return stackParser;
   } catch {

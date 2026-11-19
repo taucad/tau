@@ -5,6 +5,7 @@ import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
+import { load } from '#lib/code-loading.js';
 
 export const desktopProjectRoot = async (projectId: string): Promise<string> => {
   const config = await getProjectFileSystemConfig(projectId);
@@ -42,7 +43,7 @@ export const desktopKernelOptions =
     }
     // Dynamic so the electron renderer module never enters the web bundle's
     // eager graph, the way every other preset defers its heavy import.
-    const { createElectronClientOptions } = await import('@taucad/runtime/electron/renderer');
+    const { createElectronClientOptions } = await load(async () => import('@taucad/runtime/electron/renderer'));
     const provideClientOptions = createElectronClientOptions<typeof runtime>({
       config: createUiRuntimeConfig(ENV),
       context: { projectRoot, definition: 'default', computeMode },

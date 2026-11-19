@@ -15,6 +15,7 @@ import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { ENV } from '#environment.config.js';
 import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';
+import { load } from '#lib/code-loading.js';
 
 type InstallPackagesInvocation = ToolInvocation<typeof toolName.installPackages>;
 type Json = Readonly<Record<string, unknown>>;
@@ -119,7 +120,7 @@ export function PackagesPanel(): React.JSX.Element {
     const toolCallId = randomUuid();
     try {
       // The RPC handler stack (the package resolver and `semver`) loads on the first Install, not with the panel.
-      const handlersModule = await import('#hooks/rpc-handlers.js').catch((error: unknown) =>
+      const handlersModule = await load(async () => import('#hooks/rpc-handlers.js')).catch((error: unknown) =>
         error instanceof Error ? error : new Error(String(error)),
       );
       if (handlersModule instanceof Error) {

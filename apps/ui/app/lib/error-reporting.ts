@@ -7,6 +7,7 @@ import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '@taucad/ui-core/lib/page-visibility';
 import { loadStackParser, sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
 import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
+import { load } from '#lib/code-loading.js';
 
 /**
  * Browser error reporting (launch gate OBS-7), loaded only when the host injected `SENTRY_DSN`, so a build without
@@ -16,7 +17,9 @@ const loadSentry = async (): Promise<typeof SentryLibrary | undefined> => {
   if (!ENV.SENTRY_DSN) {
     return undefined;
   }
-  return import('#lib/sentry.lib.js');
+  // Optional (PL7 FP9): the SDK's failed load has its own owner (`recoverFromSdkLoadFailure`), and a content blocker
+  // refuses it on every load.
+  return load(async () => import('#lib/sentry.lib.js'), { optional: true });
 };
 
 /** Errors reported while the SDK is loading kept for it, at most. */

@@ -1,13 +1,15 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { KeyRound, SquareTerminal } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-projection';
 import type { AgentSignInFailure } from '#components/terminal/agent-sign-ins.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /* The code block carries the syntax highlighter, so it stays off the Home page's critical path until a card shows. */
 const ChatLoginCommand = lazy(async () => {
-  const module = await import('#components/chat/chat-login-command.js');
+  const module = await load(async () => import('#components/chat/chat-login-command.js'));
   return { default: module.ChatLoginCommand };
 });
 

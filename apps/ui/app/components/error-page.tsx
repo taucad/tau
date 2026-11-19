@@ -1,7 +1,7 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { AlertCircle, ArrowLeft, RefreshCcw, WifiOff } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
-import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { chatObservationConflict, quarantineChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
@@ -22,11 +22,37 @@ import {
   subscribeStaleBuildOutcomes,
 } from '#lib/stale-build-recovery.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
-const CollapsibleCodeBlock = lazy(async () => {
-  const m = await import('@taucad/editor-ui/components/ui/collapsible-code-block');
-  return { default: m.CollapsibleCodeBlock };
-});
+type CodeBlockProps = Readonly<{
+  title: string;
+  text: string;
+  language: string;
+  collapsedLineCount: number;
+  className: string;
+  containerClassName: string;
+}>;
+
+/** The error's message alone, for a stack whose code block did not load. */
+function MessageBlock({ title }: CodeBlockProps): React.JSX.Element {
+  return (
+    <div className='w-full rounded-md border border-border bg-muted/30 p-3 text-left'>
+      <p className='text-xs font-medium text-muted-foreground'>{title}</p>
+    </div>
+  );
+}
+
+/* Optional (PL7 FP9): the error page shows the message alone if the code block cannot load, and never reloads for it. */
+const CollapsibleCodeBlock = lazy<React.ComponentType<CodeBlockProps>>(
+  async () => {
+    const m = await load(async () => import('@taucad/editor-ui/components/ui/collapsible-code-block'), {
+      optional: true,
+    });
+    return { default: m.CollapsibleCodeBlock };
+  },
+  { fallback: MessageBlock },
+);
 
 const serverReloadState = (): ReloadState => 'idle';
 const serverVerdict = (): ServerVerdict => 'unknown';
@@ -53,6 +79,10 @@ const toReported = (error: unknown): Error | undefined => {
   return error instanceof Error ? error : undefined;
 };
 const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
+
+/** Whether the recovery's own reload for this failure is under way (PL7 FP9: into the same build, or a deploy's). */
+const isOwnReloadPending = (outcome: StaleBuildOutcome | undefined, reloadState: ReloadState): boolean =>
+  outcome === 'reloading' && reloadState === 'pending';
 
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
@@ -170,6 +200,18 @@ export function ErrorPage(): React.JSX.Element {
         <Loader className='size-6 text-muted-foreground' />
         <p role='status' className='text-sm text-muted-foreground'>
           Checking for a newer version of Tau…
+        </p>
+      </div>
+    );
+  }
+
+  // PL7 FP9: a failure on the build the server still runs reloads into it; the page waits for that reload to leave.
+  if (isModuleLoadFailure && !isExplained && isOwnReloadPending(staleOutcome, reloadState)) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-3 px-4 py-8'>
+        <Loader className='size-6 text-muted-foreground' />
+        <p role='status' className='text-sm text-muted-foreground'>
+          Reloading Tau…
         </p>
       </div>
     );

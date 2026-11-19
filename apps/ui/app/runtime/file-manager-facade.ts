@@ -39,6 +39,7 @@ import type { FileSystemClientFacade, useFileManager, WorkspaceFacade } from '#h
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { ENV } from '#environment.config.js';
 import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
+import { load } from '#lib/code-loading.js';
 
 /**
  * The root file manager's facade the project library runs on (D15 ruling, A2). It satisfies files-ui's structural
@@ -195,7 +196,7 @@ export const createRecordWatch =
       try {
         await whenServicesReady();
         abort.signal.throwIfAborted();
-        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
         abort.signal.throwIfAborted();
         const proxy = createFileSystemBridgeProxy(opener(root, 'working-copy'));
         /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
@@ -268,7 +269,7 @@ export const createDuplicateProjectReader =
   ): ((projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>) =>
   async (projectRoot) => {
     await whenServicesReady();
-    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
     const proxy = createFileSystemBridgeProxy(opener(projectRoot, 'user'));
     try {
       const files = await proxy.contents('', { versionedOnly: true });

@@ -23,6 +23,7 @@ import type { AttachmentTranscodePort } from '@taucad/agent-host/wire';
 import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
 import { AttachmentRefusedError } from '@taucad/chat-ui/utils/attachment-refusal';
+import { load } from '#lib/code-loading.js';
 
 /** The image step's input: the queued image as read, and what the file claimed to be. */
 export type ResizeImageInput = {
@@ -62,7 +63,7 @@ export const createResizeImageActor = (
         throw new Error('The image is not a base64 data URL.');
       }
       const bytes = base64ToUint8Array(input.image.slice(header[0].length));
-      const { normalizeComposerImage } = await import('#services/attachment-image.service.js');
+      const { normalizeComposerImage } = await load(async () => import('#services/attachment-image.service.js'));
       const outcome = await normalizeComposerImage(bytes, {
         ...(dependencies.transcode === undefined ? {} : { transcode: dependencies.transcode }),
         loadTranscodeSources: dependencies.loadTranscodeSources ?? loadAttachmentTranscodeSources,

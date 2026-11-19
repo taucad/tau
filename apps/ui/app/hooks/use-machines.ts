@@ -10,6 +10,7 @@ import type {
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { failureCodeOf } from '#components/print/machine-facts.js';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { load } from '#lib/code-loading.js';
 
 /** What the Print pane and Settings read from this computer's machine directory. @public */
 export type MachineDirectoryView = Readonly<{
@@ -173,7 +174,7 @@ export const useMachinesFacet = (): RuntimeTransportFacet<MachineClient> => {
     dial: async () => bridge.machines.connect(),
     connect: async (port) => {
       // Dynamic so the machine channel never enters the web bundle's eager graph.
-      const { connectMachineChannel } = await import('@taucad/runtime/machine');
+      const { connectMachineChannel } = await load(async () => import('@taucad/runtime/machine'));
       return connectMachineChannel(port);
     },
   });

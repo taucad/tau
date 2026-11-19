@@ -201,17 +201,18 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    ['the server runs this build', async (): Promise<number | undefined> => ownBuildId],
-    ['the server cannot be reached or names no build', async (): Promise<number | undefined> => undefined],
-  ])('should report a genuine failure when %s', async (_label, fetchServerBuildId) => {
-    const { recovery, reload, onSuperseded } = setup({ fetchServerBuildId });
+  // A failure on the build the server still runs is transient (FP9, below), genuine only once it repeats.
+  it.each([['the server cannot be reached or names no build', async (): Promise<number | undefined> => undefined]])(
+    'should report a genuine failure when %s',
+    async (_label, fetchServerBuildId) => {
+      const { recovery, reload, onSuperseded } = setup({ fetchServerBuildId });
 
-    await expect(recovery.recover(failure())).resolves.toBe('current');
+      await expect(recovery.recover(failure())).resolves.toBe('current');
 
-    expect(reload).not.toHaveBeenCalled();
-    expect(onSuperseded).not.toHaveBeenCalled();
-  });
+      expect(reload).not.toHaveBeenCalled();
+      expect(onSuperseded).not.toHaveBeenCalled();
+    },
+  );
 
   it('should never reload a bundle without a build id', async () => {
     const { recovery, reload, fetchServerBuildId } = setup({ buildId: 0 });
@@ -240,7 +241,7 @@ describe('createStaleBuildRecovery', () => {
   });
 
   it('should answer every report of one failure from one check, even after a current outcome', async () => {
-    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => ownBuildId);
+    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => undefined);
     const { recovery } = setup({ fetchServerBuildId });
     const error = failure();
 
@@ -260,13 +261,12 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it('should check again for a later failure once the server reported this build', async () => {
-    let served = ownBuildId;
-    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => served);
+  it('should check again for a later failure once a check got no answer', async () => {
+    const answers: Array<number | undefined> = [undefined, deployedBuildId];
+    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => answers.shift());
     const { recovery, reload } = setup({ fetchServerBuildId });
 
     await expect(recovery.recover(failure())).resolves.toBe('current');
-    served = deployedBuildId;
     await expect(recovery.recover(failure())).resolves.toBe('reloading');
 
     expect(fetchServerBuildId).toHaveBeenCalledTimes(2);
@@ -543,7 +543,14 @@ describe('createStaleBuildRecovery', () => {
     it.each(['boundary', 'global', 'preload'] as const)(
       'should tell analytics once of a %s failure decided genuine, when it is decided',
       async (source) => {
-        const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
+        // Genuine: it repeats after this tab's reload into the build the server still runs (FP9).
+        const storage = createStorage();
+        storage.setItem(transientReloadKey, `${String(ownBuildId)}@1000`);
+        const { recovery, onGenuineFailure } = setup({
+          fetchServerBuildId: async () => ownBuildId,
+          storage,
+          now: () => 2000,
+        });
         const error = failure();
 
         await recovery.recover(error, source);
@@ -570,7 +577,7 @@ describe('createStaleBuildRecovery', () => {
 
     it.each([
       ['a deploy explains it', async (): Promise<number | undefined> => deployedBuildId, 'superseded'],
-      ['the live build still has it', async (): Promise<number | undefined> => ownBuildId, 'current'],
+      ['the live build failed to load it once', async (): Promise<number | undefined> => ownBuildId, 'transient'],
       ['the server did not say', async (): Promise<number | undefined> => undefined, 'unknown'],
     ] as const)('should tag a failure for the error tracker when %s', async (_label, fetchServerBuildId, tag) => {
       const { recovery } = setup({ fetchServerBuildId, canReloadSafely: () => false });
@@ -712,10 +719,10 @@ describe('createStaleBuildRecovery', () => {
     });
 
     it('should tag an undecided failure from the live verdict', async () => {
-      const { recovery } = setup({ fetchServerBuildId: async () => ownBuildId });
+      const { recovery } = setup({ fetchServerBuildId: async () => ownBuildId, canReloadSafely: () => false });
       await recovery.recover(failure());
 
-      expect(recovery.classify(failure())).toBe('current');
+      expect(recovery.classify(failure())).toBe('transient');
     });
   });
 

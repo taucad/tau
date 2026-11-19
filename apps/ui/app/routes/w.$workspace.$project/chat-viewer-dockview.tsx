@@ -1,5 +1,4 @@
 import {
-  lazy,
   memo,
   Suspense,
   useCallback,
@@ -77,6 +76,8 @@ import type {
   ViewerPanelParameters,
   ViewSource,
 } from '#workbench-records/viewer-adapter.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /*
  * The viewer is deferred (progressive loading PL5, rule 10): three.js, the viewer package and the runtime client
@@ -87,7 +88,7 @@ const ChatViewer = lazy(async () => {
   // `tau.load.viewer.chunk`: how long the deferred viewer took to arrive, for the harness.
   const span = pageProjectOpenPerformance().begin('viewer.chunk');
   try {
-    const module = await import('#routes/w.$workspace.$project/chat-viewer.js');
+    const module = await load(async () => import('#routes/w.$workspace.$project/chat-viewer.js'));
     span.finish('ok');
     return { default: module.ChatViewer };
   } catch (error) {

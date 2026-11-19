@@ -10,6 +10,7 @@ import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/f
 import { createRootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { load } from '#lib/code-loading.js';
 
 /** How a record connection is opened: the file manager's bridge opener, or the scope's fallback. @public */
 export type RecordBridgeOpener = (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
@@ -36,7 +37,7 @@ function recordConnectionsForIncarnation(
       owner = createRootedContentClient({
         open: async (root, consumer: RootedBridgeConsumer) => {
           await ready();
-          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
           const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
           try {
             await proxy.ready;

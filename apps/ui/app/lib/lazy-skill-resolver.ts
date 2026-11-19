@@ -14,6 +14,7 @@
 
 import type { SystemSkillBundle } from '@taucad/skills/resources';
 import type { SkillResolver, SkillResolverDependencies } from '#lib/skill-resolver.js';
+import { load } from '#lib/code-loading.js';
 
 /**
  * A skill resolver whose system layer is imported by its first call.
@@ -27,29 +28,29 @@ export function createLazySkillResolver(
   let pending: Promise<SkillResolver> | undefined;
   const importResolver = async (): Promise<SkillResolver> => {
     try {
-      const { createSkillResolver } = await import('#lib/skill-resolver.js');
+      const { createSkillResolver } = await load(async () => import('#lib/skill-resolver.js'));
       return createSkillResolver(deps);
     } catch (error) {
       pending = undefined;
       throw error;
     }
   };
-  const load = async (): Promise<SkillResolver> => {
+  const loadResolver = async (): Promise<SkillResolver> => {
     pending ??= importResolver();
     return pending;
   };
 
   return {
     async listSkills() {
-      const resolver = await load();
+      const resolver = await loadResolver();
       return resolver.listSkills();
     },
     async resolveSkill(skillName) {
-      const resolver = await load();
+      const resolver = await loadResolver();
       return resolver.resolveSkill(skillName);
     },
     async getPromptSkillListing() {
-      const resolver = await load();
+      const resolver = await loadResolver();
       return resolver.getPromptSkillListing();
     },
   };
@@ -67,7 +68,7 @@ export const loadedSystemSkillBundles = (): readonly SystemSkillBundle[] | undef
 
 const importBundles = async (): Promise<readonly SystemSkillBundle[]> => {
   try {
-    const { systemSkillBundles } = await import('@taucad/skills/resources');
+    const { systemSkillBundles } = await load(async () => import('@taucad/skills/resources'));
     bundles = systemSkillBundles;
     return systemSkillBundles;
   } catch (error) {

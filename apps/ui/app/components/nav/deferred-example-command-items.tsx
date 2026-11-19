@@ -1,9 +1,11 @@
-import { lazy, Suspense, useSyncExternalStore } from 'react';
+import { Suspense, useSyncExternalStore } from 'react';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 // Every route mounts the palette items, so the example catalog loads on its own chunk instead of joining each route's
 // entry.
 const ExampleCommandPaletteItems = lazy(async () => {
-  const m = await import('#components/nav/example-command-items.js');
+  const m = await load(async () => import('#components/nav/example-command-items.js'));
   return { default: m.ExampleCommandPaletteItems };
 });
 

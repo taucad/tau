@@ -3,9 +3,10 @@ import { Button } from '@taucad/ui/components/button';
 import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { SettingsPageSkeleton } from '@taucad/settings-ui/components/settings/settings-item';
 import type { SettingsContent } from '#components/settings/settings-content.js';
+import { load } from '#lib/code-loading.js';
 
 const loadSettingsContent = async (): Promise<{ SettingsContent: typeof SettingsContent }> =>
-  import('#components/settings/settings-content.js');
+  load(async () => import('#components/settings/settings-content.js'));
 
 type ContentState = { status: 'loading' } | { status: 'ready'; Content: typeof SettingsContent } | { status: 'failed' };
 

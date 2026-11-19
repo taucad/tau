@@ -1,4 +1,4 @@
-import { lazy, Suspense, useSyncExternalStore } from 'react';
+import { Suspense, useSyncExternalStore } from 'react';
 import type { ComponentType } from 'react';
 import type { DesktopPlatform } from '@taucad/ui-kit/icons/platform-logos';
 import type { DesktopAppNoticeCardProps } from '#components/desktop/desktop-app-notice-card.js';
@@ -6,6 +6,8 @@ import { useSidebarNoticeDismissal } from '#components/nav/sidebar-notices.js';
 import { isTauDesktopReleased } from '#lib/desktop-release.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { osClass } from '#telemetry/platform-class.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 /*
  * Deferred tier (progressive loading policy): the card and the OS marks load only once this notice has decided to show
@@ -14,7 +16,7 @@ import { osClass } from '#telemetry/platform-class.js';
  */
 const DesktopAppNoticeCard = lazy<ComponentType<DesktopAppNoticeCardProps>>(async () => {
   try {
-    return await import('#components/desktop/desktop-app-notice-card.js');
+    return await load(async () => import('#components/desktop/desktop-app-notice-card.js'));
   } catch {
     return { default: (): undefined => undefined };
   }

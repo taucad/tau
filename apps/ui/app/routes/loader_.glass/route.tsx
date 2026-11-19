@@ -1,6 +1,6 @@
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { ArrowRight, Pause, Play } from 'lucide-react';
@@ -23,9 +23,11 @@ import type { ShowcaseFrameCapture } from '#components/geometry/loader/showcase-
 import { LazySection } from '@taucad/ui-kit/components/lazy-section';
 import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
+import { load } from '#lib/code-loading.js';
+import { lazy } from '#lib/lazy-component.js';
 
 const GlassPrismLoaderLazy = lazy(async () => {
-  const module = await import('#components/geometry/loader/glass-prism-loader.js');
+  const module = await load(async () => import('#components/geometry/loader/glass-prism-loader.js'));
   return { default: module.GlassPrismLoader };
 });
 

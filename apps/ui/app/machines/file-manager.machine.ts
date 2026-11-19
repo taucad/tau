@@ -52,6 +52,7 @@ import {
   isWorkerErrorEnvelope,
   toWorkerError,
 } from '@taucad/files-ui/machines/file-manager-worker-error';
+import { load } from '#lib/code-loading.js';
 
 const fileCacheMaxEntries = 500;
 const fileCacheMaxTotalBytes = 128 * 1024 * 1024;
@@ -344,7 +345,7 @@ const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> =>
   /* A failed load is forgotten, so "Try again" fetches the chunk again instead of replaying the failure. */
   fileSystemBridgeModule ??= (async () => {
     try {
-      return await import('@taucad/fs-bridge');
+      return await load(async () => import('@taucad/fs-bridge'));
     } catch (error) {
       fileSystemBridgeModule = undefined;
       throw error;

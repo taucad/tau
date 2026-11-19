@@ -16,6 +16,7 @@ import {
   disconnectAttachmentIntakeTelemetry,
 } from '#telemetry/attachment-intake-telemetry.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import { load } from '#lib/code-loading.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
 
@@ -31,7 +32,8 @@ let sdk: PostHog | undefined;
 /** Resolves the singleton, fetching it on first admission. */
 const loadSdk = async (): Promise<PostHog> => {
   if (sdk === undefined) {
-    const module_ = await import('posthog-js');
+    // Optional (PL7 FP9): a content blocker refuses analytics on every load, so a failure never reloads the page.
+    const module_ = await load(async () => import('posthog-js'), { optional: true });
     sdk = module_.posthog;
   }
   return sdk;

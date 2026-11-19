@@ -26,6 +26,7 @@ import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js'
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { armChatTurnHold, releaseChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
+import { load } from '#lib/code-loading.js';
 
 type DebugProbeGlobals = {
   __tauRunGeoSpec?: (args?: RunGeoSpecTestsRpcInput) => Promise<unknown>;
@@ -92,7 +93,7 @@ export function DebugProbes(): ReactNode {
     probeGlobals.__tauCaptureImages = async (input) => {
       const { activeChatId: chatId, ...deps } = depsRef.current;
       // The RPC handler stack loads on the first probe call; a failed import rejects this probe's promise.
-      const { createRpcHandlers } = await import('#hooks/rpc-handlers.js');
+      const { createRpcHandlers } = await load(async () => import('#hooks/rpc-handlers.js'));
       return createRpcHandlers({ chatId, ...deps }).executeRpcCall({
         rpcName: rpcName.captureImages,
         args: input,

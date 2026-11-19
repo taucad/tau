@@ -96,9 +96,10 @@ export function BindingLegend({
 }
 
 /**
- * Step 3: the mouse preset and gizmo, preselected from the tool answer, the orbit style (Turntable until chosen), the
- * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, an orbit style
- * `viewer.controls.orbitStyle`, a style `viewer.gizmo.style`, and None `viewDefaults['display.gizmo'] = false`.
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the orbit style (Turntable until chosen, each
+ * option with its hint so the two compare without a click), the binding legend and the preview. Choosing a preset
+ * stores `viewer.controls.preset`, an orbit style `viewer.controls.orbitStyle`, a style `viewer.gizmo.style`, and None
+ * `viewDefaults['display.gizmo'] = false`.
  *
  * @param properties - The record and its writers.
  * @returns The step's content.
@@ -154,32 +155,40 @@ export function SetupViewerStep({
           </p>
         </fieldset>
 
-        <div className='flex min-w-0 flex-col gap-2'>
-          <span id={`${id}-orbit`} className='text-sm font-medium'>
-            {viewerStepCopy.orbit}
-          </span>
-          <ToggleGroup
-            type='single'
-            variant='outline'
+        <fieldset className='flex min-w-0 flex-col gap-2'>
+          <legend className='mb-2 text-sm font-medium'>{viewerStepCopy.orbit}</legend>
+          <RadioGroup
             value={orbitStyle}
             onValueChange={(value) => {
               if (isOrbitStyle(value)) {
                 onOrbitStyleChange(value);
               }
             }}
-            aria-labelledby={`${id}-orbit`}
-            className='flex-wrap justify-start'
+            className='gap-1.5 sm:grid-cols-2'
           >
             {orbitStyleIds.map((option) => (
-              <ToggleGroupItem key={option} value={option} className='h-8 text-xs'>
-                {orbitStyleCopy[option].name}
-              </ToggleGroupItem>
+              <label
+                key={option}
+                className='flex items-start gap-3 rounded-lg border bg-card px-3 py-2.5 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent/40'
+              >
+                <RadioGroupItem
+                  value={option}
+                  className='mt-0.5'
+                  aria-labelledby={`${id}-orbit-${option}`}
+                  aria-describedby={`${id}-orbit-${option}-hint`}
+                />
+                <span className='flex min-w-0 flex-col gap-0.5'>
+                  <span id={`${id}-orbit-${option}`} className='text-sm font-medium'>
+                    {orbitStyleCopy[option].name}
+                  </span>
+                  <span id={`${id}-orbit-${option}-hint`} className='text-xs text-muted-foreground'>
+                    {orbitStyleCopy[option].hint}
+                  </span>
+                </span>
+              </label>
             ))}
-          </ToggleGroup>
-          <p className='text-xs text-muted-foreground' data-testid='setup-orbit-hint'>
-            {orbitStyleCopy[orbitStyle].hint}
-          </p>
-        </div>
+          </RadioGroup>
+        </fieldset>
 
         <div className='flex min-w-0 flex-col gap-2'>
           <span id={`${id}-gizmo`} className='text-sm font-medium'>

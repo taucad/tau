@@ -17,8 +17,8 @@ import type { CameraInputRouting, OrbitStyle } from '#graphics/three/controls/ca
 /*
  * The orbit styles in a real browser (roll Finding 10, TA5): the view's camera is the graphics child presented by the
  * controls adapter, on a real surface, driven by real pointer events, with the adapter's own per-frame tick. Turntable
- * stops at the pole; Tumble turns through both poles in one drag, rolling the view; switching back gives the camera
- * the scene's up again.
+ * stops at the pole; Free orbit turns through both poles in one drag, rolling the view; switching back gives the
+ * camera the scene's up again.
  */
 
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
@@ -43,7 +43,7 @@ const cameraView = {
   perspectiveZoom: 1,
 } as const;
 
-/** A view a Tumble drag left upside down, over the top pole and on, as a reload restores it. */
+/** A view a Free orbit drag left upside down, over the top pole and on, as a reload restores it. */
 const rolledView = {
   ...cameraView,
   direction: [1, 0, 0.2],
@@ -217,9 +217,9 @@ describe('orbit style in the browser (TA5)', () => {
     expect(roll(viewer)).toBeLessThan(1e-6);
   });
 
-  it('turns a Tumble drag through both poles, with a largest step no greater than Turntable’s', () => {
+  it('turns a Free orbit drag through both poles, with a largest step no greater than Turntable’s', () => {
     const turntable = largestStep(verticalDrag(mountViewer('turntable')));
-    const viewer = mountViewer('tumble');
+    const viewer = mountViewer('free');
     const directions = verticalDrag(viewer);
     expect(poles(directions)).toEqual({ top: true, bottom: true });
     expect(largestStep(directions)).toBeLessThanOrEqual(turntable + 1e-6);
@@ -228,7 +228,7 @@ describe('orbit style in the browser (TA5)', () => {
   });
 
   it('gives the camera the scene up again on switching back to Turntable', () => {
-    const viewer = mountViewer('tumble');
+    const viewer = mountViewer('free');
     // Over the top pole and on: the view is upside down.
     verticalDrag(viewer, { steps: 20 });
     expect(readView(viewer).up.dot(worldUp)).toBeLessThan(-0.1);
@@ -244,18 +244,18 @@ describe('orbit style in the browser (TA5)', () => {
     expect(roll(viewer)).toBeLessThan(1e-6);
   });
 
-  it('turns a one-finger touch drag through both poles in Tumble', () => {
-    const viewer = mountViewer('tumble');
+  it('turns a one-finger touch drag through both poles in Free orbit', () => {
+    const viewer = mountViewer('free');
     expect(poles(verticalDrag(viewer, { pointerType: 'touch' }))).toEqual({ top: true, bottom: true });
   });
 
-  it('turns through both poles with the orthographic camera in Tumble', () => {
-    const viewer = mountViewer('tumble', 'orthographic');
+  it('turns through both poles with the orthographic camera in Free orbit', () => {
+    const viewer = mountViewer('free', 'orthographic');
     expect(poles(verticalDrag(viewer))).toEqual({ top: true, bottom: true });
   });
 
-  it('leaves a trackpad pinch and a wheel step unrolled in Tumble: only an orbit re-anchors the up', () => {
-    const viewer = mountViewer('tumble');
+  it('leaves a trackpad pinch and a wheel step unrolled in Free orbit: only an orbit re-anchors the up', () => {
+    const viewer = mountViewer('free');
     const before = readView(viewer).up;
     for (const init of [{ deltaY: 30, ctrlKey: true }, { deltaY: 40 }]) {
       viewer.surface.dispatchEvent(
@@ -266,9 +266,9 @@ describe('orbit style in the browser (TA5)', () => {
     expect(readView(viewer).up.angleTo(before)).toBeLessThan(1e-9);
   });
 
-  it('keeps a rolled Tumble view across a reload, and the next drag tumbles on from it', () => {
-    // A reload restores the persisted view: upside down after a Tumble drag over the top pole.
-    const viewer = mountViewer('tumble', 'perspective', rolledView);
+  it('keeps a rolled Free orbit view across a reload, and the next drag turns on from it', () => {
+    // A reload restores the persisted view: upside down after a Free orbit drag over the top pole.
+    const viewer = mountViewer('free', 'perspective', rolledView);
     const restored = readView(viewer);
     expect(restored.direction.angleTo(new Vector3(...rolledView.direction).normalize())).toBeLessThan(1e-9);
     expect(restored.up.angleTo(new Vector3(...rolledView.up).normalize())).toBeLessThan(1e-9);

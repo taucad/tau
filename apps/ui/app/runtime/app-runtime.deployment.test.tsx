@@ -5,7 +5,6 @@
  * runtime here is pinned funded; the adaptive composition has its own project (`*.adaptive.test.ts`).
  */
 import { renderHook } from '@testing-library/react';
-import { createElement } from 'react';
 import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { createActor, createCallbackLogic } from 'xstate';
@@ -99,7 +98,9 @@ describe('app runtime: deployment', () => {
 
   it("should read the runtime's mode in render, and the build's initial mode with no runtime", () => {
     const runtime = createAppRuntime({ clock: new StepClock(), environment: () => createFakeEnvironmentHost() });
-    const wrapper = ({ children }: { children: ReactNode }) => createElement(AppRuntimeProvider, { runtime, children });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AppRuntimeProvider runtime={runtime}>{children}</AppRuntimeProvider>
+    );
     expect(renderHook(() => useDeploymentMode(), { wrapper }).result.current).toEqual({
       state: 'funded',
       basis: 'pinned',

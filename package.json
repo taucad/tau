@@ -192,7 +192,6 @@
     "typescript-eslint": "catalog:",
     "uint8array-extras": "catalog:",
     "unified": "catalog:",
-    "unist-util-visit": "catalog:",
     "vscode-languageserver-protocol": "^3.18.0",
     "ws": "catalog:",
     "xstate": "catalog:",

@@ -42,7 +42,16 @@ type ProjectManifestFields = Readonly<{
 const textField = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 
-const readProjectManifest = async (workspaceRoot: string): Promise<ProjectManifestFields> => {
+/**
+ * Reads `tau.json`. Without `--entry` it is required, for the file a viewer opens with; with `--entry` it only adds a
+ * name and a description, so a project without one publishes under its directory's name.
+ *
+ * @param workspaceRoot - The project directory.
+ * @param hasEntry - Whether `--entry` named the file a viewer opens with.
+ * @returns What `tau.json` says, or nothing when `--entry` was given and it could not be read.
+ * @throws CliError When `--entry` was not given and `tau.json` could not be read.
+ */
+const readProjectManifest = async (workspaceRoot: string, hasEntry: boolean): Promise<ProjectManifestFields> => {
   const manifestPath = join(workspaceRoot, 'tau.json');
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Readonly<{
@@ -56,6 +65,9 @@ const readProjectManifest = async (workspaceRoot: string): Promise<ProjectManife
       entryPath: manifest.assets?.main?.entryPath,
     };
   } catch {
+    if (hasEntry) {
+      return { name: undefined, description: undefined, entryPath: undefined };
+    }
     throw cliError(
       'NO_PROJECT_MANIFEST',
       `${manifestPath} could not be read. A published project carries the tau.json Tau writes for it.`,
@@ -162,7 +174,7 @@ export const publishCommand = defineCommand({
       throw cliError('NO_PROJECT', `${workspaceRoot} does not exist.`, exitCodes.refused);
     }
     const visibility = visibilityOf(args);
-    const manifest = await readProjectManifest(workspaceRoot);
+    const manifest = await readProjectManifest(workspaceRoot, args.entry !== undefined && args.entry !== '');
     const entryPath = entryPathOf(workspaceRoot, args.entry, manifest);
     const name = args.name?.trim() ?? '';
     const revisions: ProjectRevisionVerbs = await openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });

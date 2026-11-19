@@ -172,6 +172,16 @@ describe('publishCommand', () => {
     });
   });
 
+  it('publishes with --entry and no project manifest, under the directory’s name', async () => {
+    await runCommand(publishCommand, { rawArgs: ['v1', '--project', project, '--entry', 'main.ts'] });
+
+    expect(publish).toHaveBeenCalledExactlyOnceWith({
+      tag: 'v1',
+      projectName: basename(project),
+      entryPath: 'main.ts',
+    });
+  });
+
   it('refuses a project whose manifest does not say what it opens with', async () => {
     await writeFile(join(project, 'tau.json'), JSON.stringify({ assets: { main: {} } }));
 

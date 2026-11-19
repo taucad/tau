@@ -11,7 +11,7 @@ Breaking:
 - `PublishDraft` loses `title`, `sharedEmails` and `notifyRecipients`. The link shows the project's name and description (`projectName`, `description`), and invited people are managed on the link, not per publish. `visibility` is optional: absent keeps the link's setting, and a project's first publish is private.
 - `PublishPublicationActorInput` is the `POST /v1/publications` body only: `projectId`, `projectName`, `tag`, `revisionId`, `entryPath`, `description?`, `visibility?`. `publishOverHttp` sends exactly that and reads the link from the answer's `share`, so it needs an API with the stable cloud link.
 - `PublishPublicationActorOutput` and the `published` event gain `visibility`; `published` also gains the version's `name`. `RevisionPublishOutcome` gains `name` and `visibility`.
-- `tau publish [name]`: the name is optional, and the project's name and description come from `tau.json`. `--public` or the new `--private` set who can open the link; with neither the link keeps its setting. `--title` and `--description` are removed.
+- `tau publish [name]`: the name is optional, and the project's name and description come from `tau.json` (with `--entry`, a project without one publishes under its directory's name). `--public` or the new `--private` set who can open the link; with neither the link keeps its setting. `--title` and `--description` are removed.
 
 New:
 

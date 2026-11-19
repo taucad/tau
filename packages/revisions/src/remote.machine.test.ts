@@ -328,6 +328,28 @@ describe('remoteMachine', () => {
 
     expect(actor.getSnapshot().matches('retrying')).toBe(true);
     expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'failed', error: 'config unreadable' });
+    /* Whether a remote is recorded is still not known: readiness keeps a project with no head unknown (I7). */
+    expect(selectRemoteFacet(actor.getSnapshot()).reading).toBe(true);
+    actor.stop();
+  });
+
+  it('says the remotes list is still being read until its read settles (I7)', async () => {
+    let answer: ((output: RemoteReadActorOutput) => void) | undefined;
+    const readRemote: RemoteActors['readRemote'] = createAsyncLogic({
+      run: async (): Promise<RemoteReadActorOutput> =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const { actor } = start({ readRemote });
+    await settle();
+
+    expect(actor.getSnapshot().matches('reading')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ kind: 'none', phase: 'none', reading: true });
+    answer?.({ remote: undefined });
+    await settle();
+    expect(actor.getSnapshot().matches('none')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).not.toHaveProperty('reading');
     actor.stop();
   });
 

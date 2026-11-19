@@ -1087,6 +1087,8 @@ describe('projectRevisionsMachine', () => {
         storage: undefined,
         overQuota: [],
         error: undefined,
+        /* The harness has not answered the remotes read: whether a remote is recorded is not known yet (I7). */
+        reading: true,
       },
       /* One row per branch, because one branch is one checkout (A2); the chips
        * are the chats whose turns were placed there (S26, W7). */

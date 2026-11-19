@@ -884,4 +884,5 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   ...(snapshot.context.refusedReplacement === undefined
     ? {}
     : { refusedReplacement: snapshot.context.refusedReplacement }),
+  ...(snapshot.matches('reading') || snapshot.matches('retrying') ? { reading: true } : {}),
 });

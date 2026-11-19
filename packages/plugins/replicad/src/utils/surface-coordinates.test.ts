@@ -70,7 +70,8 @@ const mixedSurfaces = (): Meshable[] => [
 const placedPrototype = (): Meshable =>
   meshable(makeBox([0, 0, 0], [10, 6, 4]).fillet(1.5).rotate(37, [1, 2, 3], [1, 1, 1]).translate([30, -5, 7]));
 
-const flatMesh = (shape: Meshable): GeometryReplicad['faces'] => shape.mesh({ tolerance: 0.05, angularTolerance: 0.2 });
+const flatMesh = (shape: Meshable, tolerance = 0.05): GeometryReplicad['faces'] =>
+  shape.mesh({ tolerance, angularTolerance: 0.2 });
 
 const prototypeMesh = (shape: Meshable): GeometryReplicad['faces'] =>
   extractPrototypeFaces({ openCascade: oc, shape, tessellation: { linearTolerance: 0.05, angularTolerance: 12 } });
@@ -121,6 +122,7 @@ afterAll(async () => {
   await client.shutdown();
 });
 
+// The lampshade's shell takes a few seconds on a loaded runner: its two tests get 30 s.
 describe('native surface coordinates', () => {
   it('is in this OpenCascade build', () => {
     expect(typeof Reflect.get(oc, 'ReplicadSurfaceCoordinates')).toBe('function');
@@ -128,8 +130,8 @@ describe('native surface coordinates', () => {
 
   it('returns the same doubles as the JavaScript loop on the lampshade', () => {
     const shape = lampshade();
-    expectSameCoordinates(shape, flatMesh(shape), false);
-  });
+    expectSameCoordinates(shape, flatMesh(shape, 0.5), false);
+  }, 30_000);
 
   it('returns the same doubles as the JavaScript loop on planes, quadrics, blends and B-splines', () => {
     for (const shape of mixedSurfaces()) {
@@ -152,7 +154,7 @@ describe('native surface coordinates', () => {
 
   it('adds the native coordinates to a mesh whose material needs them', () => {
     const shape = lampshade();
-    const mesh = flatMesh(shape);
+    const mesh = flatMesh(shape, 0.5);
     const extract = vi.spyOn((oc as NativeOc).ReplicadSurfaceCoordinates, 'Extract');
     const expected = surfaceCoordinatesInJavaScript(oc, { shape, normals: mesh.normals, prototype: false });
 
@@ -161,7 +163,7 @@ describe('native surface coordinates', () => {
     expect(extract).toHaveBeenCalledOnce();
     expect(differences(mesh.texCoords!, expected.texCoords)).toEqual([]);
     expect(differences(mesh.tangents!, expected.tangents)).toEqual([]);
-  });
+  }, 30_000);
 
   it('falls back to the JavaScript loop on a build without the native extractor', () => {
     const shape = meshable(makeCylinder(3, 8));

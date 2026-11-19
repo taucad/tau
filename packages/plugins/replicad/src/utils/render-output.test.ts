@@ -308,8 +308,8 @@ describe('mesh memo (E7, N2)', () => {
             {
               name: 'box',
               shape: box,
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
               material: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
                 extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.9, anisotropyRotation: 1 } },
               },
             },

@@ -71,8 +71,10 @@ export function addSurfaceCoordinates(
     return;
   }
   const oc = getOC();
+  // Feature-detected at run time: an older build (or a caller's own OpenCascade) may not have it.
+  const detected: { ReplicadSurfaceCoordinates?: unknown } = oc;
   const { texCoords, tangents } =
-    (oc as OpenCascadeInstance & NativeSurfaceBindings).ReplicadSurfaceCoordinates === undefined
+    detected.ReplicadSurfaceCoordinates === undefined
       ? surfaceCoordinatesInJavaScript(oc, { shape, normals: mesh.normals, prototype })
       : nativeSurfaceCoordinates(oc as OpenCascadeInstance & Required<NativeSurfaceBindings>, {
           shape,

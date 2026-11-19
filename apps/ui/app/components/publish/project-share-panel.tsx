@@ -1114,6 +1114,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   /* Each read takes a number; only the latest may set what the pane shows, so an earlier read that answers late
      (an invite's refresh racing Stop sharing's) never puts back a link that has since changed. */
   const envelopeGenerationRef = useRef(0);
+  /* The link as the pane last accepted it, for a caller that awaited a read another one overtook. */
+  const acceptedEnvelopeRef = useRef<ProjectShareEnvelope>(undefined);
   const loadEnvelope = useCallback(async (): Promise<ProjectShareEnvelope | undefined> => {
     envelopeGenerationRef.current += 1;
     const generation = envelopeGenerationRef.current;
@@ -1138,6 +1140,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       }
 
       if (isLatest()) {
+        acceptedEnvelopeRef.current = nextEnvelope;
         setEnvelope(nextEnvelope);
       }
       return nextEnvelope;
@@ -1556,6 +1559,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             onVisibilityChange={handleVisibilityChange}
             onGrantsChanged={async () => {
               await loadEnvelope();
+              /* The accepted link, not this read's: a Stop sharing that answered after it has the last word. */
+              return acceptedEnvelopeRef.current?.share?.status === 'active';
             }}
           />
           <div className='flex justify-start'>

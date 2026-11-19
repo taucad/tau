@@ -1320,7 +1320,8 @@ describe('ProjectSharePanel', () => {
     globalThis.fetch = vi.fn<typeof fetch>(async (input, init) => {
       const url = input instanceof Request ? input.url : input.toString();
       if (url.endsWith('/share/access')) {
-        return mockJsonResponse({ id: 'sga_2', email: { status: 'sent' } });
+        /* Already invited, so no email: the toast would offer to copy the link. */
+        return mockJsonResponse({ id: 'sga_2', email: { status: 'not_requested' } });
       }
       if (init?.method === 'DELETE') {
         return new Response(null, { status: 204 });
@@ -1352,8 +1353,11 @@ describe('ProjectSharePanel', () => {
 
     releaseInviteRefresh?.();
 
+    /* The grant is kept, and the stopped link is neither said to work nor offered to copy (the toast has no action). */
     await waitFor(() => {
-      expect(toastSuccessMock).toHaveBeenCalledWith('Invited team@example.com.');
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'team@example.com is already invited. Sharing is stopped, so they can open the link once you publish again.',
+      );
     });
     expect(screen.getByText(/you stopped sharing this project/iu)).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Share link' })).not.toBeInTheDocument();

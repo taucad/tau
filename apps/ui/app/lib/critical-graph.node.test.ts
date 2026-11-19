@@ -74,7 +74,8 @@ const knownOnDemandReach: Readonly<Record<string, Readonly<Record<string, string
 };
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs'];
-const variants = ['', '.cloud', '.self-host', '.desktop'];
+/* Every file a specifier can resolve to under any ceiling or host, the adaptive facade included (adaptive app deployment mode W2). */
+const variants = ['', '.cloud', '.self-host', '.adaptive', '.desktop'];
 const packagePrefix = 'npm:';
 const assetQueries = new Set(['url', 'raw', 'worker', 'sharedworker']);
 /** The export conditions Vite's client build resolves with, besides the default. */

@@ -39,7 +39,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/object-store-worker.js', () => ({
   createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
-vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({ purgeSavedUsage: async () => undefined }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: async () => undefined }));
 
 const { FinancialSessionProvider, FinancialSessionScope } =
   await import('@taucad/billing-ui/providers/financial-session-provider');

@@ -18,6 +18,8 @@ const DEFAULT_ALLOWLIST = [
   'apps/libs/files-ui/src/filesystem/handle-store.ts',
   // Filesystem backend providers.
   'packages/filesystem/src/backend/**',
+  // The billing cache's own database (saved usage and its purge; adaptive app deployment mode W2 split it out).
+  'apps/libs/billing-ui/src/db/billing-snapshot-database.ts',
   // Tests set up and tear down fake-indexeddb.
   '**/*.test.ts',
   '**/*.test.tsx',

@@ -2,7 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ModuleIdManifest, ModuleIdManifestChunk } from '@taucad/vite/module-id-manifest';
 import {
+  adaptiveBounds,
+  buildCeilingOf,
   buildVariantOf,
+  compareWithSelfHostBaseline,
+  findPinnedCeilingLeaks,
   compareWithBudget,
   findEarlyKernelPreloads,
   findPrecacheProblems,
@@ -218,6 +222,63 @@ describe('buildVariantOf', () => {
       }),
     ).toBe('self-host');
     expect(() => buildVariantOf({ ...moduleIds, chunks: [] })).toThrow(/cloud or a self-host/u);
+  });
+});
+
+describe('buildCeilingOf (adaptive app deployment mode W2)', () => {
+  it('should read the ceiling module first, then an adaptive facade, then the boundary files', () => {
+    expect(
+      buildCeilingOf({
+        ...moduleIds,
+        chunks: [chunk('assets/a.js', ['apps/ui/app/cloud/deployment-ceiling.adaptive.ts'])],
+      }),
+    ).toBe('adaptive');
+    expect(
+      buildCeilingOf({ ...moduleIds, chunks: [chunk('assets/a.js', ['apps/ui/app/cloud/root-billing.adaptive.tsx'])] }),
+    ).toBe('adaptive');
+    expect(buildCeilingOf(moduleIds)).toBe('cloud');
+    expect(() =>
+      buildCeilingOf({
+        ...moduleIds,
+        chunks: [
+          chunk('assets/a.js', [
+            'apps/ui/app/cloud/deployment-ceiling.cloud.ts',
+            'apps/ui/app/cloud/deployment-ceiling.self-host.ts',
+          ]),
+        ],
+      }),
+    ).toThrow(/more than one ceiling/u);
+  });
+});
+
+describe('findPinnedCeilingLeaks (I10)', () => {
+  const leaky = {
+    ...moduleIds,
+    chunks: [chunk('assets/a.js', ['apps/ui/app/runtime/deployment.machine.ts', 'apps/ui/app/cloud/cloud-port.ts'])],
+  };
+
+  it('should refuse the mode owner and the Core in a pinned build', () => {
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'self-host' })).toHaveLength(2);
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'cloud' })).toHaveLength(2);
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'adaptive' })).toEqual([]);
+    expect(findPinnedCeilingLeaks({ moduleIds, ceiling: 'cloud' })).toEqual([]);
+  });
+});
+
+describe('compareWithSelfHostBaseline (gate G1)', () => {
+  const baseline = { brotliBytes: 100_000, requests: 100, largestChunkBrotliBytes: 50_000 };
+
+  it('should hold an adaptive class within +2 requests, 1 % bytes and 1 % of the largest chunk', () => {
+    const within = { brotliBytes: 101_000, requests: 102, largestChunkBrotliBytes: 50_500 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: within, baseline, baselineName: 'b' })).toEqual([]);
+    const over = { brotliBytes: 101_001, requests: 103, largestChunkBrotliBytes: 50_501 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: over, baseline, baselineName: 'b' })).toHaveLength(3);
+    expect(adaptiveBounds).toEqual({ requests: 2, bytes: 0.01, largestChunkBytes: 0.01 });
+  });
+
+  it('should never fail an adaptive class for landing under a baseline', () => {
+    const under = { brotliBytes: 1, requests: 1, largestChunkBrotliBytes: 1 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: under, baseline, baselineName: 'b' })).toEqual([]);
   });
 });
 

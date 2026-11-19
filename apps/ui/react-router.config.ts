@@ -1,11 +1,14 @@
 import type { Config } from '@react-router/dev/config';
 import {
   resolveServiceWorkerKillSwitch,
-  resolveTauCloudBuildEnabled,
+  resolveTauDeploymentCeiling,
+  resolveUiBuildDirectory,
+  uiBuildDirectoryVariable,
   serviceWorkerKillSwitchVariable,
 } from './build-environment.ts';
 
-const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+/* `/usage` is prerendered and precached by the `cloud` ceiling only (adaptive app deployment mode D8). */
+const tauCloudEnabled = resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']) === 'cloud';
 /** `TAU_SERVICE_WORKER_KILL_SWITCH=true`: `buildEnd` writes the retiring worker instead of the web app's (PL7). */
 const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
 
@@ -36,6 +39,8 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
+  /* `build` unless CI keeps a second build beside it (`ui:build-adaptive`, gate G1). */
+  buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
   /**
    * Hands the dev dependency optimizer its crawl entries: the client entry and every route
    * module. Without it React Router sets `optimizeDeps.entries` to `[]`, Vite's startup scan

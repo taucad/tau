@@ -14,7 +14,7 @@ export default defineConfig({
   // Vite's optimizer hash excludes entries; keep this suite's scan separate from other browser configs.
   plugins: [tailwindcss()],
   /* The pane's hooks reach the app's build-time constants, which this config does not get from the app build. */
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   cacheDir: fileURLToPath(new URL('../../../node_modules/.vite/terminal-renderer', import.meta.url)),
   server: {
     host: '127.0.0.1',

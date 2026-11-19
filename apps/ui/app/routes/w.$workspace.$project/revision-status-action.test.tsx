@@ -19,7 +19,7 @@ import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-sta
 import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let focusedChatId: string | undefined = 'chat-1';
@@ -172,7 +172,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CloudAlert,
       'attention',
-      'Not backed up · Your Git host refused access',
+      'Not backed up · Your Git host asked for a sign-in',
     ],
     [
       'GitHub refusing its credential after acknowledging everything (D68)',
@@ -504,7 +504,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open History. You are on main. Saved, Cloud copy unavailable.',
+      name: 'Open History. You are on main. Saved, Backup unavailable.',
     });
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
   });

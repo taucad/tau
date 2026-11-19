@@ -65,8 +65,8 @@ export default function handleRequest(
    * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex
    * `/` is chosen by a presentation cookie, so no cache keeps it at all (`no-store`), as the `/`
    * rule in `netlify.toml` says; that file's header blocks do not reach function responses, and the
-   * marketing edge function only covers Netlify. Routes that choose their own policy
-   * (`cdnBackedSsrRouteHeaders`) keep it. */
+   * marketing edge function only covers Netlify. Routes that choose their own policy (a loader's
+   * `Cache-Control`, such as the cloud link viewer's `private, no-store`) keep it. */
   if (!responseHeaders.has('Cache-Control')) {
     responseHeaders.set(
       'Cache-Control',
@@ -74,7 +74,7 @@ export default function handleRequest(
     );
   }
   /* TAU-UI-S: pin this page's later chunk, `.data` and manifest requests to the deploy that rendered it
-   * (production only). Never on a document the CDN may store (`cdnBackedSsrRouteHeaders`): a stored
+   * (production only). Never on a document the CDN may store (one carrying `Netlify-CDN-Cache-Control`): a stored
    * `Set-Cookie` would be replayed to every visitor, or keep the response out of the cache. */
   const skewCookie = responseHeaders.has(cdnCacheControlResponseHeader)
     ? undefined

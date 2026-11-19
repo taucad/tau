@@ -205,6 +205,7 @@ import type {
   CheckoutRecord,
   ConflictRecord,
   RevisionPortErrorCode,
+  Remote,
   RemoteRef,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
@@ -347,6 +348,50 @@ export type TurnFailedEvent = Readonly<{
    */
   code?: string;
 }>;
+
+/**
+ * Writes the version a publish names. A new version takes the name given; a version published as it is keeps the
+ * name the store holds now, read here rather than when the dialog opened, so a rename since is never undone, and is
+ * not written again unless a note changes it.
+ *
+ * @param port - The store the version is in.
+ * @param input - What `publish.machine`'s `tagging` asks for.
+ * @param actor - Who writes it.
+ * @returns The version as written.
+ * @throws Error When the version named by number is no longer in the store, in words the person can act on.
+ * @public
+ */
+export const writePublishTag = async (
+  port: Pick<RevisionPort, 'listTags' | 'tag'>,
+  input: PublishTagActorInput,
+  actor: RevisionTag['actor'],
+): Promise<RevisionTag> => {
+  const note = input.note === undefined ? {} : { note: input.note };
+  if (input.name !== undefined || input.number === undefined) {
+    return port.tag({
+      name: input.name ?? '',
+      revisionId: revisionId(input.revisionId),
+      ...note,
+      ...(input.number === undefined ? {} : { number: input.number }),
+      actor,
+    });
+  }
+  const tags = await port.listTags();
+  const stored = tags.find((tag) => tag.number === input.number);
+  if (stored === undefined) {
+    throw new Error(`V${String(input.number)} is no longer on this device. Publish again to pick a version.`);
+  }
+  if (input.note === undefined && stored.revisionId === input.revisionId) {
+    return stored;
+  }
+  return port.tag({
+    name: stored.name,
+    revisionId: revisionId(input.revisionId),
+    ...note,
+    number: stored.number,
+    actor,
+  });
+};
 
 /**
  * Fill in the two facts a settlement does not carry, and shape it for the wire.
@@ -1178,10 +1223,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           : 'origin';
     const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project in the cloud. Try again.');
     }
     return { name, url };
   };
@@ -1662,10 +1704,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const url = options.remoteUrl?.(projectId);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project in the cloud. Try again.');
     }
     await port.setRemote({ name: tauRemoteName, url });
     return tauRemoteName;
@@ -3229,6 +3268,68 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   let validatedListing:
     | Readonly<{ remote: string; identity: string | undefined; refs: readonly RemoteRef[] }>
     | undefined;
+  /*
+   * STO-25 SP6: a Tau Cloud connect's advertisement, asked for as the connect is written, beside the store's creation,
+   * its Start version and the config write that `validate` otherwise waits for. Tau Cloud has no credential to
+   * authorize (the session is the credential), and `probe` already lists an unrecorded address the same way (R2).
+   *
+   * Only a connect that names its URL is listed early (the browser's page resolves it): a host that resolves the
+   * destination itself (`remoteUrl`) is asked once, after the store exists, as before, since what it answers can
+   * depend on state set while the connect starts (a daemon's API origin).
+   *
+   * Kept for the `validate` of that connect alone: another connect, a failed write or a removed remote forgets it, and
+   * `validate` takes it only for the destination it was asked for. The outcome never rejects: refs, a `404` this host
+   * can register on (which `validate` registers on at once, D11), or nothing, after which `validate` asks again. The
+   * listing is asked with the credential current when `writeRemote` starts (for Tau Cloud, the session cookie then);
+   * `initialSync`'s fetch that takes it runs under the session current at its own time, which the server checks
+   * again for every object it serves.
+   */
+  type EarlyListingOutcome =
+    | Readonly<{ refs: readonly RemoteRef[] }>
+    | Readonly<{ notFound: RevisionPortError }>
+    | undefined;
+  let earlyListing: Readonly<{ address: RevisionRemoteAddress; listing: Promise<EarlyListingOutcome> }> | undefined;
+  /* A `404` registering can answer (`listRegistered`'s own test): never a `410`, never on a host that cannot register. */
+  const isRegistrable = (kind: string | undefined, error: unknown): error is RevisionPortError =>
+    kind === 'tau' &&
+    options.registerRemoteProject !== undefined &&
+    error instanceof RevisionPortError &&
+    error.code === 'REMOTE_NOT_FOUND' &&
+    error.status !== 410;
+  const listEarly = (input: RemoteWriteActorInput): void => {
+    earlyListing = undefined;
+    if (input.kind !== 'tau' || input.url === undefined || input.provider !== undefined || input.fetchOnly === true) {
+      return;
+    }
+    /* Named by the connect itself: no host lookup, and nothing to throw. */
+    const address = remoteAddressOf(input);
+    // async-iife: bootstrap -- the outcome is taken by `validate`; a failure never rejects, and is asked again or registered on.
+    const listing = (async (): Promise<EarlyListingOutcome> => {
+      try {
+        return { refs: await port.listRemoteRefs(address) };
+      } catch (error) {
+        return isRegistrable('tau', error) ? { notFound: error } : undefined;
+      }
+    })();
+    earlyListing = { address, listing };
+  };
+  /* The early outcome, taken once, when the recorded remote is still the Tau destination it was asked for. */
+  const takeEarlyListing = async (configured: Remote | undefined): Promise<EarlyListingOutcome> => {
+    const early = earlyListing;
+    earlyListing = undefined;
+    if (
+      early === undefined ||
+      configured?.kind !== 'tau' ||
+      configured.name !== early.address.name ||
+      configured.url !== early.address.url ||
+      configured.provider !== undefined ||
+      configured.repositoryId !== undefined ||
+      configured.fetchOnly === true
+    ) {
+      return undefined;
+    }
+    return early.listing;
+  };
   const remoteIdentity = async (name: string): Promise<string | undefined> => {
     const remotes = await port.listRemotes();
     const remote = remotes.find((entry) => entry.name === name);
@@ -3303,11 +3404,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return await list();
     } catch (error) {
       /* A `410` is a project Tau Cloud tombstoned: registering cannot bring it back. */
-      if (
-        kind !== 'tau' ||
-        options.registerRemoteProject === undefined ||
-        !(error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND' && error.status !== 410)
-      ) {
+      if (!isRegistrable(kind, error) || options.registerRemoteProject === undefined) {
         throw error;
       }
       /* A refused registration is reported as the listing's own refusal, which says what the remote answered. */
@@ -4627,7 +4724,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       signal.throwIfAborted();
       const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
       if (updated.status !== 'updated') {
-        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
       }
       return undefined;
     }
@@ -4718,7 +4815,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
           if (updated.status !== 'updated') {
-            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
           }
         },
       });
@@ -6335,32 +6432,43 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
-        await ensureStore();
-        const { name, url } = remoteAddressOf(input);
-        const [current] = await port.listRemotes();
-        if (
-          current !== undefined &&
-          (current.name !== name ||
-            current.url !== url ||
-            current.provider !== input.provider ||
-            current.repositoryId !== input.repositoryId)
-        ) {
-          await port.removeRemote(current.name);
-        }
-        await port.setRemote({
-          name,
-          url,
-          ...(input.provider === undefined ? {} : { provider: input.provider }),
-          ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
-          ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
-        });
-        return {
-          remote: remoteOf(name, url, {
+        listEarly(input);
+        const asked = earlyListing;
+        try {
+          await ensureStore();
+          /* Read after the store, as before: a host's own lookup answers once, with what it knows by then. */
+          const { name, url } = asked?.address ?? remoteAddressOf(input);
+          const [current] = await port.listRemotes();
+          if (
+            current !== undefined &&
+            (current.name !== name ||
+              current.url !== url ||
+              current.provider !== input.provider ||
+              current.repositoryId !== input.repositoryId)
+          ) {
+            await port.removeRemote(current.name);
+          }
+          await port.setRemote({
+            name,
+            url,
             ...(input.provider === undefined ? {} : { provider: input.provider }),
             ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
             ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
-          }),
-        };
+          });
+          return {
+            remote: remoteOf(name, url, {
+              ...(input.provider === undefined ? {} : { provider: input.provider }),
+              ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
+              ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
+            }),
+          };
+        } catch (error) {
+          /* A connect whose write failed is no connect a later `validate` continues: its listing goes with it. */
+          if (earlyListing === asked) {
+            earlyListing = undefined;
+          }
+          throw error;
+        }
       }),
 
       /*
@@ -6375,6 +6483,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * remote is ever offered it.
        */
       removeRemote: fromAuthorityPromise<void, Readonly<{ name: string }>>(async ({ input }) => {
+        earlyListing = undefined;
         await ensureStore();
         await port.removeRemote(input.name);
       }),
@@ -6410,8 +6519,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         validatedListing = undefined;
         const identity = await remoteIdentity(input.remote);
         const remotes = await port.listRemotes();
-        const kind = remotes.find((remote) => remote.name === input.remote)?.kind;
-        const listed = await listRegistered(kind, async () => port.listRemoteRefs(input.remote));
+        const configured = remotes.find((remote) => remote.name === input.remote);
+        const kind = configured?.kind;
+        const early = await takeEarlyListing(configured);
+        /* A `404` the early listing already heard is registered on at once (D11), then listed: no second `404`. */
+        let heard = early !== undefined && 'notFound' in early ? early.notFound : undefined;
+        const listed =
+          early !== undefined && 'refs' in early
+            ? early.refs
+            : await listRegistered(kind, async () => {
+                if (heard !== undefined) {
+                  const answer = heard;
+                  heard = undefined;
+                  throw answer;
+                }
+                return port.listRemoteRefs(input.remote);
+              });
         if (!signal.aborted && validation === validations) {
           validatedListing = { remote: input.remote, identity, refs: listed };
         }
@@ -6571,13 +6694,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* W6's tag members, on a revision that already exists. */
       createTag: fromAuthorityPromise<RevisionTag, PublishTagActorInput>(async ({ input }) => {
         await ensureStore();
-        return port.tag({
-          name: input.name,
-          revisionId: revisionId(input.revisionId),
-          ...(input.note === undefined ? {} : { note: input.note }),
-          ...(input.number === undefined ? {} : { number: input.number }),
-          actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
-        });
+        return writePublishTag(port, input, options.identity.resolve({ runId: undefined, trigger: 'save' }));
       }),
 
       /*
@@ -6612,8 +6729,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           throw new RevisionPortError(
             'INVALID_TRANSPORT',
             refused.reason === 'leaseLost'
-              ? 'Someone else changed this project in the cloud. Open it again before publishing.'
-              : `The cloud refused this project: ${refused.reason ?? 'no reason given'}`,
+              ? 'This project changed somewhere else. Open it again before publishing.'
+              : 'Couldn’t back up this project before publishing. Try again.',
           );
         }
         pushSequence += 1;
@@ -6624,10 +6741,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         async ({ input }) => {
           const record = options.publishPublication;
           if (record === undefined) {
-            throw new RevisionPortError(
-              'INVALID_TRANSPORT',
-              'This host is not signed in to Tau Cloud, so it cannot publish.',
-            );
+            throw new RevisionPortError('INVALID_TRANSPORT', 'This host is not signed in, so it cannot publish.');
           }
           return record(input);
         },
@@ -6882,7 +6996,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             /* Storage is the one refusal that is not a failed connection: the
              * files are named and `remote.machine` owns the list (D16, P19). */
-            const message = error instanceof Error ? error.message : 'History could not be backed up.';
+            const message = error instanceof Error ? error.message : 'Couldn’t back up this project’s history.';
             if (error instanceof LfsQuotaError) {
               overQuota = error.refusal.paths;
               quotaMessage = error.refusal.message;
@@ -7381,7 +7495,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   name: chatRefName(id),
                   status: 'rejected',
                   head: ref.head,
-                  reason: 'Chat synchronization could not establish this device’s record identity.',
+                  reason: 'Couldn’t back up this project’s chats.',
                 }));
               }
             }

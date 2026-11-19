@@ -45,6 +45,8 @@ export declare abstract class _1DShape<Type extends TopoDS_Shape> extends Shape<
     protected abstract _geomAdaptor(): CurveLike;
     get repr(): string;
     get curve(): Curve;
+    /** Runs `read` on a temporary curve adaptor, deleted afterwards. */
+    private _readCurve;
     get startPoint(): Vector;
     get endPoint(): Vector;
     tangentAt(position?: number): Vector;
@@ -123,6 +125,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
         thickness: number;
     }, tolerance?: number): Shape3D;
     shell(thickness: number, finderFcn: FinderFunction<FaceFinder, AnyShape>, tolerance?: number): Shape3D;
+    private _shell;
     /**
      * Creates a new shapes with some edges filletted, as specified in the
      * radius config.
@@ -157,6 +160,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
      * @category Shape Modifications
      */
     chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
+    private _chamfer;
     /**
      * Applies a draft angle to selected faces of the shape.
      *
@@ -174,6 +178,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
      * @category Shape Modifications
      */
     draft(angle: number, faceFinder: FinderFunction<FaceFinder, AnyShape>, neutralPlane?: Plane | PlaneName): Shape3D;
+    private _draft;
 }
 
 export declare const addHolesInFace: typeof shapeHelpers.addHolesInFace;
@@ -349,6 +354,7 @@ export declare class Blueprint implements DrawingInterface {
     private _guessedOrientation;
     constructor(curves: Curve2D[]);
     delete(): void;
+    /** A copy with its own curves: deleting one leaves the other intact. */
     clone(): Blueprint;
     get repr(): string;
     get boundingBox(): BoundingBox2d;
@@ -384,7 +390,9 @@ export declare class Blueprints implements DrawingInterface {
     protected _boundingBox: BoundingBox2d | null;
     constructor(blueprints: Array<Blueprint | CompoundBlueprint>);
     get repr(): string;
+    /** A copy with its own curves: deleting one leaves the other intact. */
     clone(): Blueprints;
+    delete(): void;
     get boundingBox(): BoundingBox2d;
     stretch(ratio: number, direction: Point2D, origin: Point2D): Blueprints;
     rotate(angle: number, center?: Point2D): Blueprints;
@@ -565,7 +573,9 @@ export declare class CompoundBlueprint implements DrawingInterface {
     blueprints: Blueprint[];
     protected _boundingBox: BoundingBox2d | null;
     constructor(blueprints: Blueprint[]);
+    /** A copy with its own curves: deleting one leaves the other intact. */
     clone(): CompoundBlueprint;
+    delete(): void;
     get boundingBox(): BoundingBox2d;
     get repr(): string;
     stretch(ratio: number, direction: Point2D, origin: Point2D): CompoundBlueprint;
@@ -697,6 +707,7 @@ export declare class Curve extends WrappingObj<CurveLike> {
 export declare class Curve2D extends WrappingObj<Geom2d_Curve> {
     _boundingBox: null | BoundingBox2d;
     constructor(handle: Geom2d_Curve);
+    delete(): void;
     get boundingBox(): BoundingBox2d;
     get repr(): string;
     get innerCurve(): Geom2d_Curve;
@@ -840,16 +851,12 @@ export declare const drawFaceOutline: typeof drawModule.drawFaceOutline;
  */
 declare function drawFaceOutline_2(face: Face): Drawing;
 
-/**
- * @categoryDescription Drawing
- *
- * Drawing are shapes in the 2D space. You can either use a "builder pen" to
- * draw a shape, or use some of the canned shapes like circles or rectangles.
- */
 export declare class Drawing implements DrawingInterface {
     private innerShape;
     constructor(innerShape?: Shape2D);
     clone(): Drawing;
+    /** Deletes the curves the drawing owns. */
+    delete(): void;
     serialize(): string;
     get boundingBox(): BoundingBox2d;
     stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;
@@ -909,6 +916,7 @@ export declare class Drawing implements DrawingInterface {
 
 export declare interface DrawingInterface {
     clone(): DrawingInterface;
+    delete(): void;
     boundingBox: BoundingBox2d;
     stretch(ratio: number, direction: Point2D, origin: Point2D): DrawingInterface;
     rotate(angle: number, center: Point2D): DrawingInterface;
@@ -1348,8 +1356,17 @@ declare abstract class Finder<Type, FilterType> {
      * current finder
      */
     abstract shouldKeep(t: Type): boolean;
+    private _resources;
     constructor();
+    /**
+     * Deletes the kernel values the filters use. The finder cannot be used
+     * afterwards.
+     */
     delete(): void;
+    /** @ignore The finder deletes `value` when it is deleted. */
+    protected _own<T extends Deletable>(value: T): T;
+    /** @ignore Makes `clone` share this finder's kernel values. */
+    protected _shareResourcesWith(clone: object): void;
     /**
      * Combine logically a set of filter with an AND operation.
      *
@@ -1501,6 +1518,11 @@ declare const fuseBlueprints_2: (first: Blueprint, second: Blueprint) => null | 
 
 export declare const GCWithObject: (obj: any) => <Type extends Deletable>(value: Type) => Type;
 
+/**
+ * @deprecated Values registered here are deleted only after the returned
+ * function has been garbage collected, which never happens during a
+ * synchronous model build. Use {@link ocScope}.
+ */
 export declare const GCWithScope: () => <Type extends Deletable>(value: Type) => Type;
 
 /**
@@ -1869,6 +1891,12 @@ export declare function isShape3D(shape: AnyShape): shape is Shape3D;
 
 export declare function isWire(shape: AnyShape): shape is Wire;
 
+/**
+ * Yields each distinct sub shape of `topo` kind once, in explorer order. Every
+ * yielded handle is a new one that the consumer owns and must delete (or hand
+ * to a wrapper); the iterator deletes everything else it creates, including
+ * when the consumer stops early.
+ */
 export declare function iterTopo<Entity extends TopoEntity>(shape: TopoDS_Shape, topo: Entity): IterableIterator<TopologyMap[Entity]>;
 
 /**
@@ -1893,6 +1921,10 @@ export declare class LinearPhysicalProperties extends PhysicalProperties {
  */
 export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<default_2.Font>;
 
+/**
+ * @deprecated Use {@link ocScope}, which also skips values that were already
+ * deleted and can release a value with `keep`.
+ */
 export declare const localGC: (debug?: boolean) => [<T extends Deletable>(v: T) => T, () => void, Set<Deletable> | undefined];
 
 export declare const loft: typeof addThickness.loft;
@@ -2206,6 +2238,40 @@ export declare interface MeshShapeMesh {
 
 export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 
+/**
+ * A deterministic ownership scope for OpenCascade values (and other objects
+ * with a `delete()` method).
+ *
+ * `scope(value)` registers a value the scope owns and returns it;
+ * `scope.keep(value)` takes it back out (the caller now owns it), and
+ * `scope.dispose()` deletes everything still owned, last registered first,
+ * skipping values that were already deleted. Dispose a scope in a `finally`
+ * block, or declare it with `using` where explicit resource management is
+ * available, so that a throw cannot leak what it owns:
+ *
+ * ```ts
+ * const r = ocScope();
+ * try {
+ *   const builder = r(new oc.BRepBuilderAPI_MakeFace(plane));
+ *   return builder.Face();
+ * } finally {
+ *   r.dispose();
+ * }
+ * ```
+ *
+ * Unlike {@link GCWithScope}, nothing waits for the garbage collector, which
+ * never runs during a synchronous model build.
+ */
+export declare interface OcScope {
+    <T extends Deletable | null | undefined>(value: T): T;
+    /** Releases a value from the scope: the caller now owns it. */
+    keep<T extends Deletable | null | undefined>(value: T): T;
+    /** Deletes every value the scope still owns. Safe to call twice. */
+    dispose(): void;
+}
+
+export declare function ocScope(): OcScope;
+
 declare interface Offset2DConfig {
     lineJoinType?: "miter" | "bevel" | "round";
 }
@@ -2342,6 +2408,7 @@ export declare class Plane {
     delete(): void;
     clone(): Plane;
     get origin(): Vector;
+    /** Takes ownership of `newOrigin`; the previous origin is deleted. */
     set origin(newOrigin: Vector);
     translateTo(point: Point): Plane;
     translate(xDist: number, yDist: number, zDist: number): Plane;
@@ -2718,12 +2785,15 @@ export declare class Sketch implements SketchInterface {
         defaultDirection?: Point;
     });
     get baseFace(): Face | null | undefined;
+    /** Keeps a copy of `newFace`; the previous base face is deleted. */
     set baseFace(newFace: Face | null | undefined);
     delete(): void;
     clone(): Sketch;
     get defaultOrigin(): Vector;
+    /** Keeps a copy of `newOrigin`; the previous origin is deleted. */
     set defaultOrigin(newOrigin: Point);
     get defaultDirection(): Vector;
+    /** Keeps a copy of `newDirection`; the previous direction is deleted. */
     set defaultDirection(newDirection: Point);
     /**
      * Transforms the lines into a face. The lines should be closed.
@@ -2763,6 +2833,7 @@ export declare class Sketch implements SketchInterface {
      * understandable.
      */
     sweepSketch(sketchOnPlane: (plane: Plane, origin: Point) => this, sweepConfig?: GenericSweepConfig): Shape3D;
+    private _sweepSketch;
     /** Loft between this sketch and another sketch (or an array of them)
      *
      * You can also define a `startPoint` for the loft (that will be placed
@@ -2821,8 +2892,16 @@ export declare class Sketcher implements GenericSketcher<Sketch> {
      */
     constructor(plane: Plane);
     constructor(plane?: PlaneName, origin?: Point | number);
+    /**
+     * Deletes what the sketcher owns: its plane, its pointer and the edges it
+     * has not turned into a sketch yet. `done()` and `close()` do this once the
+     * sketch is built.
+     */
     delete(): void;
+    /** Takes ownership of `newPointer`; the previous pointer is deleted. */
     protected _updatePointer(newPointer: Vector): void;
+    /** The pointer in the plane's local coordinates. */
+    protected _localPointer(): [number, number];
     movePointerTo([x, y]: Point2D): this;
     lineTo([x, y]: Point2D): this;
     line(xDist: number, yDist: number): this;
@@ -2854,9 +2933,14 @@ export declare class Sketcher implements GenericSketcher<Sketch> {
     cubicBezierCurveTo(end: Point2D, startControlPoint: Point2D, endControlPoint: Point2D): this;
     smoothSplineTo(end: Point2D, config?: SplineConfig): this;
     smoothSpline(xDist: number, yDist: number, splineConfig?: SplineConfig): this;
+    /** Consumes `wire`. */
     protected _mirrorWireOnStartEnd(wire: Wire): Wire;
     protected buildWire(): Wire;
     protected _closeSketch(): void;
+    /**
+     * Builds the sketch. The sketcher is used up: it deletes what it owns, and
+     * cannot draw any more.
+     */
     done(): Sketch;
     close(): Sketch;
     closeWithMirror(): Sketch;
@@ -3181,21 +3265,51 @@ declare type UVBounds = {
     vMax: number;
 };
 
+/**
+ * A 3D vector. Its coordinates and arithmetic are plain JavaScript numbers,
+ * computed with the same operations, in the same order, as OpenCascade's
+ * `gp_Vec`, so the results are the same to the bit. Rotations, angles and
+ * comparisons still run in OpenCascade.
+ *
+ * `wrapped` creates a `gp_Vec` the first time OpenCascade code needs one; the
+ * vector owns it and deletes it with itself (or when its coordinates
+ * change). Change a vector through its methods, not through `wrapped`.
+ */
 export declare class Vector extends WrappingObj<gp_Vec> {
+    private _x;
+    private _y;
+    private _z;
+    private _alive;
+    /** A new vector holding a copy of `vector`'s coordinates. */
     constructor(vector?: Point);
+    private _check;
+    /** Forgets the materialized `gp_Vec` after the coordinates changed. */
+    private _changed;
+    private _set;
+    /** A temporary `gp_Vec` for an OpenCascade computation. */
+    private _vec;
+    get wrapped(): gp_Vec;
+    set wrapped(newWrapped: gp_Vec);
+    delete(): void;
     get repr(): string;
     get x(): number;
     get y(): number;
     get z(): number;
+    /** As `gp_Vec::Magnitude`. */
     get Length(): number;
     toTuple(): [number, number, number];
+    /** As `gp_Vec::Crossed`. */
     cross(v: Vector): Vector;
+    /** As `gp_Vec::Dot`. */
     dot(v: Vector): number;
     sub(v: Vector): Vector;
     add(v: Vector): Vector;
     multiply(scale: number): Vector;
+    /** As `gp_Vec::Normalized`: each coordinate divided by the magnitude. */
     normalized(): Vector;
+    /** As `gp_Vec::Normalize`. */
     normalize(): Vector;
+    private _normalizingLength;
     getCenter(): Vector;
     getAngle(v: Vector): number;
     projectToPlane(plane: Plane): Vector;
@@ -3236,6 +3350,25 @@ export declare class Wire extends _1DShape<TopoDS_Wire> {
     offset2D(offset: number, kind?: "arc" | "intersection" | "tangent"): Wire;
 }
 
+/**
+ * Runs `fn` with a fresh {@link ocScope} and disposes it afterwards, whether
+ * `fn` returns or throws. Keep the result with `scope.keep` if the scope owns
+ * it.
+ */
+export declare function withOcScope<T>(fn: (scope: OcScope) => T): T;
+
+/**
+ * The base of every object that owns an OpenCascade value.
+ *
+ * A wrapper adopts the value it is constructed with: it is now its only owner
+ * and deletes it exactly once, when `delete()` is called or, as a safety net,
+ * after the wrapper has been garbage collected. Code that must keep using a
+ * value after handing it to a wrapper passes a copy instead.
+ *
+ * A wrapper whose value has been deleted (by `delete()`, by an operation that
+ * consumes it, or from outside, as an evaluation sweep does) throws on use
+ * instead of reaching freed memory.
+ */
 export declare class WrappingObj<Type extends Deletable> {
     protected oc: OpenCascadeInstance;
     private _wrapped;

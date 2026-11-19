@@ -88,7 +88,7 @@ import {
   consumeBranchControl,
   useBranchControlRequest,
   useReportHistoryPaneShown,
-} from '#routes/w.$workspace.$project/revision-pane-requests.js';
+} from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
@@ -99,7 +99,7 @@ import {
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
@@ -112,7 +112,7 @@ import { toast } from '@taucad/ui/components/sonner';
 
 /** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
 const reportSyncSettingError = (error: unknown): void => {
-  toast.error('Could not change sync settings', {
+  toast.error('Couldn’t change backup settings', {
     description: error instanceof Error ? error.message : undefined,
   });
 };

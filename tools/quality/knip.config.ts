@@ -327,7 +327,10 @@ const config: KnipConfig = {
         'app/routes/**/*.tsx',
         'app/types/**/*.d.ts',
         'vite-environment.d.ts',
-        'app/offline/offline-shell-env.d.ts',
+        'app/offline/service-worker-env.d.ts',
+        // Built into `service-worker.js` by `scripts/build-service-worker.ts`; no page imports them.
+        'app/offline/service-worker.ts',
+        'app/offline/service-worker-kill-switch.ts',
         // Netlify bundles every edge function in this directory; `config` names its paths.
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
@@ -338,7 +341,7 @@ const config: KnipConfig = {
         'app/calibration-preview.tsx',
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
-        'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
+        'app/**/*.{cloud,self-host,adaptive,desktop}.{ts,tsx}',
         // The same resolver substitutes these no-op modules when the staging harness is disabled.
         'app/lib/observability-harness-disabled.ts',
         'app/lib/observability-harness-hydration-disabled.ts',

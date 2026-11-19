@@ -183,7 +183,7 @@ jobs:
           # lane runs for every selected project when the diff touches one of them, and not at all otherwise.
           # "closure": the lane runs for the selected projects whose own dependency closure holds a project the
           # diff touches, walked without entering QUEUE_HUBS, so a hub change alone does not select them. "never": the
-          # lane never runs in the merge queue. The formal nightly tiers (the nightly, then the release gate RG-1) run
+          # lane never runs in the merge queue. The release gate (RG-1, which replaced the formal nightly's schedule) runs
           # every `formal:nightly` project, the release gate every viewer-parity fixture, and the candidate gate the full
           # shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule but "never".
           LANE_SELECTORS: >-
@@ -590,7 +590,7 @@ jobs:
           [lint-1, lint-2, typecheck-1, typecheck-2, build-1, build-2, test-1, test-2, test-3, test-4, test-5, test-6]
     env:
       # The build lanes' targets, in `nx affected` and the deal alike.
-      BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch
+      BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-critical-budget-adaptive check-static-shells check-server-output check-route-module-patch
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -716,7 +716,10 @@ jobs:
       # They also run `ui:check-critical-budget`, the critical-path budget (progressive loading
       # guard G3): each route class's interactive tier in the client build `ui:build` just made,
       # with no build of its own. Its source guards (G1 lint, G2 graph test) run in the lint and
-      # test lanes. `ui:check-static-shells` (PL3) renders each static shell through that build's
+      # test lanes. `ui:check-critical-budget-adaptive` is gate G1 of the adaptive app deployment
+      # mode charter: it adds the second web build, `ui:build-adaptive` (`TAU_CLOUD_ENABLED=adaptive`
+      # into `build-adaptive/`), serial after `ui:build` under the same `--parallel=1`, and holds it to
+      # the self-host entry and to `ui:build` on all three bounds. `ui:check-static-shells` (PL3) renders each static shell through that build's
       # server output: neutral and deterministic bytes, the function's own document, its build id
       # and headers, no rendered placeholder.
       #
@@ -1121,7 +1124,7 @@ jobs:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
       # The suites that open no chat, so capture no chat log for the empty-capture rule to find: e2e-nightly.yml's list.
-      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:filesystem-scenarios"]'
+      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -65,7 +65,9 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/revision-ref-removal.js', () => ({ requestRefRemoval: vi.fn() }));
 vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({ DiffViewer: () => null }));
-vi.mock('#routes/w.$workspace.$project/revision-conflict-editor.js', () => ({ RevisionConflictEditor: () => null }));
+vi.mock('@taucad/revisions-ui/components/revisions/revision-conflict-editor', () => ({
+  RevisionConflictEditor: () => null,
+}));
 
 const line = 'conflicts/main/device-b';
 const foreign: RevisionConflictFacet = {
@@ -478,7 +480,7 @@ describe('another device’s conflict, on its card (D3, D14)', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Only the project’s owner can remove another device’s decision.',
+      'Only the project’s owner can dismiss another device’s conflict.',
     );
     expect(revisionStatusHarness.commands.syncNow).not.toHaveBeenCalled();
   });

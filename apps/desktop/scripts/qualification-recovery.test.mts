@@ -20,7 +20,10 @@ import {
   brokenRendererDocument,
   qualificationScenario,
   rebuildAppImageWithEntry,
+  recoveryFailure,
+  recoveryLedgerSummary,
   recoveryRows,
+  recoveryTrail,
   rendererEntryPath,
   squashfsCompressor,
 } from './qualification-recovery.mjs';
@@ -330,6 +333,79 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         /ledger belongs to 0\.9\.0\+/u,
       );
       assert.throws(() => assessRecovery({ log: healthyRecovery, ledger: undefined, a, b }), /no boot-health ledger/u);
+    },
+  ],
+  [
+    "a failed row keeps A's launch, recovery and updater events and the ledger's stage, with no path or other event",
+    () => {
+      const log = [
+        launchOf(a.version, 4100),
+        line('main.app-protocol-registered', {
+          clientRoot: String.raw`C:\Users\runner\AppData\Local\Programs\t\resources\ui\client`,
+        }),
+        line('renderer.console', { message: 'secret-free but noisy' }, 'DEBUG'),
+        line('kernel.broker', { message: 'pooled spare exited' }, 'ERROR'),
+        line('main.recovery-offered', { trigger: 'shell-timeout' }, 'WARN'),
+        line(
+          'updater.error',
+          {
+            message: String.raw`Update failed: ENOENT \\?\C:\Users\runner\AppData\Local\tau-staging-updater\pending\x.exe and /home/runner/x`,
+            stack: 'at C:\\x',
+          },
+          'WARN',
+        ),
+        line('updater.blocked', { reason: 'clock', nested: { phase: 'error' } }, 'WARN'),
+        'a stack line without a record',
+      ].join('\n');
+      const trail = recoveryTrail(log);
+      assert.deepEqual(
+        trail.map(({ event }) => event),
+        ['main.ready', 'main.app-protocol-registered', 'main.recovery-offered', 'updater.error', 'updater.blocked'],
+      );
+      assert.deepEqual(trail[0]!.detail, { version: a.version, pid: 4100 });
+      assert.deepEqual(trail[1]!.detail, {});
+      assert.deepEqual(trail[2]!.detail, { trigger: 'shell-timeout' });
+      assert.deepEqual(trail[3]!.detail, { message: 'Update failed: ENOENT <path> and <path>' });
+      assert.deepEqual(trail[4]!.detail, { reason: 'clock' });
+      assert.equal(trail[0]!.at, '2026-11-17T10:00:00.000Z');
+      assert.doesNotMatch(JSON.stringify(trail), /Users|runner|home/u);
+      const many = Array.from({ length: 250 }, (_, index) => line('main.boot-stage', { stage: String(index) })).join(
+        '\n',
+      );
+      assert.equal(recoveryTrail(many).length, 200);
+      assert.equal(recoveryTrail(many).at(-1)!.detail['stage'], '249');
+
+      assert.deepEqual(
+        recoveryLedgerSummary({
+          ...ledgerOf(a.version, a.sourceCommit, 'updater-started'),
+          autoInstall: { fromBuild: 'x', targetVersion: b.version },
+        }),
+        {
+          build: `${a.version}+${a.sourceCommit}+packaged`,
+          unhealthyCount: 0,
+          last: { mode: 'normal', stage: 'updater-started', deadlinePassed: false },
+          autoInstall: { targetVersion: b.version },
+        },
+      );
+      assert.equal(recoveryLedgerSummary(undefined), undefined);
+      assert.equal(recoveryLedgerSummary('not a ledger'), undefined);
+
+      const failure = recoveryFailure({
+        reason: `Version ${a.version} logged no automatic-install countdown for ${b.version}`,
+        log,
+        ledgerText: JSON.stringify(ledgerOf(a.version, a.sourceCommit, 'updater-started')),
+        aAlive: true,
+        mirrorRequests: [],
+      });
+      assert.equal(
+        failure.error.message,
+        `T-B22.4 recovery did not complete: Version ${a.version} logged no automatic-install countdown for ${b.version} (A alive: true; ledger stage: updater-started; mirror requests: 0; last updater events: updater.error {"message":"Update failed: ENOENT <path> and <path>"}; updater.blocked {"reason":"clock"})`,
+      );
+      assert.deepEqual(failure.record['trail'], trail);
+      assert.match(
+        recoveryFailure({ reason: 'r', log: '', ledgerText: '{', aAlive: false, mirrorRequests: [] }).error.message,
+        /A alive: false; ledger stage: none; mirror requests: 0; last updater events: none/u,
+      );
     },
   ],
   [

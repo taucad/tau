@@ -1,6 +1,6 @@
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
-import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
+import type { KernelBuildReport, KernelOffers } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import { nativeBuildInputSymbol as nativeBuildInputIdentity } from '#types/runtime-kernel.types.js';
@@ -106,6 +106,8 @@ export type EvaluationSlot = {
   buildPublication?: 'pending' | 'stored';
   /** Queued publications whose snapshot reads this handle; it is released only after they settle (R1). */
   pendingPublications?: number;
+  /** What the kernel reported about the build it delivered into this slot, admitted. */
+  kernelBuild?: KernelBuildReport;
 };
 
 /**

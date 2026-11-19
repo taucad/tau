@@ -23,27 +23,45 @@ import type { GeometryReplicad } from '#replicad.types.js';
 import { normalizeRenderShapes, render } from '#utils/render-output.js';
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 
-type RecordedPbr = { BaseColor?: Quantity_ColorRGBA; Metallic?: number; Roughness?: number };
+type RecordedPbr = { BaseColor?: number[]; Metallic?: number; Roughness?: number };
 type Factors = { baseColor?: number[]; metallic?: number; roughness?: number };
 
 /** Layers the visual-material bindings of a custom OCCT build over `oc`, recording each material by name. */
 const withRecordedVisualMaterials = (oc: OpenCascadeInstance) => {
   const materials = new Map<string, RecordedPbr>();
-  class VisMaterialPbr {
+  /** Like an embind object, each binding below is deleted by its owner; the export owns all of them. */
+  const lifecycle = { created: 0, deleted: 0 };
+  class Bound {
+    public constructor() {
+      lifecycle.created += 1;
+    }
+    public delete(): void {
+      lifecycle.deleted += 1;
+    }
+  }
+  class VisMaterialPbr extends Bound {
     public BaseColor?: Quantity_ColorRGBA;
     public Metallic?: number;
     public Roughness?: number;
   }
-  class VisMaterial {
+  class VisMaterial extends Bound {
     public pbr: RecordedPbr = {};
-    public SetPbrMaterial(pbr: RecordedPbr): void {
-      this.pbr = pbr;
+    // Like `XCAFDoc_VisMaterial::SetPbrMaterial`, it copies the factors: the export deletes its colour afterwards.
+    public SetPbrMaterial(pbr: VisMaterialPbr): void {
+      const rgb = pbr.BaseColor?.GetRGB();
+      this.pbr = {
+        BaseColor: pbr.BaseColor && rgb && [rgb.Red(), rgb.Green(), rgb.Blue(), pbr.BaseColor.Alpha()],
+        Metallic: pbr.Metallic,
+        Roughness: pbr.Roughness,
+      };
+      rgb?.delete();
     }
   }
-  class AsciiString {
+  class AsciiString extends Bound {
     // oxlint-disable-next-line @typescript-eslint/parameter-properties -- `erasableSyntaxOnly` forbids constructor parameter properties in Vitest specs
     public readonly value: string;
     public constructor(value: string) {
+      super();
       this.value = value;
     }
   }
@@ -61,7 +79,8 @@ const withRecordedVisualMaterials = (oc: OpenCascadeInstance) => {
     XCAFDoc_VisMaterialPBR: VisMaterialPbr,
     TCollection_AsciiString: AsciiString,
     XCAFDoc_DocumentTool: new Proxy(oc.XCAFDoc_DocumentTool, {
-      get: (target, key): unknown => (key === 'VisMaterialTool' ? () => visMaterialTool : Reflect.get(target, key)),
+      get: (target, key): unknown =>
+        key === 'VisMaterialTool' ? () => Object.assign(new Bound(), visMaterialTool) : Reflect.get(target, key),
     }),
   };
   return {
@@ -70,6 +89,7 @@ const withRecordedVisualMaterials = (oc: OpenCascadeInstance) => {
         typeof key === 'string' && key in bindings ? bindings[key] : Reflect.get(target, key),
     }),
     materials,
+    lifecycle,
   };
 };
 
@@ -112,9 +132,11 @@ describe('exportSTEP visual materials', () => {
       },
       { shape: makeBox([80, 0, 0], [90, 10, 10]), name: 'plain' },
     ]);
-    const { oc, materials } = withRecordedVisualMaterials(getOC());
+    const { oc, materials, lifecycle } = withRecordedVisualMaterials(getOC());
 
     exportSTEP(oc, shapes);
+    expect(lifecycle.created).toBeGreaterThan(0);
+    expect(lifecycle.deleted).toBe(lifecycle.created);
 
     const geometries = render(shapes).filter(
       (geometry): geometry is GeometryReplicad => geometry.format === 'replicad',
@@ -141,12 +163,7 @@ describe('exportSTEP visual materials', () => {
       [...materials].map(([name, pbr]) => [
         name,
         {
-          baseColor: pbr.BaseColor && [
-            round(pbr.BaseColor.GetRGB().Red()),
-            round(pbr.BaseColor.GetRGB().Green()),
-            round(pbr.BaseColor.GetRGB().Blue()),
-            round(pbr.BaseColor.Alpha()),
-          ],
+          baseColor: pbr.BaseColor?.map((channel) => round(channel)),
           metallic: pbr.Metallic,
           roughness: pbr.Roughness,
         },

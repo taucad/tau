@@ -166,6 +166,12 @@
 \* refused turn through the existing regenerate gesture. No action or verdict changes.
 \* DC-10 revisions-ui slice 2 (2026-11-18): `use-turn-admission.ts` takes the revision client registry from
 \* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
+\* revisions-ui slice 6 (2026-11-19): `use-turn-admission.ts` takes `subscribeRevisionSessionUser` from
+\* `@taucad/revisions-ui/lib/revision-actor`; only the import moved. No action or verdict changes.
+\* Tau Cloud naming audit (2026-11-18): `chat-session-store.ts` rewords the queue-updates error sentence; copy only.
+\* No action or verdict changes.
+\* DC-10 files-ui slice 9 (2026-11-19): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type
+\* from `@taucad/files-ui`; only the import moved. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

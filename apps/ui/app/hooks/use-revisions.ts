@@ -7,7 +7,7 @@
  * and projection from `use-revision-status`, the chat session store whose
  * settlements name each turn's revision, the library's who-resolver over
  * `lib/revision-actor`'s context (session, push record and the debug flag) and the push
- * records of `lib/revision-pushes` (`window.ENV`'s API origin). App suites mock
+ * records of `lib/revision-pushes` (both bound to `window.ENV`'s API origin). App suites mock
  * this module and the ones it binds, so its path stays; the types and
  * `revisionPageSize` are imported from the library itself.
  */

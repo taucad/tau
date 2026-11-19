@@ -1,4 +1,4 @@
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
@@ -55,6 +55,7 @@ vi.stubGlobal(
 const { canOpenCloudProject, tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 const {
   backupByDefaultNotice,
+  cloudOpenContinuationTestApi,
   fetchCloudProjects,
   materializeOnSignIn,
   materializedCloudProjects,
@@ -331,6 +332,8 @@ describe('useTauCloudIntentConnection', () => {
     cleanup();
     setRevisionSessionUser(undefined);
     vi.restoreAllMocks();
+    /* No Web Locks in jsdom: a row's hold that never settles would otherwise keep the next row's open waiting. */
+    cloudOpenContinuationTestApi.reset();
   });
 
   function Connector({

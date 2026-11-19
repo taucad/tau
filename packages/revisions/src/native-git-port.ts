@@ -90,6 +90,7 @@ import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } 
 import type { LargeObjectBasis } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
+import { isStorageRefusal, withoutQuotaMarker } from '#refusal-markers.js';
 import {
   isHostLocalRef,
   isTauApiUrl,
@@ -876,10 +877,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns The error to throw.
    */
   const lfsTransferRefusal = (stderr: string, remote: string, paths: readonly string[]): Error => {
-    if (/\b413\b|GIT_LFS_QUOTA_EXCEEDED|entity too large|storage (?:quota|plan)/iu.test(stderr)) {
-      const said = /batch response:\s*(?<said>.+)/u.exec(stderr)?.groups?.['said']?.trim();
+    if (
+      /\b413\b|GIT_LFS_QUOTA_EXCEEDED|entity too large|storage (?:quota|plan)/iu.test(stderr) ||
+      isStorageRefusal(stderr)
+    ) {
+      /* The server's marker, when it puts one in front, is a key and not the sentence. */
+      const batch = /batch response:\s*(?<said>.+)/u.exec(stderr)?.groups?.['said'];
+      const said = batch === undefined ? undefined : withoutQuotaMarker(batch).trim();
       return new LfsQuotaError({
-        message: said === undefined || said === '' ? 'This project is over its storage plan.' : said,
+        message: said === undefined || said === '' ? 'This project doesn’t fit in its backup.' : said,
         oids: Object.freeze([]),
         /* Largest first and at most the server's ten (RV-W8 F11). */
         paths: Object.freeze(paths.slice(0, refusedFileLimit)),

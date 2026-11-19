@@ -82,7 +82,7 @@ import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_int
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
-import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { CommitCancelledDraftRestoreInput } from '@taucad/files-ui/types/chat-storage.types';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
@@ -2649,7 +2649,7 @@ export class ChatSessionStore {
         ? {
             items: after.items,
             status: 'blocked',
-            error: 'Message saved. Delivery could not be confirmed. Retry to continue.',
+            error: 'Message saved, but Tau couldn’t confirm it was delivered. Try again.',
           }
         : { items: after.items, status: 'changed' };
     });
@@ -4524,7 +4524,7 @@ export class ChatSessionStore {
             if (observed.status === 'error' || observed.status === 'closed') {
               messageQueueRef.send({
                 type: 'watchFailed',
-                error: observed.error ?? 'Queue updates disconnected. Retry to reconnect.',
+                error: observed.error ?? 'Lost the connection to your queued messages. Try again.',
               });
             }
           });

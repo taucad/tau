@@ -2,16 +2,27 @@
 import { describe, expect, it } from 'vitest';
 import type { ModuleIdManifest, ModuleIdManifestChunk } from '@taucad/vite/module-id-manifest';
 import {
+  adaptiveBounds,
+  buildCeilingOf,
   buildVariantOf,
+  compareExcessWithEntry,
+  compareWithSelfHostBaseline,
+  findPinnedCeilingLeaks,
   compareWithBudget,
   findEarlyKernelPreloads,
+  findPrecacheProblems,
   findSplitRouteModules,
   findWarmManifestProblems,
   measureClass,
   preloadHrefs,
 } from '#scripts/check-critical-budget.mts';
 import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
-import type { ClassBudget, ClassMeasure, RouterManifest } from '#scripts/check-critical-budget.mts';
+import type {
+  ClassBudget,
+  ClassMeasure,
+  RouterManifest,
+  WrittenPrecacheEntry,
+} from '#scripts/check-critical-budget.mts';
 
 const manifest = {
   'app/entry.client.tsx': { file: 'assets/entry.client-a.js', imports: ['_react-b.js'] },
@@ -215,6 +226,85 @@ describe('buildVariantOf', () => {
   });
 });
 
+describe('buildCeilingOf (adaptive app deployment mode W2)', () => {
+  it('should read the ceiling module first, then an adaptive facade, then the boundary files', () => {
+    expect(
+      buildCeilingOf({
+        ...moduleIds,
+        chunks: [chunk('assets/a.js', ['apps/ui/app/cloud/deployment-ceiling.adaptive.ts'])],
+      }),
+    ).toBe('adaptive');
+    expect(
+      buildCeilingOf({ ...moduleIds, chunks: [chunk('assets/a.js', ['apps/ui/app/cloud/root-billing.adaptive.tsx'])] }),
+    ).toBe('adaptive');
+    expect(buildCeilingOf(moduleIds)).toBe('cloud');
+    expect(() =>
+      buildCeilingOf({
+        ...moduleIds,
+        chunks: [
+          chunk('assets/a.js', [
+            'apps/ui/app/cloud/deployment-ceiling.cloud.ts',
+            'apps/ui/app/cloud/deployment-ceiling.self-host.ts',
+          ]),
+        ],
+      }),
+    ).toThrow(/more than one ceiling/u);
+  });
+});
+
+describe('findPinnedCeilingLeaks (I10)', () => {
+  const leaky = {
+    ...moduleIds,
+    chunks: [chunk('assets/a.js', ['apps/ui/app/runtime/deployment.machine.ts', 'apps/ui/app/cloud/cloud-port.ts'])],
+  };
+
+  it('should refuse the mode owner and the Core in a pinned build', () => {
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'self-host' })).toHaveLength(2);
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'cloud' })).toHaveLength(2);
+    expect(findPinnedCeilingLeaks({ moduleIds: leaky, ceiling: 'adaptive' })).toEqual([]);
+    expect(findPinnedCeilingLeaks({ moduleIds, ceiling: 'cloud' })).toEqual([]);
+  });
+});
+
+describe('compareWithSelfHostBaseline (gate G1)', () => {
+  const baseline = { brotliBytes: 100_000, requests: 100, largestChunkBrotliBytes: 50_000 };
+
+  it('should hold an adaptive class within +2 requests, 1 % bytes and 1 % of the largest chunk', () => {
+    const within = { brotliBytes: 101_000, requests: 102, largestChunkBrotliBytes: 50_500 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: within, baseline, baselineName: 'b' })).toEqual([]);
+    const over = { brotliBytes: 101_001, requests: 103, largestChunkBrotliBytes: 50_501 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: over, baseline, baselineName: 'b' })).toHaveLength(3);
+    expect(adaptiveBounds).toEqual({ requests: 2, bytes: 0.01, largestChunkBytes: 0.01 });
+  });
+
+  it('should never fail an adaptive class for landing under a baseline', () => {
+    const under = { brotliBytes: 1, requests: 1, largestChunkBrotliBytes: 1 };
+    expect(compareWithSelfHostBaseline({ label: 'x', measure: under, baseline, baselineName: 'b' })).toEqual([]);
+  });
+});
+
+describe('compareExcessWithEntry (gate G1 bound 1, amended)', () => {
+  const entry = { brotliBytes: 1_239_607, requests: 228, largestChunkBrotliBytes: 140_852 };
+
+  it('should pass when main has drifted above the entry but the adaptive excess fits its allowance', () => {
+    const sameRun = { brotliBytes: 1_251_446, requests: 227, largestChunkBrotliBytes: 136_688 };
+    const adaptive = { brotliBytes: 1_255_352, requests: 225, largestChunkBrotliBytes: 136_615 };
+    expect(compareExcessWithEntry({ label: 'home', measure: adaptive, sameRun, entry })).toEqual([]);
+  });
+
+  it('should fail an excess over 1 % of the entry on bytes, over 2 requests or over 1 % of the largest chunk', () => {
+    const sameRun = { brotliBytes: 1_000_000, requests: 200, largestChunkBrotliBytes: 100_000 };
+    const adaptive = { brotliBytes: 1_012_397, requests: 203, largestChunkBrotliBytes: 101_410 };
+    expect(compareExcessWithEntry({ label: 'home', measure: adaptive, sameRun, entry })).toHaveLength(3);
+    const fits = { brotliBytes: 1_012_396, requests: 202, largestChunkBrotliBytes: 101_409 };
+    expect(compareExcessWithEntry({ label: 'home', measure: fits, sameRun, entry })).toEqual([]);
+  });
+
+  it('should need both baselines', () => {
+    expect(compareExcessWithEntry({ label: 'home', measure: entry, sameRun: undefined, entry })).toHaveLength(1);
+  });
+});
+
 describe('findWarmManifestProblems (PL8)', () => {
   const closures = new Map([
     ['home', ['assets/entry.client-a.js', 'assets/react-b.js', 'assets/root-c.js', 'assets/root-c.css']],
@@ -291,5 +381,101 @@ describe('findSplitRouteModules (React Router 8 migration B8, RR6)', () => {
       'routes/import.$ splits clientLoaderModule /assets/route-b-client-loader.js',
       'routes/projects_ splits hydrateFallbackModule /assets/route-d-fallback.js',
     ]);
+  });
+});
+
+describe('findPrecacheProblems (PL7, shell invariant 8)', () => {
+  const closures = new Map([
+    ['home', ['assets/entry.client-a.js', 'assets/react-b.js', 'assets/root-c.js', 'assets/root-c.css']],
+  ]);
+  const documents = ['/__shell/home/index.html'];
+  const expected = [...documents, ...(closures.get('home') ?? []).map((file) => `/${file}`), '/fonts/Geist.woff2'];
+  const entry = (url: string): WrittenPrecacheEntry => ({
+    url,
+    revision: url.startsWith('/assets/') ? null : 'a1b2',
+  });
+  const check = (
+    entries: readonly WrittenPrecacheEntry[] | undefined,
+    generated: readonly string[] = expected,
+  ): string[] =>
+    findPrecacheProblems({ entries, expected: generated, closures, workerClassIds: ['home'], manifest, moduleIds });
+
+  it('should accept the generated list: documents and fonts revisioned, hashed files not', () => {
+    expect(check(expected.map((url) => entry(url)))).toEqual([]);
+  });
+
+  it('should refuse an entry added by hand and one the registry generates but the list lacks', () => {
+    expect(
+      check([...expected.filter((url) => url !== '/fonts/Geist.woff2'), '/robots.txt'].map((url) => entry(url))),
+    ).toEqual([
+      "precache: /fonts/Geist.woff2 is generated from the registry but not in the worker's list",
+      "precache: /robots.txt is in the worker's list but not generated from the registry",
+    ]);
+  });
+
+  it('should refuse a heavy chunk, its stylesheet, a kernel, a worker and a wasm file', () => {
+    const heavy = [
+      '/assets/three-e.js',
+      '/assets/three-e.css',
+      '/assets/kernel-g.js',
+      '/assets/kernel.worker-h.js',
+      '/assets/opencascade-i.wasm',
+    ];
+    expect(
+      check(
+        [...expected, ...heavy].map((url) => entry(url)),
+        [...expected, ...heavy],
+      ),
+    ).toEqual([
+      expect.stringMatching(/\/assets\/three-e\.js belongs with the three module/u),
+      expect.stringMatching(/\/assets\/three-e\.css belongs with the three module/u),
+      expect.stringMatching(/\/assets\/kernel-g\.js belongs with the kernels module/u),
+      'precache: /assets/kernel.worker-h.js is a wasm, worker or runtime asset',
+      'precache: /assets/opencascade-i.wasm is a wasm, worker or runtime asset',
+    ]);
+  });
+
+  it('should refuse a revision on a hashed file, none on a document, and any integrity', () => {
+    expect(
+      check([
+        { url: '/__shell/home/index.html', revision: null },
+        { url: '/assets/entry.client-a.js', revision: 'a1b2' },
+        { url: '/assets/react-b.js', revision: null, integrity: 'sha384-x' },
+        ...expected.slice(3).map((url) => entry(url)),
+      ]),
+    ).toEqual([
+      'precache: /__shell/home/index.html carries no content revision',
+      'precache: /assets/entry.client-a.js is hashed by name but carries a revision',
+      'precache: /assets/react-b.js carries url, revision, integrity; only url and revision are allowed',
+    ]);
+  });
+
+  it('should require each answered class’s interactive tier, and a written list', () => {
+    const withoutRoot = expected.filter((url) => url !== '/assets/root-c.js');
+    expect(
+      check(
+        withoutRoot.map((url) => entry(url)),
+        withoutRoot,
+      ),
+    ).toEqual(["precache: home's interactive tier holds /assets/root-c.js, which the worker does not precache"]);
+    expect(check(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
+  });
+
+  it('should require an empty written list from a kill switch build', () => {
+    const killSwitch = (entries: readonly WrittenPrecacheEntry[] | undefined): string[] =>
+      findPrecacheProblems({
+        entries,
+        expected,
+        closures,
+        workerClassIds: ['home'],
+        manifest,
+        moduleIds,
+        killSwitch: true,
+      });
+    expect(killSwitch([])).toEqual([]);
+    expect(killSwitch([entry('/__shell/home/index.html')])).toEqual([
+      'precache: /__shell/home/index.html is listed, but the kill switch worker precaches nothing',
+    ]);
+    expect(killSwitch(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
   });
 });

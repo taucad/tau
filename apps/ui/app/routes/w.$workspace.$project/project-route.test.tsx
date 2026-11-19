@@ -7,7 +7,7 @@ import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
@@ -892,6 +892,9 @@ describe('project route session identity', () => {
     desktopShellBridge = { agentHost: { rated: desktopRated } };
     renderRouteProvider();
     await screen.findAllByTestId('project-session');
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalled();
+    });
     const extras = publishProjectHostConnector.mock.calls[0]?.[2] as unknown as {
       rated: (rating: Readonly<Record<string, unknown>>) => Promise<void>;
     };
@@ -909,14 +912,16 @@ describe('project route session identity', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
     await screen.findAllByTestId('project-session');
-    expect(publishProjectHostConnector).toHaveBeenCalledWith(
-      projectA,
-      expect.any(Function),
-      expect.objectContaining({
-        stoppability: expect.any(Function) as unknown,
-        presented: expect.any(Function) as unknown,
-      }),
-    );
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(
+        projectA,
+        expect.any(Function),
+        expect.objectContaining({
+          stoppability: expect.any(Function) as unknown,
+          presented: expect.any(Function) as unknown,
+        }),
+      );
+    });
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
     await connector('chat-browser');
     expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
@@ -927,7 +932,9 @@ describe('project route session identity', () => {
       expect(focusedSessionId()).toBe(projectB);
     });
     expect(sessionIds()).toContain(projectA);
-    expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    await waitFor(() => {
+      expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    });
     expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
   });
 

@@ -124,7 +124,7 @@ describe('a GitHub remote while signed out of Tau', () => {
   });
 
   it('should keep GitHub’s refusal when signed in (D68)', () => {
-    expect(backupCopy(refused.sync, {}, refused.remote)).toBe('Backed up · GitHub refused access');
+    expect(backupCopy(refused.sync, {}, refused.remote)).toBe('Backed up · Reconnect GitHub to keep backing up');
   });
 });
 
@@ -251,7 +251,7 @@ describe('the copy table', () => {
           sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }),
         },
         onMain,
-        'Not backed up · Your Git host refused access',
+        'Not backed up · Your Git host asked for a sign-in',
       ],
       [
         'Not backed up · Over your plan',
@@ -279,14 +279,14 @@ describe('the copy table', () => {
       ['Checking…', sync({ state: 'checking' }), 'Checking for changes…'],
       ['Backing up… 2 revisions', sync({ state: 'pending', pendingCount: 2 }), 'Backing up 2 changes…'],
       ['Not backed up · 2 revisions', sync({ state: 'queued', pendingCount: 2 }), 'Not backed up · 2 changes'],
-      ['Saved locally · Push to GitHub when ready', sync({ state: 'manual' }), 'Saved · Not pushed to GitHub'],
+      ['Saved locally · Push to GitHub when ready', sync({ state: 'manual' }), 'Saved · Not on GitHub yet'],
     ] as const)('says the backup line “%s” as the table proposes', (_, facet, line) => {
       expect(syncCopy(facet, github)).toBe(line);
     });
 
     it('says the cloud copy is gone without “revision”', () => {
       expect(cloudUnavailableSentence).toBe(
-        'The cloud copy was deleted or your access changed. Your history is still on this device.',
+        'This project was deleted from the cloud, or your access changed. Your history is still on this device.',
       );
     });
 

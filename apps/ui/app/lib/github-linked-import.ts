@@ -10,7 +10,7 @@ import type { GithubRepositorySelection } from '#components/github/github-reposi
 import { ENV } from '#environment.config.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
-import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { getRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import type { LinkedImportRequest } from '@taucad/ui-core/machines/import-linked';
 import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 

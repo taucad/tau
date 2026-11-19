@@ -54,6 +54,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   acpLoginLaunch,
+  computeStoreWorkspace,
   defaultConfigDirectory,
   defaultDependencyStore,
   discoverAcpAgents,
@@ -171,6 +172,7 @@ import {
 import type { RecoveryHooks, RecoveryWindowLike } from '#main/recovery-window.js';
 import { admitRouteQualificationProbe, prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
+import { readDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
@@ -730,12 +732,14 @@ if (recordsBootHealth) {
     log: logMain,
   });
 }
+/* LW8: the commit packaging recorded beside the bundles (`dist/host-build.json`); empty when none was (ST-9). */
+const desktopHostBuild = readDesktopHostBuild(join(import.meta.dirname, '..'));
 const bootHealth: BootHealth | undefined = recordsBootHealth
   ? startBootHealth({
       path: join(app.getPath('userData'), bootHealthFileName),
       build: buildIdentity({
         version: app.getVersion(),
-        sourceCommit: typeof tauDesktopHostBuild === 'string' ? tauDesktopHostBuild : '',
+        sourceCommit: desktopHostBuild,
         packaged: app.isPackaged,
       }),
       version: app.getVersion(),
@@ -1155,8 +1159,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   let computeWorker: Worker | undefined;
-  /* One connection per root while some utility runs durable compute on it,
-   * counted by holder: a root nobody runs keeps no connection in main. */
+  /* One connection per store workspace while some utility runs durable compute
+   * on it, counted by holder: a store nobody runs keeps no connection in main.
+   * A project's worktrees and copies share its workspace (`computeStoreWorkspace`). */
   const computeConnections = new Map<
     string,
     { readonly connection: ReturnType<typeof connectSqliteComputeStoreWorker>; holders: number }
@@ -1173,7 +1178,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     computeWorker = undefined;
   };
   const holdComputeConnection = (projectRoot: string) => {
-    let entry = computeConnections.get(projectRoot);
+    const workspace = computeStoreWorkspace(projectRoot);
+    let entry = computeConnections.get(workspace);
     if (!entry) {
       if (!computeWorker) {
         const worker = new Worker(computeStoreWorkerEntry, {
@@ -1189,10 +1195,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
         computeWorker = worker;
       }
       entry = {
-        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot }),
+        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace }),
         holders: 0,
       };
-      computeConnections.set(projectRoot, entry);
+      computeConnections.set(workspace, entry);
     }
     const held = entry;
     held.holders += 1;
@@ -1206,8 +1212,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
         released = true;
         held.holders -= 1;
         /* A worker restart already disposed and replaced a stale entry. */
-        if (held.holders === 0 && computeConnections.get(projectRoot) === held) {
-          computeConnections.delete(projectRoot);
+        if (held.holders === 0 && computeConnections.get(workspace) === held) {
+          computeConnections.delete(workspace);
           held.connection.dispose();
         }
       },
@@ -1461,6 +1467,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
       TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* LW8: the commit packaging recorded beside the bundles, read above. */
+      TAU_DESKTOP_HOST_BUILD: desktopHostBuild, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
@@ -2784,12 +2792,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
               buttons: context.retryable
-                ? ['Retry saving', 'Keep Tau open', 'Quit anyway']
+                ? ['Try saving again', 'Keep Tau open', 'Quit anyway']
                 : ['Restore workspace', 'Quit anyway'],
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
+              detail: `${context.error ?? ''} Try saving again, or restore the app after pending saves finish. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
             });
             done(
               context.retryable
@@ -2847,7 +2855,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           case 'recoveryReview': {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
-              buttons: installFailed ? ['Retry recovery'] : ['Retry recovery', 'Quit anyway'],
+              buttons: installFailed ? ['Try recovery again'] : ['Try recovery again', 'Quit anyway'],
               defaultId: 0,
               cancelId: 0,
               message: 'Tau is waiting to restore your workspace.',

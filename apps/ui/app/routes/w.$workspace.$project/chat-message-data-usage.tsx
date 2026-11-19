@@ -8,8 +8,8 @@ import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/chat-message-usage.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordBillingRevisionMinimum } from '@taucad/billing-ui/db/billing-snapshot-store';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /** What the account's own authority says one funded operation cost. @public */
 export type ReceiptCredit =

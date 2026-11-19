@@ -1,7 +1,16 @@
 import type { Config } from '@react-router/dev/config';
-import { resolveTauCloudBuildEnabled } from './build-environment.ts';
+import {
+  resolveServiceWorkerKillSwitch,
+  resolveTauDeploymentCeiling,
+  resolveUiBuildDirectory,
+  uiBuildDirectoryVariable,
+  serviceWorkerKillSwitchVariable,
+} from './build-environment.ts';
 
-const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+/* `/usage` is prerendered and precached by the `cloud` ceiling only (adaptive app deployment mode D8). */
+const tauCloudEnabled = resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']) === 'cloud';
+/** `TAU_SERVICE_WORKER_KILL_SWITCH=true`: `buildEnd` writes the retiring worker instead of the web app's (PL7). */
+const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
 
 /**
  * Concurrency for parallel prerender requests. React Router defaults to 1
@@ -30,6 +39,8 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
+  /* `build` unless CI keeps a second build beside it (`ui:build-adaptive`, gate G1). */
+  buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
   /**
    * Hands the dev dependency optimizer its crawl entries: the client entry and every route
    * module. Without it React Router sets `optimizeDeps.entries` to `[]`, Vite's startup scan
@@ -81,10 +92,11 @@ export default {
    * `buildEnd` is the only hook that runs after prerendering, so it is where
    * the Home shell is moved off `/`'s static path to the file the marketing edge
    * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
-   * and where the offline shell worker is generated from the emitted `/usage`
-   * document and the Vite build manifest (B5 R3), and where the warm manifest is
-   * written from the Vite build manifest and the module-id manifest (progressive
-   * loading PL8, `scripts/write-warm-manifest.ts`). The desktop and daemon configs
+   * where the warm manifest is written from the Vite build manifest and the
+   * module-id manifest (progressive loading PL8, `scripts/write-warm-manifest.ts`),
+   * and where the web app's one service worker is built, its precache list generated
+   * from the route-class registry and the emitted shell documents (progressive
+   * loading PL7, `scripts/build-service-worker.ts`). The desktop and daemon configs
    * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
@@ -105,16 +117,24 @@ export default {
         .map(([id, files]) => `${id} ${String(files.length)} files`)
         .join(', ')}`,
     );
-    if (!tauCloudEnabled) {
-      return;
-    }
-    const { generateOfflineShell } = await import('./scripts/generate-offline-shell');
-    const { listOfflineShellPaths } = await import('./app/lib/static-paths');
-    await generateOfflineShell({
-      clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
-      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/offline-shell-worker.ts`,
-      documentPaths: listOfflineShellPaths(),
+    const { buildServiceWorker } = await import('./scripts/build-service-worker');
+    const { workerRouteClasses } = await import('./app/lib/route-classes');
+    const worker = await buildServiceWorker({
+      buildDirectory: reactRouterConfig.buildDirectory,
+      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/${serviceWorkerKillSwitch ? 'service-worker-kill-switch.ts' : 'service-worker.ts'}`,
+      // `/usage` is a cloud route: a self-host build neither prerenders nor precaches it.
+      classes: workerRouteClasses().filter(
+        (workerClass) => tauCloudEnabled || workerClass.routeClass.id !== 'offline-shell',
+      ),
+      // Also written at /offline-shell-worker.js, retiring the /usage worker that ui@0.3.0 and earlier registered.
+      retiringWorkerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker-kill-switch.ts`,
+      killSwitch: serviceWorkerKillSwitch,
     });
+    console.log(
+      serviceWorkerKillSwitch
+        ? `Service worker: kill switch (${serviceWorkerKillSwitchVariable}=true), retires installed workers, precaches nothing`
+        : `Service worker: ${String(worker.entries.length)} precache entries, ${String(Math.round(worker.bytes / 1024))} KiB`,
+    );
   },
   prerender: {
     async paths() {

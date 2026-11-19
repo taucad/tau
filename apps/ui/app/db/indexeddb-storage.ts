@@ -1,5 +1,6 @@
 import { convertLegacyProjectManifestBytes } from '@taucad/types';
-import type { AppUiPreferences, StorageProvider } from '#types/storage.types.js';
+import type { StorageProvider } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type {
   PendingPermanentDeleteProjectOperation,
@@ -72,7 +73,7 @@ const deviceEditorStateFromLegacy = (raw: unknown): EditorState => {
  */
 export class StorageUpgradeBlockedError extends Error {
   public constructor() {
-    super('Local storage could not be opened. Close other Tau tabs and reload.');
+    super('Couldn’t open Tau’s storage on this device. Close other Tau tabs and reload.');
     this.name = 'StorageUpgradeBlockedError';
   }
 }

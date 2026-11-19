@@ -12,7 +12,7 @@ import { render } from '@testing-library/react';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { flush } from '@taucad/xstate-testing/clock';
 import { describe, expect, it, vi } from 'vitest';
-import type { ProjectLibraryFiles } from '#runtime/project-library.js';
+import type { ProjectLibraryFiles } from '@taucad/files-ui/runtime/project-library';
 
 const files = vi.hoisted(() => ({
   recordFiles: {
@@ -39,9 +39,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/object-store-worker.js', () => ({
   createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
-vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: async () => undefined }));
 
-const { FinancialSessionProvider, FinancialSessionScope } = await import('#providers/financial-session-provider.js');
+const { FinancialSessionProvider, FinancialSessionScope } =
+  await import('@taucad/billing-ui/providers/financial-session-provider');
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');

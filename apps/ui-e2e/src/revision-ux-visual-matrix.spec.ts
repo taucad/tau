@@ -203,8 +203,8 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
    * what the project already is, so the chooser's own Back up to Tau Cloud waits for another choice. */
   await openBackupChooser();
   const thisDeviceOnly = backupChooser().getByRole('radio', { name: 'This device only' });
-  const tauCloud = backupChooser().getByRole('radio', { name: 'Tau Cloud' });
-  const connectBackup = backupLine().getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  const tauCloud = backupChooser().getByRole('radio', { name: 'Tau', exact: true });
+  const connectBackup = backupLine().getByRole('button', { name: 'Back up to the cloud', exact: true });
   await target.expectAttribute(tauCloud, 'aria-checked', 'true');
   expect(await target.getAttribute(connectBackup, 'disabled')).toBeNull();
   await target.expectVisible(backupLine().getByRole('switch', { name: 'Include chats' }));

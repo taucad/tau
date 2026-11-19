@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 915 packages, with the license each declares.
+The web and desktop apps include the following 921 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -313,9 +313,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
-| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.2.0-beta.0 | MIT |
-| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.2 | MIT |
-| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.3 | MIT |
+| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.2.0-beta.2 | MIT |
+| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.3 | MIT |
+| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.4 | MIT |
 | [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
@@ -409,8 +409,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
-| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.1 | Apache-2.0 |
-| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.1 | Apache-2.0 |
+| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
+| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
 | [call-bind-apply-helpers](https://github.com/ljharb/call-bind-apply-helpers) | 1.0.2 | MIT |
 | [call-bound](https://github.com/ljharb/call-bound) | 1.0.4 | MIT |
@@ -594,6 +594,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 7.0.6 | MIT |
 | [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 9.1.0 | MIT |
 | [iconv-lite](https://github.com/pillarjs/iconv-lite) | 0.7.3 | MIT |
+| [idb](https://github.com/jakearchibald/idb) | 7.1.1 | ISC |
 | [ieee754](https://github.com/feross/ieee754) | 1.2.1 | BSD-3-Clause |
 | [ignore](https://github.com/kaelzhang/node-ignore) | 5.3.2 | MIT |
 | [immediate](https://github.com/calvinmetcalf/immediate) | 3.0.6 | MIT |
@@ -955,6 +956,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [which](https://github.com/isaacs/node-which) | 2.0.2 | ISC |
 | [which-typed-array](https://github.com/inspect-js/which-typed-array) | 1.1.24 | MIT |
 | [widest-line](https://github.com/sindresorhus/widest-line) | 6.0.0 | MIT |
+| [workbox-core](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-expiration](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-precaching](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-routing](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-strategies](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
 | [worker-factory](https://github.com/chrisguttandin/worker-factory) | 7.0.50 | MIT |
 | [worker-timers](https://github.com/chrisguttandin/worker-timers) | 8.0.34 | MIT |
 | [worker-timers-broker](https://github.com/chrisguttandin/worker-timers-broker) | 8.0.18 | MIT |

@@ -1,6 +1,6 @@
 # replicad — Interfaces
 
-25 top-level symbols. Signatures are verbatim typescript.
+26 top-level symbols. Signatures are verbatim typescript.
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
@@ -53,6 +53,9 @@ DrawingInterface: export declare interface DrawingInterface
 
   // DrawingInterface.clone (method)
   clone(): DrawingInterface;
+
+  // DrawingInterface.delete (method)
+  delete(): void;
 
   boundingBox: BoundingBox2d
 
@@ -305,6 +308,18 @@ MeshShapeMesh: export declare interface MeshShapeMesh
   vertProperties: number[]
 
   numProp: number
+
+// A deterministic ownership scope for OpenCascade values (and other objects with a `delete()` method)
+// Remarks: `scope(value)` registers a value the scope owns and returns it; `scope.keep(value)` takes it back out (the caller now owns it), and `scope.dispose()` deletes everything still owned, last registered first, skipping values that were already deleted. Dispose a scope in a `finally` block, or declare it with `using` where explicit resource management is available, so that a throw cannot leak what it owns: ```ts const r = ocScope(); try { const builder = r(new oc.BRepBuilderAPI_MakeFace(plane)); return builder.Face(); } finally { r.dispose(); } ``` Unlike {@link GCWithScope}, nothing waits for the garbage collector, which never runs during a synchronous model build.
+OcScope: export declare interface OcScope
+
+  // Releases a value from the scope
+  // OcScope.keep (method)
+  keep<T extends Deletable | null | undefined>(value: T): T;
+
+  // Deletes every value the scope still owns
+  // OcScope.dispose (method)
+  dispose(): void;
 
 // A host cache
 // Remarks: The library calls `operation` only for calls made by user code: calls made while an operation runs (internal composition) go straight to the implementation, except inside a user callback that the library invokes (a sweep factory), where user code is routed again. Calls the cache makes itself go through the routing too; wrap them in `bypassOperationCache`.

@@ -108,6 +108,7 @@ Plane: export declare class Plane
   // Plane.clone (method)
   clone(): Plane;
 
+  // Takes ownership of `newOrigin`
   origin: Vector
 
   // Plane.translateTo (method)
@@ -276,6 +277,7 @@ Sketch: export declare class Sketch implements SketchInterface
           defaultDirection?: Point;
       });
 
+  // Keeps a copy of `newFace`
   baseFace: Face | null | undefined
 
   // Sketch.delete (method)
@@ -284,8 +286,10 @@ Sketch: export declare class Sketch implements SketchInterface
   // Sketch.clone (method)
   clone(): Sketch;
 
+  // Keeps a copy of `newOrigin`
   defaultOrigin: Vector
 
+  // Keeps a copy of `newDirection`
   defaultDirection: Vector
 
   // Transforms the lines into a face
@@ -340,6 +344,7 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   constructor(plane: Plane);
   constructor(plane?: PlaneName, origin?: Point | number);
 
+  // Deletes what the sketcher owns
   // Sketcher.delete (method)
   delete(): void;
 
@@ -478,7 +483,7 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   // Sketcher.buildWire (method)
   protected buildWire(): Wire;
 
-  // Stop drawing and returns the sketch
+  // Builds the sketch
   // Sketcher.done (method)
   done(): Sketch;
 
@@ -566,10 +571,17 @@ Transformation: export declare class Transformation extends WrappingObj<gp_Trsf>
   // Transformation.transform (method)
   transform(shape: TopoDS_Shape): TopoDS_Shape;
 
+// A 3D vector
+// Remarks: `wrapped` creates a `gp_Vec` the first time OpenCascade code needs one; the vector owns it and deletes it with itself (or when its coordinates change). Change a vector through its methods, not through `wrapped`.
 Vector: export declare class Vector extends WrappingObj<gp_Vec>
 
   // Vector.constructor (constructor)
   constructor(vector?: Point);
+
+  wrapped: gp_Vec
+
+  // Vector.delete (method)
+  delete(): void;
 
   readonly repr: string
 
@@ -579,14 +591,17 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
 
   readonly z: number
 
+  // As `gp_Vec::Magnitude`
   readonly Length: number
 
   // Vector.toTuple (method)
   toTuple(): [number, number, number];
 
+  // As `gp_Vec::Crossed`
   // Vector.cross (method)
   cross(v: Vector): Vector;
 
+  // As `gp_Vec::Dot`
   // Vector.dot (method)
   dot(v: Vector): number;
 
@@ -599,9 +614,11 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
   // Vector.multiply (method)
   multiply(scale: number): Vector;
 
+  // As `gp_Vec::Normalized`
   // Vector.normalized (method)
   normalized(): Vector;
 
+  // As `gp_Vec::Normalize`
   // Vector.normalize (method)
   normalize(): Vector;
 
@@ -640,6 +657,8 @@ Wire: export declare class Wire extends _1DShape<TopoDS_Wire>
   // Wire.offset2D (method)
   offset2D(offset: number, kind?: "arc" | "intersection" | "tangent"): Wire;
 
+// The base of every object that owns an OpenCascade value
+// Remarks: A wrapper adopts the value it is constructed with: it is now its only owner and deletes it exactly once, when `delete()` is called or, as a safety net, after the wrapper has been garbage collected. Code that must keep using a value after handing it to a wrapper passes a copy instead. A wrapper whose value has been deleted (by `delete()`, by an operation that consumes it, or from outside, as an evaluation sweep does) throws on use instead of reaching freed memory.
 WrappingObj: export declare class WrappingObj<Type extends Deletable>
 
   oc: OpenCascadeInstance

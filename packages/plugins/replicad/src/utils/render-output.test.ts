@@ -103,8 +103,35 @@ describe('tessellation instancing detection', () => {
 
     expect(inspect).not.toHaveBeenCalled();
     expect(prototypeHash).not.toHaveBeenCalled();
-    expect(onRenderMode).toHaveBeenCalledExactlyOnceWith('mixed');
+    // The partner-less cylinder is a prototype too (N5), so nothing renders flat.
+    expect(onRenderMode).toHaveBeenCalledExactlyOnceWith('tessellation-instanced');
     expect(meshes(geometries).map((geometry) => geometry.name)).toEqual(['box', 'translated', 'rotated', 'cylinder']);
+  });
+
+  it('meshes a partner-less shape unplaced, as a prototype, and places it after (N5)', () => {
+    const cylinder = keep(makeCylinder(3, 8));
+    const shape = keep(cylinder.clone().rotate(37, [1, 1, 1], [1, 2, 3]).translate([4, -5, 6]));
+    const flatMesh = vi.spyOn(shape, 'mesh');
+    const extract = vi.spyOn(oc.ReplicadPrototypeMeshExtractor, 'ExtractFaces');
+
+    const [prototype] = meshes(
+      render([{ name: 'cylinder', shape }], { openCascade: oc, tessellationInstancing: true, collectBrepEdges: true }),
+    );
+    flatMesh.mockRestore();
+    const [flat] = meshes(render([{ name: 'cylinder', shape }], { collectBrepEdges: true }));
+
+    expect(flatMesh).not.toHaveBeenCalled();
+    expect(extract).toHaveBeenCalledOnce();
+    // Only the triangles' connectivity may differ from meshing in place: OCCT triangulates a placed face differently.
+    expect(prototype!.faces.vertices).toStrictEqual(flat!.faces.vertices);
+    expect(prototype!.faces.normals).toStrictEqual(flat!.faces.normals);
+    // Group ids are native hash codes the glTF packer replaces with the group's index.
+    const spans = (groups: ReadonlyArray<{ start: number; count: number }>) =>
+      groups.map(({ start, count }) => ({ start, count }));
+    expect(spans(prototype!.faces.faceGroups)).toStrictEqual(spans(flat!.faces.faceGroups));
+    expect(prototype!.edges.lines).toStrictEqual(flat!.edges.lines);
+    expect(spans(prototype!.edges.edgeGroups)).toStrictEqual(spans(flat!.edges.edgeGroups));
+    expect(prototype!.faces.triangles).toHaveLength(flat!.faces.triangles.length);
   });
 
   it('labels every instance with the prototype face and edge groups, reading no per-instance ids (N5)', () => {
@@ -245,28 +272,80 @@ describe('mesh memo (E7, N2)', () => {
     }
   });
 
-  it('meshes again at another tolerance, placement or material', () => {
+  it('meshes again at another tolerance or once a material needs surface coordinates, not at another placement or material', () => {
     const box = keep(makeBox([0, 0, 0], [10, 6, 4]));
     const memo = createReplicadMeshMemo({ openCascade: oc });
     try {
       memoRender(memo, [{ name: 'box', shape: box }]);
       const moved = keep(box.clone().translate([5, 0, 0]));
-      const views: Array<{ shapes: NamedInputShape[]; options: Parameters<typeof render>[1] }> = [
+      const views: Array<{ shapes: NamedInputShape[]; options: Parameters<typeof render>[1]; meshed: number }> = [
         {
           shapes: [{ name: 'box', shape: box }],
           options: { tessellation: { linearTolerance: 0.5, angularTolerance: 20 } },
+          meshed: 1,
         },
-        { shapes: [{ name: 'box', shape: moved }], options: {} },
+        { shapes: [{ name: 'box', shape: moved }], options: {}, meshed: 0 },
         {
           shapes: [{ name: 'box', shape: box, material: { pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1] } } }],
           options: {},
+          meshed: 0,
+        },
+        {
+          shapes: [
+            {
+              name: 'box',
+              shape: box,
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
+              material: { extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.5 } } },
+            },
+          ],
+          options: {},
+          meshed: 1,
+        },
+        {
+          // Another material that needs surface coordinates: they depend on the geometry alone.
+          shapes: [
+            {
+              name: 'box',
+              shape: box,
+              material: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
+                extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.9, anisotropyRotation: 1 } },
+              },
+            },
+          ],
+          options: {},
+          meshed: 0,
         },
       ];
-      for (const { shapes, options } of views) {
+      for (const { shapes, options, meshed } of views) {
         const recorded = recordingTracer();
         memoRender(memo, shapes, { ...options, tracer: recorded.tracer });
-        expect(tessellated(recorded.names)).toBe(1);
+        expect(tessellated(recorded.names)).toBe(meshed);
       }
+    } finally {
+      memo.dispose();
+    }
+  });
+
+  it('answers a pose edit from the kept prototype, placing it exactly as a render without the memo (N5)', () => {
+    const cylinder = keep(makeCylinder(3, 8));
+    const box = keep(makeBox([0, 0, 0], [10, 6, 4]));
+    const pose = (angle: number): NamedInputShape[] => [
+      { name: 'arm', shape: keep(cylinder.clone().rotate(angle, [0, 0, 0], [0, 1, 0])) },
+      { name: 'base', shape: box },
+    ];
+    const memo = createReplicadMeshMemo({ openCascade: oc });
+    try {
+      memoRender(memo, pose(0), { collectBrepEdges: true });
+      const recorded = recordingTracer();
+      const moved = bytesOf(memoRender(memo, pose(25), { collectBrepEdges: true, tracer: recorded.tracer }));
+      const reference = bytesOf(
+        render(pose(25), { openCascade: oc, tessellationInstancing: true, collectBrepEdges: true }),
+      );
+
+      expect(tessellated(recorded.names)).toBe(0);
+      expect(moved).toStrictEqual(reference);
     } finally {
       memo.dispose();
     }

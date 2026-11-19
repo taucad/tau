@@ -40,7 +40,7 @@ import { createCallbackLogic } from 'xstate';
 import { randomUuid } from '@taucad/utils/id';
 import type { ActorRefFrom, CallbackActorLogic, EventObject } from 'xstate';
 import type { CheckoutRootConfig } from '@taucad/filesystem';
-import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { RevisionStatusProjection, RevisionUserActor } from '@taucad/revisions';
 import type { CheckoutCutsOutcome } from '@taucad/revisions/revision-effects';
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
@@ -49,12 +49,12 @@ import {
   getAnonymousRevisions,
   getRevisionSalt,
   getRevisionSessionUser,
-  requestRevisionSalt,
   revisionUserActor,
   subscribeAnonymousRevisions,
   subscribeRevisionSalt,
   subscribeRevisionSessionUser,
-} from '#lib/revision-actor.js';
+} from '@taucad/revisions-ui/lib/revision-actor';
+import { requestRevisionSalt } from '#lib/revision-actor.js';
 import {
   isOwingEditorText,
   isRecordingEditorConflict,
@@ -64,7 +64,9 @@ import {
 } from '@taucad/editor-ui/lib/editor-document-session';
 import type { EditorTextScope } from '@taucad/editor-ui/lib/editor-document-session';
 import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
-import { getRevisionClient } from '#hooks/use-revision-status.js';
+import { getRevisionClient, revisionCommandsFor } from '#hooks/use-revision-status.js';
+import { continueCloudOpen, nextTauCloudStep } from '#hooks/use-cloud-projects.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';
 import { canOpenCloudProject, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
@@ -132,12 +134,28 @@ export type SessionRevisionsCloseDebtPort = Readonly<{
   clear: (key: SessionRevisionsCloseDebtKey, token: string) => void;
 }>;
 
+/** What a gesture's continued Tau Cloud open is: the project, its account and client, and when it ends. */
+export type SessionRevisionsCloudOpenContinuation = Readonly<{
+  projectId: string;
+  account: string;
+  client: RevisionClient;
+  /** The gesture asserted the project active itself, just before. */
+  asserted: boolean;
+  /** Aborted when the gesture's connection is released before a session took it. */
+  signal: AbortSignal;
+}>;
+
 /** Whether a Tau Cloud open is still owed for a project (its intent is `open`): its value, and its changes. */
 export type SessionRevisionsCloudOpenPort = Readonly<{
   get: (projectId: string) => boolean;
   subscribe: (listener: () => void) => () => void;
   /** Whether this account may continue the project's open (SP2h); absent, it may. */
   canOpen?: (projectId: string) => boolean;
+  /**
+   * Connect the project's Tau remote and hold its open (`continueCloudOpen`), for an open the *Open* gesture starts
+   * before its session (STO-25 SP6); absent, a gesture opens the client and leaves the remote to the session's route.
+   */
+  continueOpen?: (input: SessionRevisionsCloudOpenContinuation) => Promise<void>;
 }>;
 
 /**
@@ -212,7 +230,7 @@ export type SessionRevisionsCallback = (
   }>,
 ) => () => void;
 
-const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' } as const;
+const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to back up to GitHub.' } as const;
 
 /** Run every step even when one throws, and report each failure, so a teardown never faults the session (D23). */
 const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>, reportFault: (error: unknown) => void): void => {
@@ -335,16 +353,39 @@ export const createSessionRevisionsPorts = (
   wiring: SessionRevisionsWiring & Pick<SessionRevisionsPorts, 'reportFault'>,
 ): SessionRevisionsPorts => ({
   ...wiring,
-  sessionUser: { get: getRevisionSessionUser, subscribe: subscribeRevisionSessionUser },
-  anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
-  salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
+  ...createSessionRevisionsAheadPorts(wiring.reportFault),
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
   closeDebt: sessionRevisionsCloseDebt,
   editorText: { setScope: setEditorTextScope, owing: isOwingEditorText, subscribe: subscribeOwedEditorText },
+});
+
+/**
+ * The module stores an *Open* gesture's early connection reads (STO-25 SP6), the same ones a `revisions` child reads.
+ *
+ * @param reportFault - Where a failure in a teardown goes.
+ * @returns The ports.
+ * @public
+ */
+export const createSessionRevisionsAheadPorts = (
+  reportFault: (error: unknown) => void,
+): SessionRevisionsAheadPorts => ({
+  reportFault,
+  sessionUser: { get: getRevisionSessionUser, subscribe: subscribeRevisionSessionUser },
+  anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
+  salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
   cloudOpen: {
     get: (projectId) => tauCloudIntent.get(projectId) === 'open',
     subscribe: tauCloudIntent.subscribe,
     canOpen: canOpenCloudProject,
+    continueOpen: async ({ projectId, account, client, asserted, signal }) => {
+      await continueCloudOpen({
+        projectId,
+        account,
+        asserted,
+        signal,
+        connect: async () => revisionCommandsFor(client, projectId).connectRemote('tau'),
+      });
+    },
   },
 });
 
@@ -392,6 +433,289 @@ const chatSyncOf = (sync: RevisionStatusProjection['sync']): ChatSyncState =>
       : 'synced';
 
 /**
+ * The `setActor` frame the client records as: the person (or their pseudonym) in this workspace, with the linked
+ * forge's identity beside them for the author line alone (D33, I3).
+ *
+ * @param input - The project, the workspace, who is signed in, the workspace's anonymity and the account's salt.
+ * @returns The actor and its frame.
+ */
+const actorFrame = (
+  input: Readonly<{
+    projectId: string;
+    workspace: string;
+    user: RevisionSessionUser | undefined;
+    anonymous: boolean;
+    salt: string | undefined;
+  }>,
+): Readonly<{ actor: RevisionUserActor; frame: Parameters<RevisionClient['send']>[0] }> => {
+  const { projectId, workspace, user, anonymous, salt } = input;
+  const actor = revisionUserActor({ workspace, user, anonymous, salt });
+  const commitAuthor = githubProjectBinding.get(projectId)?.author;
+  return { actor, frame: { command: 'setActor', actor, ...(commitAuthor === undefined ? {} : { commitAuthor }) } };
+};
+
+/*
+ * STO-25 SP6: who holds each project's client.
+ *
+ * `sessionHolds` counts the `revisions` children that hold a project's client now. `aheadOfSession` is the client an
+ * *Open* gesture opened before its project's session existed, while no session holds it: at most one per project, and
+ * the sessions-registry composition keeps one at a time in all. Ownership moves one way only. A child that takes the
+ * project's client takes the gesture's connection with it (`handOver`), and from then on the gesture cannot reach it:
+ * a gesture's `release` closes only a connection it still owns and no session holds, so nothing can close a client in
+ * use, and a gesture never starts on a project a session holds. Nothing here keeps time.
+ */
+const sessionHolds = new Map<string, number>();
+
+type AheadOfSession = Readonly<{
+  client: RevisionClient;
+  /** The account the connection was opened for: another one signed in drops it, and no session adopts it. */
+  account: string;
+  /** End the gesture's ownership: withdraw and close, unless a session holds the client. */
+  release: () => void;
+  /** A session took the client: stop following, close nothing, and let the owed open continue, or run on. */
+  handOver: () => void;
+}>;
+
+const aheadOfSession = new Map<string, AheadOfSession>();
+
+/** Test-only: forget every hold and every gesture's connection, so no row hands the next one its state. @internal */
+export const sessionRevisionsAheadTestApi = {
+  reset: (): void => {
+    sessionHolds.clear();
+    aheadOfSession.clear();
+  },
+};
+
+/**
+ * A `revisions` child takes its project's client: a connection the gesture opened ahead of it becomes the child's when
+ * it is the same client opened for the same account, and is closed first otherwise (a stale identity is never adopted).
+ *
+ * @param projectId - The child's project.
+ * @param client - The client the child took.
+ * @param account - Who is signed in now.
+ * @returns The child's release of its hold.
+ */
+const holdSessionClient = (projectId: string, client: RevisionClient, account: string | undefined): (() => void) => {
+  const ahead = aheadOfSession.get(projectId);
+  if (ahead !== undefined) {
+    if (ahead.client === client && ahead.account === account) {
+      ahead.handOver();
+    } else {
+      ahead.release();
+    }
+  }
+  sessionHolds.set(projectId, (sessionHolds.get(projectId) ?? 0) + 1);
+  let held = true;
+  return () => {
+    if (!held) {
+      return;
+    }
+    held = false;
+    const left = (sessionHolds.get(projectId) ?? 1) - 1;
+    if (left > 0) {
+      sessionHolds.set(projectId, left);
+    } else {
+      sessionHolds.delete(projectId);
+    }
+  };
+};
+
+/** What an *Open* gesture opens ahead of its project's session (STO-25 SP6). @public */
+export type SessionRevisionsAheadInput = Readonly<{
+  projectId: string;
+  /** The workspace slug the project's route opens it in (B7). */
+  workspace: string;
+  /** The shared file-manager worker the project's session will use. */
+  worker: Worker;
+  /** The gesture asserted the project active on Tau Cloud just before (it created the project's stub). */
+  asserted?: boolean;
+}>;
+
+/** The ports an early open reads: the module stores a `revisions` child reads, minus what only a session has. @public */
+export type SessionRevisionsAheadPorts = Pick<
+  SessionRevisionsPorts,
+  'sessionUser' | 'anonymity' | 'salt' | 'cloudOpen' | 'reportFault'
+>;
+
+/*
+ * The first projection an opened client publishes, or `undefined` once `signal` aborts or the client closes first. A
+ * client tells its listeners with no projection only when it closes, so a word with none ends the wait: a later reopen
+ * is somebody else's open, not this one's.
+ */
+const firstStatus = async (
+  client: RevisionClient,
+  signal: AbortSignal,
+): Promise<RevisionStatusProjection | undefined> => {
+  const answered = Promise.withResolvers<RevisionStatusProjection | undefined>();
+  const end = (): void => {
+    answered.resolve(undefined);
+  };
+  const unsubscribe = client.subscribe(() => {
+    answered.resolve(signal.aborted ? undefined : client.status());
+  });
+  signal.addEventListener('abort', end, { once: true });
+  const status = client.status();
+  if (signal.aborted || status !== undefined) {
+    answered.resolve(signal.aborted ? undefined : status);
+  }
+  try {
+    return await answered.promise;
+  } finally {
+    unsubscribe();
+    signal.removeEventListener('abort', end);
+  }
+};
+
+/**
+ * Open a project's revision client from the *Open* gesture, before its route and session load (STO-25 SP6).
+ *
+ * The client is opened as a `revisions` child opens it (D36): the device id and the actor are queued, the account's
+ * salt is asked for, the session user's credential work settles, then the connection starts the root. When the
+ * project's Tau Cloud open is owed (a created or catalogued project: its remote is Tau Cloud at its own id), the
+ * remote is connected as soon as the root first answers, through the one `continueCloudOpen` the route would run, so
+ * `info/refs`, the catalogue and the indexes load beside the route's code.
+ *
+ * Ownership: nothing starts while a session holds the project's client, or with nobody signed in. The project's
+ * session takes the connection when its `revisions` child takes the client (same client, same account); until then
+ * the returned release ends it, and so does any change of who is signed in. A release closes the client only while
+ * no session holds it and it is still the project's client; a continued open's lock wait ends with it. An owed open
+ * still waiting for the root's first answer at the hand-over continues on that answer, for the same account, while a
+ * session holds the same client: the session takes the client long before the root answers.
+ *
+ * @param ports - The session user, anonymity, salt, cloud open and fault ports.
+ * @returns The opener: its release, which is idempotent and a no-op once a session took the connection.
+ * @public
+ */
+export const openRevisionsAheadOfSession =
+  (ports: SessionRevisionsAheadPorts) =>
+  (input: SessionRevisionsAheadInput): (() => void) => {
+    const { projectId, workspace, worker } = input;
+    const user = ports.sessionUser.get();
+    if (user === undefined || (sessionHolds.get(projectId) ?? 0) > 0) {
+      return () => undefined;
+    }
+    /* A newer gesture for the same project starts again from its own state. */
+    aheadOfSession.get(projectId)?.release();
+    const client = getRevisionClient({ projectId, worker });
+    if (client.status() !== undefined) {
+      /* Open, and no session holds it: not this gesture's to own. */
+      return () => undefined;
+    }
+    const account = user.id;
+    /* The gesture's ownership: released ends it and a continued open's lock wait and hold with it. */
+    const ended = new AbortController();
+    /*
+     * The wait for the root's first answer: a release ends it, a hand-over does not. A session takes the client a few
+     * milliseconds after the gesture opens it, long before the root answers (SP3-local 5bc7b961 gap 2), and that answer
+     * is still this connection's: an identity change is an event on it, never a reopen, and a close ends the wait.
+     */
+    const released = new AbortController();
+    /* Set at hand-over: the session that took the client holds the same connection the gesture opened. */
+    const custody: { handedOver: boolean } = { handedOver: false };
+    const unsubscribes: Array<() => void> = [];
+    const stopFollowing = (): void => {
+      runIsolated(unsubscribes.splice(0), ports.reportFault);
+    };
+    let sentFor: Readonly<{ anonymous: boolean; salt: string | undefined }> | undefined;
+    const sendActor = (): void => {
+      const anonymous = ports.anonymity.get(workspace);
+      const salt = ports.salt.get({ workspace, userId: account });
+      if (sentFor?.anonymous === anonymous && sentFor.salt === salt) {
+        return;
+      }
+      sentFor = { anonymous, salt };
+      client.send(actorFrame({ projectId, workspace, user, anonymous, salt }).frame);
+    };
+    const record: AheadOfSession = {
+      client,
+      account,
+      release: () => {
+        if (aheadOfSession.get(projectId) !== record) {
+          return;
+        }
+        aheadOfSession.delete(projectId);
+        ended.abort();
+        released.abort();
+        stopFollowing();
+        if ((sessionHolds.get(projectId) ?? 0) === 0 && peekRevisionClient(projectId) === client) {
+          // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
+          void client.setCredential(withdrawnCredential);
+          client.close();
+        }
+      },
+      handOver: () => {
+        if (aheadOfSession.get(projectId) === record) {
+          aheadOfSession.delete(projectId);
+          /* From here the session owns the connection; an open continued, or still waiting to, runs on under it. */
+          custody.handedOver = true;
+          stopFollowing();
+        }
+      },
+    };
+    aheadOfSession.set(projectId, record);
+    try {
+      /* A different account, or none, cannot inherit this connection: it is closed at the change. */
+      unsubscribes.push(
+        ports.sessionUser.subscribe(() => {
+          if (ports.sessionUser.get()?.id !== account) {
+            record.release();
+          }
+        }),
+        ports.anonymity.subscribe(sendActor),
+        ports.salt.subscribe(sendActor),
+      );
+      client.send({ command: 'setDeviceId', deviceId: deviceId() });
+      sendActor();
+      if (workspace !== '' && ports.salt.get({ workspace, userId: account }) === undefined) {
+        ports.salt.request({ workspace, userId: account });
+      }
+    } catch (error) {
+      record.release();
+      ports.reportFault(error);
+      return record.release;
+    }
+    // async-iife: bootstrap -- the open follows the credential work (D36); its outcome is the projection's.
+    void (async (): Promise<void> => {
+      try {
+        await client.setUser(user);
+      } catch {
+        /* The session's own `setUser` says it again. */
+      }
+      /* Taken by a session meanwhile: its own connect opens the client; released: nothing opens. */
+      if (aheadOfSession.get(projectId) !== record) {
+        return;
+      }
+      client.open();
+      const { continueOpen } = ports.cloudOpen;
+      if (continueOpen === undefined || !ports.cloudOpen.get(projectId)) {
+        return;
+      }
+      /* After a hand-over only the client's first publish, or its close, ends this wait: a release no longer can. */
+      const status = await firstStatus(client, released.signal);
+      const canOpen = ports.cloudOpen.canOpen?.(projectId) ?? true;
+      /* Still the gesture's, or a session's that holds this very client: never a released or replaced connection. */
+      const continues =
+        aheadOfSession.get(projectId) === record ||
+        (custody.handedOver && (sessionHolds.get(projectId) ?? 0) > 0 && peekRevisionClient(projectId) === client);
+      if (
+        status === undefined ||
+        !continues ||
+        !canOpen ||
+        ports.sessionUser.get()?.id !== account ||
+        nextTauCloudStep('open', { auth: 'authed', isResolved: true, canSyncFiles: true }, status) !== 'connect'
+      ) {
+        return;
+      }
+      try {
+        await continueOpen({ projectId, account, client, asserted: input.asserted === true, signal: ended.signal });
+      } catch (error) {
+        ports.reportFault(error);
+      }
+    })();
+    return record.release;
+  };
+
+/**
  * The `revisions` callback over its ports.
  *
  * @param ports - The session user, anonymity, salt, close-cut, focus, chat-facts and recording ports.
@@ -423,6 +747,8 @@ export const sessionRevisionsCallback =
     let connected: RevisionClient | undefined;
     let unsubscribeBinding: (() => void) | undefined;
     let unsubscribeStatus: (() => void) | undefined;
+    /* This child's hold on its client (STO-25 SP6): while it is held, no *Open* gesture can own or close it. */
+    let releaseHeld: (() => void) | undefined;
     /* The project focus is on, as the route's focused session reads it; the client hears each change of `focused`. */
     let focused = ports.focusedProject.get() === projectId;
     let recording = ports.recording.get(projectId);
@@ -455,15 +781,9 @@ export const sessionRevisionsCallback =
         return;
       }
       actorSentFor = { user, anonymous, salt };
-      const actor = revisionUserActor({ workspace, user, anonymous, salt });
+      const { actor, frame } = actorFrame({ projectId, workspace, user, anonymous, salt });
       recordsAs = actor.id;
-      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
-      const commitAuthor = githubProjectBinding.get(projectId)?.author;
-      client.send({
-        command: 'setActor',
-        actor,
-        ...(commitAuthor === undefined ? {} : { commitAuthor }),
-      });
+      client.send(frame);
       /*
        * A7e: the project's editor records and replays its owed text as this person, in this workspace. Published
        * after the actor is sent: the change wakes the owed close cut, which must be cut as this person.
@@ -526,6 +846,10 @@ export const sessionRevisionsCallback =
       return () => {
         closed.abort();
         connected = undefined;
+        /* Another child still holds the project's client (this one's own hold is released after): it stays open. */
+        if ((sessionHolds.get(projectId) ?? 0) > 1) {
+          return;
+        }
         // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
         void next.setCredential(withdrawnCredential);
         next.close();
@@ -718,14 +1042,16 @@ export const sessionRevisionsCallback =
       const connection = closeConnection;
       const binding = unsubscribeBinding;
       const statusSubscription = unsubscribeStatus;
+      const held = releaseHeld;
       releaseHold = undefined;
+      releaseHeld = undefined;
       tree = undefined;
       closeConnection = undefined;
       unsubscribeBinding = undefined;
       unsubscribeStatus = undefined;
       actorSentFor = undefined;
       recordsAs = undefined;
-      runIsolated([hold, connection, binding, statusSubscription], ports.reportFault);
+      runIsolated([hold, connection, binding, statusSubscription, held], ports.reportFault);
     };
 
     const followWorker = (): void => {
@@ -748,6 +1074,8 @@ export const sessionRevisionsCallback =
         return;
       }
       const current = client;
+      /* A connection the *Open* gesture opened ahead of this session is this child's from here (STO-25 SP6). */
+      releaseHeld = holdSessionClient(projectId, current, ports.sessionUser.get()?.id);
       followTree();
       /* Which device this document is (W13, W17): the id lives in `localStorage`, which the worker cannot read. */
       current.send({ command: 'setDeviceId', deviceId: deviceId() });
@@ -811,7 +1139,7 @@ export const sessionRevisionsCallback =
         try {
           await current?.quiesce();
         } catch (error) {
-          refusal = error instanceof Error ? error.message : 'The project could not finish syncing.';
+          refusal = error instanceof Error ? error.message : 'Couldn’t finish backing up this project.';
         }
         if (!stopped) {
           sendBack({

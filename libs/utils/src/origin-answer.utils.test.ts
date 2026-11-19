@@ -222,6 +222,46 @@ describe('requestAnswer', () => {
       vi.useRealTimers();
     }
   });
+
+  it('should pass a cache mode and add nothing else to the request when asked', async () => {
+    const fetch = vi.fn(async () => json({ funded: true, maxAgeSeconds: 60 }));
+    await requestAnswer({
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      url: 'https://api.test/v1/x',
+      parse,
+      cache: 'no-store',
+    });
+    expect(fetch).toHaveBeenCalledWith('https://api.test/v1/x', {
+      method: 'GET',
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+  });
+
+  it("should abort the request with the caller's signal, with or without a timeout", async () => {
+    for (const requestTimeout of [undefined, 10_000]) {
+      const controller = new AbortController();
+      let seen: AbortSignal | undefined;
+      const pending = requestAnswer({
+        fetch: (async (_url: string, init?: RequestInit) => {
+          seen = init?.signal ?? undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            seen?.addEventListener('abort', () => {
+              reject(new DOMException('aborted', 'AbortError'));
+            });
+          });
+        }) as typeof globalThis.fetch,
+        url: 'https://api.test/v1/x',
+        parse,
+        signal: controller.signal,
+        ...(requestTimeout === undefined ? {} : { requestTimeout }),
+      });
+      controller.abort();
+      // oxlint-disable-next-line no-await-in-loop -- each case settles before the next starts.
+      expect(await pending).toEqual({ kind: 'failed', reason: 'network' });
+      expect(seen?.aborted).toBe(true);
+    }
+  });
 });
 
 // ===========================================================================

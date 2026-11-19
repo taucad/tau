@@ -21,8 +21,8 @@ import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-crea
 import { parseProjectCreationLocation } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
-import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { getRevisionSessionUser, useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import {
   canOpenCloudProject,
   deletionStoragePrefix,
@@ -31,9 +31,10 @@ import {
   tauCloudIntent,
 } from '#lib/tau-cloud-intent.js';
 import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -143,7 +144,7 @@ class CloudDeletionRequestError extends Error {
   public readonly status: number;
 
   public constructor(status: number) {
-    super(`Tau Cloud answered ${String(status)}. Check your connection and access, then try again.`);
+    super('Couldn’t delete this project’s cloud copy. Check your connection and try again.');
     this.name = 'CloudDeletionRequestError';
     this.status = status;
   }
@@ -165,7 +166,7 @@ const fetchDeletionStatus = async (projectId: string, method: 'GET' | 'DELETE' =
   }
   const status = deletionStatusSchema.parse(await response.json());
   if (status.projectId !== projectId || (method === 'DELETE' && status.state === 'active')) {
-    throw new Error('Tau Cloud did not confirm deletion. Check its status before trying again.');
+    throw new Error('Couldn’t confirm the deletion. Close this and open it again to check before trying again.');
   }
   return status;
 };
@@ -221,13 +222,13 @@ export const useDeleteCloudProject = (): UseMutationResult<
   return useMutation({
     mutationFn: async (project: CloudProject) => {
       if (account === undefined || getRevisionSessionUser()?.id !== account || project.canDeleteCloud !== true) {
-        throw new Error('Cloud deletion is unavailable. Refresh this project’s access and try again.');
+        throw new Error('You can’t delete this project’s cloud copy right now. Refresh the page and try again.');
       }
       await queryClient.cancelQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
       try {
         return await withNamedLock(`tau:delete-cloud-project:${project.id}`, async () => {
           if (getRevisionSessionUser()?.id !== account) {
-            throw new Error('Your account changed. Refresh the project before trying again.');
+            throw new Error('You’re signed in to a different account now. Close this and start again.');
           }
           const known = getCloudDeletionState(project.id);
           if (known !== undefined) {
@@ -241,7 +242,7 @@ export const useDeleteCloudProject = (): UseMutationResult<
           try {
             if (getRevisionSessionUser()?.id !== account) {
               await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'checking' }, true);
-              throw new Error('Your account changed. Refresh the project before trying again.');
+              throw new Error('You’re signed in to a different account now. Close this and start again.');
             }
             const status = await fetchDeletionStatus(project.id, 'DELETE');
             if (status.state !== 'active') {
@@ -286,7 +287,9 @@ export class CloudProjectUnavailableError extends Error {
 export const assertCloudProjectActive = async (projectId: string): Promise<void> => {
   const account = getRevisionSessionUser()?.id;
   if (getCloudDeletionState(projectId) !== undefined) {
-    throw new CloudProjectUnavailableError('This project is being deleted from Tau Cloud. Local copies are kept.');
+    throw new CloudProjectUnavailableError(
+      'This project’s cloud copy is being deleted. Copies on your devices are kept.',
+    );
   }
   const projects = await fetchCloudProjects();
   if (
@@ -294,7 +297,7 @@ export const assertCloudProjectActive = async (projectId: string): Promise<void>
     !projects.some((entry) => entry.id === projectId && entry.cloudState !== 'deleting') ||
     getCloudDeletionState(projectId) !== undefined
   ) {
-    throw new CloudProjectUnavailableError('This project is no longer available on Tau Cloud. Local copies are kept.');
+    throw new CloudProjectUnavailableError('This project is no longer in the cloud. Copies on your devices are kept.');
   }
 };
 
@@ -350,7 +353,7 @@ class CloudListingAnswerError extends Error {
   public readonly status: number;
 
   public constructor(status: number) {
-    super(`Tau Cloud answered ${String(status)}`);
+    super(`Couldn’t load your cloud projects (${String(status)})`);
     this.status = status;
   }
 }
@@ -697,6 +700,137 @@ export const useTauCloudEligibility = (): TauCloudEligibility => {
   return { auth, isResolved, canSyncFiles };
 };
 
+/*
+ * The Tau Cloud opens this document is running, by project (STO-25 SP6): the client each runs on, and whether it
+ * connected. An open stands for its own client only: one on a client since replaced is no answer for the new one.
+ */
+const cloudOpensInFlight = new Map<
+  string,
+  Readonly<{ client: RevisionClient | undefined; connected: Promise<boolean> }>
+>();
+
+/** What {@link continueCloudOpen} continues. @public */
+export type CloudOpenContinuation = Readonly<{
+  projectId: string;
+  /** The account the open is owed to: it stops being owed when another is signed in. */
+  account: string | undefined;
+  /** Send `connectRemote('tau')` on the project's client. */
+  connect: () => Promise<void>;
+  /** The gesture asserted the project active itself, just before (the *Open* click after creating its stub). */
+  asserted?: boolean;
+  /** Ends the wait for the lock and the open's hold; the open itself is the remote's from then. */
+  signal?: AbortSignal;
+}>;
+
+/* A registered client with no projection is closed, or not opened yet: a frame sent to it waits for its next open. */
+const isOpenOrAbsent = (client: RevisionClient | undefined): boolean =>
+  client === undefined || client.status() !== undefined;
+
+const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
+  const { projectId, account, connect, signal } = input;
+  try {
+    if (input.asserted !== true) {
+      await assertCloudProjectActive(projectId);
+    }
+    /*
+     * S20: one cold open per device. A second tab waits here and finds the open done. The client is
+     * looked up as the open goes: a tab with no client yet still takes the lock, one whose client is
+     * replaced lets it go, and one whose client exists but is not open by the time it holds the lock
+     * is refused (`owed`) and lets it go at once.
+     */
+    let opened = peekRevisionClient(projectId);
+    const alive = (): boolean => {
+      const current = peekRevisionClient(projectId);
+      opened ??= current;
+      return current === opened;
+    };
+    const owed = (): boolean =>
+      signal?.aborted !== true &&
+      /* The route's own check, shared by every caller: a gesture's assertion does not outlive a deletion. */
+      getCloudDeletionState(projectId) === undefined &&
+      getRevisionSessionUser()?.id === account &&
+      tauCloudIntent.get(projectId) === 'open' &&
+      canOpenCloudProject(projectId) &&
+      /*
+       * The client this open began on, still open (it has a projection). A client closed while the open waited for
+       * the lock keeps its registry entry, and `connect` would queue `connectRemote` on it for its next open, under
+       * whoever opens it then, while this tab held the lock for nothing. With no client at all, `connect` sends
+       * nothing.
+       */
+      alive() &&
+      isOpenOrAbsent(peekRevisionClient(projectId));
+    return await holdCloudOpen({
+      projectId,
+      owed,
+      connect,
+      source: {
+        status: () => peekRevisionClient(projectId)?.status(),
+        subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
+        alive,
+      },
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    if (
+      error instanceof CloudProjectUnavailableError &&
+      getRevisionSessionUser()?.id === account &&
+      tauCloudIntent.get(projectId) === 'open'
+    ) {
+      tauCloudIntent.set(projectId, undefined);
+    }
+    if (signal?.aborted !== true) {
+      console.error('Could not open the cloud project:', error);
+    }
+    return false;
+  }
+};
+
+/** Test-only: forget the opens in flight, which a row's unsettled hold would otherwise leave to the next. @internal */
+export const cloudOpenContinuationTestApi = {
+  reset: (): void => {
+    cloudOpensInFlight.clear();
+  },
+};
+
+/**
+ * Connect a Tau Cloud project whose open is owed (`open` intent) and hold its open lock until it lands (S20).
+ *
+ * One per project in this document (STO-25 SP6): the *Open* gesture starts it before the project route loads, and the
+ * route's {@link useTauCloudIntentConnection} may ask again while it runs. A second call waits for the one running and
+ * connects nothing when that one connected; when it did not (not owed, refused, ended before connecting), the second
+ * runs its own, which asks again whether the open is still owed.
+ *
+ * @param input - The project, its account, the connection, whether the gesture asserted it active, and the end.
+ * @returns Whether this call connected.
+ * @public
+ */
+export const continueCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
+  const { projectId } = input;
+  for (;;) {
+    const running = cloudOpensInFlight.get(projectId);
+    if (running === undefined) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each newer open in flight is waited for in turn.
+    if ((await running.connected) && peekRevisionClient(projectId) === running.client) {
+      return false;
+    }
+    if (cloudOpensInFlight.get(projectId) === running) {
+      /* Settled but not yet forgotten: it is no answer for this call either way. */
+      break;
+    }
+  }
+  const own = { client: peekRevisionClient(projectId), connected: runCloudOpen(input) };
+  cloudOpensInFlight.set(projectId, own);
+  try {
+    return await own.connected;
+  } finally {
+    if (cloudOpensInFlight.get(projectId) === own) {
+      cloudOpensInFlight.delete(projectId);
+    }
+  }
+};
+
 /**
  * Act on a project's intent from inside its session: expose the inline backup
  * offer, connect Tau Cloud through the same verb the
@@ -749,45 +883,7 @@ export const useTauCloudIntentConnection = ({
           tauCloudIntent.set(projectId, 'connected');
         }
         if (intent === 'open') {
-          const connectActiveProject = async (): Promise<void> => {
-            try {
-              await assertCloudProjectActive(projectId);
-              const owed = (): boolean =>
-                getRevisionSessionUser()?.id === account &&
-                tauCloudIntent.get(projectId) === 'open' &&
-                canOpenCloudProject(projectId);
-              /*
-               * S20: one cold open per device. A second tab waits here and finds the open done. The client is
-               * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
-               * whose client is replaced lets it go.
-               */
-              let opened = peekRevisionClient(projectId);
-              await holdCloudOpen({
-                projectId,
-                owed,
-                connect: async () => connectRemote('tau'),
-                source: {
-                  status: () => peekRevisionClient(projectId)?.status(),
-                  subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
-                  alive: () => {
-                    const current = peekRevisionClient(projectId);
-                    opened ??= current;
-                    return current === opened;
-                  },
-                },
-              });
-            } catch (error) {
-              if (
-                error instanceof CloudProjectUnavailableError &&
-                getRevisionSessionUser()?.id === account &&
-                tauCloudIntent.get(projectId) === 'open'
-              ) {
-                tauCloudIntent.set(projectId, undefined);
-              }
-              console.error('Could not open the Tau Cloud project:', error);
-            }
-          };
-          void connectActiveProject();
+          void continueCloudOpen({ projectId, account, connect: async () => connectRemote('tau') });
         } else {
           void connectRemote('tau');
         }

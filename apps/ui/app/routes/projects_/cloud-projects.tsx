@@ -31,7 +31,7 @@ import {
   useMaterializeOnSignInLocation,
 } from '#hooks/use-cloud-projects.js';
 import { isCloudProjectPending, getCloudDeletionState, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
@@ -117,7 +117,7 @@ export const toLibraryRows = ({
 /** What a shared row says it is. An owned row keeps its own sentence. */
 const collaborationCopy = (role: CloudProject['role']): Readonly<{ badge: string; line: string }> | undefined => {
   if (role === 'write') {
-    return { badge: 'Can edit', line: 'Shared with you. This device does not have it yet.' };
+    return { badge: 'Can edit', line: 'Shared with you. Not on this device yet.' };
   }
   if (role === 'read') {
     return { badge: 'Can view', line: 'Shared with you. You can open it but not change it.' };
@@ -136,7 +136,7 @@ export function OnTauCloudMark(): React.JSX.Element {
   return (
     <span data-slot='on-tau-cloud' className='flex shrink-0 items-center'>
       <Cloud aria-hidden className='size-3 shrink-0' />
-      <span className='sr-only'>Also on Tau Cloud</span>
+      <span className='sr-only'>Also in the cloud</span>
     </span>
   );
 }
@@ -181,7 +181,7 @@ export function OpenCloudProjectButton({
         }
       }}
     >
-      {entry.cloudState === 'deleting' ? 'Deleting from Tau Cloud…' : isOpening ? 'Opening…' : 'Open'}
+      {entry.cloudState === 'deleting' ? 'Deleting cloud copy…' : isOpening ? 'Opening…' : 'Open'}
       <span className='sr-only'> {entry.name}</span>
       {isOpening ? <Loader /> : <ArrowRight aria-hidden />}
     </Button>
@@ -189,7 +189,7 @@ export function OpenCloudProjectButton({
 }
 
 /**
- * Where a Tau-Cloud-only row lives and whose it is: the glyph, `Tau Cloud`, and
+ * Where a Tau-Cloud-only row lives and whose it is: the glyph, `Cloud`, and
  * the role badge on a collaboration.
  *
  * @param props - The row.
@@ -205,8 +205,8 @@ function CloudOnlyWhere({ entry }: { readonly entry: CloudProject }): React.JSX.
         {entry.cloudState === 'deleting'
           ? entry.isCheckingDeletion
             ? 'Checking deletion…'
-            : 'Deleting from Tau Cloud…'
-          : 'Tau Cloud'}
+            : 'Deleting cloud copy…'
+          : 'Cloud'}
       </span>
       {shared === undefined ? undefined : <Badge variant='secondary'>{shared.badge}</Badge>}
     </div>
@@ -375,7 +375,7 @@ export const useMaterializeCloudProjects = ({
         }
       } catch (error) {
         if (!hasStartedCreation) {
-          console.error(`Error bringing ${entry.name} from Tau Cloud:`, error);
+          console.error(`Error bringing ${entry.name} from the cloud:`, error);
           return;
         }
         /* On this device all the same — refused as already held, or written and
@@ -395,7 +395,7 @@ export const useMaterializeCloudProjects = ({
         /* Not created: nothing may point at it. Asked again once the listing's
            ids change, or on the library's next visit. */
         tauCloudIntent.set(entry.id, undefined);
-        console.error(`Error bringing ${entry.name} from Tau Cloud:`, error);
+        console.error(`Error bringing ${entry.name} from the cloud:`, error);
       }
     };
     /* One pass, in order, so two creations never race one directory allocation. */

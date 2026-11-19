@@ -33,6 +33,7 @@ import type {
 } from '@taucad/revisions/revision-effects';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
+import { autoVersionName } from '@taucad/revisions/publish-machine';
 import {
   sameRevisionStatus,
   versionedChangePaths as classifiedChangePaths,
@@ -549,7 +550,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const candidateRemote = async (publishing: boolean): Promise<string> => {
     if (publishing && published.remote.provider === 'github') {
       throw new Error(
-        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau Cloud for candidate sharing.',
+        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau for candidate sharing.',
       );
     }
     if (isDesktopTarget()) {
@@ -1706,7 +1707,20 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'confirmPublish': {
-          actor.send({ type: 'publish', event: { type: 'confirm', draft: command.draft } });
+          /* Only a host has a locale, so a draft nobody named is named here, as the host's `publish` verb names it.
+             The page's draft is not validated on the way here, so a missing name reads as empty. */
+          const { draft } = command;
+          const tag: unknown = draft.tag;
+          actor.send({
+            type: 'publish',
+            event: {
+              type: 'confirm',
+              draft:
+                draft.isAutoNamed === true && (typeof tag === 'string' ? tag : '').trim() === ''
+                  ? { ...draft, tag: autoVersionName(new Date()) }
+                  : draft,
+            },
+          });
           return;
         }
         case 'cancelPublish': {
@@ -1873,7 +1887,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Through the content read, so a placeholder compares as its object, never as its pointer text (D9). */
         const read = await readContent(checkout.id, path, { wait: compareWaitMilliseconds });
         if (read.outcome === 'pending') {
-          throw Object.assign(new Error(`The large object of ${path} is not on this device yet.`), { code: 'PENDING' });
+          throw Object.assign(new Error(`${path} is still downloading.`), { code: 'PENDING' });
         }
         const working = read.outcome === 'bytes' ? read.data : undefined;
         if (working !== undefined) {

@@ -3,9 +3,8 @@
  * who-resolver sees it (blueprint A3, client half; I2 step 2).
  *
  * The store that reads `GET /v1/projects/:projectId/git/pushes` and joins it to
- * the rows the page holds stays in the app (`lib/revision-pushes`: the API
- * origin and the request id). These are the shapes it hands out, so the
- * resolver here reads them without reaching that store.
+ * the rows the page holds is `lib/revision-pushes`. These are the shapes it
+ * hands out, so the resolver here reads them without reaching that store.
  */
 
 /**
@@ -23,7 +22,7 @@ export type PushEntry = Readonly<{
   pusher: PushPusher;
   /** The owner's read of a push that brought an anonymous commit: the account is shown, marked as recorded anonymously. */
   anonymous?: true;
-  /** A host device pushed it on the account's behalf ("by a cloud agent host"). */
+  /** A host device pushed it on the account's behalf ("by a cloud agent"). */
   viaDevice: boolean;
   /** The commits the branches it moved now hold. */
   tips: readonly string[];

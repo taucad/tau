@@ -466,7 +466,7 @@ describe('ChatRevisionMarker', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
     const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(container.textContent).not.toMatch(/Tau Cloud|backed up|Backing up/u);
+    expect(container.textContent).not.toMatch(/Tau Cloud|the cloud|backed up|Backing up/u);
   });
 
   it('should link an earlier saved request to its entry in History', () => {

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { AppUiPreferences } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
 
 export const appUiPreferencesQueryKey = ['app-ui-preferences'] as const;
 

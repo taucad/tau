@@ -245,7 +245,7 @@ export const pollJobStream = async ({
         publish(markJobProjectionSync(projection, 'failed', error.message));
         return 'protocol-error';
       }
-      const message = error instanceof Error ? error.message : 'Job stream disconnected.';
+      const message = error instanceof Error ? error.message : 'Lost the connection to job updates. Reconnecting…';
       publish(markJobProjectionSync(projection, 'reconnecting', message));
       try {
         await waitForReconnect(reconnectDelay, signal);
@@ -347,7 +347,7 @@ export const useJobs = (): JobsView => {
       setIsLoading(false);
       const pausedMessage = navigator.onLine
         ? 'Job updates are paused while Tau is in the background.'
-        : 'Job updates are paused offline.';
+        : 'You’re offline. Job updates are paused.';
       setError(pausedMessage);
       for (const projection of projectionsRef.current.values()) {
         if (!isTerminalJobState(projection.snapshot.state)) {

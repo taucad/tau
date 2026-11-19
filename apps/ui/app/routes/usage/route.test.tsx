@@ -22,7 +22,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
 }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
-vi.mock('#db/billing-snapshot-store.js', () => ({
+vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({
   canonicalUsageQueryKey: () => 'key',
   useBillingRevisionMinimum,
   useSavedUsage,
@@ -433,7 +433,7 @@ describe('UsagePage', () => {
     renderPage();
 
     expect(screen.getByTestId('usage-freshness')).toHaveTextContent(
-      /Offline — saved usage for a@example.test, last updated .+\. Reconnect for the latest usage\./u,
+      /Offline — saved usage for a@example.test, last updated .+\. Go online for the latest usage\./u,
     );
     expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     expect(screen.queryByRole('button', { name: /Models/u })).not.toBeInTheDocument();

@@ -460,7 +460,12 @@
     "reason": "imports tau-examples source by relative path instead of its package"
   },
   {
-    "file": "apps/ui-e2e/src/stale-deploy-recovery.test.ts",
+    "file": "apps/ui-e2e/src/service-worker.test.ts",
+    "target": "apps/ui/build/**",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/two-deploys.ts",
     "target": "apps/ui/build/**",
     "reason": "reads another project's build output"
   },

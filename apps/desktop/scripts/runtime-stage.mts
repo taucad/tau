@@ -8,6 +8,7 @@
  * Exit codes: n/a (library module).
  */
 
+import { execFileSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -18,6 +19,7 @@ import { preparationPluginsOf } from '@taucad/native-process-core/store';
 import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
+import { desktopHostBuildOf, writeDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 import {
   desktopNativeDeployments,
@@ -160,6 +162,17 @@ const readJson = async <Value extends NonNullable<unknown>>(path: string): Promi
 export const excludesBuildDiagnostics = (path: string): boolean =>
   !/\.(?:[cm]?[jt]s|css)\.map$|^tau-module-graph.*\.json$/u.test(basename(path));
 
+/** The bundled main/utility imports staged with their runtime dependency closure from the desktop's own install. */
+export const desktopBundledImports = [
+  '@gltf-transform/core',
+  '@gltf-transform/functions',
+  'electron-updater',
+  'fflate',
+  'uint8array-extras',
+  'xstate',
+  '@parcel/watcher',
+] as const;
+
 /**
  * Resolve every runtime package one target stages, failing before the output is touched.
  * @param options - The desktop app and workspace roots, and the packaged target.
@@ -220,15 +233,7 @@ export const resolveRuntimePackages = async (
     });
   }
   const bundledImports = await Promise.all(
-    [
-      '@gltf-transform/core',
-      '@gltf-transform/functions',
-      'electron-updater',
-      'fflate',
-      'uint8array-extras',
-      'xstate',
-      '@parcel/watcher',
-    ].map(async (name) => ({
+    desktopBundledImports.map(async (name) => ({
       ...(await installed(await realpath(resolve(desktopRoot, 'node_modules', name)))),
       name,
     })),
@@ -397,6 +402,21 @@ export const stageRuntimePackages = async (
     readonly main: string;
     readonly type: string;
   }>(resolve(desktopRoot, 'package.json'));
+  /*
+   * LW8: the commit this app is packaged from, beside the bundles, where main reads it (`#shared/desktop-host-build`).
+   * The release workflow checks out the release tag, so it is the tag's commit. `desktop:build` compiles no commit in,
+   * so its cache key holds sources and configuration only (ST-9).
+   */
+  writeDesktopHostBuild(
+    resolve(stageRoot, 'dist'),
+    desktopHostBuildOf(() =>
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: desktopRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ),
+  );
   await Promise.all([
     copyTree(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), excludesBuildDiagnostics),
     copyTree(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), excludesBuildDiagnostics),

@@ -71,6 +71,6 @@
   "dependencies": {
     "@taucad/brep": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
-    "cadmpeg-ts": "0.1.0-beta.1"
+    "cadmpeg-ts": "0.1.0-beta.4"
   }
 }

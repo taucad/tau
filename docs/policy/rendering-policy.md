@@ -3,7 +3,7 @@ title: 'Rendering Policy'
 description: 'Rules for keeping the DOM lightweight, UI smooth, and streaming content responsive through virtualization, content budgets, and scroll management.'
 status: active
 created: '2026-03-19'
-updated: '2026-03-19'
+updated: '2026-11-19'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/react-policy.md
@@ -100,6 +100,8 @@ For lists between 5-20 items, use CSS `max-h-*` with `overflow-y-auto` instead o
 | ≤5    | Render all, no constraints        |
 | 6–20  | CSS `max-h-*` + `overflow-y-auto` |
 | >20   | `react-virtuoso`                  |
+
+**Exception, single-scroll panes**: a list inside a pane whose single scroller is the pane's own (the Share pane) may render in flow, without `max-h-*`, `overflow-y-auto` or Virtuoso, when it shows at most five rows until the person asks for all of them and a product limit caps it at 50 rows or fewer. A nested scroller there takes height from the one region that scrolls, which a phone sheet with the keyboard open cannot spare.
 
 ## 2. Content Budgets
 

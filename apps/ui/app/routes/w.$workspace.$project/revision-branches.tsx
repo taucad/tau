@@ -39,7 +39,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
+import { RevisionConflictEditor } from '@taucad/revisions-ui/components/revisions/revision-conflict-editor';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 
 /**
@@ -372,7 +372,7 @@ function ConflictDismissal({ conflict }: { readonly conflict: RevisionConflictFa
           <AlertDialogHeader>
             <AlertDialogTitle>{`Dismiss another device’s conflict on ${conflict.into}?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again when it next syncs.`}
+              {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again the next time it backs up.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <details className='text-xs text-muted-foreground'>

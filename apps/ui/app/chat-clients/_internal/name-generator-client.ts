@@ -5,7 +5,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /**
  * Error thrown by the project-name / commit-name client when the

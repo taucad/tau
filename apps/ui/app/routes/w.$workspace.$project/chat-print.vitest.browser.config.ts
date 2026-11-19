@@ -10,7 +10,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   server: {
     host: '127.0.0.1',
@@ -20,6 +20,7 @@ export default defineConfig({
     include: [
       'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
       'app/components/select-alignment.browser.test.tsx',
+      'app/components/publish/share-pane-scroll.browser.test.tsx',
       'app/components/machines/machines.browser.test.tsx',
     ],
     fileParallelism: false,

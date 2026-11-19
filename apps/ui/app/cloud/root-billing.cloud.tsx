@@ -18,19 +18,27 @@ import {
   followPaymentRedirect,
   getPaymentAction,
   recoverPaymentAction,
-} from '#lib/billing-payment-client.js';
+} from '@taucad/billing-ui/lib/billing-payment-client';
 import {
   FinancialSessionProvider,
   FinancialSessionScope,
   useFinancialSession,
-} from '#providers/financial-session-provider.js';
+} from '@taucad/billing-ui/providers/financial-session-provider';
+import { BillingLegalLinksProvider } from '@taucad/billing-ui/providers/billing-legal-links-provider';
+import type { BillingLegalLinks } from '@taucad/billing-ui/providers/billing-legal-links-provider';
+import { legalUrl } from '#lib/legal-url.js';
+
+/** The billing surfaces link Tau's legal pages on this deployment's website (`lib/legal-url`). */
+const billingLegalLinks: BillingLegalLinks = { legalUrl };
 
 export function CloudRootBoundary({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (
     <FinancialSessionProvider>
-      <AuthConfigProvider>
-        <BillingSessionBridge>{children}</BillingSessionBridge>
-      </AuthConfigProvider>
+      <BillingLegalLinksProvider links={billingLegalLinks}>
+        <AuthConfigProvider>
+          <BillingSessionBridge>{children}</BillingSessionBridge>
+        </AuthConfigProvider>
+      </BillingLegalLinksProvider>
     </FinancialSessionProvider>
   );
 }

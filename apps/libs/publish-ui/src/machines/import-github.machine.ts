@@ -764,7 +764,7 @@ export const importGitHubMachine = setup({
                     ...fetchErrorPatch(context, {
                       key: 'metadata',
                       error: event.error,
-                      fallback: 'Failed to fetch repository metadata',
+                      fallback: 'Couldn’t load this repository.',
                     }),
                     repoMetadata: undefined,
                     error: toMetadataFetchError(event.error),
@@ -852,7 +852,7 @@ export const importGitHubMachine = setup({
                     ...fetchErrorPatch(context, {
                       key: 'files',
                       error: event.error,
-                      fallback: 'Failed to fetch files',
+                      fallback: 'Couldn’t load its files.',
                     }),
                     isLoadingFiles: false,
                     repoFiles: [],
@@ -890,7 +890,7 @@ export const importGitHubMachine = setup({
         onError: ({ context, event }) => ({
           target: 'enteringDetails',
           context: {
-            ...fetchErrorPatch(context, { key: 'files', error: event.error, fallback: 'Failed to fetch files' }),
+            ...fetchErrorPatch(context, { key: 'files', error: event.error, fallback: 'Couldn’t load its files.' }),
             isLoadingFiles: false,
             repoFiles: [],
           },

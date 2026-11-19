@@ -10,20 +10,22 @@ import { createExportFile } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
 import {
   asBuffer,
-  jsonSchemaFromJson,
-  defineKernel,
-  isRecordObject,
-  extractDefaultParameters,
-  registerKernelModule,
-  toVmEntryPath,
-  enrichIssueLocation,
-  createKernelError,
-  createKernelSuccess,
-  createKernelParameterDeclaration,
+  bindKernelModuleCode,
   createFrameClassifier,
-  parseStackTrace,
-  resolveSourcePath,
+  createKernelError,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
   deriveLocationFromFrames,
+  enrichIssueLocation,
+  extractDefaultParameters,
+  isRecordObject,
+  jsonSchemaFromJson,
+  parseStackTrace,
+  portableKernelModuleCode,
+  registerKernelModule,
+  resolveSourcePath,
+  toVmEntryPath,
 } from '@taucad/runtime/kernel';
 import type { KernelServices } from '@taucad/runtime/kernel';
 
@@ -355,6 +357,8 @@ export const jscadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: jscadDetectPattern,
   builtinModuleNames: ['@jscad/modeling'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
   version: '1.2.0',
@@ -525,7 +529,7 @@ export const jscadKernel = defineKernel({
     return { content: result.content, tessellation, issues: result.issues };
   },
 
-  serializeHandle({ handle }, _runtime, context) {
+  serializeHandle({ handle }, runtime, context) {
     const { geom2, geom3, path2 } = context.modeling.geometries;
     const parts = normalizeJscadParts(handle, context.modeling);
     const entries = parts.map((part): JscadSerializedNativeHandleEntry => {
@@ -553,10 +557,16 @@ export const jscadKernel = defineKernel({
       }
       throw new Error(`Unsupported JSCAD geometry type for serialized handle at index ${part.index}.`);
     });
-    return handle.program === undefined ? entries : { parts: entries, program: { ...handle.program } };
+    // The stored program names no worker: its built-in imports are rebound on restore.
+    return handle.program === undefined
+      ? entries
+      : {
+          parts: entries,
+          program: { ...handle.program, code: portableKernelModuleCode(handle.program.code, runtime.bundler) },
+        };
   },
 
-  deserializeHandle({ serialized }, _runtime, context): JscadHandle {
+  deserializeHandle({ serialized }, runtime, context): JscadHandle {
     const { geom2, geom3, path2 } = context.modeling.geometries;
     const withProgram = isRecordObject(serialized) && !Array.isArray(serialized) ? serialized : undefined;
     const rawEntries: unknown = withProgram ? withProgram.parts : serialized;
@@ -602,7 +612,9 @@ export const jscadKernel = defineKernel({
       };
     });
     const program = parseSerializedProgram(withProgram?.program);
-    return program === undefined ? parts : Object.assign(parts, { program });
+    return program === undefined
+      ? parts
+      : Object.assign(parts, { program: { ...program, code: bindKernelModuleCode(program.code, runtime.bundler) } });
   },
 
   async export(input, runtime, context) {

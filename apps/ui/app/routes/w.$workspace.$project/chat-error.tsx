@@ -210,8 +210,8 @@ function codedErrorCard({
         className={className}
         tone='warning'
         icon={CircleAlert}
-        title='Update Tau on this host'
-        description='This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'
+        title='Update Tau on that computer'
+        description='That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.'
         actions={
           <Button variant='outline' size='xs' onClick={onTryAgain}>
             <RefreshCcw className='size-3.5' />
@@ -240,7 +240,7 @@ function codedErrorCard({
           awaitingApproval
             ? 'Tau closed while the agent waited for your approval'
             : waitingOnSync
-              ? 'Waiting on sync from another device'
+              ? 'Waiting for changes from your other device'
               : code === 'RUN_ABANDONED'
                 ? 'Chat paused'
                 : code === 'NETWORK_ERROR'
@@ -251,7 +251,7 @@ function codedErrorCard({
           awaitingApproval
             ? 'Resume and the agent asks for it again.'
             : waitingOnSync
-              ? 'Resume once sync brings what another device wrote.'
+              ? 'Resume when the changes from your other device arrive.'
               : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
                 ? undefined
                 : error.message
@@ -392,8 +392,8 @@ function codedErrorCard({
         className={className}
         tone='neutral'
         icon={MonitorSmartphone}
-        title='This chat is running on another device'
-        description='Send again here once that run finishes.'
+        title='This chat is running on your other device'
+        description='Send again here once it finishes.'
       />
     );
   }
@@ -406,8 +406,8 @@ function codedErrorCard({
         className={className}
         tone='neutral'
         icon={MonitorSmartphone}
-        title='Waiting on sync from another device'
-        description='This chat continues once sync brings what another device wrote. Send again then.'
+        title='Waiting for changes from your other device'
+        description='This chat continues when the changes from your other device arrive. Send again then.'
       />
     );
   }

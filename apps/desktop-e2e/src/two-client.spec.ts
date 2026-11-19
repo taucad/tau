@@ -379,18 +379,18 @@ const readBrowserFile = async (
     [slug, ...path],
   );
 
-/** Open the product's persisted-share form, selecting Tau Hosted sharing when necessary. */
+/** Open the cloud link in Share, selecting it when necessary, and wait for its first publish button. */
 const openHostedShare = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await page.getByRole('button', { name: 'Share', exact: true }).first().click({ timeout: 120_000 });
   await page.getByRole('region', { name: 'Share project' }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const method = page.getByRole('button', { name: /^Share with /u }).first();
-  if ((await method.getAttribute('aria-label')) !== 'Share with Hosted link') {
+  if ((await method.getAttribute('aria-label')) !== 'Share with Cloud link') {
     await method.click();
-    await page.getByText('Hosted link', { exact: true }).last().click();
+    await page.getByText('Cloud link', { exact: true }).last().click();
   }
   await page
-    .getByRole('combobox', { name: /Version name/iu })
+    .getByRole('button', { name: /Publish and copy link/iu })
     .first()
     .waitFor({ state: 'visible', timeout: 60_000 });
 };
@@ -776,7 +776,7 @@ describe('a project on the browser client', () => {
       .poll(
         async () => {
           const text = await syncRegionText(client);
-          return text.includes('Tau Cloud') && (await settings.isVisible());
+          return text.includes('Cloud') && (await settings.isVisible());
         },
         {
           message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
@@ -926,11 +926,9 @@ describe('a project on the browser client', () => {
       await gitOutput(await tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`]),
     ).toContain(`oid sha256:${browserDigest}`);
 
-    /* The named version is authored through the product, then read from each
-     * destination's own revision store — not inferred from the remote tag or
-     * from the unpublished Share authoring form. */
+    /* The version is made through the product's cloud link (the pane names it "Shared <date>"), then read from
+     * each destination's own revision store — not inferred from the remote tag. */
     await openHostedShare(source);
-    await source.page.getByRole('combobox', { name: /Version name/iu }).fill('Ready for print');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
       .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v2^{}']), {
@@ -2852,7 +2850,7 @@ describe('backup by default and one library', () => {
     await expect
       .poll(async () => cloudCard.count(), { message: 'D20: one list names Tau Cloud’s project', timeout: 60_000 })
       .toBe(1);
-    expect(await cloudCard.textContent()).toContain('Tau Cloud');
+    expect(await cloudCard.textContent()).toContain('Cloud');
 
     const destinationSlug = await openCloudOnlyProject(second.page, { projectsUrl, name, message: 'D20 open' });
     const root = join(second.homeRoot, destinationSlug);
@@ -2904,7 +2902,7 @@ describe('backup by default and one library', () => {
       await third.page.goto('app://tau/?settings=filesystem', { waitUntil: 'domcontentloaded' });
       /* The setting (d19597bf0b, #1227) is the *Tau Cloud projects* select,
        * whose options are Off, Home and each connected workspace. */
-      const destination = third.page.getByRole('combobox', { name: 'Tau Cloud projects', exact: true });
+      const destination = third.page.getByRole('combobox', { name: 'Cloud projects', exact: true });
       await destination.click({ timeout: 120_000 });
       await third.page.getByRole('option', { name: 'Home', exact: true }).click();
       await expect.poll(async () => destination.textContent(), { timeout: 30_000 }).toBe('Home');

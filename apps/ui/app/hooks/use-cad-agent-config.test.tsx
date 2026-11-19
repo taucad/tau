@@ -298,7 +298,8 @@ describe('useCadAgentConfig', () => {
     await waitFor(() => {
       expect(result.current).toEqual({
         status: 'unavailable',
-        reason: 'This project’s storage cannot hold a durable agent log.',
+        reason:
+          'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
       });
     });
   });
@@ -350,7 +351,8 @@ describe('useCadAgentConfig', () => {
 
     await expect(settled).resolves.toEqual({
       status: 'unavailable',
-      reason: 'This project’s storage cannot hold a durable agent log.',
+      reason:
+        'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
     });
   });
 

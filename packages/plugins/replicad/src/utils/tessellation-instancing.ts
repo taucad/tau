@@ -71,8 +71,6 @@ export type ReplicadTessellationInstance = {
   material?: GlbMaterial;
   locationMatrix: ReplicadShapeIdentityInfo['locationMatrix'];
   determinant: number;
-  faceIds?: number[];
-  edgeIds?: number[];
 };
 
 type ReplicadInstancingOc = OpenCascadeInstance & {
@@ -158,7 +156,6 @@ type TransformReplicadGeometryInstanceOptions = {
 };
 
 type Point3 = readonly [number, number, number];
-type MatrixTransform = (matrix: readonly number[], point: Point3) => [number, number, number];
 
 const angularToleranceToRad = (tessellation: Tessellation): number => tessellation.angularTolerance * (Math.PI / 180);
 
@@ -515,12 +512,26 @@ export function extractPrototypeEdges({
   }
 }
 
-function transformPoint(matrix: readonly number[], [x, y, z]: Point3): [number, number, number] {
-  return [
-    (matrix[0] ?? 0) * x + (matrix[1] ?? 0) * y + (matrix[2] ?? 0) * z + (matrix[3] ?? 0),
-    (matrix[4] ?? 0) * x + (matrix[5] ?? 0) * y + (matrix[6] ?? 0) * z + (matrix[7] ?? 0),
-    (matrix[8] ?? 0) * x + (matrix[9] ?? 0) * y + (matrix[10] ?? 0) * z + (matrix[11] ?? 0),
-  ];
+/**
+ * Points placed by a location matrix, rounded once to single precision. The products are summed in the order OCCT's
+ * `gp_Trsf` value matrix is applied, `((m0 x + m1 y) + m2 z) + m3`, so a placement gives the same values a world-space
+ * mesh does; the loop allocates nothing per point.
+ * @param values - Points as x, y, z triplets.
+ * @param matrix - Row-major 3x4 (or 4x4) location matrix.
+ * @returns The placed points.
+ */
+function transformPoints(values: ArrayLike<number>, matrix: readonly number[]): Float32Array {
+  const [m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0, m6 = 0, m7 = 0, m8 = 0, m9 = 0, m10 = 0, m11 = 0] = matrix;
+  const transformed = new Float32Array(values.length - (values.length % 3));
+  for (let index = 0; index < transformed.length; index += 3) {
+    const x = values[index]!;
+    const y = values[index + 1]!;
+    const z = values[index + 2]!;
+    transformed[index] = m0 * x + m1 * y + m2 * z + m3;
+    transformed[index + 1] = m4 * x + m5 * y + m6 * z + m7;
+    transformed[index + 2] = m8 * x + m9 * y + m10 * z + m11;
+  }
+  return transformed;
 }
 
 function normalMatrix(matrix: readonly number[]): readonly number[] {
@@ -563,17 +574,33 @@ function transformVector(matrix: readonly number[], [x, y, z]: Point3): [number,
   return [nx / length, ny / length, nz / length];
 }
 
-function transformTriplets(
-  values: ArrayLike<number>,
-  matrix: readonly number[],
-  transform: MatrixTransform,
-): Float32Array {
+/**
+ * Unit vectors transformed by a 3x3 matrix and normalized, rounded once to single precision; a vector that vanishes
+ * becomes +Z. The loop allocates nothing per vector.
+ * @param values - Vectors as x, y, z triplets.
+ * @param matrix - Row-major 3x3 matrix.
+ * @returns The transformed vectors.
+ */
+function transformVectors(values: ArrayLike<number>, matrix: readonly number[]): Float32Array {
+  const [m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0, m6 = 0, m7 = 0, m8 = 0] = matrix;
   const transformed = new Float32Array(values.length - (values.length % 3));
   for (let index = 0; index < transformed.length; index += 3) {
-    const [x, y, z] = transform(matrix, [values[index]!, values[index + 1]!, values[index + 2]!]);
-    transformed[index] = x;
-    transformed[index + 1] = y;
-    transformed[index + 2] = z;
+    const x = values[index]!;
+    const y = values[index + 1]!;
+    const z = values[index + 2]!;
+    const nx = m0 * x + m1 * y + m2 * z;
+    const ny = m3 * x + m4 * y + m5 * z;
+    const nz = m6 * x + m7 * y + m8 * z;
+    const length = Math.hypot(nx, ny, nz);
+    if (length === 0) {
+      transformed[index] = 0;
+      transformed[index + 1] = 0;
+      transformed[index + 2] = 1;
+      continue;
+    }
+    transformed[index] = nx / length;
+    transformed[index + 1] = ny / length;
+    transformed[index + 2] = nz / length;
   }
   return transformed;
 }
@@ -594,7 +621,7 @@ function transformNormals(values: ArrayLike<number>, matrix: readonly number[]):
     return Float32Array.from(values);
   }
 
-  return transformTriplets(values, normals, transformVector);
+  return transformVectors(values, normals);
 }
 
 function transformTangents(values: number[] | undefined, instance: ReplicadTessellationInstance): number[] | undefined {
@@ -624,47 +651,10 @@ function transformTriangles(triangles: Uint32Array, determinant: number): Uint32
   return transformed;
 }
 
-function applyFaceIds(
-  groups: GeometryReplicad['faces']['faceGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['faces']['faceGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing face ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    faceId: ids[index]!,
-  }));
-}
-
-function applyEdgeIds(
-  groups: GeometryReplicad['edges']['edgeGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['edges']['edgeGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing edge ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    edgeId: ids[index]!,
-  }));
-}
-
 /**
+ * One instance of a prototype: the prototype's mesh at the instance's placement. Face and edge groups are the
+ * prototype's own (shared, never written downstream): the glTF packer numbers groups by index, so an instance needs no
+ * labels of its own (catalogue N5).
  */
 export function transformReplicadGeometryInstance({
   prototype,
@@ -681,14 +671,14 @@ export function transformReplicadGeometryInstance({
     faces: {
       texCoords: prototype.faces.texCoords,
       tangents: transformTangents(prototype.faces.tangents, instance),
-      vertices: transformTriplets(prototype.faces.vertices, instance.locationMatrix, transformPoint),
+      vertices: transformPoints(prototype.faces.vertices, instance.locationMatrix),
       normals: transformNormals(prototype.faces.normals, instance.locationMatrix),
       triangles: transformTriangles(prototype.faces.triangles, instance.determinant),
-      faceGroups: applyFaceIds(prototype.faces.faceGroups, instance.faceIds),
+      faceGroups: prototype.faces.faceGroups,
     },
     edges: {
-      lines: transformTriplets(prototype.edges.lines, instance.locationMatrix, transformPoint),
-      edgeGroups: applyEdgeIds(prototype.edges.edgeGroups, instance.edgeIds),
+      lines: transformPoints(prototype.edges.lines, instance.locationMatrix),
+      edgeGroups: prototype.edges.edgeGroups,
     },
   };
 }

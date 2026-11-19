@@ -117,6 +117,8 @@
     // Storage-policy Rule 0: direct indexedDB access only in allowlisted storage providers.
     "tau-lint/no-bare-random-uuid": "error",
     "tau-lint/no-direct-indexeddb": "error",
+    // Adaptive app deployment mode I8: a Cloud import() only through the one loader; no lazy() of Cloud code.
+    "tau-lint/no-cloud-import-outside-loader": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
@@ -1561,11 +1563,6 @@
         "apps/ui/app/utils/chat.utils.test.ts",
         "apps/ui/app/utils/chat.utils.ts"
       ],
-      "rules": { "no-restricted-imports": "off" }
-    },
-    {
-      // Current revision inversions. -- W8
-      "files": ["apps/ui/app/hooks/use-restore-to-point.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {

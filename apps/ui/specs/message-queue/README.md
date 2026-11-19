@@ -89,3 +89,7 @@ Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm 
 Explicit reorder atomically moves one pending identity before another (or to the end), only while no delivery or steering command is prepared. It changes the saved sequence but preserves command identity, payload and terminal authorization. FIFO is evaluated against this user-selected order. Store tests cover stale targets, concurrent submissions, failed writes, replayed moves and reopening.
 
 DC-10 revisions-ui slice 2 re-pinned the drift after `use-turn-admission.ts` began importing the revision client registry from `@taucad/revisions-ui`; no action changed.
+
+The Tau Cloud naming audit re-pinned the drift after `chat-session-store.ts` reworded its queue-updates error sentence; no action changed.
+
+DC-10 files-ui slice 9 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/files-ui`; no action changed.

@@ -80,13 +80,18 @@ export function PublicationAccessPanel({
   const controlsDisabled = mutating || visibilityMutating;
   const canAdd = visibility === 'private' && pendingEmails.length > 0 && !emailError && !controlsDisabled;
 
-  const invite = async (email: string): Promise<void> => {
+  /**
+   * Grants one address access. The API upserts the grant by address, so asking again for a removed address makes the
+   * same grant active again; `notifyRecipient` decides whether the invite email goes out, and the API only sends it to
+   * an address that had no active grant.
+   */
+  const invite = async (email: string, notifyRecipient: boolean): Promise<void> => {
     // A network failure is named by its address too, never by the transport's message.
     const response = await fetch(endpoint, {
       method: 'POST',
       credentials: 'include',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, notifyRecipient: true }),
+      body: JSON.stringify({ email, notifyRecipient }),
     });
     // The failure ends at the toast below and is never reported, so no request id is recorded on it.
     if (!response.ok) {
@@ -102,7 +107,7 @@ export function PublicationAccessPanel({
 
     setMutating(true);
     try {
-      const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email)));
+      const outcomes = await Promise.allSettled(pendingEmails.map(async (email) => invite(email, true)));
       const failed = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'rejected');
       const invited = pendingEmails.filter((_email, index) => outcomes[index]?.status === 'fulfilled');
       setPendingEmails(failed);
@@ -113,6 +118,19 @@ export function PublicationAccessPanel({
       if (failed.length > 0) {
         toast.error(inviteToast(failed, true));
       }
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  /* Undo puts the same grant back without a second invite email: the person was invited once already. */
+  const handleRestore = async (email: string): Promise<void> => {
+    setMutating(true);
+    try {
+      await invite(email, false);
+      await onGrantsChanged();
+    } catch {
+      toast.error(`Couldn't give ${email} access again. Invite them again.`);
     } finally {
       setMutating(false);
     }
@@ -132,7 +150,14 @@ export function PublicationAccessPanel({
       }
 
       await onGrantsChanged();
-      toast.success(`Removed access for ${grant.recipientEmail}.`);
+      toast.success(`Removed access for ${grant.recipientEmail}.`, {
+        action: {
+          label: 'Undo',
+          onClick() {
+            void handleRestore(grant.recipientEmail);
+          },
+        },
+      });
     } catch {
       toast.error(`Couldn't remove access for ${grant.recipientEmail}. Try again.`);
     } finally {

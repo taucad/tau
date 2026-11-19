@@ -106,6 +106,9 @@
           "env": "PICOGK_BROWSER_MIRROR_BASE"
         },
         {
+          "env": "CADMPEG_ENGINES_BASE"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {
@@ -198,6 +201,9 @@
         },
         {
           "env": "PICOGK_BROWSER_MIRROR_BASE"
+        },
+        {
+          "env": "CADMPEG_ENGINES_BASE"
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"

@@ -644,21 +644,23 @@ type PrototypeGroupOptions = {
 
 /**
  * Memo key of a group's prototype mesh beyond the partner: its orientation, the exact tolerances and, when an
- * instance's material asks for surface coordinates, that material and the prototype's placement (its tangent frames are
+ * instance's material asks for surface coordinates, that it does and the prototype's placement (its tangent frames are
  * brought back through the prototype's location). Placement otherwise plays no part: the prototype is meshed unplaced.
+ * The material's values play no part either: surface coordinates depend on geometry alone, and a kept mesh takes this
+ * render's appearance, so a material-only edit is answered from the memo.
  * @param group - The group.
  * @param tessellation - The exact resolved tolerances.
  * @returns The key.
  */
 function prototypeMemoKey(group: PrototypeGroup, tessellation: Tessellation): string {
-  const surface = group.instances.find((instance) => needsSurfaceCoordinates(instance.config.material));
+  const surface = group.instances.some((instance) => needsSurfaceCoordinates(instance.config.material));
   return [
     'prototype',
     group.prototype.info.orientation,
     tessellation.linearTolerance,
     tessellation.angularTolerance,
-    surface === undefined ? '' : JSON.stringify(surface.config.material),
-    surface === undefined ? '' : group.prototype.info.locationMatrix.join(','),
+    surface ? 'surface' : '',
+    surface ? group.prototype.info.locationMatrix.join(',') : '',
   ].join('|');
 }
 

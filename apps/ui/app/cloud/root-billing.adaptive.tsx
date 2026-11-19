@@ -77,11 +77,12 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
   /* The owner admits only an environment this build knows (D7; parity with the wire schema is tested), and a funded
    * mode always names one. */
   const environment = funded ? (mode.environment as BillingSession['environment']) : undefined;
-  const identity = fundedIdentity({ apiBaseUrl, state: mode.state, environment, ownerId });
+  /* One value per identity, so the port and the surfaces see a change only when the identity changes. */
   const bound = useMemo(
-    () => cloudIdentityValue(identity),
-    [identity?.apiBaseUrl, identity?.environment, identity?.ownerId],
+    () => cloudIdentityValue(fundedIdentity({ apiBaseUrl, state: mode.state, environment, ownerId })),
+    [apiBaseUrl, environment, mode.state, ownerId],
   );
+  const { identity } = bound;
   return (
     <FinancialSessionScope identity={identity} ownerId={ownerId}>
       <BillingSessionProvider

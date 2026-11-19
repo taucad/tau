@@ -105,7 +105,7 @@ const scripted = <Module,>(importer: () => Promise<Module>) => {
 
 describe('cloud loader', () => {
   it('should retry a rejected import once on its own, then wait for the person, reporting once (T-BA10)', async () => {
-    const importer = vi.fn(async () => {
+    const importer = vi.fn(async (): Promise<{ ok: boolean }> => {
       throw new TypeError('Failed to fetch dynamically imported module');
     });
     const { loader, reported, recovered } = scripted(importer);
@@ -119,7 +119,7 @@ describe('cloud loader', () => {
     loader.load();
     expect(importer).toHaveBeenCalledTimes(2);
 
-    importer.mockResolvedValueOnce({ ok: true } as never);
+    importer.mockResolvedValueOnce({ ok: true });
     loader.retry();
     await waitFor(() => {
       expect(loader.state()).toEqual({ status: 'loaded', module: { ok: true } });

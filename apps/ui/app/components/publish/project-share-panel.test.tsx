@@ -1080,8 +1080,36 @@ describe('ProjectSharePanel', () => {
     expect(screen.queryByRole('button', { name: 'Publish changes' })).not.toBeInTheDocument();
   });
 
-  it('offers Publish changes without the sentence when the head of main is not known', async () => {
+  it('offers only Copy link when the head of main is not known, since a publish could take the link back', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Link' });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Copy link']);
+    expect(screen.queryByText(/you've changed this project/iu)).not.toBeInTheDocument();
+  });
+
+  it('offers only Copy link before the revision status has answered', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    revisionStatusHarness.connected = false;
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Link' });
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Copy link']);
+  });
+
+  it('offers Publish changes without the sentence when the link shows no version yet', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(mockJsonResponse({ ...publishedEnvelope, share: { ...sharedLink, currentVersion: null } }));
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     const section = await screen.findByRole('region', { name: 'Link' });

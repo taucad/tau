@@ -315,20 +315,28 @@ type LinkRelation = RevisionDivergence | 'pending' | 'missing';
  * version names. It is exact rather than a timestamp guess. `changed` needs the graph to say the link's revision is
  * behind the head: when this device is the one behind (the link shows a version published elsewhere, or one it does
  * not have yet), a publish would take the link back, so the link reads `elsewhere`. Off `main`, the head comes from
- * the branch list, and when neither knows it the answer is `unknown`.
+ * the branch list. When the status has not answered or neither knows the head, the relation cannot be told and the
+ * answer is `unknown`: a publish then could take the link back, so it is not offered. A link that shows no version
+ * yet (`empty`) has nothing a publish could take back, and publishing is the only way to give it one.
  *
  * @param status - The project's revision status.
  * @param publishedRevisionId - The revision the link shows.
  * @param relation - How the head of `main` stands to that revision; read only when the two differ.
- * @returns `current`, `changed`, `elsewhere`, `checking` (the graph has not answered yet), or `unknown`.
+ * @returns `current`, `changed`, `elsewhere`, `checking` (the graph has not answered yet), `empty` or `unknown`.
  */
 const linkFreshnessOf = (
   status: RevisionStatusProjection | undefined,
   publishedRevisionId: string | undefined,
   relation: LinkRelation,
-): 'current' | 'changed' | 'elsewhere' | 'checking' | 'unknown' => {
+): 'current' | 'changed' | 'elsewhere' | 'checking' | 'empty' | 'unknown' => {
+  if (status === undefined) {
+    return 'unknown';
+  }
+  if (publishedRevisionId === undefined) {
+    return 'empty';
+  }
   const head = headOfMainOf(status);
-  if (head === undefined || publishedRevisionId === undefined) {
+  if (head === undefined) {
     return 'unknown';
   }
   if (head === publishedRevisionId) {
@@ -1502,9 +1510,9 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
           ) : null}
           {publishError === undefined ? null : <PublishErrorNotice message={publishError} signIn={signIn} />}
           <div className='flex flex-wrap justify-end gap-2'>
-            {/* Off `main` the head is not known here, so publishing is offered without the sentence. A link that
-                shows a version this device is behind offers no publish: it would take the link back. */}
-            {freshness === 'unknown' ? publishChanges : null}
+            {/* A link with no version yet is given one without the sentence. Where the head of `main` is not known,
+                or this device is behind the version the link shows, a publish could take the link back: none. */}
+            {freshness === 'empty' ? publishChanges : null}
             <Button
               ref={copyLinkRef}
               type='button'

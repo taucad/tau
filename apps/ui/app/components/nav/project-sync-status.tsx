@@ -12,7 +12,7 @@ function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boole
   if (sync?.state === 'conflicted') {
     return {
       label: 'Needs your decision',
-      detail: 'This device and the cloud copy changed the same files. Open History to choose.',
+      detail: 'This project changed here and somewhere else. Open History to choose what to keep.',
       kind: 'attention',
     };
   }
@@ -20,8 +20,8 @@ function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boole
     return {
       label: 'Offline',
       detail: isCloudPending
-        ? 'Connect to download this project. Its files are not ready on this device yet.'
-        : 'Changes will sync when you reconnect.',
+        ? 'Go online to download this project. It isn’t on this device yet.'
+        : 'Changes back up when you’re back online.',
       kind: 'offline',
     };
   }
@@ -47,14 +47,14 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return failure;
   }
   if (sync?.pullPhase === 'fetching') {
-    return { label: 'Downloading files…', detail: 'Bringing this project to your device.', kind: 'busy' };
+    return { label: 'Downloading files…', detail: 'Bringing this project to this device.', kind: 'busy' };
   }
   if (sync?.pullPhase === 'applying') {
-    return { label: 'Preparing files…', detail: 'Making the downloaded files ready to open.', kind: 'busy' };
+    return { label: 'Preparing files…', detail: 'Getting your files ready to open.', kind: 'busy' };
   }
   if (sync?.chats === 'failed') {
     return {
-      label: 'Chats need attention',
+      label: 'Couldn’t load chats',
       detail: 'Files are ready. Open History to try loading chats again.',
       kind: 'attention',
     };
@@ -63,18 +63,18 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return { label: 'Loading chats…', detail: 'Files are ready. Your chats are still loading.', kind: 'busy' };
   }
   if (isCloudPending && sync?.hasAppliedRemote) {
-    return { label: 'Preparing files…', detail: 'Making the downloaded files ready to open.', kind: 'busy' };
+    return { label: 'Preparing files…', detail: 'Getting your files ready to open.', kind: 'busy' };
   }
   if (isCloudPending) {
-    return { label: 'Connecting to Tau Cloud…', detail: 'Your files will appear when they are ready.', kind: 'busy' };
+    return { label: 'Opening project…', detail: 'Your files will appear when they are ready.', kind: 'busy' };
   }
   if (sync?.state === 'checking') {
-    return { label: 'Checking for changes…', detail: 'Checking the cloud copy for changes.', kind: 'busy' };
+    return { label: 'Checking for changes…', detail: 'Checking for new changes.', kind: 'busy' };
   }
   if (sync?.state === 'pending') {
     return {
       label: 'Backing up changes…',
-      detail: 'Sending local changes to the remote. You can keep working.',
+      detail: 'Backing up your changes. You can keep working.',
       kind: 'busy',
     };
   }
@@ -105,7 +105,7 @@ export function ProjectSyncStatus({
               variant='ghost'
               size='icon'
               className={sidebarRowButtonClass}
-              aria-label={`Project sync: ${indicator.label}`}
+              aria-label={indicator.label}
             >
               {indicator.kind === 'busy' ? (
                 <Loader aria-hidden />
@@ -122,7 +122,7 @@ export function ProjectSyncStatus({
           <p>{indicator.detail}</p>
         </TooltipContent>
       </Tooltip>
-      <PopoverContent side='bottom' align='start' aria-label='Project sync status' className='space-y-2 text-sm'>
+      <PopoverContent side='bottom' align='start' aria-label='Project status' className='space-y-2 text-sm'>
         <p className='font-medium'>{indicator.label}</p>
         <p>{indicator.detail}</p>
         <Button variant='outline' size='sm' onClick={onOpenDetails}>

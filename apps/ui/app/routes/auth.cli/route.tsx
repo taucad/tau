@@ -75,8 +75,8 @@ export default function AuthCliRoute(): React.JSX.Element {
               </p>
               <p>Account: {session?.user.email ?? 'Signing in…'}</p>
               <p className='text-sm text-muted-foreground'>
-                Tau CLI will be able to access your Tau Cloud account, including your projects, backups, and paid
-                services. It receives its own session, which you can revoke with tau auth logout.
+                Tau CLI will be able to use your Tau account, including your projects, backups and paid services. It
+                receives its own session, which you can revoke with tau auth logout.
               </p>
               {request.data && request.data.status !== 'pending' ? (
                 <p role='status'>This request has already been processed. Return to your terminal.</p>

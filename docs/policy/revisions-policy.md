@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-11-13'
+updated: '2026-11-18'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -54,7 +54,7 @@ Use each term for exactly one concept and keep engineering terms out of product 
 | Publication     | Share record pointing at a version synced to Tau Cloud                                                                                                                              |
 | Project session | All resources held for one live project on one client                                                                                                                               |
 
-Use **History**, **Version**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Close**, **Back up**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, head, remote, line, linked, or host (except "Git host") as product vocabulary.
+Use **History**, **Version**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Close**, **Back up**, **the cloud** (with **Tau** as the backup choice's label), **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, head, remote, line, linked, or host (except "Git host") as product vocabulary.
 
 Reserve **revision** and **Rev A, B, C** for a release workflow (blueprint M11). A save is a history entry: product copy never calls it a revision and never gives it a number; it names an entry by its title, an autosave by its time, and a version by `V3`. "Revision" stays the engineering term for the immutable tree in code, package and file names (`@taucad/revisions`, `RevisionRow`, `RevisionPort`).
 
@@ -234,7 +234,7 @@ Use Git smart HTTP plus Git LFS for every remote. Disk hosts use native Git; bro
 
 Use a dedicated GitHub App user connection for first-class GitHub repository discovery and transport. Keep Tau sign-in and Gist authorization separate; never broaden Better Auth account linking or request `public_repo`/`repo` for this capability. Store App access and refresh tokens only in the encrypted user connection store. Bind every in-memory Git credential to one normalized GitHub repository URL, stable repository id, connection generation, and expiry. Refuse authenticated redirects; resolve repository moves through authenticated catalog selection. Permit GitHub LFS only through the repository batch endpoint and server-issued, short-lived action handles that cannot name an arbitrary target or inherit the batch credential.
 
-Expose one remote per project for now—**No remote**, **Tau Cloud**, or **Git remote**—while retaining Git's remotes list as the data model. Never model blob stores as client-side remotes. For a signed-in, entitled account, back a project up to Tau Cloud from its first revision with a one-line notice and a per-project opt-out, with no Connect step; keep the chooser for GitHub, any Git address, and reconnection.
+Expose one remote per project for now—shown as **This device only**, **Tau**, or **GitHub or another Git host**—while retaining Git's remotes list as the data model. Never model blob stores as client-side remotes. For a signed-in, entitled account, back a project up to Tau Cloud from its first revision with a one-line notice and a per-project opt-out, with no Connect step; keep the chooser for GitHub, any Git address, and reconnection.
 
 Give a Tau Cloud project one owner and any number of collaborators holding `read` or `write`. Authorize every git request and every project route through one access service rather than an owner comparison, answer 404 for a non-member and a role refusal for a member below the need, and reserve registering, publishing and managing collaborators to the owner. A collaborator's bytes land in the owner's storage and count against the owner's plan; the server attributes every repository write to the authenticated pusher, while the commit author stays the person the client recorded. Revocation takes effect within the authorization cache window (5 s per API process; hits only are cached, so a revoked collaborator is refused by the first request after that window on each worker). A lease already in flight finishes.
 

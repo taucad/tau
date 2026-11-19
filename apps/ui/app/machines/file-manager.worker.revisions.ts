@@ -549,7 +549,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const candidateRemote = async (publishing: boolean): Promise<string> => {
     if (publishing && published.remote.provider === 'github') {
       throw new Error(
-        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau Cloud for candidate sharing.',
+        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau for candidate sharing.',
       );
     }
     if (isDesktopTarget()) {
@@ -1873,7 +1873,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Through the content read, so a placeholder compares as its object, never as its pointer text (D9). */
         const read = await readContent(checkout.id, path, { wait: compareWaitMilliseconds });
         if (read.outcome === 'pending') {
-          throw Object.assign(new Error(`The large object of ${path} is not on this device yet.`), { code: 'PENDING' });
+          throw Object.assign(new Error(`${path} is still downloading.`), { code: 'PENDING' });
         }
         const working = read.outcome === 'bytes' ? read.data : undefined;
         if (working !== undefined) {

@@ -8,6 +8,9 @@ import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
+/** Every label the sidebar's project status button can carry as its accessible name. */
+const projectStatusName =
+  /^(Needs your decision|Offline|Sign in to continue|Project unavailable|Couldn’t back up|Downloading files…|Preparing files…|Couldn’t load chats|Loading chats…|Opening project…|Checking for changes…|Backing up changes…)$/u;
 const mockUseProjects = vi.fn();
 const mockCloudIntent = vi.fn();
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mockCloudIntent() as string | undefined }));
@@ -287,7 +290,7 @@ describe('ProjectNavigation', () => {
     mockCloudIntent.mockReturnValue(undefined);
     rerender(<ProjectNavigation />);
     expect(newChat).toHaveAttribute('aria-disabled', 'false');
-    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: projectStatusName })).not.toBeInTheDocument();
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -586,7 +589,7 @@ describe('ProjectNavigation', () => {
     );
     expect(actions).toContainElement(newChat);
     expect(link).not.toContainElement(actions as HTMLElement);
-    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: projectStatusName })).not.toBeInTheDocument();
   });
 
   /* On a phone both menus open in drawers. */

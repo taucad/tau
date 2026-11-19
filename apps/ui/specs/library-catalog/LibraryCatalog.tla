@@ -124,6 +124,8 @@
 \* `reportWorkerFailed` services, which `ProjectLibrary` binds to the app's worker factory and reporters; the library
 \* reads the started store back as its worker (`runtime/project-library.ts` re-reviewed in its final form, with the
 \* typed read-back). `use-project-manager.tsx` re-points a type import. No action or correspondence changes.
+\* Tau Cloud naming audit (2026-11-18): `project-library-commands.ts` rewords a refusal sentence; copy only.
+\* No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -60,7 +60,7 @@ vi.mock('#lib/share-providers.js', async (importOriginal) => {
     shareProviderRegistry: {
       descriptors: [
         { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'tau', label: 'Hosted link', capabilities: ['project.publish', 'project.resolve'] },
+        { id: 'tau', label: 'Cloud link', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
       ],
@@ -248,10 +248,10 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(trigger);
 
     const directOption = screen.getByRole('option', { name: 'Direct link' });
-    const tauOption = screen.getByRole('option', { name: 'Hosted link' });
+    const tauCloudOption = screen.getByRole('option', { name: 'Cloud link' });
     const gistOption = screen.getByRole('option', { name: 'GitHub Gist' });
     expect(directOption.querySelector('.lucide-link-2')).not.toBeNull();
-    expect(tauOption.querySelector('use')).toHaveAttribute('href', '#tau');
+    expect(tauCloudOption.querySelector('.lucide-cloud')).not.toBeNull();
     expect(gistOption.querySelector('use')).toHaveAttribute('href', '#github');
     expect(screen.queryByRole('option', { name: 'GitHub repository' })).not.toBeInTheDocument();
 
@@ -303,13 +303,13 @@ describe('ProjectSharePanel', () => {
     expect(portableContextDispose).toHaveBeenCalledOnce();
   });
 
-  it('should leave sign-in to the hosted link rather than asking under the direct link (D95)', async () => {
+  it('should leave sign-in to the cloud link rather than asking under the direct link (D95)', async () => {
     renderPanel(
       <ProjectSharePanel projectId='proj_direct' projectName='Direct' entryPath='main.ts' collectSnapshot={vi.fn()} />,
     );
 
     expect(await screen.findByRole('button', { name: /copy direct link/i })).toBeInTheDocument();
-    expect(screen.queryByText(/sign in to persist/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sign in to create/i)).not.toBeInTheDocument();
   });
 
   it('opts into password encryption and can omit the password from the copied link', async () => {
@@ -668,8 +668,10 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_signed_out' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Sign in to persist this project with Tau.')).toBeInTheDocument();
-    expect(screen.getByText(/keeps this hosted share available over time/i)).toBeInTheDocument();
+    expect(await screen.findByText('Sign in to create a cloud link.')).toBeInTheDocument();
+    expect(screen.getByText(/saved to your account/i)).toBeInTheDocument();
+    // Without a snapshot collector the pane offers no direct link, so it does not suggest one.
+    expect(screen.queryByText(/use a direct link/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/auth/sign-in?redirectTo=%2F%3Fworkbench%3Dshare%26shareProvider%3Dtau',
@@ -694,8 +696,8 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_offline' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Tau-hosted sharing is unavailable right now.')).toBeInTheDocument();
-    expect(screen.getByText('Check your connection and try again.')).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load this project's cloud link.")).toBeInTheDocument();
+    expect(screen.getByText('Check your connection, then try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
@@ -705,17 +707,17 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_cloud_deleted' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('This project has no copy in Tau Cloud.')).toBeInTheDocument();
-    expect(screen.getByText(/duplicate the project to publish a new copy/u)).toBeInTheDocument();
-    expect(screen.queryByText('Check your connection and try again.')).not.toBeInTheDocument();
+    expect(await screen.findByText("This project isn't in the cloud.")).toBeInTheDocument();
+    expect(screen.getByText(/duplicate the project and share the copy/u)).toBeInTheDocument();
+    expect(screen.queryByText('Check your connection, then try again.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
   it('loads unpublished share state with private visibility selected', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText(/publish a snapshot/i)).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /private/i })).toBeChecked();
+    expect(await screen.findByText(/publish a version of this project/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeChecked();
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeEnabled();
     expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
       credentials: 'include',
@@ -795,7 +797,7 @@ describe('ProjectSharePanel', () => {
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
     });
-    expect(await screen.findByText('Who can view this link')).toBeInTheDocument();
+    expect(await screen.findByText('People invited to this link')).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
   });
 
@@ -817,10 +819,10 @@ describe('ProjectSharePanel', () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.type(
-      await screen.findByRole('combobox', { name: /share with emails/i }),
+      await screen.findByRole('combobox', { name: 'Invite people by email' }),
       'Team@Example.com{Enter}',
     );
-    await userEvent.click(screen.getByRole('button', { name: /add access/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/access', {
@@ -831,7 +833,7 @@ describe('ProjectSharePanel', () => {
       });
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: /revoke friend@example.com/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /remove access for friend@example.com/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/access/pva_1', {
@@ -854,10 +856,12 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    expect(await screen.findByText(/people with this link see the previous shared snapshot/i)).toBeInTheDocument();
-    expect(screen.getByText('General access')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Private');
-    expect(screen.queryByRole('radio', { name: /private/i })).not.toBeInTheDocument();
+    expect(await screen.findByText(/people who open the link still see the published version/i)).toBeInTheDocument();
+    expect(screen.getByText('Who can open the link')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent(
+      'Only people you invite',
+    );
+    expect(screen.queryByRole('radio', { name: /only people you invite/i })).not.toBeInTheDocument();
   });
 
   it('republishes the exact named version and makes another version explicit', async () => {
@@ -877,7 +881,7 @@ describe('ProjectSharePanel', () => {
       expect.objectContaining({ tag: 'Ready for print', version: 2 }),
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Publish another version' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Publish new version' }));
     expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
   });
 
@@ -902,9 +906,9 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
+    const accessSelect = await screen.findByRole('combobox', { name: /who can open the link/i });
     await userEvent.click(accessSelect);
-    await userEvent.click(await screen.findByRole('option', { name: 'Public' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Anyone with the link' }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/visibility', {
@@ -915,12 +919,14 @@ describe('ProjectSharePanel', () => {
       });
     });
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Public');
+      expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent(
+        'Anyone with the link',
+      );
     });
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: /share with emails/i })).not.toBeInTheDocument();
-    expect(toastSuccessMock).toHaveBeenCalledWith('Visibility updated');
+    expect(screen.queryByRole('combobox', { name: 'Invite people by email' })).not.toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Link access updated');
   });
 
   it('switches public publications back to private and restores recipient entry', async () => {
@@ -931,9 +937,9 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
+    const accessSelect = await screen.findByRole('combobox', { name: /who can open the link/i });
     await userEvent.click(accessSelect);
-    await userEvent.click(await screen.findByRole('option', { name: 'Private' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Only people you invite' }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/publications/pub_ui/visibility', {
@@ -944,7 +950,7 @@ describe('ProjectSharePanel', () => {
       });
     });
 
-    expect(await screen.findByRole('combobox', { name: /share with emails/i })).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: 'Invite people by email' })).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
   });
 
@@ -955,21 +961,23 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
+    const accessSelect = await screen.findByRole('combobox', { name: /who can open the link/i });
     await userEvent.click(accessSelect);
-    await userEvent.click(await screen.findByRole('option', { name: 'Public' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Anyone with the link' }));
 
     await waitFor(() => {
-      expect(toastErrorMock).toHaveBeenCalledWith('Could not update visibility');
+      expect(toastErrorMock).toHaveBeenCalledWith("Couldn't change who can open the link. Try again.");
     });
-    expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Private');
+    expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent(
+      'Only people you invite',
+    );
   });
 
   it('disables publish when a shared email is invalid', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_invalid_email' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.type(
-      await screen.findByRole('combobox', { name: /share with specific emails/i }),
+      await screen.findByRole('combobox', { name: 'Invite people by email (optional)' }),
       'not-an-email{Enter}',
     );
 
@@ -996,7 +1004,7 @@ describe('ProjectSharePanel', () => {
   });
 
   it('offers sign-in only when the sentence asks for it', async () => {
-    publishFacet({ phase: 'error', error: 'Sign in to publish to Tau Cloud.' });
+    publishFacet({ phase: 'error', error: 'Sign in to publish to the cloud.' });
     renderPanel(<ProjectSharePanel projectId='proj_signin' projectName='Demo' entryPath='main.ts' />);
 
     const alert = await screen.findByRole('alert');
@@ -1023,16 +1031,16 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   it('locks the private option and defaults free users to public', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText(/publish a snapshot/i)).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /private/i })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: /public/i })).toBeChecked();
+    expect(await screen.findByText(/publish a version of this project/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
   });
 
   it('routes the upgrade affordance to billing settings', async () => {
     const user = userEvent.setup();
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await screen.findByText(/publish a snapshot/i);
+    await screen.findByText(/publish a version of this project/i);
     await user.click(screen.getByRole('button', { name: /upgrade/i }));
 
     expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');

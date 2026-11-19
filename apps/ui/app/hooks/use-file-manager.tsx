@@ -492,7 +492,7 @@ function startFailureCopy(errorClass: string | undefined, errorCode: string | un
       return {
         title: "Tau's local database did not open",
         description:
-          'The database Tau keeps on this device did not answer. Restart in safe mode, or open Troubleshooting to reset it.',
+          'Tau’s storage on this device didn’t answer. Restart in safe mode, or open Troubleshooting to reset it.',
         actions: ['restartInSafeMode', 'troubleshooting', 'showLogs'],
         offersRetry: true,
       };

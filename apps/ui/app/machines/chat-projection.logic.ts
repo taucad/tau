@@ -38,9 +38,9 @@ import type {
   ParsedLogSegment,
   RowKey,
   SegmentParse,
-  TurnPlacement,
 } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
+import type { TurnRevisionLog } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import {
   agentApprovalToolName,
   parseAgentHostApproval,
@@ -1739,26 +1739,6 @@ export const selectPosition = (
   projection.sourceHealth === undefined
     ? projection.ledger.position
     : { ...projection.ledger.position, sourceHealth: projection.sourceHealth };
-
-/** What a turn's newest attempt says about its revision (§5.8): the log facts the revision card reads. @public */
-export type TurnRevisionLog = Readonly<{
-  attempt: number;
-  /** Host-confirmed change for this attempt, independent of selected checkout status. */
-  hasChanges?: boolean;
-  /** Earlier verified result for this user turn; never progress for the current attempt. */
-  previousRevisionId?: string;
-  /** The attempt's terminal lifecycle, once its terminal row is folded. */
-  terminal?: 'completed' | 'failed' | 'cancelled';
-  /** The attempt waits on the person: it paused, or an interrupt it opened is still open. */
-  isWaiting: boolean;
-  /** Attempt 1's placement of record; a run without one never settles (legacy). */
-  placement?: TurnPlacement;
-  /** The attempt's settlement row, and the revision it names. */
-  settlement?: Readonly<{
-    type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed';
-    revisionId?: string;
-  }>;
-}>;
 
 const isTerminal = (lifecycle: string): lifecycle is 'completed' | 'failed' | 'cancelled' =>
   lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';

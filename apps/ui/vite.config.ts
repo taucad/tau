@@ -34,6 +34,8 @@ import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
+import { createCadmpegEngines } from './cadmpeg-engines.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -576,6 +578,13 @@ export default defineConfig(({ command, mode }) => {
   });
   const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
+  // Deploys load each engine by digest from their dependency host; the dev server serves the installed package.
+  const cadmpegEngines = createCadmpegEngines({
+    base: process.env['CADMPEG_ENGINES_BASE'],
+    command,
+    mode,
+    root: __dirname,
+  });
   const csharpAssets = createCsharpLanguageAssets(
     isTest ? undefined : path.resolve(__dirname, '../../out/csharp-language/stage'),
   );
@@ -630,6 +639,7 @@ export default defineConfig(({ command, mode }) => {
       tauTelemetryHostCloudBuild: JSON.stringify(!isTest),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
+      tauCadmpegEngines: cadmpegEngines.define,
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
@@ -678,6 +688,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       mtAssets.plugin,
       picogkAssets.plugin,
+      cadmpegEngines.plugin,
       csharpAssets.plugin,
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({

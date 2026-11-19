@@ -1,5 +1,25 @@
-import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
-import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
+import type { TurnPlacement } from '@taucad/agent-host';
+import type { RevisionCard } from '#hooks/use-revisions.js';
+
+/** What a turn's newest attempt says about its revision (§5.8): the log facts the revision card reads. @public */
+export type TurnRevisionLog = Readonly<{
+  attempt: number;
+  /** Host-confirmed change for this attempt, independent of selected checkout status. */
+  hasChanges?: boolean;
+  /** Earlier verified result for this user turn; never progress for the current attempt. */
+  previousRevisionId?: string;
+  /** The attempt's terminal lifecycle, once its terminal row is folded. */
+  terminal?: 'completed' | 'failed' | 'cancelled';
+  /** The attempt waits on the person: it paused, or an interrupt it opened is still open. */
+  isWaiting: boolean;
+  /** Attempt 1's placement of record; a run without one never settles (legacy). */
+  placement?: TurnPlacement;
+  /** The attempt's settlement row, and the revision it names. */
+  settlement?: Readonly<{
+    type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed';
+    revisionId?: string;
+  }>;
+}>;
 
 /** The revision a turn started from, as far as the placement says. @public */
 export type TurnRevisionBase =

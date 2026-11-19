@@ -53,10 +53,15 @@ jobs:
           persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+      - name: Install the browsers' system dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: ${{ matrix.engines }}
       - name: Install the three browsers
         env:
           ENGINES: ${{ matrix.engines }}
-        run: pnpm exec playwright install --with-deps ${ENGINES//,/ }
+        run: pnpm exec playwright install ${ENGINES//,/ }
       # Placeholder origins: the server build checks they are set; nothing here contacts them.
       - name: Build the web client
         env:

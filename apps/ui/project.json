@@ -106,6 +106,9 @@
           "env": "PICOGK_BROWSER_MIRROR_BASE"
         },
         {
+          "env": "CADMPEG_ENGINES_BASE"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {
@@ -198,6 +201,9 @@
         },
         {
           "env": "PICOGK_BROWSER_MIRROR_BASE"
+        },
+        {
+          "env": "CADMPEG_ENGINES_BASE"
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
@@ -423,6 +429,47 @@
       "options": {
         "cwd": ".",
         "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build --external @taucad/openrscad"
+      }
+    },
+    "check-cadmpeg-engine-absence": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "cadmpeg engine-absence gate (cadmpeg engine delivery charter D16, I1): fails when the web, desktop renderer or `tau serve` build holds a file whose SHA-256 is the raw or gzip digest of any engine in the installed `cadmpeg-ts/digests`, under any name, and names the file and the engine. The browser loads one engine per opened format by digest at run time, so no build carries one. A missing build directory fails. CI's build lane runs it whenever this app is affected; its builds are already in that lane."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-cadmpeg-engine-absence.mts",
+        {
+          "externalDependencies": ["cadmpeg-ts"]
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-cadmpeg-engine-absence.mts apps/ui/build apps/ui/desktop/build apps/ui/serve/build"
+      }
+    },
+    "check-serve-ui-layer": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Serve UI layer size gate (X2; cadmpeg engine delivery charter D16, I11): builds the `tau serve` UI layer from the `tau serve` build with packages/cli/scripts/serve-ui-layer.mts, the release's own deterministic tar and gzip, and fails when it is over 150,000,000 B gzipped. It prints the layer's size on a pass and on a refusal. The release build's serve-ui-layer job still applies the same line. CI's build lane runs it whenever this app is affected; build:serve is already in that lane."
+      },
+      "dependsOn": ["build:serve"],
+      "inputs": [
+        "{workspaceRoot}/packages/cli/scripts/serve-ui-layer.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/serve/build/client/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts build --client apps/ui/serve/build/client --out out/serve-ui-layer"
       }
     },
     "check-route-module-patch": {

@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
 import type { ExportResult } from '@taucad/runtime/client';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type * as FileUtilsModuleType from '@taucad/utils/file';
 import type { FileExtension } from '@taucad/types';
-import type { cadMachine } from '#machines/cad.machine.js';
+import type { CadExportActor } from '#components/files/use-export-to-disk.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -85,7 +84,7 @@ const mockCadRef = {
       document: mockDocument,
     },
   })),
-} as unknown as ActorRefFrom<typeof cadMachine>;
+} as unknown as CadExportActor;
 
 const mockCadRef2 = {
   getSnapshot: vi.fn(() => ({
@@ -96,7 +95,7 @@ const mockCadRef2 = {
       document: mockDocument,
     },
   })),
-} as unknown as ActorRefFrom<typeof cadMachine>;
+} as unknown as CadExportActor;
 
 const mockDownloadBlob = vi.fn();
 vi.mock('@taucad/utils/file', async () => {
@@ -272,7 +271,7 @@ describe('ExportSelector', () => {
   });
 
   it('should show the geometry unit picker in multi-geometry-unit mode with more than one entry', () => {
-    const geometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
+    const geometryUnits = new Map<string, CadExportActor>();
     geometryUnits.set('main.ts', mockCadRef);
     geometryUnits.set('helper.ts', mockCadRef2);
 
@@ -348,7 +347,7 @@ describe('ExportSelector', () => {
   });
 
   it('should switch the active geometry unit when the picker selects a different file', async () => {
-    const geometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
+    const geometryUnits = new Map<string, CadExportActor>();
     geometryUnits.set('main.ts', mockCadRef);
     geometryUnits.set('helper.ts', mockCadRef2);
 

@@ -94,6 +94,7 @@
     "./services/headless-capture-presentation": "./src/services/headless-capture-presentation.ts",
     "./services/parameter-set-service": "./src/services/parameter-set-service.ts",
     "./types/editor.types": "./src/types/editor.types.ts",
+    "./types/persistent-storage.types": "./src/types/persistent-storage.types.ts",
     "./types/project-creation-location.types": "./src/types/project-creation-location.types.ts",
     "./utils/api-key-plugin": "./src/utils/api-key-plugin.ts",
     "./utils/auth-error.utils": "./src/utils/auth-error.utils.ts",

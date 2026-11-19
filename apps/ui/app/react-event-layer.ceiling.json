@@ -12,7 +12,6 @@
   "apps/ui/app/components/chat/chat-textarea-desktop.tsx": 1,
   "apps/ui/app/components/chat/chat-tool-file-operation.tsx": 1,
   "apps/ui/app/components/chat/new-project-chat-composer.tsx": 1,
-  "apps/ui/app/components/files/use-export-to-disk.ts": 1,
   "apps/ui/app/components/geometry/cad/capture-view-control.tsx": 1,
   "apps/ui/app/components/geometry/loader/metal-morph-spinner.tsx": 1,
   "apps/ui/app/components/machines/machine-controls.tsx": 1,

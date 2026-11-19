@@ -141,8 +141,11 @@ jobs:
           cp out/picovoxel/dotnet/global.json out/workload-install/global.json
           cd out/workload-install
           dotnet workload install wasm-tools --version 11.0.100-rc.3.26524.4
-          sudo apt-get update
-          sudo apt-get install -y ninja-build cmake
+      - name: Install the native build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ninja-build cmake
       - name: Acquire the managed dependency the package declares
         if: steps.cache.outputs.cache-hit != 'true'
         run: |

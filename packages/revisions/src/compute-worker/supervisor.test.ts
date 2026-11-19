@@ -369,23 +369,55 @@ describe('the supervised compute worker (W5)', () => {
     expect(await supervised.inflate(await inline.deflate(data))).toStrictEqual(data);
   });
 
-  it('answers a method its fallback lacks as unavailable, typed, never a TypeError', async () => {
+  it('serves inflateObject past a dead worker from a fallback that lacks it: inflate, size check and SHA-1', async () => {
+    // A fallback built before `inflateObject` answered it `unavailable`, so every read for a copy failed where the
+    // fallback's inflate and sha1 had served it before (SP6-import re-review).
     const { inflateObject: _absent, ...older } = createInlineCompute();
-    const supervised = createSupervisedComputeWorker({
+    const inline = createInlineCompute();
+    const data = encoder.encode('cube(1);\n'.repeat(100));
+    const deflated = await inline.deflate(data);
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(data.byteLength)}\0`), ...data]));
+    const abandoned = createSupervisedComputeWorker({
       spawn: () => {
         throw new Error('no workers');
       },
       maxRestarts: 0,
       fallback: older,
     });
-    const inline = createInlineCompute();
-    const data = encoder.encode('cube(1);\n');
-    const refusal = await supervised.inflateObject!('blob', await inline.deflate(data), data.byteLength).catch(
-      (error: unknown) => error,
-    );
-    expect(refusal).toBeInstanceOf(ComputeWorkerCrashedError);
-    expect(refusal).toMatchObject({ failure: 'unavailable', method: 'inflateObject' });
-    expect(await supervised.inflate(await inline.deflate(data))).toStrictEqual(data);
+    const answered = await abandoned.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(answered.oid).toBe(oid);
+    expect(new Uint8Array(answered.data)).toStrictEqual(data);
+    for (const [bytes, declared] of [
+      [encoder.encode('not zlib at all'), 10],
+      [deflated, data.byteLength - 1],
+      [deflated, data.byteLength + 1],
+      [deflated, 2 ** 52],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time.
+      const refusal = await abandoned.inflateObject!('blob', new Uint8Array(bytes), declared).catch(
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(CorruptBytesError);
+    }
+
+    /* A worker that never loaded: its held inflateObject goes to that fallback, and no call is counted failed. */
+    const crashes: unknown[] = [];
+    const unloadable = createSupervisedComputeWorker({
+      spawn: () => {
+        const worker = fakeWorker();
+        worker.freeze();
+        queueMicrotask(() => {
+          worker.crash();
+        });
+        return worker;
+      },
+      maxRestarts: 2,
+      fallback: older,
+      onCrash: (report) => crashes.push(report),
+    });
+    const rerouted = await unloadable.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(rerouted.oid).toBe(oid);
+    expect(crashes).toEqual([{ failedCalls: 0, restarts: 1, abandoned: false }]);
   });
 
   it('keeps a pack whose read failed because the worker crashed, and reads it once restarted', async () => {

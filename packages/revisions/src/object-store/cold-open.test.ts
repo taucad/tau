@@ -10,6 +10,7 @@ import { postService } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
+import { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
@@ -533,6 +534,31 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     for (const oid of closure) {
       // oxlint-disable-next-line no-await-in-loop -- one object at a time.
       const object = await reopened.read(oid);
+      expect(object).toBeDefined();
+      expect(digestHex('sha1', frameObject(object!.type, object!.data))).toBe(oid);
+    }
+  });
+
+  it('imports and verifies through a supervised compute whose worker is dead and whose fallback lacks inflateObject', async () => {
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const compute = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('Worker scripts are blocked here.');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const store = await emptyStore(compute, 'supervised-older');
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    const closure = [
+      hosted.main,
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+    ];
+    for (const oid of closure) {
+      // oxlint-disable-next-line no-await-in-loop -- one object at a time.
+      const object = await store.read(oid);
       expect(object).toBeDefined();
       expect(digestHex('sha1', frameObject(object!.type, object!.data))).toBe(oid);
     }

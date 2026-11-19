@@ -272,6 +272,43 @@ const inflateFramed = async (
   return framed;
 };
 
+/* A size no body this long can inflate to is refused before the body is inflated at all. */
+const refuseImpossibleSize = (compressed: Uint8Array<ArrayBuffer>, declared: number): void => {
+  if (!Number.isSafeInteger(declared) || declared < 0 || declared > compressed.byteLength * deflateMaximumRatio) {
+    throw new CorruptBytesError('The entry declares a size its body cannot inflate to.');
+  }
+};
+
+/**
+ * A compute with `inflateObject`: the one given when it has it, else the
+ * same work from its own `inflate` and `sha1`, with the same refusals (an
+ * impossible declared size, a body that is not zlib, one that inflates to
+ * another size). For a supervisor's fallback built before the method was.
+ *
+ * @param compute - Any compute.
+ * @returns A compute whose `inflateObject` is there.
+ */
+export const withInflateObject = (
+  compute: ComputeWorker,
+): ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>> =>
+  typeof compute.inflateObject === 'function'
+    ? (compute as ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>>)
+    : Object.freeze({
+        ...compute,
+        inflateObject: async (type, compressed, declared) => {
+          refuseImpossibleSize(compressed, declared);
+          const data = await compute.inflate(compressed);
+          if (data.byteLength !== declared) {
+            throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
+          }
+          const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
+          const framed = new Uint8Array(head.byteLength + declared);
+          framed.set(head);
+          framed.set(data, head.byteLength);
+          return { data, oid: await compute.sha1(framed) };
+        },
+      });
+
 /**
  * The compute contract run in the caller's own realm.
  *
@@ -292,10 +329,7 @@ export const createInlineCompute = (): ComputeWorker => {
   return Object.freeze({
     inflate,
     inflateObject: async (type, compressed, declared) => {
-      /* A size no body this long can inflate to is refused before the body is inflated at all. */
-      if (!Number.isSafeInteger(declared) || declared < 0 || declared > compressed.byteLength * deflateMaximumRatio) {
-        throw new CorruptBytesError('The entry declares a size its body cannot inflate to.');
-      }
+      refuseImpossibleSize(compressed, declared);
       /* Inflated behind its frame: hashed without a further copy, and handed back as a view past the frame. */
       const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
       const framed = await inflateFramed(compressed, head, declared);

@@ -159,7 +159,7 @@ public sealed partial class WorkerTests
 public sealed partial class WorkerTests
 {
     private delegate void CopyNativeWords(ReadOnlySpan<byte> native,Span<byte> wire,bool littleEndian);
-    private delegate void HashNativeWords(System.Security.Cryptography.IncrementalHash hash,ReadOnlySpan<byte> native,bool littleEndian);
+    private delegate void HashNativeWords(StreamingSha256 hash,ReadOnlySpan<byte> native,bool littleEndian);
     private delegate int[] ReadIntWords(ReadOnlySpan<byte> wire,bool littleEndian);
     private delegate float[] ReadFloatWords(ReadOnlySpan<byte> wire,bool littleEndian);
     [Fact]
@@ -176,8 +176,8 @@ public sealed partial class WorkerTests
         Assert.Equal(big,System.Runtime.InteropServices.MemoryMarshal.AsBytes(read(little,false).AsSpan()).ToArray());
         // More than one bounded scratch chunk, including a partial final chunk.
         var nativeLittle=Enumerable.Range(0,25).SelectMany(_=>little).ToArray();var nativeBig=Enumerable.Range(0,25).SelectMany(_=>big).ToArray();
-        using var a=System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
-        using var b=System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        using var a=new StreamingSha256();
+        using var b=new StreamingSha256();
         hash(a,nativeLittle,true);hash(b,nativeBig,false);Assert.Equal(a.GetHashAndReset(),b.GetHashAndReset());
         Assert.Equal(ComputeLayoutCodec.Digest(new int[]{1,2}),ComputeLayoutCodec.Digest(new int[]{1,2}));
         Assert.NotEqual(ComputeLayoutCodec.Digest(new int[]{-1,int.MinValue}),ComputeLayoutCodec.Digest(new uint[]{uint.MaxValue,0x80000000}));

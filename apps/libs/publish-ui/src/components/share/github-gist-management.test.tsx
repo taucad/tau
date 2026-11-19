@@ -73,6 +73,7 @@ const renderManagement = (
   properties?: {
     readonly onRepublished?: (url: string) => void;
     readonly onUnpublished?: () => void;
+    readonly shareUrl?: string;
   },
   path = '/s/github-gist~abc123',
 ) =>
@@ -85,6 +86,7 @@ const renderManagement = (
             locator={{ providerId: 'github-gist', reference: 'abc123' }}
             protection={{ kind: 'none' }}
             collectSnapshot={async () => snapshot}
+            shareUrl={properties?.shareUrl}
             onRepublished={properties?.onRepublished ?? vi.fn()}
             onUnpublished={properties?.onUnpublished ?? vi.fn()}
           />
@@ -121,11 +123,11 @@ describe('GithubGistManagement', () => {
     expect(manage.querySelector('span')).toHaveClass('hidden', 'md:inline');
   });
 
-  it('republishes to the same Gist and emits the new pinned Tau URL', async () => {
+  it('updates the same Gist, emits the new pinned Tau link and says the link changed', async () => {
     const onRepublished = vi.fn();
-    renderManagement({ onRepublished });
+    renderManagement({ onRepublished, shareUrl: 'https://tau.new/s/github-gist~abc123' });
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Update Gist' }));
     await waitFor(() => {
       expect(mocks.republish).toHaveBeenCalledWith(
         expect.objectContaining({ locator: { providerId: 'github-gist', reference: 'abc123' }, snapshot }),
@@ -133,15 +135,17 @@ describe('GithubGistManagement', () => {
       );
       expect(onRepublished).toHaveBeenCalledWith(`https://tau.new/s/github-gist~abc123.${'b'.repeat(40)}`);
     });
+    expect(toast.success).toHaveBeenCalledWith('Gist updated. The link changed, so copy it again.');
   });
 
-  it('requires confirmation before unpublishing', async () => {
+  it('requires confirmation before deleting the Gist', async () => {
     const onUnpublished = vi.fn();
     renderManagement({ onUnpublished });
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unpublish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete Gist…' }));
     expect(mocks.unpublish).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Unpublish Gist' }));
+    expect(screen.getByRole('alertdialog', { name: 'Delete this Gist?' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Gist' }));
     await waitFor(() => {
       expect(mocks.unpublish).toHaveBeenCalledWith(
         { locator: { providerId: 'github-gist', reference: 'abc123' } },

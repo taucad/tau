@@ -50,7 +50,7 @@ import {
   readServerVerdict,
   readSupersedingBuildId,
 } from '#filesystem/build-skew.js';
-import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import {
   isErrorTrackerListening,
   isSdkLoadFailure,

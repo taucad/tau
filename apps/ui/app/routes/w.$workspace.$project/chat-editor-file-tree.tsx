@@ -144,7 +144,7 @@ import { previewProjectFileInQuickLook } from '@taucad/files-ui/filesystem/deskt
 import type { QuickLookServices } from '@taucad/files-ui/filesystem/desktop-quick-look';
 import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
-import type { RevealInFileManager } from '@taucad/files-ui/hooks/use-native-file-manager';
+import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
 
 /**
  * What one row shows about where its bytes come from.

@@ -2,7 +2,7 @@
 import { createMemoryRouter } from 'react-router';
 import type { DataRouter, MiddlewareFunction } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 
 const skew = vi.hoisted(() => ({
   verdict: 'live' as ServerVerdict,

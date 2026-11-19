@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { lookupConfirmDelay, serverConfirmations } from '#filesystem/build-skew.js';
-import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import {
   autoReloadBudget,
   autoReloadTimesKey,

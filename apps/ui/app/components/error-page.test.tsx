@@ -6,7 +6,7 @@ import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
-import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 

@@ -30,7 +30,6 @@ import type { Arbitrary } from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as BuildIdentity from '#lib/build-identity.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
-import type { ServerVerdict } from '@taucad/files-ui/filesystem/build-skew';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as ErrorReporting from '#lib/error-reporting.js';
 
@@ -771,7 +770,7 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
 const showsPrompt = (
   recovery: typeof StaleBuildRecovery,
   outcome: StaleBuildRecovery.StaleBuildOutcome | undefined,
-  verdict: ServerVerdict,
+  verdict: BuildSkew.ServerVerdict,
 ): boolean => recovery.showsUpdatePrompt(outcome, verdict);
 
 /** I1, I3, I4 and I5 after one step. */

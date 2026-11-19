@@ -109,10 +109,24 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+      - name: Install Chromium and WebKit (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium webkit
       - name: Install Chromium and WebKit
-        run: pnpm exec playwright install --with-deps chromium webkit
+        run: pnpm exec playwright install chromium webkit
       - name: Validate polling helpers
         run: pnpm nx run ui-e2e:test:observability-helpers
       - name: Check deployed harness

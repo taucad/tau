@@ -68,10 +68,12 @@ jobs:
 
       - name: Install OpenSCAD
         if: matrix.ecosystem == 'none'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openscad=2021.01-6build4
-          openscad --version
+        uses: ./.github/actions/apt-install
+        with:
+          packages: --no-install-recommends openscad=2021.01-6build4
+      - name: Report the OpenSCAD version
+        if: matrix.ecosystem == 'none'
+        run: openscad --version
 
       # Restore the Zoo CLI setup and KCL execution once renewable CI credentials are provisioned.
       - name: Report Zoo KCL quarantine

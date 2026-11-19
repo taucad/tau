@@ -238,9 +238,14 @@ describe('Vitest Browser test-runner ownership', () => {
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
     // its real-GPU check installs the same Chromium on the operator's Mac.
     // The release gate's end-to-end rows install the three engines `ci.yml`'s e2e-queue rows do (C2b).
+    // The apt-install action installs the browsers' system dependencies those workflows used to fetch with
+    // `--with-deps`, and its pinning test drives it (APT-1).
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
+        '.github/actions/apt-install/action.yml',
+        '.github/actions/apt-install/apt-install.sh',
+        'scripts/src/apt-resilience.test.ts',
         '.github/workflows/ci.yml',
         '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',

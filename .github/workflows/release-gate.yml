@@ -367,14 +367,28 @@ jobs:
         with:
           ref: ${{ needs.reuse.outputs.ref }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
 
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: pnpm exec playwright install chromium firefox webkit
 
       - name: Install Pandoc for reference conversion
         run: |
@@ -386,9 +400,11 @@ jobs:
         uses: ./.github/actions/setup-linux-sandbox
 
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       - name: Prepare API env file
         run: cp apps/api/.env.example apps/api/.env

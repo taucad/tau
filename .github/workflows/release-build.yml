@@ -1082,6 +1082,16 @@ jobs:
         with:
           ref: refs/tags/${{ needs.resolve.outputs.tag }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -1094,10 +1104,11 @@ jobs:
           set -euo pipefail
           pipx install uv
           uv --version
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq libcurl4-openssl-dev zlib1g-dev
-          fi
+      - name: Install the libcurl and zlib headers for prepare-git
+        if: runner.os == 'Linux'
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: libcurl4-openssl-dev zlib1g-dev
 
       # The Linux package seals the build123d closure it ships (charter W6), and its
       # seal step compiles bytecode inside the native sandbox.

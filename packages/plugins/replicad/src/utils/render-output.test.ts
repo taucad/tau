@@ -272,7 +272,7 @@ describe('mesh memo (E7, N2)', () => {
     }
   });
 
-  it('meshes again at another tolerance or a material that needs surface coordinates, not at another placement', () => {
+  it('meshes again at another tolerance or once a material needs surface coordinates, not at another placement or material', () => {
     const box = keep(makeBox([0, 0, 0], [10, 6, 4]));
     const memo = createReplicadMeshMemo({ openCascade: oc });
     try {
@@ -301,6 +301,21 @@ describe('mesh memo (E7, N2)', () => {
           ],
           options: {},
           meshed: 1,
+        },
+        {
+          // Another material that needs surface coordinates: they depend on the geometry alone.
+          shapes: [
+            {
+              name: 'box',
+              shape: box,
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
+              material: {
+                extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.9, anisotropyRotation: 1 } },
+              },
+            },
+          ],
+          options: {},
+          meshed: 0,
         },
       ];
       for (const { shapes, options, meshed } of views) {

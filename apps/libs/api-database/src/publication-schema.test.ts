@@ -351,7 +351,13 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
             .insert(schema.projectShare)
             .values({ id: `shr_b_${Date.now()}`, projectId, ownerId, visibility: 'public' }),
         ),
-      ).toMatchObject({ code: '23505', constraint_name: 'project_share_project_idx' });
+      ).toMatchObject(
+        /* PostgreSQL names the field in snake_case. */
+        Object.fromEntries([
+          ['code', '23505'],
+          ['constraint_name', 'project_share_project_idx'],
+        ]),
+      );
       /* Each refusal on its own: a project with no link and an unknown setting
          exercises the visibility check, not the foreign key. */
       const other = await seedOwnedProject('one_link_other');
@@ -365,7 +371,13 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
             visibility: 'secret',
           }),
         ),
-      ).toMatchObject({ code: '23514', constraint_name: 'project_share_visibility_check' });
+      ).toMatchObject(
+        /* PostgreSQL names the field in snake_case. */
+        Object.fromEntries([
+          ['code', '23514'],
+          ['constraint_name', 'project_share_visibility_check'],
+        ]),
+      );
       expect(
         await refusalOf(
           db.insert(schema.projectShare).values({
@@ -375,7 +387,13 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
             visibility: 'private',
           }),
         ),
-      ).toMatchObject({ code: '23503', constraint_name: 'project_share_project_id_project_id_fk' });
+      ).toMatchObject(
+        /* PostgreSQL names the field in snake_case. */
+        Object.fromEntries([
+          ['code', '23503'],
+          ['constraint_name', 'project_share_project_id_project_id_fk'],
+        ]),
+      );
     } finally {
       /* The owners take their projects and links with them, whichever assertion failed. */
       for (const ownerId of owners) {

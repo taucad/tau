@@ -27,6 +27,7 @@
     "./collaboration/collaboration.controller": "./src/collaboration/collaboration.controller.ts",
     "./collaboration/project-access.module": "./src/collaboration/project-access.module.ts",
     "./collaboration/project-access.service": "./src/collaboration/project-access.service.ts",
+    "./collaboration/project-invite-email.service": "./src/collaboration/project-invite-email.service.ts",
     "./entitlements/commercial-entitlements": "./src/entitlements/commercial-entitlements.ts",
     "./projects/project-deletion.controller": "./src/projects/project-deletion.controller.ts",
     "./projects/project-preview.controller": "./src/projects/project-preview.controller.ts",

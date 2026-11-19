@@ -327,6 +327,40 @@ describe('PublicationAccessPanel', () => {
     });
   });
 
+  it.each([
+    ['not_requested', 'friend@example.com is already invited.'],
+    ['skipped', 'Invited friend@example.com.'],
+  ])(
+    'keeps the grant but offers no link once sharing stopped while the invite ran (%s)',
+    async (emailStatus, opening) => {
+      globalThis.fetch = vi.fn().mockResolvedValue(inviteAnswer({ status: emailStatus, reason: 'daily_cap' }));
+      renderPanel(
+        <PublicationAccessPanel
+          apiBaseUrl='https://api.example'
+          projectId='proj_panel'
+          shareUrl='https://tau.example/s/tau~shr_panel'
+          visibility='private'
+          grants={[]}
+          onVisibilityChange={vi.fn()}
+          onGrantsChanged={vi.fn(async () => false)}
+        />,
+      );
+
+      await userEvent.type(
+        screen.getByRole('combobox', { name: 'Invite people by email' }),
+        'friend@example.com{Enter}',
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+      await waitFor(() => {
+        expect(toastSuccessMock).toHaveBeenCalledExactlyOnceWith(
+          `${opening} Sharing is stopped, so they can open the link once you publish again.`,
+        );
+      });
+      expect(toastWarningMock).not.toHaveBeenCalled();
+    },
+  );
+
   it('says an invite email was sent as Invited', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(inviteAnswer({ status: 'sent' }));
     renderPanel(

@@ -34,7 +34,11 @@ type PublicationAccessPanelProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- existing panel API copy, analogous to async mutation state props.
   readonly visibilityMutating?: boolean;
   readonly onVisibilityChange: (visibility: 'private' | 'public') => Promise<void> | void;
-  readonly onGrantsChanged: () => Promise<void> | void;
+  /**
+   * Reads the link again after its invited people changed. Resolves `false` when the link, as the pane now holds it,
+   * is no longer on (sharing stopped meanwhile), so an invite's toast never offers a link that no longer works.
+   */
+  readonly onGrantsChanged: () => Promise<boolean | undefined> | boolean | undefined;
 };
 
 /** Rows shown before "Show all"; the list renders in the pane's one scroll area, so it never scrolls on its own. */
@@ -50,6 +54,9 @@ const visibilityHelp = {
  * no email was due), or refused.
  */
 type InviteOutcome = 'invited' | 'not-emailed' | 'has-access' | 'failed';
+
+/** What an invite's toast says when sharing stopped while it ran: the grant is kept, the link does not work yet. */
+const stoppedSentence = 'Sharing is stopped, so they can open the link once you publish again.';
 
 /**
  * Who a toast is about: the one address, or how many.
@@ -67,12 +74,18 @@ const whoOf = (emails: readonly string[]): string =>
  *
  * @param emails - The addresses this outcome is about.
  * @param outcome - What happened to them.
+ * @param isLinkActive - Whether the link is still on; a stopped one is never offered to copy or send.
  * @returns One sentence.
  */
-const inviteToast = (emails: readonly string[], outcome: InviteOutcome): string => {
+const inviteToast = (emails: readonly string[], outcome: InviteOutcome, isLinkActive = true): string => {
   const who = whoOf(emails);
   if (outcome === 'failed') {
     return `Couldn't invite ${who}. Try again.`;
+  }
+  if (!isLinkActive) {
+    return outcome === 'has-access'
+      ? `${who} ${emails.length === 1 ? 'is' : 'are'} already invited. ${stoppedSentence}`
+      : `Invited ${who}. ${stoppedSentence}`;
   }
   if (outcome === 'has-access') {
     return emails.length === 1
@@ -82,6 +95,47 @@ const inviteToast = (emails: readonly string[], outcome: InviteOutcome): string 
   return outcome === 'not-emailed'
     ? `We couldn't email ${who}. Copy the link and send it yourself.`
     : `Invited ${who}.`;
+};
+
+/**
+ * Says what the invites that were kept came to. A link that is on is offered to copy wherever the person has to send
+ * it; once sharing stopped, the grants are reported as kept and no toast offers the stopped link.
+ *
+ * @param groups - The addresses invited and emailed, invited but not emailed, and already invited.
+ * @param isLinkActive - Whether the link is still on, as the pane holds it after the refresh.
+ * @param copyLink - Copies the link inside a toast action's press.
+ */
+const announceInvites = (
+  groups: Readonly<{ invited: readonly string[]; notEmailed: readonly string[]; hasAccess: readonly string[] }>,
+  isLinkActive: boolean,
+  copyLink: () => Promise<void>,
+): void => {
+  const { invited, notEmailed, hasAccess } = groups;
+  if (!isLinkActive) {
+    const granted = [...invited, ...notEmailed];
+    if (granted.length > 0) {
+      toast.success(inviteToast(granted, 'invited', false));
+    }
+    if (hasAccess.length > 0) {
+      toast.success(inviteToast(hasAccess, 'has-access', false));
+    }
+    return;
+  }
+  const copyAction = {
+    label: 'Copy link',
+    onClick() {
+      void copyLink();
+    },
+  };
+  if (invited.length > 0) {
+    toast.success(inviteToast(invited, 'invited'));
+  }
+  if (hasAccess.length > 0) {
+    toast.success(inviteToast(hasAccess, 'has-access'), { action: copyAction });
+  }
+  if (notEmailed.length > 0) {
+    toast.warning(inviteToast(notEmailed, 'not-emailed'), { action: copyAction });
+  }
 };
 
 /**
@@ -180,30 +234,7 @@ export function PublicationAccessPanel({
       const failed = withOutcome('failed');
       setPendingEmails(failed);
       if (invited.length > 0 || notEmailed.length > 0 || hasAccess.length > 0) {
-        await onGrantsChanged();
-      }
-      if (invited.length > 0) {
-        toast.success(inviteToast(invited, 'invited'));
-      }
-      if (hasAccess.length > 0) {
-        toast.success(inviteToast(hasAccess, 'has-access'), {
-          action: {
-            label: 'Copy link',
-            onClick() {
-              void copyLink();
-            },
-          },
-        });
-      }
-      if (notEmailed.length > 0) {
-        toast.warning(inviteToast(notEmailed, 'not-emailed'), {
-          action: {
-            label: 'Copy link',
-            onClick() {
-              void copyLink();
-            },
-          },
-        });
+        announceInvites({ invited, notEmailed, hasAccess }, (await onGrantsChanged()) !== false, copyLink);
       }
       if (failed.length > 0) {
         toast.error(inviteToast(failed, 'failed'));

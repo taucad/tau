@@ -26,6 +26,7 @@ import { noAsyncIifeRule } from './rules/no-async-iife.js';
 import { noBareRandomUuidRule } from './rules/no-bare-random-uuid.js';
 import { noDirectIndexeddbRule } from './rules/no-direct-indexeddb.js';
 import { noCloudImportOutsideLoaderRule } from './rules/no-cloud-import-outside-loader.js';
+import { noUnownedCodeLoadRule } from './rules/no-unowned-code-load.js';
 import { noBareRpcErrorCodeRule } from './rules/no-bare-rpc-error-code.js';
 import { noHandrolledFanoutRule } from './rules/no-handrolled-fanout.js';
 import { noAwaitedMutationInLoopRule } from './rules/no-awaited-mutation-in-loop.js';
@@ -60,7 +61,7 @@ import { noKernelTypeAssertionRule } from './rules/no-kernel-type-assertion.js';
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.33.0',
+    version: '1.34.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -82,6 +83,7 @@ const plugin = {
     'no-bare-random-uuid': noBareRandomUuidRule,
     'no-direct-indexeddb': noDirectIndexeddbRule,
     'no-cloud-import-outside-loader': noCloudImportOutsideLoaderRule,
+    'no-unowned-code-load': noUnownedCodeLoadRule,
     'no-bare-rpc-error-code': noBareRpcErrorCodeRule,
     'no-handrolled-fanout': noHandrolledFanoutRule,
     'no-awaited-mutation-in-loop': noAwaitedMutationInLoopRule,

@@ -119,6 +119,8 @@
     "tau-lint/no-direct-indexeddb": "error",
     // Adaptive app deployment mode I8: a Cloud import() only through the one loader; no lazy() of Cloud code.
     "tau-lint/no-cloud-import-outside-loader": "error",
+    // PL7 FP9: every page-realm import() and lazy() through the one code-load owner (`apps/ui/app/lib/code-loading.ts`).
+    "tau-lint/no-unowned-code-load": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",

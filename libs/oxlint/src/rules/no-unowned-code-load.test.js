@@ -10,7 +10,7 @@ const ruleTester = new RuleTester({
 });
 
 const page = 'apps/ui/app/components/chat/chat-activity-spinner.tsx';
-const owner = "import { lazy, load } from '#lib/code-loading.js';\n";
+const owner = "import { load } from '#lib/code-loading.js';\nimport { lazy } from '#lib/lazy-component.js';\n";
 
 describe('no-unowned-code-load', () => {
   it('routes every page-realm import() and lazy() through the one code-load owner (PL7 FP9)', () => {
@@ -19,27 +19,32 @@ describe('no-unowned-code-load', () => {
         {
           name: 'an import() the owner loads',
           filename: page,
-          code: `${owner}const module = await load(() => import('#components/cad-preview.js'));`,
+          code: `${owner}const module = await load(async () => import('#components/cad-preview.js'));`,
         },
         {
           name: 'an optional import() the owner loads',
           filename: page,
-          code: `${owner}const module = await load(() => import('posthog-js'), { optional: true });`,
+          code: `${owner}const module = await load(async () => import('posthog-js'), { optional: true });`,
         },
         {
           name: 'imports loaded together, each by the owner',
           filename: page,
-          code: `${owner}const [a, b] = await Promise.all([load(() => import('./a.js')), load(() => import('./b.js'))]);`,
+          code: `${owner}const [a, b] = await Promise.all([load(async () => import('./a.js')), load(async () => import('./b.js'))]);`,
         },
         {
           name: "the owner's lazy around a factory that loads through it",
           filename: page,
-          code: `${owner}const View = lazy(async () => ({ default: (await load(() => import('./view.js'))).View }));`,
+          code: `${owner}const View = lazy(async () => ({ default: (await load(async () => import('./view.js'))).View }));`,
         },
         {
           name: 'the owner itself',
           filename: 'apps/ui/app/lib/code-loading.ts',
           code: "import { lazy as reactLazy } from 'react'; const f = () => import('./x.js');",
+        },
+        {
+          name: "the owner's lazy component",
+          filename: 'apps/ui/app/lib/lazy-component.ts',
+          code: "import { lazy as reactLazy } from 'react';",
         },
         {
           name: 'a worker realm, which FP10 owns',
@@ -99,7 +104,7 @@ describe('no-unowned-code-load', () => {
         {
           name: 'a load that is not the owner’s',
           filename: page,
-          code: "import { load } from './elsewhere.js'; const m = await load(() => import('./x.js'));",
+          code: "import { load } from './elsewhere.js'; const m = await load(async () => import('./x.js'));",
           errors: [{ messageId: 'unownedImport' }],
         },
         {

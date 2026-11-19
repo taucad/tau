@@ -24,7 +24,11 @@ vi.mock('#lib/billing-lifecycle-client.js', () => ({
   getCurrentAccountClosure: current,
   getAccountClosure: getClosure,
 }));
-vi.mock('#lib/billing-payment-client.js', () => ({ createPaymentRequestId: () => 'request-a' }));
+vi.mock('#lib/billing-payment-client.js', () => ({
+  /* The web's own page: the desktop's Billing return path is covered by the client's own test. */
+  billingReturnPath: () => `${globalThis.location.pathname}${globalThis.location.search}`,
+  createPaymentRequestId: () => 'request-a',
+}));
 /** The host's auth calls, as the app supplies them from its Better Auth client. */
 const services: AccountClosureServices = { deleteUser };
 const binding = { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' } as const;

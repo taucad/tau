@@ -1,8 +1,14 @@
 import { Component, Suspense, useEffect, useSyncExternalStore } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
+import type { ComponentType, ErrorInfo, ReactNode } from 'react';
+import { useOptionalFinancialSession } from '@taucad/billing-ui/providers/financial-session-provider';
 import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudLoader } from '#cloud/cloud-loader.js';
 import { useCloudIdentity } from '#cloud/cloud-identity.js';
+import { cloudSurfaces } from '#cloud/cloud-entries.js';
+import type { CloudSurfacesModule } from '#cloud/cloud-entries.js';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
+
+type FinancialSessionHandle = ReturnType<typeof useOptionalFinancialSession>;
 
 /**
  * The one helper every lazy Cloud surface mounts through (adaptive app deployment mode charter D6, I8, BA11, BA25):
@@ -36,7 +42,20 @@ function CloudRendering<Module>({
   module,
   render,
 }: Readonly<{ module: Module; render: (module: Module) => ReactNode }>): ReactNode {
-  return render(module);
+  /* A Cloud chunk carries the context its surfaces need (the billing legal links); Core hands it the financial session,
+   * so the chunk imports no Core provider module (gate G1, one-way dependency). */
+  const financialSession = useOptionalFinancialSession();
+  const { CloudProviders } = module as {
+    readonly CloudProviders?: ComponentType<{
+      readonly financialSession: FinancialSessionHandle | undefined;
+      readonly children: ReactNode;
+    }>;
+  };
+  return CloudProviders === undefined ? (
+    render(module)
+  ) : (
+    <CloudProviders financialSession={financialSession}>{render(module)}</CloudProviders>
+  );
 }
 
 /** What {@link CloudSurface} takes. @public */
@@ -95,4 +114,26 @@ export function CloudSurface<Module>({
       </Suspense>
     </CloudSurfaceBoundary>
   );
+}
+
+/**
+ * A surface from the Cloud chunk, mounted while the display mode is `funded` (adaptive app deployment mode D6, the
+ * surface table): the one loader, the one helper, and the facade's non-Cloud rendering before, instead of and after it.
+ *
+ * @param props - The non-Cloud rendering and the Cloud rendering from the chunk's module.
+ * @returns The surface.
+ * @public
+ */
+export function FundedSurface({
+  fallback,
+  render,
+  enabled = true,
+}: Readonly<{
+  fallback: ReactNode;
+  render: (module: CloudSurfacesModule) => ReactNode;
+  /** A further condition beside `funded`, such as a confirmed basis. */
+  enabled?: boolean;
+}>): React.JSX.Element {
+  const funded = useDeploymentMode().state === 'funded';
+  return <CloudSurface loader={cloudSurfaces} enabled={funded && enabled} fallback={fallback} render={render} />;
 }

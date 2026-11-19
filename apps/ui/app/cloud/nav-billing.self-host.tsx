@@ -1,6 +1,8 @@
 import type { NavRoute } from '#constants/route.constants.js';
 
-export const billingNavRoutes: NavRoute[] = [];
+const noRoutes: NavRoute[] = [];
+
+export const useBillingNavRoutes = (): NavRoute[] => noRoutes;
 
 export function NavBillingItem(): React.JSX.Element | undefined {
   return undefined;

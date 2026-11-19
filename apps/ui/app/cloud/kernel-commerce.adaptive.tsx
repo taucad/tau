@@ -1,16 +1,19 @@
 import type { KernelProvider } from '@taucad/runtime';
 import type { KernelId } from '@taucad/types/constants';
 import { getKernelRequiredTier } from '@taucad/billing/kernel-tier-requirements';
-import { CloudSurface } from '#cloud/cloud-surface.js';
-import { useCloudFunded } from '#cloud/cloud-mode.js';
+import { FundedSurface } from '#cloud/cloud-surface.js';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
 import { KernelCommercialBadge as SelfHostKernelBadge } from '#cloud/kernel-commerce.self-host.js';
 
 /** The adaptive facade of `kernel-commerce` (adaptive app deployment mode charter D6, C6, C8). */
 export function KernelCommercialBadge(props: { readonly kernelId: KernelProvider }): React.JSX.Element | undefined {
-  const funded = useCloudFunded();
-  return <CloudSurface enabled={funded} fallback={<SelfHostKernelBadge {...props} />} render={() => undefined} />;
+  return (
+    <FundedSurface
+      fallback={<SelfHostKernelBadge {...props} />}
+      render={(cloud) => <cloud.KernelCommercialBadge {...props} />}
+    />
+  );
 }
 
 /**

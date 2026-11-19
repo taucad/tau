@@ -234,7 +234,6 @@ const selfHostSourceOverrides = new Map([
   ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
   ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
   ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
-  ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
   [
     '#routes/w.$workspace.$project/chat-details-usage.js',
     '#routes/w.$workspace.$project/chat-details-usage.self-host.js',
@@ -333,7 +332,12 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           options.target === 'desktop' && harnessSpecifier
             ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
             : harnessSpecifier;
-        const ceiling = options.deploymentCeiling ?? 'self-host';
+        /* The Cloud chunk (`*.lazy.tsx`) is the funded world of an adaptive build: what it imports resolves as the
+         * `cloud` ceiling does, so it reaches the Cloud implementations the facades stand in for (D6). */
+        const ceiling =
+          options.deploymentCeiling === 'adaptive' && importer?.endsWith('.lazy.tsx') === true
+            ? 'cloud'
+            : (options.deploymentCeiling ?? 'self-host');
         const specifier = hostSpecifier === undefined ? undefined : ceilingSpecifier(hostSpecifier, ceiling);
         if (specifier === undefined) {
           return null;

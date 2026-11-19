@@ -8,7 +8,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Component, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { useFinancialSession } from '@taucad/billing-ui/providers/financial-session-provider';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
@@ -227,6 +227,12 @@ class Catch extends Component<{ readonly children: ReactNode }, { readonly error
 }
 
 describe('adaptive root boundary', () => {
+  /* The Cloud chunk carries every funded surface: warm its transform once, so the loader's own import below measures
+   * the seam, not a cold compile. */
+  beforeAll(async () => {
+    await import('#cloud/cloud-surfaces.lazy.js');
+  }, 60_000);
+
   const seen: Array<ReturnType<typeof useBillingSession>> = [];
   const mounts = { count: 0 };
   /** A shell child: reads the billing session, needs the financial provider, counts its mounts. */

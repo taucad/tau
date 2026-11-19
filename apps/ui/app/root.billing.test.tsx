@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { useCloudPaymentActionReturn } from '#cloud/root-billing.cloud.js';
 
 const payment = vi.hoisted(() => ({
   getPaymentAction: vi.fn(),
@@ -32,8 +32,8 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
 const financialSession = vi.hoisted(() => ({
   capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
 }));
-vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
-  useFinancialSession: () => financialSession,
+vi.mock('#cloud/cloud-financial-session.js', () => ({
+  useCloudFinancialSession: () => financialSession,
 }));
 
 function Harness(): React.JSX.Element {

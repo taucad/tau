@@ -1,14 +1,12 @@
-import { CloudSurface } from '#cloud/cloud-surface.js';
-import { useCloudFunded } from '#cloud/cloud-mode.js';
+import { FundedSurface } from '#cloud/cloud-surface.js';
 import { SvgSpriteMount as BaseSvgSpriteMount } from '#components/icons/svg-sprite-mount.self-host.js';
 
-/** The base sprite is Core; the payment sprite arrives with the Cloud chunk (adaptive app deployment mode W5). */
+/** The base sprite is Core; the payment artwork arrives with the Cloud chunk while funded. */
 export function SvgSpriteMount(): React.JSX.Element {
-  const funded = useCloudFunded();
   return (
     <>
       <BaseSvgSpriteMount />
-      <CloudSurface enabled={funded} fallback={undefined} render={() => undefined} />
+      <FundedSurface fallback={undefined} render={(cloud) => <cloud.PaymentSprite />} />
     </>
   );
 }

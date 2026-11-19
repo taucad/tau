@@ -10,7 +10,6 @@ const loadPublication = vi.hoisted(() =>
     publication: { id: 'pub' },
   })),
 );
-const publicationMeta = vi.hoisted(() => vi.fn(() => [{ title: 'Persisted project' }]));
 
 /* eslint-disable @typescript-eslint/naming-convention -- mocked React module exports keep their public names. */
 vi.mock('#components/share/tau-publication.js', () => ({
@@ -18,7 +17,6 @@ vi.mock('#components/share/tau-publication.js', () => ({
   PublicationInteractiveSurface: () => null,
   ErrorBoundary: () => null,
   loadPublication,
-  publicationMeta,
 }));
 /* eslint-enable @typescript-eslint/naming-convention -- end mocked exports. */
 

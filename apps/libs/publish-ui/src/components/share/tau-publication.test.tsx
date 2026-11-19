@@ -1,21 +1,23 @@
 // @vitest-environment jsdom
 import { RouterContextProvider } from 'react-router';
-import { createElement } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
 import { publicationApiCode } from '@taucad/types/constants';
 import {
-  loadPublication as loader,
+  createPublicationLoader,
   PublicationInteractiveSurface,
   publicationMeta as meta,
 } from '#components/share/tau-publication.js';
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
-import type { PublicationLockReason } from '@taucad/publish-ui/components/share/publication-lock-screen';
-import { parsePublicationRecord } from '@taucad/publish-ui/components/share/parsed-publication';
-import { getEnvironment } from '#environment.config.js';
-import type { Environment } from '#environment.config.js';
-import type * as EnvironmentConfigModule from '#environment.config.js';
+import type { PublicationLockReason } from '#components/share/publication-lock-screen.js';
+import { parsePublicationRecord } from '#components/share/parsed-publication.js';
+import { PublicationViewerServicesProvider } from '#components/share/publication-viewer-services.js';
+import type { PublicationViewerServices } from '#components/share/publication-viewer-services.js';
+
+/* The app's API origin, as its environment reads it. */
+const apiBaseUrl = vi.fn<() => Promise<string>>();
+const loader = createPublicationLoader(apiBaseUrl);
 
 const loaderJson = async (args: LoaderFunctionArgs): Promise<Record<string, unknown>> => {
   const result = await loader(args);
@@ -36,21 +38,17 @@ const loaderHeaders = (result: unknown): Headers => {
   return new Headers(init?.headers);
 };
 
-vi.mock('#environment.config.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof EnvironmentConfigModule>();
-  return {
-    ...actual,
-    getEnvironment: vi.fn(),
-  };
-});
-
-const useViewPingMock = vi.hoisted(() => vi.fn());
-vi.mock('@taucad/publish-ui/components/share/use-view-ping', () => ({ useViewPing: useViewPingMock }));
 // eslint-disable-next-line @typescript-eslint/naming-convention -- mock mirrors the module's exported component.
 vi.mock('@taucad/ui/components/client-only', () => ({ ClientOnly: () => null }));
 
-const mockedGetEnvironment = vi.mocked(getEnvironment);
-const originalClientEnvironment = globalThis.window.ENV;
+const sharedProjectWorkbench = vi.fn(() => null);
+const viewerServices: PublicationViewerServices = {
+  sharedProjectWorkbench,
+  workerGate: () => null,
+  errorPage: () => null,
+  useAuthLinks: () => ({ magicLink: '/auth/magic-link', signUp: '/auth/sign-up', signOut: '/auth/sign-out' }),
+  useSession: () => ({ data: undefined, isPending: false }),
+};
 const thumbnailPath = 'thumbnail.webp';
 
 const sampleLoaderData: PublicationRouteLoaderData = {
@@ -116,10 +114,7 @@ const expectThrowsPublicationLock = async (
 describe('Tau publication loader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetEnvironment.mockResolvedValue(
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable keys are UPPER_SNAKE_CASE
-      { TAU_API_URL: 'http://api.test/' } as Environment,
-    );
+    apiBaseUrl.mockResolvedValue('http://api.test/');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(sampleLoaderData), {
         status: 200,
@@ -130,7 +125,6 @@ describe('Tau publication loader', () => {
 
   afterEach(() => {
     cleanup();
-    globalThis.window.ENV = originalClientEnvironment;
     vi.restoreAllMocks();
   });
 
@@ -414,30 +408,26 @@ describe('Tau publication loader', () => {
 describe('Tau publication client environment', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable key is uppercase by contract.
-    globalThis.window.ENV = { ...originalClientEnvironment, TAU_API_URL: 'https://client-api.tau.test' };
   });
 
   afterEach(() => {
     cleanup();
-    globalThis.window.ENV = originalClientEnvironment;
   });
 
+  /* The view ping is the workbench's: outside the client the workbench, and so the ping, never mounts. */
   it('does not mount a view ping outside the client workbench', () => {
     const publication = parsePublicationRecord(sampleLoaderData.publication, 'public');
     if (!publication) {
       throw new Error('Expected the publication fixture to parse.');
     }
     render(
-      createElement(PublicationInteractiveSurface, {
-        data: sampleLoaderData,
-        publication,
-        hydratedFiles: {},
-      }),
+      <PublicationViewerServicesProvider value={viewerServices}>
+        <PublicationInteractiveSurface data={sampleLoaderData} publication={publication} hydratedFiles={{}} />
+      </PublicationViewerServicesProvider>,
     );
 
-    expect(mockedGetEnvironment).not.toHaveBeenCalled();
-    expect(useViewPingMock).not.toHaveBeenCalled();
+    expect(apiBaseUrl).not.toHaveBeenCalled();
+    expect(sharedProjectWorkbench).not.toHaveBeenCalled();
   });
 });
 

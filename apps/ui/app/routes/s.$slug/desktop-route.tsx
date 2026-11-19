@@ -46,7 +46,7 @@ import {
   ErrorBoundary as PublicationErrorBoundary,
   PublicationInteractiveSurface,
 } from '#components/share/tau-publication.js';
-import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
+import type { PublicationRouteLoaderData } from '@taucad/publish-ui/components/share/tau-publication';
 import { PortableShareSurface } from '#routes/s.$slug/route.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
@@ -78,8 +78,8 @@ export type DesktopShareOutcome =
 /**
  * Resolve one `/s/:slug` for the desktop shell.
  *
- * Mirrors the status vocabulary of the web loader (`loadPublication` in
- * `#components/share/tau-publication.js`) so both builds answer the same API
+ * Mirrors the status vocabulary of the web loader (`createPublicationLoader` in
+ * `@taucad/publish-ui/components/share/tau-publication`) so both builds answer the same API
  * the same way. Never rejects: every failure is one of the outcomes.
  *
  * @param slug - The share slug from the route parameters.

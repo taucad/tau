@@ -892,6 +892,9 @@ describe('project route session identity', () => {
     desktopShellBridge = { agentHost: { rated: desktopRated } };
     renderRouteProvider();
     await screen.findAllByTestId('project-session');
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalled();
+    });
     const extras = publishProjectHostConnector.mock.calls[0]?.[2] as unknown as {
       rated: (rating: Readonly<Record<string, unknown>>) => Promise<void>;
     };
@@ -909,14 +912,16 @@ describe('project route session identity', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
     await screen.findAllByTestId('project-session');
-    expect(publishProjectHostConnector).toHaveBeenCalledWith(
-      projectA,
-      expect.any(Function),
-      expect.objectContaining({
-        stoppability: expect.any(Function) as unknown,
-        presented: expect.any(Function) as unknown,
-      }),
-    );
+    await waitFor(() => {
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(
+        projectA,
+        expect.any(Function),
+        expect.objectContaining({
+          stoppability: expect.any(Function) as unknown,
+          presented: expect.any(Function) as unknown,
+        }),
+      );
+    });
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
     await connector('chat-browser');
     expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();

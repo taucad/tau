@@ -2,6 +2,7 @@ import type { Event } from '@sentry/react';
 import type { ClientInstrumentation } from 'react-router';
 import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
+import { deploymentCeiling } from '#cloud/deployment-ceiling.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { readDocumentSessionCounts } from '#lib/memory-kill-signal.js';
@@ -138,8 +139,9 @@ const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Re
   Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, Value>;
 
 /**
- * The tags every UI event carries: `route`, `route.pattern`, `device_class`, `build_id`, `deploy_context` and
- * `deployment_mode`.
+ * The tags every UI event carries: `route`, `route.pattern`, `device_class`, `build_id`, `deploy_context`,
+ * `deployment_mode` and `deployment_ceiling` (the build's ceiling, `cloud`, `self-host` or `adaptive`, so a report says
+ * which build it came from beside what the page showed).
  *
  * @returns The known tags.
  */
@@ -153,6 +155,7 @@ const readTauEventTags = (): Record<string, string> => {
     build_id: buildId === 0 ? undefined : String(buildId),
     deploy_context: ENV.TAU_DEPLOY_CONTEXT,
     deployment_mode: reportedDeploymentMode,
+    deployment_ceiling: deploymentCeiling,
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
 };

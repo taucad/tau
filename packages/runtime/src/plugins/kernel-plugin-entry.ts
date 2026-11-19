@@ -41,6 +41,7 @@ export type {
   KernelExportResult,
 } from '#types/runtime-kernel-v2.types.js';
 export type {
+  KernelExecuteOptions,
   KernelFileSystem,
   RealmGroup,
   RealmHold,

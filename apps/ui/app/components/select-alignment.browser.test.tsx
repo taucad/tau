@@ -75,7 +75,7 @@ afterEach(() => {
 });
 
 const sites = [
-  'Invitation role',
+  'Role',
   'Role for teammate@example.test',
   'Who can open the link',
   'Account choice',
@@ -101,13 +101,12 @@ it.each(
   );
   const narrow = width === 320;
   const child =
-    site === 'Invitation role' || site === 'Role for teammate@example.test' ? (
+    site === 'Role' || site === 'Role for teammate@example.test' ? (
       <RevisionCollaborators projectId='fixture' />
     ) : site === 'Who can open the link' ? (
       <PublicationAccessPanel
         apiBaseUrl='http://localhost:4000'
         publicationId='fixture'
-        shareUrl='https://tau.new/fixture'
         visibility={narrow ? 'public' : 'private'}
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -149,7 +148,7 @@ it.each(
       ? await screen.findByRole('combobox')
       : await screen.findByRole('combobox', { name: site });
   const current =
-    site === 'Invitation role'
+    site === 'Role'
       ? 'Can edit'
       : site === 'Role for teammate@example.test'
         ? 'Can view'

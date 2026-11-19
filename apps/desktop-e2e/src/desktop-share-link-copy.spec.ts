@@ -110,11 +110,11 @@ describe('desktop share links', () => {
     /* C4 (dbee175fd2): People with access moved from History to Share. */
     await page.getByRole('button', { name: 'Share', exact: true }).first().click();
     const people = page.getByRole('region', { name: 'People with access' });
-    const email = people.getByLabel('Invite by email');
+    const email = people.getByLabel('Email address');
     await expectVisible(email, 180_000);
     await email.fill(invitee);
     await people.getByRole('button', { name: 'Create invite link' }).click();
-    const created = page.getByRole('status', { name: 'Invitation created' }).first();
+    const created = page.getByRole('status', { name: 'Invite link created' }).first();
     await expectVisible(created, 60_000);
 
     await application.evaluate(({ clipboard }, sentinel) => {

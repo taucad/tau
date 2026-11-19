@@ -77,7 +77,9 @@ describe('GitHub accounts against a live GitHub App (C10, A4)', () => {
     await target.click(selectors.getByRole('button', { name: 'Share', exact: true }).first());
     const share = selectors.getByRole('region', { name: 'Share project' });
     await target.expectVisible(share, 60_000);
-    await target.click(share.getByRole('tab', { name: 'GitHub Gist' }));
+    /* The methods are one "Share with" picker, not tabs. */
+    await target.click(share.getByRole('button', { name: /^Share with/u }));
+    await target.click(selectors.getByRole('option', { name: /^GitHub Gist/u }));
 
     const connect = share.getByRole('button', { name: 'Connect GitHub', exact: true });
     await target.expectVisible(connect, 60_000);

@@ -127,7 +127,7 @@ describe('replicad build report', () => {
   );
 
   it(
-    'should report the operations of the build it delivered, whatever user code kept across builds',
+    'should report the operations of the build it delivered, not of a run a release fallback discarded',
     async () => {
       const keeper = `
         import { makeBaseBox, makeCylinder } from 'replicad';

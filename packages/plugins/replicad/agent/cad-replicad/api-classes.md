@@ -225,6 +225,7 @@ Blueprint: export declare class Blueprint implements DrawingInterface
   // Blueprint.delete (method)
   delete(): void;
 
+  // A copy with its own curves
   // Blueprint.clone (method)
   clone(): Blueprint;
 
@@ -310,8 +311,12 @@ Blueprints: export declare class Blueprints implements DrawingInterface
 
   readonly repr: string
 
+  // A copy with its own curves
   // Blueprints.clone (method)
   clone(): Blueprints;
+
+  // Blueprints.delete (method)
+  delete(): void;
 
   readonly boundingBox: BoundingBox2d
 
@@ -443,8 +448,12 @@ CompoundBlueprint: export declare class CompoundBlueprint implements DrawingInte
   // CompoundBlueprint.constructor (constructor)
   constructor(blueprints: Blueprint[]);
 
+  // A copy with its own curves
   // CompoundBlueprint.clone (method)
   clone(): CompoundBlueprint;
+
+  // CompoundBlueprint.delete (method)
+  delete(): void;
 
   readonly boundingBox: BoundingBox2d
 
@@ -603,6 +612,9 @@ Curve2D: export declare class Curve2D extends WrappingObj<Geom2d_Curve>
   // Curve2D.constructor (constructor)
   constructor(handle: Geom2d_Curve);
 
+  // Curve2D.delete (method)
+  delete(): void;
+
   readonly boundingBox: BoundingBox2d
 
   readonly repr: string
@@ -672,6 +684,10 @@ Drawing: export declare class Drawing implements DrawingInterface
 
   // Drawing.clone (method)
   clone(): Drawing;
+
+  // Deletes the curves the drawing owns
+  // Drawing.delete (method)
+  delete(): void;
 
   // Drawing.serialize (method)
   serialize(): string;

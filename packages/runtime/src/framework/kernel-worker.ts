@@ -36,6 +36,7 @@ import type {
   ExportGeometryRequest,
   KernelExportGeometryInput,
   RuntimeImplementationAsset,
+  KernelExecuteOptions,
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -8214,9 +8215,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       logger: this.logger,
       fileContentCache: this.fileContentCache,
       bundler: this.createBundlerFacade(signal),
-      execute: async (code: string): Promise<ExecuteResult> => {
+      execute: async (code: string, options?: KernelExecuteOptions): Promise<ExecuteResult> => {
         signal.throwIfAborted();
         await this.ensureBundlerContext();
+        if (options?.fresh === true) {
+          // The new instance is cached under the same code, so the clear on a file edit still frees it.
+          this.clearBundlerExecutionCaches(code);
+        }
 
         const executeSpan = this.tracer.startSpan('kernel.execute', {
           phase: 'computingGeometry',

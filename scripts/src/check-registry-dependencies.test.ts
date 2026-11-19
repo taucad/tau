@@ -29,7 +29,7 @@ describe('Replicad registry aliases', () => {
       await readFile(join(repositoryRoot, 'packages/plugins/replicad/package.json'), 'utf8'),
     ) as { dependencies?: Record<string, string> };
 
-    expect(workspace.catalog?.['replicad']).toBe('npm:@taulabs/replicad@1.2.0-beta.0');
+    expect(workspace.catalog?.['replicad']).toBe('npm:@taulabs/replicad@1.2.0-beta.2');
     expect(workspace.catalog?.['replicad-opencascadejs']).toBe('npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2');
     expect(workspace.overrides?.['replicad']).toBe('catalog:');
     expect(workspace.overrides?.['replicad-opencascadejs']).toBe('catalog:');

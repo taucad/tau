@@ -11,7 +11,7 @@ Operation results and plugin-author contracts share issues and artifacts.
 
 ## Result Types
 
-`KernelResult<T>` discriminates plugin success and failure with `success`.
+`KernelResult<T>` discriminates success and failure with `success`.
 
 <auto-type-table path='./props/types.ts' name='KernelSuccessResult' />
 
@@ -45,7 +45,7 @@ A resource-bound refusal carries `ResourceLimitDetails` in `details`: `limit`, `
 
 Document results carry `issues`. Successful evaluations offer ordered view and export IDs (possibly no views). A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
 
-`DocumentStatus` and `ViewStatus` describe separate owners. Their events and supersession outcomes are documented in [Client API](./client).
+`DocumentStatus` and `ViewStatus` describe separate owners. Their events and supersession outcomes are in [Client API](./client).
 
 ## Dependency Types
 
@@ -88,6 +88,8 @@ Document results carry `issues`. Successful evaluations offer ordered view and e
 <auto-type-table path='./props/types.ts' name='KernelDefinition' />
 
 <auto-type-table path='./props/types.ts' name='KernelServices' />
+
+<auto-type-table path='./props/types.ts' name='KernelExecuteOptions' />
 
 <auto-type-table path='./props/types.ts' name='RealmResources' />
 
@@ -167,7 +169,7 @@ Node hosts persist batches through `openTelemetryFileSink()`, a non-blocking `Te
 
 <auto-type-table path='./props/types.ts' name='TranscodeResult' />
 
-`TranscoderServices` supplies the logger, tracer, and cancellation signal. `MediaType` names artifact MIME types; `JSONSchema7` carries serializable option metadata.
+`TranscoderServices` supplies a logger, tracer and cancellation signal. `MediaType` names artifact MIME types; `JSONSchema7` carries serializable option metadata.
 
 ## Content and Capability Types
 

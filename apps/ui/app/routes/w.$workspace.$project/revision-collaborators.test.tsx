@@ -11,7 +11,7 @@
  * rows are that host difference.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -78,10 +78,10 @@ const renderPanel = (element: React.JSX.Element = <RevisionCollaborators project
 const issueInvitation = async (): Promise<HTMLInputElement> => {
   renderPanel();
 
-  await userEvent.type(await screen.findByRole('textbox', { name: 'Invite by email' }), 'teammate@example.test');
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Email address' }), 'teammate@example.test');
   await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }));
 
-  return screen.findByRole('textbox', { name: 'Invitation link for teammate@example.test' });
+  return screen.findByRole('textbox', { name: 'Invite link for teammate@example.test' });
 };
 
 const teammate = {
@@ -119,8 +119,10 @@ describe('RevisionCollaborators', () => {
     const link = await issueInvitation();
 
     expect(link.value).toBe(`${globalThis.location.origin}/invitations/tok_abcdef`);
-    expect(screen.getByRole('status', { name: 'Invitation created' }).classList.contains('ph-no-capture')).toBe(true);
-    expect(screen.getByText('Tau does not email this link. Send it to them yourself.')).toBeDefined();
+    expect(screen.getByRole('status', { name: 'Invite link created' }).classList.contains('ph-no-capture')).toBe(true);
+    expect(
+      screen.getByText(/^Send this link to them yourself\. Tau doesn’t email it, and it’s only shown once\./u),
+    ).toBeDefined();
   });
 
   it('should mint the invitation from the web origin on desktop, never app://tau', async () => {
@@ -149,10 +151,9 @@ describe('RevisionCollaborators', () => {
     /* The desktop shell has no inbound link path, so the invitee completes in a
        browser and the project arrives on their next cloud listing (Finding 5,
        ruling Q4). */
-    expect(
-      screen.getByText('This link opens in the browser. Once they accept, the project appears in their Tau.'),
-    ).toBeDefined();
-    expect(screen.queryByText('Tau does not email this link. Send it to them yourself.')).toBeNull();
+    expect(screen.getByRole('status', { name: 'Invite link created' })).toHaveTextContent(
+      'It opens in a browser. After they accept, the project appears in their Tau.',
+    );
   });
 
   it('lists people with their role and status under the invite form', async () => {
@@ -162,9 +163,10 @@ describe('RevisionCollaborators', () => {
     expect(screen.getByRole('heading', { name: 'People with access' })).toBeDefined();
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
     const people = screen.getByRole('list', { name: 'People with access' });
-    expect(people).toHaveTextContent('Accepted');
+    /* An accepted row needs no status; a pending one says what is still missing. */
+    expect(people).not.toHaveTextContent('Accepted');
     expect(people).toHaveTextContent('viewer@example.test');
-    expect(people).toHaveTextContent('Invited');
+    expect(people).toHaveTextContent('Invite not accepted yet');
     expect(screen.getByRole('combobox', { name: 'Role for viewer@example.test' })).toHaveTextContent('Can view');
   });
 
@@ -179,8 +181,11 @@ describe('RevisionCollaborators', () => {
     answer([], undefined, { status: 500 });
     renderPanel();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The list of people with access could not be loaded.');
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load the people with access. Try again.");
     expect(screen.queryByText('Nobody else has access to this project.')).toBeNull();
+    answer([teammate]);
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('teammate@example.test')).toBeDefined();
   });
 
   /* W3 a2: a role change is `PATCH`, not a re-invite — the invitee keeps the
@@ -198,7 +203,7 @@ describe('RevisionCollaborators', () => {
         expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ role: 'read' }) }),
       );
     });
-    expect(screen.queryByRole('textbox', { name: /Invitation link for/u })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /Invite link for/u })).toBeNull();
   });
 
   it('surfaces the one-time link, its expiry and who it is for, and focuses it', async () => {
@@ -208,20 +213,28 @@ describe('RevisionCollaborators', () => {
     expect(screen.getByRole('button', { name: /Copy link/u })).toBeDefined();
     /* F5: the link is the whole product of the gesture, so it is announced and
        it takes focus — a keyboard person must not have to hunt for it. */
-    expect(screen.getByRole('status', { name: 'Invitation created' })).toBeDefined();
+    expect(screen.getByRole('status', { name: 'Invite link created' })).toHaveTextContent(
+      /It works until (October 2, 2026|2 October 2026)\./u,
+    );
     await waitFor(() => {
       expect(document.activeElement).toBe(link);
     });
   });
 
   it.each([
-    { status: 429, code: 'PROJECT_INVITE_RATE_LIMITED', says: 'Too many invitations today. Try again tomorrow.' },
-    { status: 500, code: undefined, says: 'Couldn’t create the invite. Try again.' },
+    {
+      status: 429,
+      code: 'PROJECT_INVITE_RATE_LIMITED',
+      says: 'You’ve created too many invite links today. Try again tomorrow.',
+    },
+    { status: 403, code: undefined, says: 'Only the project owner can invite people.' },
+    { status: 404, code: undefined, says: 'This project isn’t in the cloud yet. Back it up to the cloud first.' },
+    { status: 500, code: undefined, says: 'Couldn’t create the invite link. Try again.' },
   ])('says plainly why an invite failed ($status)', async ({ status, code, says }) => {
     answer([], { status, body: code === undefined ? {} : { code } });
     renderPanel();
 
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Invite by email' }), 'teammate@example.test');
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Email address' }), 'teammate@example.test');
     await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(says);
@@ -246,6 +259,26 @@ describe('RevisionCollaborators', () => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'People with access' }));
     });
   });
+
+  it('lists five people in flow and the rest on request', async () => {
+    answer(
+      Array.from({ length: 7 }, (_unused, index) => ({ ...teammate, email: `person${String(index)}@example.test` })),
+    );
+    renderPanel();
+
+    const people = await screen.findByRole('list', { name: 'People with access' });
+    expect(within(people).getAllByRole('listitem')).toHaveLength(5);
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 7' }));
+    expect(within(people).getAllByRole('listitem')).toHaveLength(7);
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('says a removed person no longer has access', async () => {
+    answer([{ ...teammate, status: 'revoked' }]);
+    renderPanel();
+
+    expect(await screen.findByRole('list', { name: 'People with access' })).toHaveTextContent('Access removed');
+  });
 });
 
 describe('ProjectPeopleWithAccess', () => {
@@ -254,8 +287,15 @@ describe('ProjectPeopleWithAccess', () => {
     renderPanel(<ProjectPeopleWithAccess projectId='proj_1' />);
 
     const section = screen.getByRole('region', { name: 'People with access' });
-    expect(section).toHaveAttribute('data-slot', 'share-people');
-    expect(await screen.findByRole('textbox', { name: 'Invite by email' })).toBeDefined();
+    expect(section.querySelector('[data-slot=share-people]')).not.toBeNull();
+    /* In the pane's one scroll area: the section neither scrolls nor bounds its own height. */
+    expect(section.outerHTML).not.toMatch(/overflow-y-auto|max-h-/u);
+    expect(section).toHaveTextContent(
+      'People you add here open the project itself and see your latest changes. People with a link see only what you shared.',
+    );
+    const field = await screen.findByRole('textbox', { name: 'Email address' });
+    expect(field).toHaveAccessibleDescription('You’ll get an invite link to send them yourself. Tau doesn’t email it.');
+    expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('Can edit');
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
     expect(screen.getByRole('list', { name: 'People with access' })).toHaveTextContent('teammate@example.test');
   });

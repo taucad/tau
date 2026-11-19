@@ -77,6 +77,9 @@ const placementHarness = vi.hoisted(() => ({
   localHostId: undefined as 'desktop' | undefined,
 }));
 
+/* The routing plan the turn reads at admission (adaptive app deployment mode C6): every kernel allowed here. */
+vi.mock('#cloud/kernel-commerce.js', () => ({ useKernelRoutingPlan: () => () => true }));
+
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
   useCadAgentConfig: vi.fn(),

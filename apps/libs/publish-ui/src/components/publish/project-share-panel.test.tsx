@@ -176,12 +176,16 @@ const services: ProjectShareServices = {
   useRevisionCommands: () => revisionStatusHarness.commands,
   useRevisionClient: () => revisionClient,
   /* The cloud build's plan: an upgrade opens billing settings. */
-  useCommercialFeatures: () => ({
-    ...plan,
-    requestUpgrade: () => {
-      openSettingsDialogMock('billing');
-    },
-  }),
+  useCommercialFeatures: () =>
+    plan.isResolved
+      ? {
+          isResolved: true,
+          canCreatePrivateShares: plan.canCreatePrivateShares,
+          requestUpgrade: () => {
+            openSettingsDialogMock('billing');
+          },
+        }
+      : { isResolved: false },
   commercialUpgradeLabel: () => <>Upgrade</>,
 };
 
@@ -1756,6 +1760,49 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
     await user.click(screen.getByRole('button', { name: /upgrade/i }));
 
     expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');
+  });
+
+  /* Adaptive app deployment mode C1 (T-G1): an unresolved plan sends the person's choice and the API decides. */
+  it('switches a public link to private while the plan is unresolved, sending the request with no upgrade prompt', async () => {
+    planIs('free', false);
+    openSettingsDialogMock.mockClear();
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(publicEnvelope))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope.share))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
+
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const accessSelect = await screen.findByRole('combobox', { name: /who can open the link/i });
+    await userEvent.click(accessSelect);
+    await userEvent.click(await screen.findByRole('option', { name: 'Only people you invite' }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'https://api.example/v1/projects/proj_ui/share',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ visibility: 'private' }) }),
+      );
+    });
+    expect(openSettingsDialogMock).not.toHaveBeenCalled();
+  });
+
+  it('offers Publish as public when the API refuses a private link for the plan (C1)', async () => {
+    planIs('free', false);
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /only people you invite/i }));
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ visibility: 'private' }),
+    );
+    publishFacet({ phase: 'error', error: 'Private links need the Pro plan.' });
+    view.rerender(panelElement('proj_ok'));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish as public' }));
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ visibility: 'public' }),
+    );
+    expect(openSettingsDialogMock).not.toHaveBeenCalled();
   });
 
   it('asks who can open a first link while the plan is still loading, rather than assuming private', async () => {

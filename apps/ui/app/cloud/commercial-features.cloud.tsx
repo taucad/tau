@@ -1,4 +1,6 @@
 import { useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import type { CommercialFeatures } from '#cloud/plan-facts.types.js';
 import { storageLimitBytesByTier } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { ProBadge } from '@taucad/billing-ui/components/tier-badge';
@@ -12,29 +14,30 @@ export function CommercialUpgradeLabel(): React.JSX.Element {
   );
 }
 
-export const useCommercialFeatures = (): {
-  readonly canCreatePrivateShares: boolean;
-  /** Whether this plan may back a project's files up to Tau Cloud (N4). */
-  readonly canSyncFiles: boolean;
-  /** The Tau Cloud allowance this plan includes (D16), once known and while it syncs. */
-  readonly storageLimitBytes: number | undefined;
-  /** Whether a larger plan exists to offer (D17): never on the top tier, never before the plan is known. */
-  readonly canUpgradePlan: boolean;
-  /** False until the plan is known; upgrade prompts stay hidden so a Pro customer is never asked to buy Pro. */
-  readonly isResolved: boolean;
-  readonly requestUpgrade: () => void;
-} => {
+/**
+ * The plan from the account's entitlements (a pinned `cloud` build). Unresolved while they load (`checking`) or after
+ * their request failed (`unavailable`); a Pro customer is never asked to buy Pro while the plan is unknown.
+ */
+export const useCommercialFeatures = (): CommercialFeatures => {
   const entitlements = useEntitlements();
   const { open: openSettings } = useSettingsDialog();
+  const queryClient = useQueryClient();
+  const requestUpgrade = useCallback(() => {
+    openSettings('billing');
+  }, [openSettings]);
+  const retry = useCallback(() => {
+    void queryClient.refetchQueries({ queryKey: ['billing', 'entitlements'] });
+  }, [queryClient]);
+  if (!entitlements.isResolved) {
+    return { isResolved: false, wait: entitlements.isError ? 'unavailable' : 'checking', retry };
+  }
   return {
+    isResolved: true,
+    basis: 'pinned',
     canCreatePrivateShares: entitlements.canCreatePrivateShares,
     canSyncFiles: entitlements.canSyncFiles,
-    storageLimitBytes:
-      entitlements.isResolved && entitlements.canSyncFiles ? storageLimitBytesByTier[entitlements.tier] : undefined,
-    canUpgradePlan: entitlements.isResolved && entitlements.tier !== 'enterprise',
-    isResolved: entitlements.isResolved,
-    requestUpgrade: useCallback(() => {
-      openSettings('billing');
-    }, [openSettings]),
+    storageLimitBytes: entitlements.canSyncFiles ? storageLimitBytesByTier[entitlements.tier] : undefined,
+    canUpgradePlan: entitlements.tier !== 'enterprise',
+    requestUpgrade,
   };
 };

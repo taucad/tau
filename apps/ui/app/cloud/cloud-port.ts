@@ -24,8 +24,20 @@ export const cloudIdentityKey = (identity: CloudIdentity): string =>
 /** The facts one identity holds, by name. Data only, never closures (D6). @public */
 export type CloudFacts = Readonly<Record<string, unknown>>;
 
+/** How long a bound identity may wait for its facts before the wait reads `unavailable` (I15). Milliseconds. @public */
+export const cloudFactsDeadlineMilliseconds = 5000;
+
 /** The port's store. @public */
 export type CloudPortStore = Readonly<{
+  /**
+   * Bind the page's current identity, or none: what a fact used outside render reads when it is called (I4). Binding
+   * an identity with no facts yet starts its wait, which reads `unavailable` after the deadline (I15).
+   */
+  bind: (identityKey: string | undefined) => void;
+  /** The bound identity's key, read when a callable fact is called (I4). */
+  current: () => string | undefined;
+  /** Whether a bound identity still waits within its deadline (`checking`) or has outlived it (`unavailable`). */
+  wait: (identityKey: string | undefined) => 'checking' | 'unavailable';
   /** The facts published for an identity, or `undefined`. */
   read: (identityKey: string | undefined) => CloudFacts | undefined;
   /** Publish an identity's facts, replacing what it held. */
@@ -41,10 +53,42 @@ export type CloudPortStore = Readonly<{
  * @returns The store.
  * @public
  */
-export const createCloudPortStore = (): CloudPortStore => {
+/** A timer the port's deadline runs on. @public */
+export type CloudPortTimer = Readonly<{ set: (callback: () => void, milliseconds: number) => () => void }>;
+
+const browserTimer: CloudPortTimer = {
+  set: (callback, milliseconds) => {
+    const id = setTimeout(callback, milliseconds);
+    return () => {
+      clearTimeout(id);
+    };
+  },
+};
+
+export const createCloudPortStore = (timer: CloudPortTimer = browserTimer): CloudPortStore => {
   const entries = new Map<string, CloudFacts>();
   const changed = new Topic<void>({ name: 'cloud-port' });
+  const expired = new Set<string>();
+  let bound: string | undefined;
+  let cancelDeadline: (() => void) | undefined;
   return {
+    bind: (identityKey) => {
+      if (identityKey === bound) {
+        return;
+      }
+      bound = identityKey;
+      cancelDeadline?.();
+      cancelDeadline = undefined;
+      if (identityKey !== undefined && !entries.has(identityKey) && !expired.has(identityKey)) {
+        cancelDeadline = timer.set(() => {
+          expired.add(identityKey);
+          changed.emit(undefined);
+        }, cloudFactsDeadlineMilliseconds);
+      }
+      changed.emit(undefined);
+    },
+    current: () => bound,
+    wait: (identityKey) => (identityKey !== undefined && expired.has(identityKey) ? 'unavailable' : 'checking'),
     read: (identityKey) => (identityKey === undefined ? undefined : entries.get(identityKey)),
     publish: (identityKey, facts) => {
       entries.set(identityKey, facts);
@@ -53,6 +97,7 @@ export const createCloudPortStore = (): CloudPortStore => {
     clear: (identityKey) => {
       if (identityKey === undefined) {
         entries.clear();
+        expired.clear();
       } else {
         entries.delete(identityKey);
       }

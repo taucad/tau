@@ -37,6 +37,7 @@ import type { RemoteFacet, RemoteRefusedReplacement, SyncFacet, SyncFailureReaso
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
 import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
+import type { PlanWait } from '#cloud/plan-facts.types.js';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import {
   configureGithubAccess,
@@ -122,6 +123,11 @@ export type RevisionSyncRegionProps = {
    * Cloud choice says what is included instead of what is withheld.
    */
   readonly storageLimitBytes?: number;
+  /**
+   * The plan has not resolved (adaptive app deployment mode C2, I3, I15): the Tau option keeps its preselection but
+   * cannot be confirmed, and says which wait it is; Git destinations stay usable. No allowance, gate label or upgrade.
+   */
+  readonly planWait?: Readonly<{ wait: PlanWait; retry: () => void }>;
   /** Where *Sign in* goes when the remote answered 401 (N3). */
   readonly signInHref?: string;
   /**
@@ -308,6 +314,30 @@ const authoritySentence = (githubAvailable: boolean | undefined): string =>
  * @param props - The upgrade verb the pane supplied, when this build has one.
  * @returns The label, or nothing on a build with no plans to sell.
  */
+/**
+ * What an unresolved plan says beside the Tau option (adaptive app deployment mode C2, I15): checking for at most one
+ * deadline, then a stated "can't check" with Retry and the way to Settings' notice; in safe mode, that it is off.
+ */
+function PlanWaitNote({ wait, onRetry }: { readonly wait: PlanWait; readonly onRetry: () => void }): React.JSX.Element {
+  if (wait === 'checking') {
+    return <span className='text-xs text-muted-foreground'>Checking your plan</span>;
+  }
+  if (wait === 'safe-mode') {
+    return <span className='text-xs text-muted-foreground'>Not available in safe mode</span>;
+  }
+  return (
+    <span className='text-xs text-muted-foreground'>
+      Tau backup isn’t available right now: Tau can’t check your plan with this server.{' '}
+      <button type='button' className='underline-offset-2 hover:underline pointer-coarse:min-h-6' onClick={onRetry}>
+        Retry
+      </button>{' '}
+      <Link to='?settings=billing' className='underline-offset-2 hover:underline'>
+        Settings
+      </Link>
+    </span>
+  );
+}
+
 function PlanGate({ onUpgrade }: { readonly onUpgrade: (() => void) | undefined }): React.JSX.Element | undefined {
   if (onUpgrade === undefined) {
     return undefined;
@@ -521,6 +551,7 @@ export function RevisionSyncRegion({
   canSyncFiles = true,
   onUpgrade,
   storageLimitBytes,
+  planWait,
   signInHref,
   role,
   isSignedOut,
@@ -685,6 +716,10 @@ export function RevisionSyncRegion({
    * unmounting mid-probe; the region only sends the pick.
    */
   const commitConnection = async (pending: PendingConnection): Promise<void> => {
+    /* C2: the plan is read again at commit, so a Tau choice made under one plan is not sent under another. */
+    if (pending.kind === 'tau' && (planWait !== undefined || !canSyncFiles)) {
+      return;
+    }
     setConnectionError(undefined);
     setCommitting(true);
     try {
@@ -720,6 +755,9 @@ export function RevisionSyncRegion({
     /* N4: an account without Tau Cloud sync issues **no** Tau connect. The
      * radio is already disabled; this is the one funnel every kind passes
      * through. A Git remote, GitHub included, is on every plan. */
+    if (pending.kind === 'tau' && planWait !== undefined) {
+      return; // C2: an unresolved plan neither connects nor offers an upgrade; the option says why.
+    }
     if (pending.kind === 'tau' && !canSyncFiles) {
       onUpgrade?.();
       return;
@@ -1009,18 +1047,26 @@ export function RevisionSyncRegion({
               — but it says what it costs and routes to the plan surface, the
               way `project-share-panel` already gates private shares. */}
           <div className='flex flex-wrap items-center gap-2'>
-            <RadioGroupItem id='remote-tau' value='tau' disabled={!canSyncFiles} />
+            <RadioGroupItem id='remote-tau' value='tau' disabled={planWait === undefined && !canSyncFiles} />
             <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-            <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
+            <Label
+              htmlFor='remote-tau'
+              className={cn('font-normal', (planWait !== undefined || !canSyncFiles) && 'text-muted-foreground')}
+            >
               Tau
             </Label>
-            {canSyncFiles ? (
-              storageLimitBytes === undefined ? null : (
-                <span className='text-xs text-muted-foreground'>{formatStorageLimit(storageLimitBytes)} included</span>
+            {planWait === undefined ? null : <PlanWaitNote wait={planWait.wait} onRetry={planWait.retry} />}
+            {planWait === undefined ? (
+              canSyncFiles ? (
+                storageLimitBytes === undefined ? null : (
+                  <span className='text-xs text-muted-foreground'>
+                    {formatStorageLimit(storageLimitBytes)} included
+                  </span>
+                )
+              ) : (
+                <PlanGate onUpgrade={onUpgrade} />
               )
-            ) : (
-              <PlanGate onUpgrade={onUpgrade} />
-            )}
+            ) : null}
           </div>
           <div className='flex items-center gap-2'>
             <RadioGroupItem id='remote-git' value='git' />
@@ -1048,7 +1094,10 @@ export function RevisionSyncRegion({
           <div className='flex flex-wrap gap-2'>
             <Button
               size='sm'
-              disabled={(remote.kind === 'none' && choice === 'none') || (choice === 'tau' && !canSyncFiles)}
+              disabled={
+                (remote.kind === 'none' && choice === 'none') ||
+                (choice === 'tau' && (planWait !== undefined || !canSyncFiles))
+              }
               onClick={() => {
                 void applyRemote();
               }}
@@ -1311,7 +1360,7 @@ export function RevisionSyncRegion({
           variant='outline'
           className='-my-0.5 shrink-0'
           onClick={() => {
-            setChoice(canSyncFiles ? 'tau' : undefined);
+            setChoice(canSyncFiles || planWait !== undefined ? 'tau' : undefined);
             setChangingBackup(true);
           }}
         >

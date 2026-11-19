@@ -4,15 +4,11 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
-import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { publishCloudProjectPreview, usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
 
-/* eslint-disable-next-line @typescript-eslint/naming-convention -- Runtime environment names. */
-vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test/' } }));
-// This test exercises the producer boundary, not the mounted project's hook dependencies.
-vi.mock('@taucad/revisions-ui/lib/revision-actor', () => ({ useRevisionSessionUser: vi.fn() }));
-vi.mock('#hooks/use-project-thumbnail.js', () => ({ useProjectThumbnail: vi.fn() }));
+// This test exercises the producer boundary: the app's session user, thumbnail and API base arrive as inputs.
+const apiBaseUrl = (): string => 'https://api.test/';
+const readyThumbnail = (url?: string) => ({ url, status: 'ready' }) as const;
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -48,6 +44,7 @@ describe('saved catalog preview producer', () => {
     const fetcher = vi.fn(async () => new Response(new Uint8Array([1])));
     vi.stubGlobal('fetch', fetcher);
     await publishCloudProjectPreview({
+      apiBaseUrl,
       projectId: 'project',
       source: 'blob:local-thumbnail',
       createOnly: true,
@@ -67,16 +64,6 @@ describe('saved catalog preview producer', () => {
   });
 
   it('should hold a verified fresh capture until authored sync settles, then replace the old saved preview', async () => {
-    vi.mocked(useRevisionSessionUser).mockReturnValue({
-      id: 'owner',
-      name: 'Owner',
-    });
-    vi.mocked(useProjectThumbnail).mockReturnValue({
-      url: undefined,
-      status: 'ready',
-      error: undefined,
-      refresh: vi.fn(),
-    });
     vi.stubGlobal(
       'createImageBitmap',
       vi.fn(async () => ({ width: 768, height: 576, close: vi.fn() })),
@@ -98,7 +85,15 @@ describe('saved catalog preview producer', () => {
     vi.stubGlobal('fetch', fetcher);
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const { result, rerender, unmount } = renderHook(
-      ({ enabled }) => usePublishCloudProjectPreview({ projectId: 'project', enabled, captureEnabled: true }),
+      ({ enabled }) =>
+        usePublishCloudProjectPreview({
+          projectId: 'project',
+          enabled,
+          captureEnabled: true,
+          userId: 'owner',
+          thumbnail: readyThumbnail(),
+          apiBaseUrl,
+        }),
       {
         initialProps: { enabled: false },
         wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),
@@ -124,30 +119,29 @@ describe('saved catalog preview producer', () => {
   it.each(['account', 'project', 'disconnect'] as const)(
     'should discard a pending capture after its %s scope changes',
     async (change) => {
-      vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'owner', name: 'Owner' });
-      vi.mocked(useProjectThumbnail).mockReturnValue({
-        url: undefined,
-        status: 'ready',
-        error: undefined,
-        refresh: vi.fn(),
-      });
       const bitmap = vi.fn();
       vi.stubGlobal('createImageBitmap', bitmap);
       const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
       const { result, rerender, unmount } = renderHook((props) => usePublishCloudProjectPreview(props), {
-        initialProps: { projectId: 'project', enabled: false, captureEnabled: true },
+        initialProps: {
+          projectId: 'project',
+          enabled: false,
+          captureEnabled: true,
+          userId: 'owner',
+          thumbnail: readyThumbnail(),
+          apiBaseUrl,
+        },
         wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),
       });
       act(() => {
         result.current(new Uint8Array([1]));
       });
-      if (change === 'account') {
-        vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'other', name: 'Other' });
-      }
+      const userId = change === 'account' ? 'other' : 'owner';
       const projectId = change === 'project' ? 'other-project' : 'project';
-      rerender({ projectId, enabled: false, captureEnabled: change !== 'disconnect' });
+      const scope = { projectId, userId, thumbnail: readyThumbnail(), apiBaseUrl };
+      rerender({ ...scope, enabled: false, captureEnabled: change !== 'disconnect' });
       await act(async () => {
-        rerender({ projectId, enabled: true, captureEnabled: true });
+        rerender({ ...scope, enabled: true, captureEnabled: true });
       });
       expect(bitmap).not.toHaveBeenCalled();
       unmount();
@@ -158,13 +152,7 @@ describe('saved catalog preview producer', () => {
   it('should backfill a project the server already holds a preview for once per session, not on every open', async () => {
     // Tau #2012: each open re-sent the create-only backfill and the API answered 412 every time.
     // The hook's saved-preview set lives for the module, so this test uses ids no other test uses.
-    vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'owner-2012', name: 'Owner' });
-    vi.mocked(useProjectThumbnail).mockReturnValue({
-      url: 'blob:local-thumbnail',
-      status: 'ready',
-      error: undefined,
-      refresh: vi.fn(),
-    });
+    const scope = { userId: 'owner-2012', thumbnail: readyThumbnail('blob:local-thumbnail'), apiBaseUrl };
     vi.stubGlobal(
       'createImageBitmap',
       vi.fn(async () => ({ width: 768, height: 576, close: vi.fn() })),
@@ -191,9 +179,12 @@ describe('saved catalog preview producer', () => {
     const uploads = (): number => fetcher.mock.calls.filter(([input]) => urlOf(input).startsWith('https:')).length;
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
-    const first = renderHook(() => usePublishCloudProjectPreview({ projectId: 'project-2012', enabled: true }), {
-      wrapper,
-    });
+    const first = renderHook(
+      () => usePublishCloudProjectPreview({ ...scope, projectId: 'project-2012', enabled: true }),
+      {
+        wrapper,
+      },
+    );
     await waitFor(() => {
       expect(uploads()).toBe(1);
     });
@@ -201,9 +192,12 @@ describe('saved catalog preview producer', () => {
       expect(client.isMutating()).toBe(0);
     });
     first.unmount();
-    const second = renderHook(() => usePublishCloudProjectPreview({ projectId: 'project-2012', enabled: true }), {
-      wrapper,
-    });
+    const second = renderHook(
+      () => usePublishCloudProjectPreview({ ...scope, projectId: 'project-2012', enabled: true }),
+      {
+        wrapper,
+      },
+    );
     await act(async () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -237,6 +231,7 @@ describe('saved catalog preview producer', () => {
     vi.stubGlobal('fetch', fetcher);
     await expect(
       publishCloudProjectPreview({
+        apiBaseUrl,
         projectId: 'project',
         source: 'blob:local-thumbnail',
         signal: new AbortController().signal,

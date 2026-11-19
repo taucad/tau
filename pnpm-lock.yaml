@@ -4166,6 +4166,9 @@ importers:
       react-router:
         specifier: 'catalog:'
         version: 8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59

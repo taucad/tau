@@ -2,6 +2,7 @@ import { Component, Suspense, useEffect, useSyncExternalStore } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudLoader } from '#cloud/cloud-loader.js';
+import { useCloudIdentity } from '#cloud/cloud-identity.js';
 
 /**
  * The one helper every lazy Cloud surface mounts through (adaptive app deployment mode charter D6, I8, BA11, BA25):
@@ -44,7 +45,7 @@ export type CloudSurfaceProps<Module> = Readonly<{
   loader?: CloudLoader<Module> | undefined;
   /** Whether the mode allows the Cloud rendering (`funded`); otherwise the fallback, and no load starts. */
   enabled: boolean;
-  /** The financial identity's key: a change remounts the Cloud rendering. */
+  /** The financial identity's key: a change remounts the Cloud rendering. The bound identity's by default. */
   identityKey?: string | undefined;
   /** The non-Cloud rendering, shown before, instead of and after a failed Cloud rendering. */
   fallback: ReactNode;
@@ -67,10 +68,12 @@ const noSubscription = (): (() => void) => () => undefined;
 export function CloudSurface<Module>({
   loader,
   enabled,
-  identityKey,
+  identityKey: givenKey,
   fallback,
   render,
 }: CloudSurfaceProps<Module>): React.JSX.Element {
+  const bound = useCloudIdentity();
+  const identityKey = givenKey ?? bound.key;
   const state = useSyncExternalStore(
     loader?.subscribe ?? noSubscription,
     loader?.state ?? idleState,

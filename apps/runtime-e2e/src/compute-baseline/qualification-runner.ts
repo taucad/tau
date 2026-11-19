@@ -28,8 +28,15 @@ export type QualifyStep = {
   readonly call?: number;
   readonly action?: string;
   readonly content?: string;
-  /** Stop-latency trial outcome; its timings are data the summarizer reports, not part of this contract. */
-  readonly abort?: { readonly valid: boolean };
+  /**
+   * Stop-latency trial outcome. Its timings are data the summarizer reports, except `nextBuildAfterIssue`, which CI
+   * bounds.
+   */
+  readonly abort?: {
+    readonly valid: boolean;
+    /** Milliseconds from the supersede to the start of the committed edit's `main()`. */
+    readonly nextBuildAfterIssue?: number;
+  };
   readonly counts: QualifyCounts;
   readonly output?: {
     readonly sha256?: string;

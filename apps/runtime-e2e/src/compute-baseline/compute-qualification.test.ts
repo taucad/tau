@@ -192,6 +192,20 @@ describe.each(ciModels)('compute reuse qualification: %s', (model) => {
     expect(trials.length).toBeGreaterThan(0);
   });
 
+  it('should start the committed edit soon after it superseded a running build', () => {
+    // P9c, worker transport: 16 to 49 ms on planetary-gear-system's 20 s faceWidth build (n 12, both arms), and up to
+    // about 150 ms when the supersede lands in a render's GLB pack before the pack polled the abort word. The bound
+    // is ten times the heavy-model worst case, below the 0.7 to 0.9 s a render that runs to its end would add there,
+    // and far below the whole-build waits of 2 to 15 s before the native user break.
+    const nextBuild = ['abort.off', 'abort.memory'].flatMap((key) =>
+      reports[key]!.steps.flatMap((step) =>
+        step.abort?.valid && step.abort.nextBuildAfterIssue !== undefined ? [step.abort.nextBuildAfterIssue] : [],
+      ),
+    );
+    expect(nextBuild.length).toBeGreaterThan(0);
+    expect(Math.max(...nextBuild)).toBeLessThan(500);
+  });
+
   it('should do no compute store work with reuse off', () => {
     for (const scenario of ['matrix', 'scrub', 'agent']) {
       expect(reports[`${scenario}.off`]!.steps.every((step) => step.counts.storeWrites === 0)).toBe(true);

@@ -538,12 +538,16 @@ const run = async () => {
         const startOf = (entry: any) => entry.workerTimeOrigin + entry.startTime;
         const stopped = mains.filter((entry) => startOf(entry) < issued).sort((a, b) => startOf(b) - startOf(a))[0];
         const end = stopped ? startOf(stopped) + stopped.duration : 0;
+        // The committed edit's build: the first run-main to start after the supersede was issued.
+        const next = mains.filter((entry) => startOf(entry) >= issued).sort((a, b) => startOf(a) - startOf(b))[0];
         (step as any).abort = {
           // Valid when the superseded main() was running when the supersede was issued; otherwise the delay missed it.
           valid: Boolean(stopped && end > issued && (firstOutcome as any)?.superseded),
           firstOutcome,
           supersededMainMs: stopped ? +stopped.duration.toFixed(1) : undefined,
           stopAfterIssueMs: stopped ? +(startOf(stopped) + stopped.duration - issued).toFixed(1) : undefined,
+          // P9c: from the supersede to the committed edit's `main()`: the stop, its unwinding and the next build's setup.
+          nextBuildAfterIssue: next ? +(startOf(next) - issued).toFixed(1) : undefined,
           supersededMainStatus: stopped?.detail?.status ?? stopped?.detail?.error,
           warmMainMs: warmMain,
           mainSpans: mains.length,

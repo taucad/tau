@@ -146,11 +146,13 @@ if (abortRows.length > 0) {
   out('## Stop latency of a superseded build');
   out();
   out(
-    'A running build is superseded by the next edit (worker transport). `stop after issue` is how long its `main()` kept running after the supersede was issued: the wait for the next OCCT call boundary plus the abort poll. A trial is valid when the superseded `main()` was still running at the supersede. The 50 ms target is measured from the next operation boundary, which this number upper-bounds; it is reported, not gated.',
+    'A running build is superseded by the next edit (worker transport). `stop after issue` is how long its `main()` kept running after the supersede was issued: the wait for the next OCCT call boundary plus the abort poll. A trial is valid when the superseded `main()` was still running at the supersede. The 50 ms target is measured from the next operation boundary, which this number upper-bounds; it is reported, not gated. `next build after issue` runs from the supersede to the start of the committed edit build `main()`.',
   );
   out();
-  out('| model | arm | valid trials | stop after issue ms | superseded main ms | committed bytes = off |');
-  out('| --- | --- | --- | --- | --- | --- |');
+  out(
+    '| model | arm | valid trials | stop after issue ms | next build after issue ms | superseded main ms | committed bytes = off |',
+  );
+  out('| --- | --- | --- | --- | --- | --- | --- |');
   const grouped: Record<string, any[]> = {};
   for (const row of abortRows) (grouped[`${row.model}|${row.arm}`] ??= []).push(row.run);
   for (const [key, runs] of Object.entries(grouped)) {
@@ -164,7 +166,7 @@ if (abortRows.length > 0) {
     const equal = trials.every((step: any) => offByToken.get(step.token) === step.output?.sha256);
     (summary.stopLatency ??= {})[key] = valid.map((step: any) => step.abort.stopAfterIssueMs);
     out(
-      `| ${model} | ${arm} | ${valid.length}/${trials.length} | ${stat(valid.map((step: any) => step.abort.stopAfterIssueMs))} | ${stat(valid.map((step: any) => step.abort.supersededMainMs))} | ${equal ? 'yes' : 'NO'} |`,
+      `| ${model} | ${arm} | ${valid.length}/${trials.length} | ${stat(valid.map((step: any) => step.abort.stopAfterIssueMs))} | ${stat(valid.map((step: any) => step.abort.nextBuildAfterIssue))} | ${stat(valid.map((step: any) => step.abort.supersededMainMs))} | ${equal ? 'yes' : 'NO'} |`,
     );
   }
   out();

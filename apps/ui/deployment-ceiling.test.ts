@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- this test exercises the application-owned alias rule.
 import { ceilingSpecifier, cloudCoreModulePattern } from './vite.config.js';
+import { zooNeutralCloseMessages } from '#cloud/zoo-close-messages.js';
 
 /*
  * The ceiling as a module (adaptive app deployment mode charter D1, I12, T-BA15): every ceiling resolves each
@@ -53,6 +54,28 @@ describe('ceilingSpecifier', () => {
     expect(readFileSync(join(import.meta.dirname, 'vite-environment.d.ts'), 'utf8')).not.toContain(
       'tauCloudBuildEnabled',
     );
+  });
+
+  it('should leave main, preload and the services host without the define (T-BA16)', () => {
+    const workspace = join(import.meta.dirname, '../..');
+    for (const file of [
+      'apps/desktop/electron.vite.config.ts',
+      'apps/desktop/src/build-environment.d.ts',
+      'apps/desktop/vitest.config.ts',
+      'apps/libs/desktop-services-host/src/build-environment.d.ts',
+      'apps/libs/desktop-services-host/vitest.config.ts',
+    ]) {
+      expect(readFileSync(join(workspace, file), 'utf8'), file).not.toContain('tauCloudBuildEnabled');
+    }
+  });
+
+  it("should give main's Zoo close-code map the web app's neutral sentences (D11)", () => {
+    const desktopMap = readFileSync(
+      join(import.meta.dirname, '../libs/desktop-services-host/src/zoo-close-errors.ts'),
+      'utf8',
+    );
+    expect(desktopMap).toContain(`4402: '${zooNeutralCloseMessages.credits}'`);
+    expect(desktopMap).toContain(`4403: '${zooNeutralCloseMessages.pro}'`);
   });
 });
 

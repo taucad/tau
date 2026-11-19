@@ -112,7 +112,7 @@ import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
 import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
-import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { useReportHistoryPaneShown } from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { desktopAgentSignInBridge } from '#components/terminal/agent-sign-ins.js';
 import { agentSignInComponent, connectAgentSignInWorkbench } from '#components/terminal/agent-sign-in-workbench.js';
 import type { AgentSignInPanelParameters } from '#components/terminal/agent-sign-in-workbench.js';

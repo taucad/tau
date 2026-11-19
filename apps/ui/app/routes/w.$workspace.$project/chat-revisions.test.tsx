@@ -22,7 +22,7 @@ import {
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
-import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { requestBranchControl } from '@taucad/revisions-ui/lib/revision-pane-requests';
 import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';

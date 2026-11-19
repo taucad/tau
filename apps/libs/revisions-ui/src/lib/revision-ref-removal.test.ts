@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
+import { createRevisionRefRemoval } from '#lib/revision-ref-removal.js';
 
-vi.mock('#environment.config.js', () => ({
-  requireClientEnvironmentUrl: () => 'https://api.tau.test',
-}));
+const { requestRefRemoval } = createRevisionRefRemoval({ apiBaseUrl: () => 'https://api.tau.test' });
 
 const line = 'refs/heads/conflicts/main/device-b';
 const answer = (status: number, body: unknown): Response => new Response(JSON.stringify(body), { status });
@@ -24,6 +22,32 @@ describe('requestRefRemoval (D24)', () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
     expect(url).toBe(`https://api.tau.test/v1/git/proj_1/refs?name=${encodeURIComponent(line)}`);
     expect(init).toMatchObject({ method: 'DELETE', credentials: 'include' });
+  });
+
+  it('should read the API origin on every request and drop its trailing slash', async () => {
+    const origins = ['https://one.tau.test/', 'https://two.tau.test'];
+    const removal = createRevisionRefRemoval({ apiBaseUrl: () => origins.shift() ?? '' });
+    vi.mocked(fetch).mockImplementation(async () => answer(200, {}));
+
+    await removal.requestRefRemoval('proj_1', line);
+    await removal.requestRefRemoval('proj_1', line);
+
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => url);
+    expect(urls).toStrictEqual([
+      `https://one.tau.test/v1/git/proj_1/refs?name=${encodeURIComponent(line)}`,
+      `https://two.tau.test/v1/git/proj_1/refs?name=${encodeURIComponent(line)}`,
+    ]);
+  });
+
+  it('should reject without a request when the API origin is not configured', async () => {
+    const removal = createRevisionRefRemoval({
+      apiBaseUrl: () => {
+        throw new Error('TAU_API_URL is not configured');
+      },
+    });
+
+    await expect(removal.requestRefRemoval('proj_1', line)).rejects.toThrow('TAU_API_URL is not configured');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('should take a line the remote no longer holds as removed', async () => {

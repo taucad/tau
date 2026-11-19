@@ -39,7 +39,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
+import { RevisionConflictEditor } from '@taucad/revisions-ui/components/revisions/revision-conflict-editor';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 
 /**

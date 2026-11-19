@@ -4179,6 +4179,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
+      '@taucad/editor-ui':
+        specifier: workspace:*
+        version: link:../editor-ui
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events

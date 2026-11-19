@@ -3230,7 +3230,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * authorize (the session is the credential), and `probe` already lists an unrecorded address the same way (R2).
    * Kept for the `validate` of that connect alone: another connect or a removed remote forgets it, and `validate` takes
    * it only for the destination it was asked for. A failed listing answers `undefined`, so it never rejects unhandled
-   * and `validate` asks again.
+   * and `validate` asks again. The listing is asked with the credential current when `writeRemote` starts (for Tau
+   * Cloud, the session cookie then); `initialSync`'s fetch that takes it runs under the session current at its own
+   * time, which the server checks again for every object it serves.
    */
   let earlyListing:
     | Readonly<{ address: RevisionRemoteAddress; listing: Promise<readonly RemoteRef[] | undefined> }>
@@ -6381,32 +6383,41 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
         listEarly(input);
-        await ensureStore();
-        const { name, url } = remoteAddressOf(input);
-        const [current] = await port.listRemotes();
-        if (
-          current !== undefined &&
-          (current.name !== name ||
-            current.url !== url ||
-            current.provider !== input.provider ||
-            current.repositoryId !== input.repositoryId)
-        ) {
-          await port.removeRemote(current.name);
-        }
-        await port.setRemote({
-          name,
-          url,
-          ...(input.provider === undefined ? {} : { provider: input.provider }),
-          ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
-          ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
-        });
-        return {
-          remote: remoteOf(name, url, {
+        const asked = earlyListing;
+        try {
+          await ensureStore();
+          const { name, url } = remoteAddressOf(input);
+          const [current] = await port.listRemotes();
+          if (
+            current !== undefined &&
+            (current.name !== name ||
+              current.url !== url ||
+              current.provider !== input.provider ||
+              current.repositoryId !== input.repositoryId)
+          ) {
+            await port.removeRemote(current.name);
+          }
+          await port.setRemote({
+            name,
+            url,
             ...(input.provider === undefined ? {} : { provider: input.provider }),
             ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
             ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
-          }),
-        };
+          });
+          return {
+            remote: remoteOf(name, url, {
+              ...(input.provider === undefined ? {} : { provider: input.provider }),
+              ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
+              ...(input.fetchOnly === true ? { fetchOnly: true } : {}),
+            }),
+          };
+        } catch (error) {
+          /* A connect whose write failed is no connect a later `validate` continues: its listing goes with it. */
+          if (earlyListing === asked) {
+            earlyListing = undefined;
+          }
+          throw error;
+        }
       }),
 
       /*

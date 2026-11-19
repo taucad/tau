@@ -30,6 +30,8 @@ type Harness = Readonly<{
   listings: Array<readonly RemoteRef[]>;
   /** Lets the store's creation finish. */
   releaseInit: () => void;
+  /** Creates the store underneath the actors, as another open of it would. */
+  createStore: () => Promise<void>;
 }>;
 
 const harness = async (
@@ -73,7 +75,14 @@ const harness = async (
     projectId: 'project-1',
     filesystem: async () => Object.create(filesystem) as RevisionFileSystem,
   });
-  return { actors, port, steps, listings, releaseInit: init.resolve };
+  return {
+    actors,
+    port,
+    steps,
+    listings,
+    releaseInit: init.resolve,
+    createStore: async () => inner.init({ author: { name: 'Tau', email: 'noreply@tau.new' } }),
+  };
 };
 
 const start = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
@@ -157,6 +166,19 @@ describe('a cold Tau Cloud connect lists the remote beside the store work (STO-2
       'list:tau@' + tauUrl,
       'list:github-42',
     ]);
+  });
+
+  /* Review of 7bb4b645 (LOW): a connect whose write failed leaves no listing for a later `validate`. */
+  it('forgets the early listing when the connect that asked for it fails to write', async () => {
+    const { actors, port, steps, listings, releaseInit, createStore } = await harness({ failInit: true });
+    releaseInit();
+    await expect(start(actors.remote.writeRemote, tauConnect)).rejects.toThrow('The store could not be created.');
+    expect(listings).toHaveLength(1);
+    /* The destination is recorded by some later path; its `validate` asks the remote itself. */
+    await createStore();
+    await port.setRemote({ name: 'tau', url: tauUrl });
+    await start(actors.remote.validate, { remote: 'tau', url: tauUrl });
+    expect(steps.filter((step) => step.startsWith('list:'))).toStrictEqual(['list:tau@' + tauUrl, 'list:tau']);
   });
 
   it('asks a remote with a credential to authorize nothing early', async () => {

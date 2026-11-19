@@ -734,8 +734,9 @@ const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
     }
     /*
      * S20: one cold open per device. A second tab waits here and finds the open done. The client is
-     * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
-     * whose client is replaced lets it go.
+     * looked up as the open goes: a tab with no client yet still takes the lock, one whose client is
+     * replaced lets it go, and one whose client exists but is not open by the time it holds the lock
+     * is refused (`owed`) and lets it go at once.
      */
     let opened = peekRevisionClient(projectId);
     const alive = (): boolean => {

@@ -1,8 +1,7 @@
 import { useCallback } from 'react';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
-import { errorCategory } from '@taucad/types/constants';
-import { errorCategoryTitles } from '@taucad/chat/utils';
+import { refuseUnfundedTurn } from '#hooks/credit-preflight-refusal.js';
 import { useAutoReloadEnabled } from '@taucad/billing-ui/hooks/use-auto-reload-enabled';
 
 /**
@@ -41,35 +40,13 @@ export const useCreditPreflight = (): CreditPreflight => {
       // (assets − holds, zero while in debt). An explanation whose authority is
       // unavailable carries no balance at all, and must not read as zero.
       const balance = explanation?.balance;
-      const available = balance ? balance.eligibleAvailableCreditAtoms : undefined;
-      const required = estimates?.routes.find((route) => route.routeId === routeId)?.minimumHoldAtoms;
-      if (available === undefined || required === undefined || autoReloadEnabled) {
-        return;
-      }
-      const availableAtoms = BigInt(available);
-      const requiredAtoms = BigInt(required);
-      if (availableAtoms >= requiredAtoms) {
-        return;
-      }
-      throw new Error(
-        JSON.stringify({
-          category: errorCategory.credits,
-          title: errorCategoryTitles[errorCategory.credits],
-          // The exact shortfall rides on `details`, which the credits card
-          // renders; `@taucad/billing`'s formatter is lazy-loaded in this app
-          // and may not be imported statically here.
-          message: `Add credits to use ${modelName}.`,
-          code: 'INSUFFICIENT_CREDIT',
-          httpStatus: 402,
-          details: {
-            // The real shortfall: what the balance must reach before any turn on
-            // this route can be admitted, not what a representative turn reserves.
-            requiredCreditAtoms: required,
-            availableCreditAtoms: available,
-            routeId,
-          },
-        }),
-      );
+      refuseUnfundedTurn({
+        available: balance ? balance.eligibleAvailableCreditAtoms : undefined,
+        required: estimates?.routes.find((route) => route.routeId === routeId)?.minimumHoldAtoms,
+        autoReloadEnabled,
+        routeId,
+        modelName,
+      });
     },
     [autoReloadEnabled, estimates, explanation],
   );

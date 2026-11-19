@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
@@ -18,6 +18,7 @@ import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { CloudIdentityProvider, cloudIdentityValue } from '#cloud/cloud-identity.js';
 import { CloudSurface } from '#cloud/cloud-surface.js';
 import { cloudSurfaces } from '#cloud/cloud-entries.js';
+import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudIdentity } from '#cloud/cloud-port.js';
 
 /** The billing surfaces link Tau's legal pages on this deployment's website (`lib/legal-url`). */
@@ -83,6 +84,10 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
     [apiBaseUrl, environment, mode.state, ownerId],
   );
   const { identity } = bound;
+  /* I4: what a fact used outside render reads when it is called; binding also starts the facts' deadline (I15). */
+  useLayoutEffect(() => {
+    cloudPort.bind(bound.key);
+  }, [bound.key]);
   return (
     <FinancialSessionScope identity={identity} ownerId={ownerId}>
       <BillingSessionProvider

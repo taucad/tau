@@ -4,7 +4,7 @@ import type { SettingId } from '@taucad/settings-ui/components/settings/settings
 import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
 import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
 import { SetupAnswersRow } from '#components/settings/setup-answers-row.js';
@@ -69,6 +69,7 @@ function SetupAnswersGroup(): React.JSX.Element {
 
 export function AgentSettings(): React.JSX.Element {
   const isOnboardingEnabled = useFeature('onboarding');
+  const isFunded = useDeploymentMode().state === 'funded';
   const [showCredits, setShowCredits] = useCookie(cookieName.chatModelCost, true);
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
@@ -78,7 +79,7 @@ export function AgentSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-6 pb-6'>
       <SettingsGroup title='Chat'>
-        {tauCloudEnabled ? (
+        {isFunded ? (
           <SwitchSetting
             settingId='show-credits'
             title='Show credits'

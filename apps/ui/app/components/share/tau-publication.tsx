@@ -4,7 +4,6 @@ import { data, isRouteErrorResponse, useLoaderData, useRouteError } from 'react-
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import { getEnvironment } from '#environment.config.js';
-import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { ErrorPage } from '#components/error-page.js';
@@ -48,27 +47,40 @@ export type PublicationRouteLoaderData = {
   files: Record<string, string>;
 };
 
-// Better Auth's session cookie (`cookiePrefix: 'tau'`), with the `__Secure-` prefix it carries over HTTPS.
-const sessionCookiePattern = /(?:^|;\s*)(?:__Secure-)?tau\.session_token=/u;
+/** A project's cloud link id, `shr_…`: the reference in `/s/tau~shr_…`. */
+const projectShareIdPattern = /^shr_[\w-]+$/u;
+
+/*
+ * Never stored by a shared cache: a cloud link shows the version last published and stops working on Stop sharing,
+ * so a stored copy would show an old version, or a link that no longer works, for as long as it lived.
+ */
+const viewerHeaders = { 'Cache-Control': 'private, no-store' } as const;
 
 function throwPublicationLock(reason: PublicationLockReason, httpStatus: number): never {
   // oxlint-disable-next-line typescript-eslint/only-throw-error -- React Router uses Response throws as control-flow
   throw new Response(JSON.stringify({ reason }), {
     status: httpStatus,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' },
+    headers: { 'Content-Type': 'application/json', ...viewerHeaders },
   });
 }
 
+/**
+ * Reads a cloud link for the viewer: `GET /v1/shares/<shareId>` with the visitor's cookie. Only a link id opens; an
+ * old per-version link (`tau~pub_…`) is not found, as is anything else, without asking the API.
+ *
+ * @param args - The loader arguments; `params.id` is the link id.
+ * @returns The viewer payload, never stored by a shared cache.
+ */
 export const loadPublication = async ({ request, params }: LoaderFunctionArgs): Promise<unknown> => {
-  const publicationId = params['id'];
-  if (publicationId === undefined || publicationId === '') {
+  const shareId = params['id'];
+  if (shareId === undefined || !projectShareIdPattern.test(shareId)) {
     throwPublicationLock('not-found', 404);
   }
 
   const environment = await getEnvironment();
   const apiBase = environment.TAU_API_URL.replace(/\/$/, '');
 
-  const maybeResponse = await fetch(`${apiBase}/v1/publications/${publicationId}`, {
+  const maybeResponse = await fetch(`${apiBase}/v1/shares/${shareId}`, {
     headers: {
       Accept: 'application/json',
       Cookie: request.headers.get('Cookie') ?? '',
@@ -108,16 +120,7 @@ export const loadPublication = async ({ request, params }: LoaderFunctionArgs): 
     throwPublicationLock('service-unavailable', 503);
   })) as PublicationRouteLoaderData;
 
-  const publication = parsePublicationRecord(body.publication, body.viewerRole);
-  // Only an anonymous view of a public publication is the same for everyone; anything else embeds the viewer.
-  const isAnonymousPublicView =
-    publication?.visibility === 'public' &&
-    publication.viewerRole === 'public' &&
-    !sessionCookiePattern.test(request.headers.get('Cookie') ?? '');
-  const responseHeaders = isAnonymousPublicView
-    ? new Headers(cdnBackedSsrRouteHeaders(cacheTag.publicationViewer, 'long'))
-    : new Headers({ 'Cache-Control': 'private, no-store' });
-  return data(body, { headers: responseHeaders });
+  return data(body, { headers: new Headers(viewerHeaders) });
 };
 
 export const publicationMeta: MetaFunction<typeof loadPublication> = ({ loaderData }) => {

@@ -7,7 +7,7 @@
  * needs and the draft that leaves — never a second publish path.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -50,8 +50,10 @@ describe('publishCommand', () => {
     publish.mockResolvedValue({
       status: 'published',
       tag: 'v1',
+      name: 'Shared Nov 19',
       publicationId: 'pub_1',
-      url: 'https://tau.new/s/tau~pub_1',
+      url: 'https://tau.new/s/tau~shr_1',
+      visibility: 'private',
     });
     openProjectRevisions.mockReset();
     openProjectRevisions.mockReturnValue({ publish, close });
@@ -65,46 +67,67 @@ describe('publishCommand', () => {
     await rm(project, { recursive: true, force: true });
   });
 
-  const seedManifest = async (entryPath = 'main.ts'): Promise<void> => {
-    await writeFile(join(project, 'tau.json'), JSON.stringify({ assets: { main: { entryPath } } }));
+  const seedManifest = async (
+    entryPath = 'main.ts',
+    fields: Readonly<{ name?: string; description?: string }> = {},
+  ): Promise<void> => {
+    await writeFile(join(project, 'tau.json'), JSON.stringify({ ...fields, assets: { main: { entryPath } } }));
   };
 
-  it('publishes the named version and prints the link', async () => {
-    await seedManifest();
+  it('publishes a named version with the project’s name and description, and prints the link', async () => {
+    await seedManifest('main.ts', { name: 'Bracket', description: 'A wall bracket' });
 
-    await runCommand(publishCommand, { rawArgs: ['v2', '--project', project, '--title', 'Bracket'] });
+    await runCommand(publishCommand, { rawArgs: ['Ready for print', '--project', project] });
 
     expect(openProjectRevisions).toHaveBeenCalledWith({
       workspaceRoot: project,
       apiBaseUrl: 'https://api.tau.new',
       apiToken: 'session-token',
     });
+    /* No visibility: the link keeps its setting, and a first publish is private. */
     expect(publish).toHaveBeenCalledExactlyOnceWith({
-      tag: 'v2',
-      projectName: basename(project),
+      tag: 'Ready for print',
+      projectName: 'Bracket',
+      description: 'A wall bracket',
       entryPath: 'main.ts',
-      visibility: 'private',
-      title: 'Bracket',
     });
-    expect(stdout.join('')).toBe('https://tau.new/s/tau~pub_1\n');
+    expect(stdout.join('')).toBe('https://tau.new/s/tau~shr_1\n');
     expect(close).toHaveBeenCalled();
   });
 
-  it('publishes publicly only when asked, and carries the optional fields', async () => {
+  it('leaves an unnamed version for the host to name, and falls back to the directory’s name', async () => {
+    await seedManifest();
+
+    await runCommand(publishCommand, { rawArgs: ['--project', project] });
+
+    expect(publish).toHaveBeenCalledExactlyOnceWith({
+      tag: '',
+      isAutoNamed: true,
+      projectName: basename(project),
+      entryPath: 'main.ts',
+    });
+  });
+
+  it.each([
+    [['--public'], 'public'],
+    [['--private'], 'private'],
+  ])('sets who can open the link with %j', async (flags, visibility) => {
     await seedManifest('lib/body.ts');
 
-    await runCommand(publishCommand, {
-      rawArgs: ['v1', '--project', project, '--public', '--description', 'A bracket', '--note', 'first release'],
-    });
+    await runCommand(publishCommand, { rawArgs: ['v1', '--project', project, ...flags, '--note', 'first release'] });
 
     expect(publish).toHaveBeenCalledWith(
-      expect.objectContaining({
-        visibility: 'public',
-        entryPath: 'lib/body.ts',
-        description: 'A bracket',
-        note: 'first release',
-      }),
+      expect.objectContaining({ visibility, entryPath: 'lib/body.ts', note: 'first release' }),
     );
+  });
+
+  it('refuses --public with --private before opening anything', async () => {
+    await seedManifest();
+
+    await expect(
+      runCommand(publishCommand, { rawArgs: ['--project', project, '--public', '--private'] }),
+    ).rejects.toMatchObject({ code: 'CONFLICTING_VISIBILITY', exit: exitCodes.usage });
+    expect(openProjectRevisions).not.toHaveBeenCalled();
   });
 
   it('prefers an explicit entry path over the project manifest', async () => {
@@ -124,7 +147,9 @@ describe('publishCommand', () => {
       v: 1,
       kind: 'publication',
       ok: true,
-      url: 'https://tau.new/s/tau~pub_1',
+      url: 'https://tau.new/s/tau~shr_1',
+      name: 'Shared Nov 19',
+      visibility: 'private',
     });
   });
 
@@ -147,6 +172,26 @@ describe('publishCommand', () => {
     });
   });
 
+  it('publishes with --entry and no project manifest, under the directory’s name', async () => {
+    await runCommand(publishCommand, { rawArgs: ['v1', '--project', project, '--entry', 'main.ts'] });
+
+    expect(publish).toHaveBeenCalledExactlyOnceWith({
+      tag: 'v1',
+      projectName: basename(project),
+      entryPath: 'main.ts',
+    });
+  });
+
+  it('refuses a project manifest it cannot read even with --entry, before opening the project', async () => {
+    /* Not absent but unreadable: it may hold the project's identity, which the host will not guess. */
+    await mkdir(join(project, 'tau.json'));
+
+    await expect(
+      runCommand(publishCommand, { rawArgs: ['v1', '--project', project, '--entry', 'main.ts'] }),
+    ).rejects.toMatchObject({ code: 'NO_PROJECT_MANIFEST' });
+    expect(openProjectRevisions).not.toHaveBeenCalled();
+  });
+
   it('refuses a project whose manifest does not say what it opens with', async () => {
     await writeFile(join(project, 'tau.json'), JSON.stringify({ assets: { main: {} } }));
 
@@ -163,11 +208,12 @@ describe('publishCommand', () => {
 
   it('reports the machine’s own refusal and still closes the project', async () => {
     await seedManifest();
-    publish.mockResolvedValue({ status: 'refused', reason: 'Private links need the Pro plan.' });
+    const reason = 'Private links need the Pro plan.';
+    publish.mockResolvedValue({ status: 'refused', reason });
 
     await expect(runCommand(publishCommand, { rawArgs: ['v1', '--project', project] })).rejects.toMatchObject({
       code: 'PUBLISH_REFUSED',
-      message: 'Private links need the Pro plan.',
+      message: reason,
       exit: exitCodes.refused,
     });
     expect(close).toHaveBeenCalled();

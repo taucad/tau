@@ -901,7 +901,10 @@ describe('the Tau Cloud publish and register legs', () => {
   });
 
   it('carries the document cookie on one leg and the bearer header on the other', async () => {
-    const answered = capture(200, { id: 'pub-1', urls: { share: 'https://tau.new/s/1' } });
+    const answered = capture(200, {
+      id: 'pub-1',
+      share: { id: 'shr_1', url: 'https://tau.new/s/tau~shr_1', visibility: 'private' },
+    });
     try {
       await publishOverHttp('https://api.test/', { kind: 'cookie' }, draft);
       await publishOverHttp('https://api.test', { kind: 'bearer', authorization: 'Bearer t' }, draft);
@@ -911,6 +914,92 @@ describe('the Tau Cloud publish and register legs', () => {
       expect((answered.calls[0]?.headers ?? {}) as Record<string, string>).not.toHaveProperty('Authorization');
       expect(answered.calls[1]?.credentials).toBeUndefined();
       expect((answered.calls[1]?.headers ?? {}) as Record<string, string>).toHaveProperty('Authorization', 'Bearer t');
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('sends the stable-link body and reads the link and its setting from the answer', async () => {
+    const answered = capture(201, {
+      id: 'pub-1',
+      urls: { share: 'https://tau.new/s/tau~shr_1' },
+      share: { id: 'shr_1', url: 'https://tau.new/s/tau~shr_1', visibility: 'public' },
+      version: { tag: 'v3' },
+    });
+    try {
+      /* Fields the machine carries for itself never reach the API, even when a caller passes them. */
+      const input: PublishPublicationActorInput & Readonly<{ note: string; isAutoNamed: boolean }> = {
+        projectId: 'p1',
+        projectName: 'Bracket',
+        tag: 'v3',
+        revisionId: 'r1',
+        entryPath: 'main.ts',
+        description: 'A wall bracket',
+        note: 'first',
+        isAutoNamed: true,
+      };
+      const output = await publishOverHttp('https://api.test', { kind: 'cookie' }, input);
+
+      expect(output).toStrictEqual({
+        publicationId: 'pub-1',
+        url: 'https://tau.new/s/tau~shr_1',
+        visibility: 'public',
+      });
+      const sentBody = answered.calls[0]?.body;
+      expect(typeof sentBody).toBe('string');
+      expect(JSON.parse(sentBody as string)).toStrictEqual({
+        projectId: 'p1',
+        projectName: 'Bracket',
+        tag: 'v3',
+        revisionId: 'r1',
+        entryPath: 'main.ts',
+        description: 'A wall bracket',
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('sends the default a new link takes only when the draft names one', async () => {
+    const answered = capture(201, {
+      id: 'pub-1',
+      share: { id: 'shr_1', url: 'https://tau.new/s/tau~shr_1', visibility: 'public' },
+    });
+    try {
+      await publishOverHttp(
+        'https://api.test',
+        { kind: 'cookie' },
+        {
+          projectId: 'p1',
+          projectName: 'Bracket',
+          tag: 'v3',
+          revisionId: 'r1',
+          entryPath: 'main.ts',
+          defaultVisibility: 'public',
+        },
+      );
+
+      const sentBody = answered.calls[0]?.body;
+      expect(typeof sentBody).toBe('string');
+      expect(JSON.parse(sentBody as string)).toStrictEqual({
+        projectId: 'p1',
+        projectName: 'Bracket',
+        tag: 'v3',
+        revisionId: 'r1',
+        entryPath: 'main.ts',
+        defaultVisibility: 'public',
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('refuses an answer without a cloud link', async () => {
+    const answered = capture(201, { id: 'pub-1', urls: { share: 'https://tau.new/s/tau~pub-1' } });
+    try {
+      await expect(publishOverHttp('https://api.test', { kind: 'cookie' }, draft)).rejects.toThrow(
+        'Couldn’t create the link. Try again.',
+      );
     } finally {
       answered.restore();
     }

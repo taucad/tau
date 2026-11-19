@@ -109,10 +109,10 @@ export const projectCollaborator = pgTable(
 );
 
 /**
- * An invitation to collaborate, on the `publication_access` pattern (D27).
+ * An invitation to collaborate, on the `project_share_access` pattern (D27).
  *
- * Keyed on (project, email) exactly as `publication_access` is keyed on
- * (publication, email), which is what makes inviting twice idempotent and
+ * Keyed on (project, email) exactly as `project_share_access` is keyed on
+ * (link, email), which is what makes inviting twice idempotent and
  * re-inviting a revoked address un-revoke the row in place rather than leave
  * two. The token is stored hashed, so a leaked row cannot be replayed as a
  * link. `email` is lowercase by check constraint, so normalisation cannot be

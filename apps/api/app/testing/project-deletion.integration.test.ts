@@ -126,9 +126,13 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
       tokenHash: fixture.projectId,
       expiresAt: new Date('2030-01-01'),
     });
-    await database.insert(schema.publicationAccess).values({
+    const shareId = `shr_${fixture.projectId}`;
+    await database
+      .insert(schema.projectShare)
+      .values({ id: shareId, projectId: fixture.projectId, ownerId: fixture.ownerId, visibility: 'private' });
+    await database.insert(schema.projectShareAccess).values({
       id: `access_${fixture.projectId}`,
-      publicationId: firstId,
+      shareId,
       ownerId: fixture.ownerId,
       recipientEmail: 'invite@example.invalid',
     });
@@ -159,9 +163,12 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     expect(invitation?.revokedAt).toEqual(intent?.requestedAt);
     const [grant] = await database
       .select()
-      .from(schema.publicationAccess)
-      .where(eq(schema.publicationAccess.publicationId, firstId));
+      .from(schema.projectShareAccess)
+      .where(eq(schema.projectShareAccess.shareId, shareId));
     expect(grant).toMatchObject({ status: 'revoked', revokedAt: intent?.requestedAt });
+    /* The cloud link stops in the same commit, keeping its id for the purge cascade. */
+    const [link] = await database.select().from(schema.projectShare).where(eq(schema.projectShare.id, shareId));
+    expect(link?.disabledAt).toEqual(intent?.requestedAt);
     const publications = await database
       .select()
       .from(schema.publication)

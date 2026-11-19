@@ -4,9 +4,11 @@
  * takes that listing instead of asking again; the connect-time fetch then takes it as before (R6).
  *
  * Guarded: the listing is used only for the destination it was asked for and only by the connect that asked; a remote
- * re-pointed, replaced or removed meanwhile lists again; a listing that fails is asked again by `validate` and never
- * rejects unhandled, even when the store work fails beside it; only a Tau remote (no credential to authorize) is
- * asked early.
+ * re-pointed, replaced or removed meanwhile, or a connect whose write failed, lists again; a listing that fails is
+ * asked again by `validate` and never rejects unhandled, even when the store work fails beside it, except a `404`
+ * this host can register on, which `validate` registers on at once (D11); only a Tau remote (no credential to
+ * authorize) is asked early, and only when the connect names its URL: a host that resolves the destination itself is
+ * asked once, after the store exists, as before.
  */
 import { describe, expect, it } from 'vitest';
 import { createActor } from 'xstate';
@@ -41,6 +43,10 @@ const harness = async (
     failListing?: (remote: string | RevisionRemoteAddress) => boolean;
     /** The remote answers `404` until the project is registered. */
     unregistered?: boolean;
+    /** The status that `404`-family answer carries (a `410` is a tombstoned project). */
+    notFoundStatus?: number;
+    /** No registration seam, as a host that cannot register a project. */
+    noRegistration?: boolean;
     remoteUrl?: (projectId: string) => string | undefined;
   }> = {},
 ): Promise<Harness> => {
@@ -68,7 +74,11 @@ const harness = async (
         throw new Error('The remote did not answer.');
       }
       if (options.unregistered === true && !steps.includes('register')) {
-        throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        throw new RevisionPortError(
+          'REMOTE_NOT_FOUND',
+          'No repository here yet.',
+          options.notFoundStatus === undefined ? undefined : { status: options.notFoundStatus },
+        );
       }
       const listed = Object.freeze([{ name: 'refs/heads/main', head }]) as readonly RemoteRef[];
       listings.push(listed);
@@ -84,9 +94,13 @@ const harness = async (
     port,
     projectId: 'project-1',
     filesystem: async () => Object.create(filesystem) as RevisionFileSystem,
-    registerRemoteProject: async () => {
-      steps.push('register');
-    },
+    ...(options.noRegistration === true
+      ? {}
+      : {
+          registerRemoteProject: async () => {
+            steps.push('register');
+          },
+        }),
     ...(options.remoteUrl === undefined ? {} : { remoteUrl: options.remoteUrl }),
   });
   return {
@@ -209,9 +223,9 @@ describe('a cold Tau Cloud connect lists the remote beside the store work (STO-2
   });
 
   /* CI on #2653: a host resolves the project's identity for its Tau URL; one connect asks it once. */
-  it('resolves the Tau destination once for the early listing and the config write', async () => {
+  it('asks a host that resolves the Tau destination once per connect, and lists nothing early for it', async () => {
     const asked: string[] = [];
-    const { actors, releaseInit } = await harness({
+    const { actors, steps, releaseInit } = await harness({
       remoteUrl: (projectId) => {
         asked.push(projectId);
         return tauUrl;
@@ -220,6 +234,7 @@ describe('a cold Tau Cloud connect lists the remote beside the store work (STO-2
     releaseInit();
     await start(actors.remote.writeRemote, { projectId: 'project-1', kind: 'tau' });
     expect(asked).toStrictEqual(['project-1']);
+    expect(steps.filter((step) => step.startsWith('list:'))).toStrictEqual([]);
 
     /* With no destination, the write still fails as before, having asked once. */
     asked.length = 0;
@@ -234,6 +249,53 @@ describe('a cold Tau Cloud connect lists the remote beside the store work (STO-2
       'Couldn’t find this project in the cloud',
     );
     expect(asked).toStrictEqual(['project-1']);
+  });
+
+  /* Merge queue on #2653: a destination known only once the store exists (a daemon's API origin set meanwhile). */
+  it('asks a host for a destination it resolves itself only after the store, when it knows it', async () => {
+    const asked: string[] = [];
+    let known = false;
+    const { actors, port, steps, releaseInit } = await harness({
+      remoteUrl: (projectId) => {
+        asked.push(projectId);
+        return known ? tauUrl : undefined;
+      },
+    });
+    const written = start(actors.remote.writeRemote, { projectId: 'project-1', kind: 'tau' });
+    await settle();
+    known = true;
+    releaseInit();
+    await written;
+    const recorded = await port.listRemotes();
+    expect(recorded.map((remote) => remote.url)).toStrictEqual([tauUrl]);
+    expect(asked).toStrictEqual(['project-1']);
+    /* Resolved by the host: nothing was asked of the remote early. */
+    expect(steps.filter((step) => step.startsWith('list:'))).toStrictEqual([]);
+  });
+
+  /* Review of bd71d15d (LOW): a `410` is a tombstoned project; registering cannot bring it back, so it is no seed. */
+  it('keeps no early 410 to register on: validate asks the remote itself', async () => {
+    const { actors, steps, releaseInit } = await harness({ unregistered: true, notFoundStatus: 410 });
+    releaseInit();
+    await start(actors.remote.writeRemote, tauConnect);
+    await expect(start(actors.remote.validate, { remote: 'tau', url: tauUrl })).rejects.toThrow(
+      'No repository here yet.',
+    );
+    expect(steps.filter((step) => step.startsWith('list:') || step === 'register')).toStrictEqual([
+      'list:tau@' + tauUrl,
+      'list:tau',
+    ]);
+  });
+
+  /* Review of bd71d15d (LOW): with no way to register, an early `404` is no seed either. */
+  it('keeps no early 404 on a host that cannot register: validate asks the remote itself', async () => {
+    const { actors, steps, releaseInit } = await harness({ unregistered: true, noRegistration: true });
+    releaseInit();
+    await start(actors.remote.writeRemote, tauConnect);
+    await expect(start(actors.remote.validate, { remote: 'tau', url: tauUrl })).rejects.toThrow(
+      'No repository here yet.',
+    );
+    expect(steps.filter((step) => step.startsWith('list:'))).toStrictEqual(['list:tau@' + tauUrl, 'list:tau']);
   });
 
   it('asks a remote with a credential to authorize nothing early', async () => {

@@ -3272,42 +3272,43 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * STO-25 SP6: a Tau Cloud connect's advertisement, asked for as the connect is written, beside the store's creation,
    * its Start version and the config write that `validate` otherwise waits for. Tau Cloud has no credential to
    * authorize (the session is the credential), and `probe` already lists an unrecorded address the same way (R2).
-   * Kept for the `validate` of that connect alone: another connect or a removed remote forgets it, and `validate` takes
-   * it only for the destination it was asked for. A failed listing answers `undefined`, so it never rejects unhandled
-   * and `validate` asks again. The listing is asked with the credential current when `writeRemote` starts (for Tau
-   * Cloud, the session cookie then); `initialSync`'s fetch that takes it runs under the session current at its own
-   * time, which the server checks again for every object it serves.
+   *
+   * Only a connect that names its URL is listed early (the browser's page resolves it): a host that resolves the
+   * destination itself (`remoteUrl`) is asked once, after the store exists, as before, since what it answers can
+   * depend on state set while the connect starts (a daemon's API origin).
+   *
+   * Kept for the `validate` of that connect alone: another connect, a failed write or a removed remote forgets it, and
+   * `validate` takes it only for the destination it was asked for. The outcome never rejects: refs, a `404` this host
+   * can register on (which `validate` registers on at once, D11), or nothing, after which `validate` asks again. The
+   * listing is asked with the credential current when `writeRemote` starts (for Tau Cloud, the session cookie then);
+   * `initialSync`'s fetch that takes it runs under the session current at its own time, which the server checks
+   * again for every object it serves.
    */
-  /* What the early listing answered: the refs, the remote's `REMOTE_NOT_FOUND` (kept for `validate` to register on), or nothing. */
   type EarlyListingOutcome =
     | Readonly<{ refs: readonly RemoteRef[] }>
     | Readonly<{ notFound: RevisionPortError }>
     | undefined;
   let earlyListing: Readonly<{ address: RevisionRemoteAddress; listing: Promise<EarlyListingOutcome> }> | undefined;
-  /* A connect's destination, resolved once: the early listing and the config write read the same answer. */
-  type ResolvedAddress = Readonly<{ address: RevisionRemoteAddress }> | Readonly<{ error: unknown }>;
-  const resolveAddress = (input: RemoteWriteActorInput): ResolvedAddress => {
-    try {
-      return { address: remoteAddressOf(input) };
-    } catch (error) {
-      return { error };
-    }
-  };
-  const listEarly = (input: RemoteWriteActorInput, resolved: ResolvedAddress): void => {
+  /* A `404` registering can answer (`listRegistered`'s own test): never a `410`, never on a host that cannot register. */
+  const isRegistrable = (kind: string | undefined, error: unknown): error is RevisionPortError =>
+    kind === 'tau' &&
+    options.registerRemoteProject !== undefined &&
+    error instanceof RevisionPortError &&
+    error.code === 'REMOTE_NOT_FOUND' &&
+    error.status !== 410;
+  const listEarly = (input: RemoteWriteActorInput): void => {
     earlyListing = undefined;
-    if (input.kind !== 'tau' || input.provider !== undefined || input.fetchOnly === true || !('address' in resolved)) {
-      /* No early listing; a missing address is reported by the write itself. */
+    if (input.kind !== 'tau' || input.url === undefined || input.provider !== undefined || input.fetchOnly === true) {
       return;
     }
-    const { address } = resolved;
+    /* Named by the connect itself: no host lookup, and nothing to throw. */
+    const address = remoteAddressOf(input);
     // async-iife: bootstrap -- the outcome is taken by `validate`; a failure never rejects, and is asked again or registered on.
     const listing = (async (): Promise<EarlyListingOutcome> => {
       try {
         return { refs: await port.listRemoteRefs(address) };
       } catch (error) {
-        return error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND'
-          ? { notFound: error }
-          : undefined;
+        return isRegistrable('tau', error) ? { notFound: error } : undefined;
       }
     })();
     earlyListing = { address, listing };
@@ -3403,11 +3404,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return await list();
     } catch (error) {
       /* A `410` is a project Tau Cloud tombstoned: registering cannot bring it back. */
-      if (
-        kind !== 'tau' ||
-        options.registerRemoteProject === undefined ||
-        !(error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND' && error.status !== 410)
-      ) {
+      if (!isRegistrable(kind, error) || options.registerRemoteProject === undefined) {
         throw error;
       }
       /* A refused registration is reported as the listing's own refusal, which says what the remote answered. */
@@ -6435,15 +6432,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       writeRemote: fromAuthorityPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(async ({ input }) => {
-        const resolved = resolveAddress(input);
-        listEarly(input, resolved);
+        listEarly(input);
         const asked = earlyListing;
         try {
           await ensureStore();
-          if ('error' in resolved) {
-            throw resolved.error;
-          }
-          const { name, url } = resolved.address;
+          /* Read after the store, as before: a host's own lookup answers once, with what it knows by then. */
+          const { name, url } = asked?.address ?? remoteAddressOf(input);
           const [current] = await port.listRemotes();
           if (
             current !== undefined &&

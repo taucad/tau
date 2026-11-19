@@ -2185,6 +2185,12 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     });
   const pill = (): Element | undefined => document.querySelector('[data-slot="wait-indicator-body"]') ?? undefined;
   const caption = (): Element | undefined => document.querySelector('[data-slot="viewer-wait-caption"]') ?? undefined;
+  const captionText = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="viewer-wait-caption-text"]') ?? undefined;
+  const slowCaption = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="viewer-wait-caption-slow"]') ?? undefined;
+  const slowDelay = (element: Element | undefined): string | undefined =>
+    element instanceof HTMLElement ? element.style.getPropertyValue('--wait-slow-delay') : undefined;
   const advance = (milliseconds: number): void => {
     act(() => {
       vi.advanceTimersByTime(milliseconds);
@@ -2211,6 +2217,7 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
   afterEach(() => {
     vi.useRealTimers();
     mockSyncStatus = { sync: { state: 'backedUp' } };
+    mockViewSettings = {};
   });
 
   it('should keep one stage from the first frame through opening, downloading and preparing, the pill saying each step', () => {
@@ -2257,15 +2264,15 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     expect(mockViewFields).toBeUndefined();
   });
 
-  it('should lay out one caption row of one height in every step, empty for the opening step and before 3 s', () => {
+  it('should lay out one caption row of one height in every step, with no words for the opening step', () => {
     mockSyncStatus = opening;
     renderOpen();
     expect(caption()).toHaveClass('absolute', 'top-full', 'h-4', 'text-xs', 'text-muted-foreground');
-    expect(caption()).toBeEmptyDOMElement();
+    /* Opening project has no caption: the pill already says it. */
+    expect(caption()?.textContent).toBe('');
 
     advance(3000);
-    /* Opening project has no caption: the pill already says it. */
-    expect(caption()).toBeEmptyDOMElement();
+    expect(caption()?.textContent).toBe('');
 
     publishSyncStatus(downloadingWithNumbers);
     expect(caption()).toHaveClass('h-4');
@@ -2276,40 +2283,98 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     expect(caption()).toHaveTextContent('Getting your files ready to open.');
   });
 
-  it('should show the download numbers only once the open passes 3 s', () => {
+  it('should show the download numbers by CSS once the open passes 3 s, with no timer', () => {
     mockSyncStatus = downloadingWithNumbers;
     renderOpen();
     expect(pill()).toHaveTextContent('Downloading files…');
     expect(pill()).toHaveTextContent('64%');
-    advance(2999);
-    expect(caption()).toBeEmptyDOMElement();
-    advance(1);
-    expect(caption()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    /* The words are laid out from the start and revealed by `wait-after-slow` at the open's start plus 3 s, on the
+       pill's own slow delay. */
+    expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    expect(captionText()).toHaveClass('wait-after-slow');
+    expect(slowDelay(captionText())).toBe('calc(10000ms - 7000ms)');
+    expect(vi.getTimerCount()).toBe(0);
+
+    /* Time passing re-renders nothing: the same element keeps its delay, which CSS counts down. */
+    const text = captionText();
+    advance(5000);
+    expect(captionText()).toBe(text);
+    expect(slowDelay(captionText())).toBe('calc(10000ms - 7000ms)');
   });
 
-  it('should read "Still downloading files" with "Try again" 10 s into the download, and say what to do', () => {
+  it('should keep the caption on the wait’s clock when the stage mounts part way through it', () => {
+    /* A download of the model files the open already bore starts the stage's clock 1,000 ms back: the pill is
+       showing, and the caption's delay is the 2 s it still has to go. */
+    mockSessionAvailability = 'pending';
+    mockViewSettings = { 'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings } };
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    mockSyncStatus = {
+      sync: { state: 'backedUp' },
+      readiness: 'filled',
+      largeObjects: downloadingWithNumbers.largeObjects,
+    };
+    renderOpen();
+    expect(pill()).toHaveTextContent('Downloading model files…');
+    expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '0ms' });
+    expect(slowDelay(captionText())).toBe('calc(9000ms - 7000ms)');
+  });
+
+  it('should swap in "Still downloading files" with "Try again" by CSS 10 s into the download, and say what to do', () => {
     mockSyncStatus = opening;
     renderOpen();
+    const body = pill();
     advance(2000);
     publishSyncStatus(downloadingWithNumbers);
-    /* The slow mark counts from the download's own start, not the open's. */
-    advance(9999);
-    expect(pill()).toHaveTextContent('Downloading files…');
-    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    /* The pill keeps its element and its own clock through the step: it does not restart. */
+    expect(pill()).toBe(body);
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms', '--wait-slow-delay': '10000ms' });
+    /* The slow mark counts from the download's own start, not the open's: the swap is moved onto the download's
+       delay, which the status row carries for the pill's words. */
+    const status = document.querySelector('[data-slot="viewer-wait-status"]');
+    expect(status).toHaveStyle({ '--viewer-download-slow-delay': '10000ms' });
+    const label = document.querySelector('[data-slot="wait-indicator-label"]');
+    const slowWords = document.querySelector('[data-slot="wait-indicator-slow"]');
+    expect(label).toHaveTextContent('Downloading files…');
+    expect(label).toHaveClass('wait-until-slow');
+    expect(slowWords).toHaveTextContent('Still downloading files…');
+    expect(slowWords).toHaveClass('wait-after-slow');
+    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveClass(
+      '[&_[data-slot=wait-indicator-label]]:[--wait-slow-delay:var(--viewer-download-slow-delay)]',
+      '[&_[data-slot=wait-indicator-slow]]:[--wait-slow-delay:var(--viewer-download-slow-delay)]',
+    );
 
-    advance(1);
-    expect(pill()).toHaveTextContent('Still downloading files…');
-    expect(caption()).toHaveTextContent('Check your connection, then try again.');
+    /* The caption's numbers give way, and what to do appears, at the same mark. */
+    expect(captionText()?.firstElementChild).toHaveClass('wait-until-slow');
+    expect(slowDelay(captionText()?.firstElementChild ?? undefined)).toBe('10000ms');
+    expect(slowCaption()).toHaveTextContent('Check your connection, then try again.');
+    expect(slowCaption()).toHaveClass('wait-after-slow');
+    expect(slowDelay(slowCaption())).toBe('10000ms');
+
+    /* "Try again" is a real button, hidden (so neither focusable nor in the accessibility tree) until the mark. */
     const retry = screen.getByRole('button', { name: 'Try again' });
-    /* The button appears beside the pill without taking focus. */
+    expect(retry).toHaveClass('wait-after-slow');
+    expect(slowDelay(retry)).toBe('10000ms');
     expect(document.activeElement).not.toBe(retry);
+    expect(vi.getTimerCount()).toBe(0);
     fireEvent.click(retry);
     expect(mockSyncNow).toHaveBeenCalledOnce();
 
     /* The download moves on: the slow words and Try again go with it. */
     publishSyncStatus(preparing);
+    expect(pill()).toBe(body);
     expect(pill()).toHaveTextContent('Preparing files…');
+    expect(pill()).not.toHaveTextContent('Still downloading files…');
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(slowCaption()).toBeUndefined();
+    expect(caption()).toHaveTextContent('Getting your files ready to open.');
+
+    /* A later download counts from its own start again, on a new element. */
+    advance(4000);
+    publishSyncStatus(downloadingWithNumbers);
+    expect(screen.getByRole('button', { name: 'Try again' })).not.toBe(retry);
+    expect(slowDelay(screen.getByRole('button', { name: 'Try again' }))).toBe('10000ms');
   });
 
   it('should not announce the pill or the caption itself: the open has one route announcement', () => {

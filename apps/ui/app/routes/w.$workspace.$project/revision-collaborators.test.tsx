@@ -1,5 +1,5 @@
 /**
- * People with access, in the Share panel (C4, Q5; charter W5, D27).
+ * Collaborators, in the Share panel (C4, Q5; charter W5, D27).
  *
  * The owner alone manages this surface, and there is no invitation email — so
  * the one-time link the API answers with *is* the product: if this panel does
@@ -160,9 +160,9 @@ describe('RevisionCollaborators', () => {
     answer([teammate, { ...teammate, email: 'viewer@example.test', role: 'read', status: 'pending' }]);
     renderPanel();
 
-    expect(screen.getByRole('heading', { name: 'People with access' })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Collaborators' })).toBeDefined();
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
-    const people = screen.getByRole('list', { name: 'People with access' });
+    const people = screen.getByRole('list', { name: 'Collaborators' });
     /* An accepted row needs no status; a pending one says what is still missing. */
     expect(people).not.toHaveTextContent('Accepted');
     expect(people).toHaveTextContent('viewer@example.test');
@@ -173,7 +173,7 @@ describe('RevisionCollaborators', () => {
   it('says plainly when nobody else has access', async () => {
     renderPanel();
 
-    expect(await screen.findByText('Nobody else has access to this project.')).toBeDefined();
+    expect(await screen.findByText('No collaborators yet.')).toBeDefined();
   });
 
   /* F4: an unread list is not an empty one. */
@@ -181,8 +181,8 @@ describe('RevisionCollaborators', () => {
     answer([], undefined, { status: 500 });
     renderPanel();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load the people with access. Try again.");
-    expect(screen.queryByText('Nobody else has access to this project.')).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load collaborators. Try again.");
+    expect(screen.queryByText('No collaborators yet.')).toBeNull();
     answer([teammate]);
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
@@ -227,7 +227,7 @@ describe('RevisionCollaborators', () => {
       code: 'PROJECT_INVITE_RATE_LIMITED',
       says: 'You’ve created too many invite links today. Try again tomorrow.',
     },
-    { status: 403, code: undefined, says: 'Only the project owner can invite people.' },
+    { status: 403, code: undefined, says: 'Only the project owner can add collaborators.' },
     { status: 404, code: undefined, says: 'This project isn’t in the cloud yet. Back it up to the cloud first.' },
     { status: 500, code: undefined, says: 'Couldn’t create the invite link. Try again.' },
   ])('says plainly why an invite failed ($status)', async ({ status, code, says }) => {
@@ -247,7 +247,7 @@ describe('RevisionCollaborators', () => {
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
     await userEvent.click(screen.getByRole('button', { name: 'Remove access for teammate@example.test' }));
 
-    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test?' });
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test from collaborators?' });
     expect(dialog).toHaveAccessibleDescription(
       'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.',
     );
@@ -266,7 +266,7 @@ describe('RevisionCollaborators', () => {
     /* F5: the button the click came from is disabled with its removed row, so focus would fall to
        `<body>` — the same defect review R15 fixed on the disconnect confirm. */
     await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'People with access' }));
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Collaborators' }));
     });
   });
 
@@ -276,7 +276,7 @@ describe('RevisionCollaborators', () => {
 
     const remove = await screen.findByRole('button', { name: 'Remove access for teammate@example.test' });
     await userEvent.click(remove);
-    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test?' });
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove teammate@example.test from collaborators?' });
     expect(dialog).toHaveAccessibleDescription(
       'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.',
     );
@@ -289,13 +289,26 @@ describe('RevisionCollaborators', () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'DELETE' }));
   });
 
+  it('creates the invite link from the email field with Enter', async () => {
+    const fetchMock = answer();
+    renderPanel();
+
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Email address' }), 'teammate@example.test{Enter}');
+
+    expect(await screen.findByRole('textbox', { name: 'Invite link for teammate@example.test' })).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4000/v1/projects/proj_1/collaborators',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('lists five people in flow and the rest on request', async () => {
     answer(
       Array.from({ length: 7 }, (_unused, index) => ({ ...teammate, email: `person${String(index)}@example.test` })),
     );
     renderPanel();
 
-    const people = await screen.findByRole('list', { name: 'People with access' });
+    const people = await screen.findByRole('list', { name: 'Collaborators' });
     expect(within(people).getAllByRole('listitem')).toHaveLength(5);
     await userEvent.click(screen.getByRole('button', { name: 'Show all 7' }));
     expect(within(people).getAllByRole('listitem')).toHaveLength(7);
@@ -306,7 +319,7 @@ describe('RevisionCollaborators', () => {
     answer([{ ...teammate, status: 'revoked' }]);
     renderPanel();
 
-    expect(await screen.findByRole('list', { name: 'People with access' })).toHaveTextContent('Access removed');
+    expect(await screen.findByRole('list', { name: 'Collaborators' })).toHaveTextContent('Access removed');
   });
 });
 
@@ -315,18 +328,22 @@ describe('ProjectPeopleWithAccess', () => {
     answer([teammate]);
     renderPanel(<ProjectPeopleWithAccess projectId='proj_1' />);
 
-    const section = screen.getByRole('region', { name: 'People with access' });
+    const section = screen.getByRole('region', { name: 'Collaborators' });
     expect(section.querySelector('[data-slot=share-people]')).not.toBeNull();
     /* In the pane's one scroll area: the section neither scrolls nor bounds its own height. */
     expect(section.outerHTML).not.toMatch(/overflow-y-auto|max-h-/u);
     expect(section).toHaveTextContent(
-      'People you add here open the project itself and see your latest changes. People with a link see only what you shared.',
+      'Collaborators open this project itself and see your latest changes. People with a link see only what you shared.',
     );
-    const field = await screen.findByRole('textbox', { name: 'Email address' });
+    /* One row, always open: the address, the role and the button, with no disclosure in front of them. */
+    const form = screen.getByRole('form', { name: 'Add a collaborator' });
+    const field = await within(form).findByRole('textbox', { name: 'Email address' });
+    expect(within(form).getByRole('button', { name: 'Create invite link' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /add collaborator|done/iu })).toBeNull();
     expect(field).toHaveAccessibleDescription('You’ll get an invite link to send them yourself. Tau doesn’t email it.');
     expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('Can edit');
     expect(await screen.findByText('teammate@example.test')).toBeDefined();
-    expect(screen.getByRole('list', { name: 'People with access' })).toHaveTextContent('teammate@example.test');
+    expect(screen.getByRole('list', { name: 'Collaborators' })).toHaveTextContent('teammate@example.test');
   });
 
   /* N4: every route behind it needs `owner` and a Tau Cloud project. */
@@ -342,7 +359,7 @@ describe('ProjectPeopleWithAccess', () => {
     viewer.remote = { kind, phase };
     renderPanel(<ProjectPeopleWithAccess projectId='proj_1' />);
 
-    expect(screen.queryByRole('region', { name: 'People with access' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Collaborators' })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

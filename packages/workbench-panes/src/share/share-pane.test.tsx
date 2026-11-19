@@ -74,8 +74,8 @@ describe('SharePane', () => {
   it('should draw the picker, the method and the host sections in one scroll area', () => {
     renderPane(
       { methods: [directMethod(), customMethod(() => <p>Hosted body</p>)] },
-      <SharePaneSection title='People with access' description='Who opens the project itself.'>
-        <p>Nobody else has access to this project.</p>
+      <SharePaneSection title='Collaborators' description='Who opens the project itself.'>
+        <p>No collaborators yet.</p>
       </SharePaneSection>,
     );
 
@@ -85,7 +85,7 @@ describe('SharePane', () => {
     expect(scroller).toHaveClass('overflow-y-auto');
     expect(scroller).toContainElement(screen.getByRole('button', { name: 'Share with Direct link' }));
     expect(scroller).toContainElement(screen.getByRole('button', { name: 'Create link' }));
-    const people = screen.getByRole('region', { name: 'People with access' });
+    const people = screen.getByRole('region', { name: 'Collaborators' });
     expect(scroller).toContainElement(people);
     expect(within(people).getByText('Who opens the project itself.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share with Direct link' })).toHaveAccessibleDescription(

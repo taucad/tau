@@ -221,7 +221,7 @@ export function PublicationAccessPanel({
 
           <div className='flex flex-col gap-2'>
             <div className='flex items-center justify-between gap-2'>
-              {/* Who can open this link; the project's own members are People with access, below it (C2). */}
+              {/* Who can open this link; the project's own members are Collaborators, below it (C2). */}
               <Heading level={4} variant='overline'>
                 {`Invited (${String(grants.length)})`}
               </Heading>

@@ -207,7 +207,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
 
   const entryPath = project?.assets.main?.entryPath ?? '';
 
-  /* C4: People with access lives in Share, as the last section of the pane's one scroll area, under every method. */
+  /* C4: Collaborators lives in Share, as the last section of the pane's one scroll area, under every method. */
   return (
     <ProjectSharePanel
       key={projectId}

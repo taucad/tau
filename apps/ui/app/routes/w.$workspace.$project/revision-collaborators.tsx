@@ -1,5 +1,5 @@
 /**
- * *People with access* — the owner's half of a collaboration (charter W5, D27).
+ * *Collaborators* — the owner's half of a collaboration (charter W5, D27).
  *
  * There is no invitation email. `POST /v1/projects/:id/collaborators` answers
  * the accept token exactly once and nothing stores it afterwards, so the link
@@ -60,7 +60,7 @@ const statusLabel = (status: CollaboratorEntry['status']): string | undefined =>
 /** Rows shown before "Show all"; the list renders in the pane's one scroll area, so it never scrolls on its own. */
 const collapsedRowCount = 5;
 
-const listFailureMessage = "Couldn't load the people with access. Try again.";
+const listFailureMessage = "Couldn't load collaborators. Try again.";
 
 /**
  * The refusal, in the words of the person who caused it.
@@ -80,7 +80,7 @@ const inviteFailureMessage = (status: number, code: string | undefined): string 
     return 'Enter a valid email address.';
   }
   if (status === 403) {
-    return 'Only the project owner can invite people.';
+    return 'Only the project owner can add collaborators.';
   }
   if (status === 404) {
     return 'This project isn’t in the cloud yet. Back it up to the cloud first.';
@@ -141,7 +141,7 @@ export type RevisionCollaboratorsProps = {
 };
 
 /**
- * Who else may work on this project, and how one more is invited: the Share pane's "People with access" section.
+ * Who else may work on this project, and how one more is invited: the Share pane's "Collaborators" section.
  *
  * Mounted in the Share panel for the owner alone, by {@link ProjectPeopleWithAccess}. A collaborator never sees it:
  * the routes behind it all need `owner`, and offering a control that is always
@@ -296,12 +296,22 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 
   return (
     <SharePaneSection
-      title='People with access'
-      description='People you add here open the project itself and see your latest changes. People with a link see only what you shared.'
+      title='Collaborators'
+      description='Collaborators open this project itself and see your latest changes. People with a link see only what you shared.'
       headingRef={headingRef}
     >
       <div data-slot='share-people' className='flex flex-col gap-4'>
-        <div className='flex flex-col gap-2'>
+        {/* One row, always open, and no Done: the one-time link it creates stays shown until the next invite replaces it. */}
+        <form
+          className='flex flex-col gap-2'
+          aria-label='Add a collaborator'
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (typed !== '' && !busy) {
+              invite.mutate();
+            }
+          }}
+        >
           <div className='flex flex-wrap items-end gap-2'>
             <div className='flex min-w-40 flex-1 flex-col gap-2'>
               <Label htmlFor='collaborator-email'>Email address</Label>
@@ -334,26 +344,15 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
                 <SelectItem value='read'>Can view</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <p id={helpId} className='text-xs text-muted-foreground'>
-            You’ll get an invite link to send them yourself. Tau doesn’t email it.
-          </p>
-          <div className='flex flex-wrap justify-end gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              disabled={typed === '' || busy}
-              aria-busy={invite.isPending}
-              onClick={() => {
-                invite.mutate();
-              }}
-            >
+            <Button type='submit' variant='outline' disabled={typed === '' || busy} aria-busy={invite.isPending}>
               {invite.isPending ? <Loader className='size-4' /> : undefined}
               <span>Create invite link</span>
             </Button>
           </div>
-        </div>
+          <p id={helpId} className='text-xs text-muted-foreground'>
+            You’ll get an invite link to send them yourself. Tau doesn’t email it.
+          </p>
+        </form>
 
         {/*
           The token, once (D27).
@@ -395,13 +394,13 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         )}
 
         {isLoading ? (
-          <div role='status' aria-busy='true' aria-label='Loading people with access' className='flex flex-col gap-2'>
+          <div role='status' aria-busy='true' aria-label='Loading collaborators' className='flex flex-col gap-2'>
             <Skeleton aria-hidden className='h-5 w-48' />
             <Skeleton aria-hidden className='h-5 w-40' />
           </div>
         ) : people.length > 0 ? (
           <>
-            <ul aria-label='People with access' className='flex list-none flex-col gap-3'>
+            <ul aria-label='Collaborators' className='flex list-none flex-col gap-3'>
               {shownPeople.map((person) => {
                 const personStatus = statusLabel(person.status);
                 return (
@@ -472,7 +471,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
             ) : null}
           </>
         ) : isError ? null : (
-          <p className='text-sm text-muted-foreground'>Nobody else has access to this project.</p>
+          <p className='text-sm text-muted-foreground'>No collaborators yet.</p>
         )}
       </div>
       <RemoveCollaboratorDialog
@@ -529,7 +528,7 @@ function RemoveCollaboratorDialog({
     >
       <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <AlertDialogHeader>
-          <AlertDialogTitle>{`Remove ${person?.email ?? ''}?`}</AlertDialogTitle>
+          <AlertDialogTitle>{`Remove ${person?.email ?? ''} from collaborators?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {person?.status === 'pending'
               ? 'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.'
@@ -607,7 +606,7 @@ function IssuedInviteLink({
 }
 
 /**
- * *People with access* in the Share panel (C4, Q5): the last section of the pane's one scroll area, under every
+ * *Collaborators* in the Share panel (C4, Q5): the last section of the pane's one scroll area, under every
  * sharing method, because it belongs to the project rather than to a link.
  *
  * The owner alone: every route behind the list needs `owner`, so a

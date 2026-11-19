@@ -103,7 +103,9 @@ describe('formal nightly check shards and cache', () => {
   it('should run a formal:nightly:check tier as four shards, each named and uploaded on its own', () => {
     const step = list?.steps?.find((candidate) => candidate.id === 'list');
     expect(step?.env?.['CHECK_SHARDS']).toBe(4);
-    expect(step?.run).toContain('if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi');
+    expect(step?.run).toContain(
+      'if [ "$target" = formal:nightly:check ] && [ -f tools/formal/run-seconds.json ]; then shards=$CHECK_SHARDS; fi',
+    );
     expect(step?.run).toContain('range(1; $shards + 1)');
     expect(step?.run).toContain(String.raw`shard: (if $shards > 1 then "\($index)/\($shards)" else "" end)`);
     expect(step?.run).toContain(String.raw`(if $shards > 1 then "-\($index)-of-\($shards)" else "" end)`);

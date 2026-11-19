@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -231,6 +231,77 @@ describe('release-gate.yml', () => {
       uncached: true,
     });
     expect(formal?.if).toBe(uncachedJobIf);
+  });
+
+  describe('formal matrix on an older candidate', () => {
+    /*
+     * The gate calls `main`'s formal-nightly.yml, but its tiers run the candidate's formal runner. Gate run
+     * 44222563188 gated 7abb090f, cut before #2560 gave the runner `--shard`, and all four agent-host check shards
+     * failed on `Unknown option '--shard'`. A checkout without the run seconds runs the check tier whole.
+     */
+    const workflow = load(read('.github/workflows/formal-nightly.yml')) as Workflow;
+    const step = workflow.jobs['projects']?.steps?.find((candidate) => candidate.id === 'list');
+    /** Runs the tier list in a checkout with or without the run seconds; returns the shards of each tier. */
+    const tiers = (withRunSeconds: boolean): { status: number | undefined; tiers: readonly string[] } => {
+      const directory = mkdtempSync(join(tmpdir(), 'tau-release-formal-'));
+      try {
+        const bin = join(directory, 'bin');
+        const checkout = join(directory, 'checkout');
+        mkdirSync(bin);
+        mkdirSync(join(checkout, 'tools/formal'), { recursive: true });
+        if (withRunSeconds) {
+          writeFileSync(join(checkout, 'tools/formal/run-seconds.json'), '{}');
+        }
+        // `nx show projects --with-target <target>`: agent-host has `formal:nightly` and `formal:nightly:check`.
+        writeFileSync(
+          join(bin, 'pnpm'),
+          '#!/usr/bin/env bash\ncase "$5" in formal:nightly|formal:nightly:check) echo \'["agent-host"]\' ;; *) echo \'[]\' ;; esac\n',
+          { mode: 0o755 },
+        );
+        writeFileSync(join(directory, 'output'), '');
+        const result = spawnSync('bash', ['-c', step?.run ?? 'exit 1'], {
+          cwd: checkout,
+          encoding: 'utf8',
+          env: Object.fromEntries([
+            ['PATH', `${bin}:${process.env['PATH'] ?? ''}`],
+            ['GITHUB_OUTPUT', join(directory, 'output')],
+            ['REQUESTED', ''],
+            ...Object.entries(step?.env ?? {}).filter(([name]) => name.endsWith('_SHARDS')),
+          ]),
+        });
+        const line = readFileSync(join(directory, 'output'), 'utf8').trim();
+        const listed = line
+          ? (JSON.parse(line.replace(/^tiers=/u, '')) as ReadonlyArray<{ target: string; shard: string }>)
+          : [];
+        return {
+          status: result.status ?? undefined,
+          tiers: listed.map((tier) => `${tier.target} ${tier.shard}`.trim()),
+        };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+
+    it("should deal the check tier into shards when the candidate's runner has the run seconds", () => {
+      expect(tiers(true)).toEqual({
+        status: 0,
+        tiers: [
+          'formal:nightly',
+          'formal:nightly:check 1/4',
+          'formal:nightly:check 2/4',
+          'formal:nightly:check 3/4',
+          'formal:nightly:check 4/4',
+        ],
+      });
+    });
+
+    it('should run the check tier whole, never drop it, when the candidate predates --shard', () => {
+      expect(tiers(false)).toEqual({ status: 0, tiers: ['formal:nightly', 'formal:nightly:check'] });
+    });
+
+    it('should keep the run seconds on main, so the queue and every new candidate stay sharded', () => {
+      expect(read('tools/formal/run-seconds.json').length).toBeGreaterThan(0);
+    });
   });
 
   it("should run every scope:api project's tests against ci.yml's service containers (C2a)", () => {

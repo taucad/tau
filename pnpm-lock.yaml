@@ -3867,6 +3867,9 @@ importers:
       '@taucad/project-workspace':
         specifier: workspace:*
         version: link:../project-workspace
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../../packages/plugins/slicer
@@ -3888,12 +3891,21 @@ importers:
       '@taucad/workbench-panes':
         specifier: workspace:*
         version: link:../../../packages/workbench-panes
+      deepmerge:
+        specifier: 'catalog:'
+        version: 4.3.1
       lucide-react:
         specifier: 'catalog:'
         version: 0.552.0(react@19.3.1)
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      type-fest:
+        specifier: 'catalog:'
+        version: 4.41.0
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4185,6 +4197,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
+      '@taucad/editor-ui':
+        specifier: workspace:*
+        version: link:../editor-ui
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events

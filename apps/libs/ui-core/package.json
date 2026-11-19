@@ -70,6 +70,7 @@
     "./lib/lsp-completion-snippet": "./src/lib/lsp-completion-snippet.ts",
     "./lib/memory-sampler": "./src/lib/memory-sampler.ts",
     "./lib/module-preload-cap": "./src/lib/module-preload-cap.ts",
+    "./lib/named-lock": "./src/lib/named-lock.ts",
     "./lib/network-failure": "./src/lib/network-failure.ts",
     "./lib/page-visibility": "./src/lib/page-visibility.ts",
     "./lib/pick-suggestions": "./src/lib/pick-suggestions.ts",

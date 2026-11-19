@@ -34,8 +34,12 @@ import type {
 import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
-import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type {
+  CreateProjectOptions,
+  ProjectLibraryChatSessions,
+} from '@taucad/files-ui/runtime/project-library-commands';
 import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -603,7 +607,7 @@ const { ProjectLibrary } = await import('#runtime/project-library.js');
 /* A2: the provider is over a library the runtime builds with its query client; each wrapper's client gets one here. */
 const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>();
 /* The chat store the A12 row reads: it notes each chat created empty. */
-const notingChatStore: Pick<ProjectLibraryChatSessions, 'noteCreatedEmpty'> = {
+const notingChatStore: Pick<ProjectLibraryChatSessions<ChatProjection>, 'noteCreatedEmpty'> = {
   noteCreatedEmpty: (chatId: string) => {
     appRuntime.notedEmpty.push(chatId);
   },
@@ -615,7 +619,7 @@ const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrar
       queryClient,
       rootFiles: () => rootFiles,
       chatSessions: () =>
-        appRuntime.current === undefined ? undefined : (notingChatStore as ProjectLibraryChatSessions),
+        appRuntime.current === undefined ? undefined : (notingChatStore as ProjectLibraryChatSessions<ChatProjection>),
     });
     library.start();
     libraries.set(queryClient, library);

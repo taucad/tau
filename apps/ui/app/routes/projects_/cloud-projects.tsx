@@ -31,7 +31,7 @@ import {
   useMaterializeOnSignInLocation,
 } from '#hooks/use-cloud-projects.js';
 import { isCloudProjectPending, getCloudDeletionState, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';

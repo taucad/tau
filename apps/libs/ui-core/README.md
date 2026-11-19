@@ -8,17 +8,17 @@ Cut from `apps/ui/app/{lib,utils,constants,types,services,workers}` in UI wave E
 
 One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` and the UI feature libraries cut from it.
 
-| Subpath               | Contents                                                                                                                                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./lib/<name>`        | `xstate.lib` (`fromSafeAsync`, `eventSchemas`, `MachineActors`), device id, memory and module-preload helpers, project-open timing, LSP completion, GeoSpec candidates, API request ids, guards |
-| `./utils/<name>`      | String, number, date, temporal, colour, crypto, binary, URL, backoff, file-reader, zip-download, search-parameter codecs, parameter config, auth plugins                                        |
-| `./constants/<name>`  | Cookie, cache, colour, editor, sidebar, search-parameter, health and workspace-copy constants; project names and prompt examples                                                                |
-| `./types/<name>`      | Editor and project-creation-location types                                                                                                                                                      |
-| `./services/<name>`   | Parameter-set service, filesystem source identity, headless-capture presentation                                                                                                                |
-| `./machines/<name>`   | `import-staging`, `import-linked`                                                                                                                                                               |
-| `./workers/<name>`    | Agent-host placement and evidence, system-skills overlay                                                                                                                                        |
-| `./filesystem/<name>` | `workspace-errors`                                                                                                                                                                              |
-| Test helpers          | `lib/xstate-test.utils`, `lib/project.fixture`, `lib/composed-view-client.fixture`, `lib/testing/worker-stub`, `workers/test/rooted-provider.fixture` (app suites only)                         |
+| Subpath               | Contents                                                                                                                                                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./lib/<name>`        | `xstate.lib` (`fromSafeAsync`, `eventSchemas`, `MachineActors`), device id, memory and module-preload helpers, project-open timing, LSP completion, GeoSpec candidates, API request ids, named cross-tab locks, guards |
+| `./utils/<name>`      | String, number, date, temporal, colour, crypto, binary, URL, backoff, file-reader, zip-download, search-parameter codecs, parameter config, auth plugins                                                               |
+| `./constants/<name>`  | Cookie, cache, colour, editor, sidebar, search-parameter, health and workspace-copy constants; project names and prompt examples                                                                                       |
+| `./types/<name>`      | Editor and project-creation-location types                                                                                                                                                                             |
+| `./services/<name>`   | Parameter-set service, filesystem source identity, headless-capture presentation                                                                                                                                       |
+| `./machines/<name>`   | `import-staging`, `import-linked`                                                                                                                                                                                      |
+| `./workers/<name>`    | Agent-host placement and evidence, system-skills overlay                                                                                                                                                               |
+| `./filesystem/<name>` | `workspace-errors`                                                                                                                                                                                                     |
+| Test helpers          | `lib/xstate-test.utils`, `lib/project.fixture`, `lib/composed-view-client.fixture`, `lib/testing/worker-stub`, `workers/test/rooted-provider.fixture` (app suites only)                                                |
 
 ## Tests
 

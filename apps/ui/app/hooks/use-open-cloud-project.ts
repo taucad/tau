@@ -15,14 +15,14 @@ import { projectLibraryUrl, projectUrl } from '@taucad/files-ui/utils/project-ur
 import { toast } from '@taucad/ui/components/sonner';
 import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import { getRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { selectRuntimeOpenAhead } from '#runtime/app-runtime.js';
 import type { AppRuntime } from '#runtime/app-runtime.js';
-import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
+import type { CreateProjectOptions } from '@taucad/files-ui/runtime/project-library-commands';
 
 /**
  * What this device creates for a Tau Cloud project before its first pull: the

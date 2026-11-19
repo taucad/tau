@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -111,6 +112,19 @@ describe('buildLayer', () => {
     );
   });
 
+  it('should hold a layer at the line, and refuse one a byte over it (I11: at most the line)', async () => {
+    const root = await scratch();
+    const source = await client(root);
+    const { byteLength } = await buildLayer({ client: source, out: join(root, 'measure') });
+
+    await expect(
+      buildLayer({ client: source, out: join(root, 'at'), maximumBytes: byteLength }),
+    ).resolves.toMatchObject({ byteLength });
+    await expect(buildLayer({ client: source, out: join(root, 'over'), maximumBytes: byteLength - 1 })).rejects.toThrow(
+      `The layer is ${String(byteLength)} bytes gzipped, over the ${String(byteLength - 1)}-byte line (X2).`,
+    );
+  });
+
   it('should refuse a client with no document, or with a link in it', async () => {
     const root = await scratch();
     await mkdir(join(root, 'empty'));
@@ -168,5 +182,47 @@ describe('pinLayer', () => {
     await expect(pinLayer({ layer, archive, write: stale })).rejects.toThrow(/its record says/u);
     await writeFile(layer, '{"schemaVersion":1}');
     await expect(pinLayer({ layer, archive, write: stale })).rejects.toThrow(/is not a serve UI layer record/u);
+  });
+});
+
+describe('serve-ui-layer.mts build', () => {
+  const script = fileURLToPath(new URL('serve-ui-layer.mts', import.meta.url));
+  const run = (
+    args: readonly string[],
+  ): { readonly status: number | undefined; readonly stdout: string; readonly stderr: string } => {
+    const result = spawnSync(process.execPath, ['--import', '@oxc-node/core/register', script, 'build', ...args], {
+      encoding: 'utf8',
+    });
+    return { status: result.status ?? undefined, stdout: result.stdout, stderr: result.stderr };
+  };
+
+  it('should print the layer size on a pass and on a refusal, the gate the build lane runs (X2)', async () => {
+    const root = await scratch();
+    const source = await client(root);
+
+    const pass = run(['--client', source, '--out', join(root, 'pass')]);
+    const record = JSON.parse(pass.stdout) as { readonly byteLength: number };
+    expect(pass.status).toBe(0);
+    expect(pass.stderr).toBe(
+      `The layer is ${String(record.byteLength)} bytes gzipped, within the 150000000-byte line (X2).\n`,
+    );
+
+    const fail = run(['--client', source, '--out', join(root, 'fail'), '--max-bytes', '10']);
+    expect(fail.status).toBe(1);
+    expect(fail.stdout).toBe('');
+    expect(fail.stderr).toContain(
+      `The layer is ${String(record.byteLength)} bytes gzipped, over the 10-byte line (X2).`,
+    );
+  });
+
+  it('should refuse a size line that is not a positive integer as usage', async () => {
+    const root = await scratch();
+    const source = await client(root);
+
+    for (const line of ['abc', '0', '-1', '1.5']) {
+      const result = run(['--client', source, '--out', join(root, 'out'), `--max-bytes=${line}`]);
+      expect(result.status, line).toBe(2);
+      expect(result.stderr, line).toMatch(/^Usage: serve-ui-layer\.mts build/u);
+    }
   });
 });

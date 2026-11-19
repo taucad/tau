@@ -256,7 +256,7 @@ describe('ci.yml affected-only lanes', () => {
     const lane = ci.jobs['affected-lane'];
     const targets = lane?.env?.['BUILD_TARGETS'] ?? '';
     expect(targets).toBe(
-      'build size check-desktop-payload check-critical-budget check-critical-budget-adaptive check-static-shells check-server-output check-route-module-patch check-cadmpeg-engine-absence',
+      'build size check-desktop-payload check-critical-budget check-critical-budget-adaptive check-static-shells check-server-output check-route-module-patch check-cadmpeg-engine-absence check-serve-ui-layer',
     );
     // Both build shards take their projects from one `nx affected` over these targets, and run them all.
     const pins = steps.find((step) => step.id === 'pins')?.run ?? '';
@@ -277,6 +277,8 @@ describe('ci.yml affected-only lanes', () => {
     expect(nxTargets(build)).toContainEqual({ target: 'check-route-module-patch', affected: true });
     // And the check that no client build holds a cadmpeg engine, recognised by its installed digest (cadmpeg D16, I1).
     expect(nxTargets(build)).toContainEqual({ target: 'check-cadmpeg-engine-absence', affected: true });
+    // And the serve UI layer's size line, per pull request as well as at release (X2, cadmpeg D16, I11).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-serve-ui-layer', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -293,6 +295,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     expect(ui.targets['check-route-module-patch']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     expect(ui.targets['check-cadmpeg-engine-absence']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-serve-ui-layer']?.dependsOn).toEqual(['build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
     };

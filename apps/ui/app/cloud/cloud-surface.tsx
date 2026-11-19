@@ -44,7 +44,9 @@ export type CloudSurfaceProps<Module> = Readonly<{
   render: (module: Module) => ReactNode;
 }>;
 
-const idleState = () => ({ status: 'idle' }) as const;
+/* One object, so `useSyncExternalStore` sees a stable snapshot when a surface has no loader yet. */
+const idle = { status: 'idle' } as const;
+const idleState = (): typeof idle => idle;
 const noSubscription = (): (() => void) => () => undefined;
 
 /**

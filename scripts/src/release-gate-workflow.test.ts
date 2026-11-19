@@ -161,8 +161,8 @@ describe('release-gate.yml', () => {
       const callee = load(calleeText) as Workflow;
       expect(callee.on['workflow_call']?.inputs?.['uncached']?.type, name).toBe('boolean');
     }
-    // `formal-nightly.yml` sets the skip itself and drops the server and token under `uncached`; its schedule,
-    // a dispatch and the merge queue's call keep the remote cache.
+    // `formal-nightly.yml` sets the skip itself and drops the server and token under `uncached`; a dispatch
+    // and the merge queue's call keep the remote cache.
     const formal = load(read('.github/workflows/formal-nightly.yml')) as Workflow;
     expect(formal.on['workflow_call']?.inputs?.['uncached']).toMatchObject({
       type: 'boolean',

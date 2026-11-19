@@ -183,7 +183,7 @@ jobs:
           # lane runs for every selected project when the diff touches one of them, and not at all otherwise.
           # "closure": the lane runs for the selected projects whose own dependency closure holds a project the
           # diff touches, walked without entering QUEUE_HUBS, so a hub change alone does not select them. "never": the
-          # lane never runs in the merge queue. The formal nightly tiers (the nightly, then the release gate RG-1) run
+          # lane never runs in the merge queue. The release gate (RG-1, which replaced the formal nightly's schedule) runs
           # every `formal:nightly` project, the release gate every viewer-parity fixture, and the candidate gate the full
           # shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule but "never".
           LANE_SELECTORS: >-

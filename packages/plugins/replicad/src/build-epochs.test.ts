@@ -124,7 +124,7 @@ describe('handle epochs', () => {
     epochs.release(epochs.adopt({ shapes: [{ shape: memo }] }));
     expect(epochs.wasReleased(memo)).toBe(false);
 
-    // A collector delivery still settles what other handles parked, but holds nothing itself.
+    // A collector delivery still settles what other handles parked, and never parks what it delivers.
     const fresh = replicad.makeCylinder(1, 2);
     const collected = epochs.adopt({ shapes: [{ shape: fresh }] }, { collector: true });
     expect(isDeleted(memo)).toBe(true);
@@ -195,5 +195,27 @@ describe('handle epochs', () => {
     expect(isDeleted(late)).toBe(false);
     expect(epochs.stats()).toMatchObject({ deleted: 2 });
     late.delete();
+  });
+
+  it('spares, when a group is retired, a value a live collector handle of any kind still delivers', () => {
+    const epochs = createHandleEpochs(library);
+    const group = epochs.collectorGroup();
+    const other = epochs.collectorGroup();
+    const shared = replicad.makeCylinder(1, 2);
+    const own = replicad.makeCylinder(2, 2);
+    const grouped = epochs.adopt({ shapes: [{ shape: shared }, { shape: own }] }, { collector: group });
+    // A worker-wide collector handle and another group's handle deliver the same value.
+    const workerWide = epochs.adopt({ shapes: [{ shape: shared }] }, { collector: true });
+    const otherGroup = epochs.adopt({ shapes: [{ shape: shared }] }, { collector: other });
+
+    group.retire();
+    epochs.release(grouped);
+    expect([shared, own].map((shape) => isDeleted(shape))).toStrictEqual([false, true]);
+
+    epochs.release(workerWide);
+    epochs.release(otherGroup);
+    expect(isDeleted(shared)).toBe(false);
+    expect(epochs.stats()).toMatchObject({ liveValues: 0, parked: 0, deleted: 1 });
+    shared.delete();
   });
 });

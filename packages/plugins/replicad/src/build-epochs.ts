@@ -65,7 +65,8 @@ export type HandleEpochStats = {
 /**
  * The values one module instance delivered under collector release. The instance stays reachable from the JavaScript
  * module map after its code changes, so a memo in it would keep its shapes for the worker's life; retiring the group
- * deletes the ones still alive once no handle that delivered them is live. @internal
+ * deletes the ones still alive once none of its handles is live, sparing any value another live handle (deterministic
+ * or collector, of any group) still delivers. @internal
  */
 export type CollectorGroup = {
   /** The instance will not run again: delete what it delivered once its handles are released. */
@@ -181,7 +182,9 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
   /** Values the epochs deleted. */
   const released = new WeakSet();
   const live = new Set<EpochHandle>();
-  /** Live handles delivering each value. */
+  /** Delivered collector handles not yet released: they hold their values but never park them. */
+  const collectorLive = new Set<EpochHandle>();
+  /** Live handles, deterministic and collector, delivering each value. */
   const holders = new Map<WeakKey, number>();
   /** Released values the next delivered handle settles. */
   const parked = new Set<WeakKey>();
@@ -272,6 +275,12 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
       if (collector !== undefined && collector !== false) {
         const group = collector === true ? undefined : (collector as Group);
         collected += 1;
+        if (!collectorLive.has(handle) && !live.has(handle)) {
+          collectorLive.add(handle);
+          for (const value of valuesOf(handle)) {
+            holders.set(value, (holders.get(value) ?? 0) + 1);
+          }
+        }
         if (group && !group.retired) {
           group.handles.add(handle);
           groupOf.set(handle, group);
@@ -300,6 +309,16 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
     },
     release(handle) {
       if (!live.delete(handle)) {
+        if (collectorLive.delete(handle)) {
+          for (const value of valuesOf(handle)) {
+            const remaining = (holders.get(value) ?? 1) - 1;
+            if (remaining > 0) {
+              holders.set(value, remaining);
+            } else {
+              holders.delete(value);
+            }
+          }
+        }
         const group = groupOf.get(handle);
         if (group) {
           groupOf.delete(handle);

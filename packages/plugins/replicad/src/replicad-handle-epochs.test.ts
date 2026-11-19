@@ -12,6 +12,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
 import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime/client';
+import type { ViewUpdateOutcome } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -342,6 +343,153 @@ describe('replicad release fallback', () => {
       } finally {
         view.close();
         document.close();
+        await client.shutdown();
+      }
+    },
+    renderTimeout,
+  );
+
+  /** A client over an in-memory `main.ts`; documents edit it by staging a new source. */
+  const memoryClient = (source: string, options: Options) =>
+    createRuntimeClient({
+      transport: inProcessTransport({
+        runtime: defineRuntime({
+          kernels: [replicadKernel({ wasm: 'single', ...options })],
+          bundlers: [esbuildBundler()],
+        }),
+        fileSystem: fromMemoryFs({ 'main.ts': source }),
+        compute: { mode: 'memory' },
+      }),
+    });
+  const rendered = (outcome: ViewUpdateOutcome<'model'>): string => {
+    if (outcome.superseded) {
+      return 'superseded';
+    }
+    return outcome.rendering.success ? 'ok' : `fail:${outcome.rendering.issues[0]?.message}`;
+  };
+
+  it.each([
+    ['off', { computeReuse: false }],
+    ['on', {}],
+  ] as const)(
+    'should never delete, when a group retires, a shape a still-open document delivers (reuse %s)',
+    async (_arm, options) => {
+      const memoVersion = (version: number): string => `
+        import { makeCylinder } from 'replicad';
+        const version = ${version};
+        const cache = new Map();
+        export const defaultParams = { key: 1, tag: 0 };
+        export default function main(p = defaultParams) {
+          let shape = cache.get(p.key);
+          if (!shape) {
+            shape = makeCylinder(p.key + version / 1000, 8);
+            cache.set(p.key, shape);
+          }
+          return shape;
+        }`;
+      const client = memoryClient(memoVersion(0), options);
+      const results: string[] = [];
+      try {
+        const old = client.open({ source: { path: 'main.ts' }, parameters: { key: 1, tag: 0 }, watch: false });
+        const oldView = old.view('model');
+        for (const [index, key] of [1, 2, 3, 1, 2, 3, 1].entries()) {
+          if (index > 0) {
+            await old.update({ parameters: { key, tag: index } });
+          }
+          results.push(rendered(await oldView.rendering()));
+        }
+        const ledger = ledgerOf();
+        // Edit: a second document builds the new code, which retires the old instance's group.
+        const edited = client.open({ source: { path: 'main.ts' }, parameters: { key: 1, tag: 0 }, watch: false });
+        const editedView = edited.view('model');
+        for (const [index, key] of [1, 2, 3].entries()) {
+          await edited.update({
+            parameters: { key, tag: index + 10 },
+            ...(index === 0 ? { stage: { 'main.ts': memoVersion(1) } } : {}),
+          });
+          results.push(rendered(await editedView.rendering()));
+        }
+        // The old document still holds its handle: exports and a second view work.
+        for (const format of ['step', 'glb'] as const) {
+          const exported = await old.export(format);
+          results.push(exported.success ? 'ok' : `fail:${exported.issues[0]?.message}`);
+        }
+        const second = old.view('model');
+        results.push(rendered(await second.rendering()));
+        second.close();
+        oldView.close();
+        old.close();
+        editedView.close();
+        edited.close();
+        expect(results).toStrictEqual(results.map(() => 'ok'));
+        expect(ledger.stats().doubleDeletes).toBe(0);
+      } finally {
+        await client.shutdown();
+      }
+    },
+    renderTimeout,
+  );
+
+  /**
+   * Version A memoizes on `globalThis` too and falls back; the edit to B, which returns A's shapes from `globalThis`,
+   * escalates to the worker. When the old document closes, A's group retires, but a worker-wide collector handle of B
+   * still delivers one of its shapes: that shape must survive for B's export and next view.
+   */
+  it(
+    'should spare, when a group retires, a shape a worker-wide collector handle still delivers',
+    async () => {
+      const versionA = `
+        import { makeCylinder } from 'replicad';
+        const cache = new Map();
+        export const defaultParams = { key: 1, tag: 0 };
+        export default function main(p = defaultParams) {
+          let shape = cache.get(p.key);
+          if (!shape) {
+            shape = makeCylinder(p.key, 8);
+            cache.set(p.key, shape);
+          }
+          (globalThis.__replicadFallbackShare ??= new Map()).set(p.key, shape);
+          return shape;
+        }`;
+      const versionB = `
+        import { makeCylinder } from 'replicad';
+        export const defaultParams = { key: 1, tag: 0 };
+        export default function main(p = defaultParams) {
+          return globalThis.__replicadFallbackShare?.get(p.key) ?? makeCylinder(p.key + 0.5, 8);
+        }`;
+      const client = memoryClient(versionA, { computeReuse: false });
+      const log: string[] = [];
+      try {
+        const old = client.open({ source: { path: 'main.ts' }, parameters: { key: 1, tag: 0 }, watch: false });
+        const oldView = old.view('model');
+        for (const [index, key] of [1, 2, 3, 1].entries()) {
+          if (index > 0) {
+            await old.update({ parameters: { key, tag: index } });
+          }
+          log.push(`A${key}:${rendered(await oldView.rendering())}`);
+        }
+        const edited = client.open({ source: { path: 'main.ts' }, parameters: { key: 2, tag: 0 }, watch: false });
+        const editedView = edited.view('model');
+        await edited.update({ parameters: { key: 2, tag: 0 }, stage: { 'main.ts': versionB } });
+        // Key 2's shape was released with A's second build: B's first build fails and escalates to the worker.
+        log.push(`B2:${rendered(await editedView.rendering())}`);
+        await edited.update({ parameters: { key: 1, tag: 1 } });
+        log.push(`B1:${rendered(await editedView.rendering())}`);
+        // The old document goes: its handle, the group's last, is released and the group settles.
+        oldView.close();
+        old.close();
+        const other = client.open({ source: { path: 'main.ts' }, parameters: { key: 5, tag: 9 }, watch: false });
+        await other.view('model').rendering();
+        other.close();
+        const exported = await edited.export('step');
+        log.push(`B1-export:${exported.success ? 'ok' : `fail:${exported.issues[0]?.message}`}`);
+        const again = edited.view('model');
+        log.push(`B1-view:${rendered(await again.rendering())}`);
+        again.close();
+        editedView.close();
+        edited.close();
+        expect(log.filter((entry) => entry.startsWith('B1'))).toStrictEqual(['B1:ok', 'B1-export:ok', 'B1-view:ok']);
+      } finally {
         await client.shutdown();
       }
     },

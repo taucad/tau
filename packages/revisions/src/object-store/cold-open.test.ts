@@ -10,10 +10,13 @@ import { postService } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
+import { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
 import { revisionId } from '#algorithms/index.js';
+import { digestHex } from '#object-hash.js';
+import { frameObject } from '#git-objects.js';
 import { coldOpenFromCatalogue, importReachableFromCatalogue, parseHeadListing } from '#object-store/cold-open.js';
 import type { CatalogueFamily } from '#object-store/cold-open.js';
 import { createObjectStore, gitFilesOf, PackCeilingError } from '#object-store/object-store.js';
@@ -409,6 +412,156 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     /* Coalesced: fewer Range requests than objects read. */
     expect(served.ranges.length).toBeLessThan(opened!.report.imported);
     expect(opened!.report.ranges.rangeRequests).toBe(served.ranges.length);
+  });
+
+  it('looks up no loose object by its own path: a fan-out directory is listed once, and one not there is not read', async () => {
+    // An object-by-object `exists` was the largest local cost of a cold open after its last pack byte (SP6-import):
+    // three lookups per object, each a path resolution in the origin's private file system.
+    const compute = countingCompute();
+    const provider = new MemoryProvider();
+    await provider.mkdir('.git/objects/pack', { recursive: true });
+    const files = gitFilesOf(provider, '.git');
+    const asked: string[] = [];
+    const listed: string[] = [];
+    const store = createObjectStore({
+      files: {
+        ...files,
+        exists: async (path) => {
+          asked.push(path);
+          return files.exists(path);
+        },
+        readdir: async (path) => {
+          listed.push(path);
+          return files.readdir(path);
+        },
+      },
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-no-lookups',
+    });
+    /* A loose object already held is still found, so it is not imported again. */
+    const scad = hosted.git('rev-parse', `${hosted.main}:main.scad`);
+    const [held] = await store.writeLoose([
+      { type: 'blob', data: new TextEncoder().encode(`${hosted.git('cat-file', 'blob', scad)}\n`) },
+    ]);
+    expect(held).toBe(scad);
+    asked.length = 0;
+    listed.length = 0;
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    expect(asked.filter((path) => /\/objects\/[\da-f]{2}\/[\da-f]{38}$/u.test(path))).toEqual([]);
+    /* No fan-out directory but the one that is there is listed, whatever the number of objects. */
+    const fanouts = listed.filter((path) => /\/objects\/[\da-f]{2}$/u.test(path));
+    expect(fanouts.filter((path) => path !== `.git/objects/${scad.slice(0, 2)}`)).toEqual([]);
+    const packFiles = await provider.readdir('.git/objects/pack');
+    const indexes = packFiles.filter((name) => name.endsWith('.idx'));
+    expect(indexes.length).toBeGreaterThan(0);
+    const written = await Promise.all(
+      indexes.map(async (name) => readPackIndex(new Uint8Array(await provider.readFile(`.git/objects/pack/${name}`)))),
+    );
+    expect(written.some((index) => index.offsetOf(scad) !== undefined)).toBe(false);
+    expect(written.some((index) => index.offsetOf(hosted.main) !== undefined)).toBe(true);
+  });
+
+  it('keeps a tree, commit or tag it read whole as the bytes it read, deflating only what it resolved from a delta', async () => {
+    // The trees and tips waited in the stage by their bodies alone and were deflated again when kept: the last step
+    // of the open, after every blob (SP6-import).
+    const compute = countingCompute();
+    let deflated = 0;
+    const counting: ComputeWorker = {
+      ...compute,
+      deflate: async (raw) => {
+        deflated += 1;
+        return compute.deflate(raw);
+      },
+    };
+    const store = await emptyStore(counting, 'kept-as-read');
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute: counting });
+    expect(opened).toBeDefined();
+    const packDirectory = join(hosted.directory, '.git', 'objects', 'pack');
+    const packFiles = await readdir(packDirectory);
+    const indexFile = packFiles.find((name) => name.endsWith('.idx'))!;
+    /* `verify-pack -v` gives a delta's line a depth and a base: seven fields. */
+    const deltas = new Set(
+      lines(hosted.git('verify-pack', '-v', join(packDirectory, indexFile)))
+        .map((line) => line.split(/\s+/u))
+        .filter((fields) => fields.length === 7)
+        .map((fields) => fields[0]!),
+    );
+    const closure = new Set([
+      hosted.main,
+      hosted.tag,
+      hosted.tagged,
+      ...lines(hosted.git('rev-list', '--objects', '--no-walk', hosted.main, hosted.tagged)).map(
+        (line) => line.split(' ')[0]!,
+      ),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.tagged)).map((line) => line.split(/\s+/u)[2]!),
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      hosted.git('rev-parse', `${hosted.tagged}^{tree}`),
+    ]);
+    expect(deflated).toBe([...closure].filter((oid) => deltas.has(oid)).length);
+  });
+
+  it('imports and repacks through a compute that has no inflateObject, checking each object by its own hash', async () => {
+    // `inflateObject` is optional on the exported contract: a compute built before it inflates and hashes in two
+    // calls, and a repack never takes its absence for a corrupt pack (SP6-import review).
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const compute: ComputeWorker = older;
+    const provider = new MemoryProvider();
+    await provider.mkdir('.git/objects/pack', { recursive: true });
+    const store = createObjectStore({
+      files: gitFilesOf(provider, '.git'),
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-older',
+    });
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    expect(opened!.report.packsWritten).toBeGreaterThan(0);
+    expect(await store.repack(true)).toBe(true);
+    const closure = [
+      hosted.main,
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+    ];
+    const reopened = createObjectStore({
+      files: gitFilesOf(provider, '.git'),
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-older-reopened',
+    });
+    for (const oid of closure) {
+      // oxlint-disable-next-line no-await-in-loop -- one object at a time.
+      const object = await reopened.read(oid);
+      expect(object).toBeDefined();
+      expect(digestHex('sha1', frameObject(object!.type, object!.data))).toBe(oid);
+    }
+  });
+
+  it('imports and verifies through a supervised compute whose worker is dead and whose fallback lacks inflateObject', async () => {
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const compute = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('Worker scripts are blocked here.');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const store = await emptyStore(compute, 'supervised-older');
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    const closure = [
+      hosted.main,
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+    ];
+    for (const oid of closure) {
+      // oxlint-disable-next-line no-await-in-loop -- one object at a time.
+      const object = await store.read(oid);
+      expect(object).toBeDefined();
+      expect(digestHex('sha1', frameObject(object!.type, object!.data))).toBe(oid);
+    }
   });
 
   it('asks every pack Range past the HTTP cache, so parallel ranges of one pack are not serialised', async () => {

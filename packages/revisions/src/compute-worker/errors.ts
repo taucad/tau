@@ -13,6 +13,7 @@
  */
 export type ComputeMethod =
   | 'inflate'
+  | 'inflateObject'
   | 'deflate'
   | 'sha1'
   | 'sha256'

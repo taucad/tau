@@ -106,7 +106,8 @@ it.each(
     ) : site === 'Who can open the link' ? (
       <PublicationAccessPanel
         apiBaseUrl='http://localhost:4000'
-        publicationId='fixture'
+        projectId='fixture'
+        shareUrl='https://tau.example/s/tau~shr_fixture'
         visibility={narrow ? 'public' : 'private'}
         grants={[]}
         onVisibilityChange={vi.fn()}

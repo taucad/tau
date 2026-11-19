@@ -8,7 +8,11 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { extractFile, uncache } from '@electron/asar';
 import { z } from 'zod';
-import { createWindowsPowerShellEnvironment, verifyWindowsSignature } from '#main/windows-signature.js';
+import {
+  createWindowsPowerShellEnvironment,
+  verifyWindowsSignature,
+  windowsProductIdentity,
+} from '#main/windows-signature.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native qualification scripts share one driver contract. */
@@ -350,8 +354,7 @@ export const createWindowsQualificationDriver = (
     await verifyWindowsSignature({
       path: download.path,
       publisher: options.publisher!,
-      expectedVersion: manifest.version,
-      expectedProductName: 'Tau Staging',
+      ...windowsProductIdentity(manifest, 'installer'),
     });
     const zoneIdentifier = z
       .string()
@@ -448,13 +451,15 @@ $user=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninst
   const lifecycle = createQualificationReinstallGuard();
   let installed = false;
   let active: QualificationCandidate | undefined;
-  const verifyInstalledSignature = async (path: string, version: string, name: string): Promise<void> => {
+  const verifyInstalledSignature = async (
+    path: string,
+    release: Parameters<typeof windowsProductIdentity>[0],
+  ): Promise<void> => {
     if (options.mode === 'release') {
       await verifyWindowsSignature({
         path,
         publisher: options.publisher!,
-        expectedVersion: version,
-        expectedProductName: name,
+        ...windowsProductIdentity(release, 'executable'),
       });
     }
   };
@@ -495,7 +500,7 @@ $user=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninst
       throw new Error('Installed Windows trust/identity differs');
     }
     const name = manifest.channel === 'staging' ? 'Tau Staging' : 'Tau';
-    await verifyInstalledSignature(executablePath, manifest.version, name);
+    await verifyInstalledSignature(executablePath, manifest);
     const scheme = manifest.channel === 'staging' ? 'tau-staging' : 'tau';
     const registration = z
       .object({
@@ -584,8 +589,7 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await verifyWindowsSignature({
           path,
           publisher: options.publisher!,
-          expectedVersion: manifest.version,
-          expectedProductName: manifest.channel === 'staging' ? 'Tau Staging' : 'Tau',
+          ...windowsProductIdentity(manifest, 'installer'),
         });
       }
       if (options.cleanHost) {
@@ -612,8 +616,7 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await verifyWindowsSignature({
           path,
           publisher: options.publisher!,
-          expectedVersion: manifest.version,
-          expectedProductName: manifest.channel === 'staging' ? 'Tau Staging' : 'Tau',
+          ...windowsProductIdentity(manifest, 'installer'),
         });
       }
       if (options.cleanHost) {

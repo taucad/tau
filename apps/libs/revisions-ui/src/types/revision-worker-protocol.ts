@@ -118,8 +118,8 @@ export type WorkerRevisionCommand =
    *
    * Named `…Publish` on the same flat namespace: `confirm` and `cancel` already
    * belong to restore. `publishProject` opens the dialog on the project's own
-   * names; `confirmPublish` carries the whole draft, because a publication's
-   * visibility, title and recipients are decided in one gesture.
+   * names; `confirmPublish` carries the whole draft (the version's name, or an
+   * auto-named one, and who can open the project's cloud link) in one gesture.
    */
   | Readonly<{
       command: 'publishProject';

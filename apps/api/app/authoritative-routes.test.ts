@@ -77,12 +77,11 @@ const cachedReadAllowlist: Readonly<Record<string, string>> = {
   '../libs/api-projects/src/projects/project-preview.controller.ts#GET :projectId/preview':
     'Preview bytes streamed through the API; no signed link',
   '../libs/api-projects/src/projects/projects.controller.ts#GET ': 'Project list read',
-  '../libs/api-projects/src/publications/project-share.controller.ts#GET :id/share': 'Share settings read',
-  '../libs/api-projects/src/publications/publications.controller.ts#GET :id':
-    'Publication read; file URLs are unsigned API proxy paths',
+  '../libs/api-projects/src/publications/project-share.controller.ts#GET :id/share': 'Cloud link settings read',
+  '../libs/api-projects/src/publications/project-share.controller.ts#GET :shareId':
+    'Cloud link read; file URLs are unsigned API proxy paths',
   '../libs/api-projects/src/publications/publications.controller.ts#GET :id/files':
     'Publication files streamed through the API; no signed link',
-  '../libs/api-projects/src/publications/publications.controller.ts#GET :id/access': 'Publication access read',
 };
 
 const signingModules = new Set([

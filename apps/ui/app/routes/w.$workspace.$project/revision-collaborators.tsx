@@ -1,10 +1,12 @@
 /**
  * *Collaborators* — the owner's half of a collaboration (charter W5, D27).
  *
- * There is no invitation email. `POST /v1/projects/:id/collaborators` answers
- * the accept token exactly once and nothing stores it afterwards, so the link
- * this panel renders **is** the invitation: if an owner closes the region
- * without copying it, the only way back is to invite the address again.
+ * `POST /v1/projects/:id/collaborators` emails the invitation and answers the
+ * accept token exactly once, with `emailDelivery` saying whether the email went
+ * out. Nothing stores the token afterwards, so the link this panel renders is
+ * the only copy the owner has: when the email could not be sent, it is the
+ * invitation, and the only way back after closing the region is to invite the
+ * address again.
  *
  * It renders in the Share panel (C4, Q5): sharing is not history, so the
  * History pane keeps one line, "Shared with 2 people", read from the same
@@ -14,7 +16,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserMinus } from 'lucide-react';
+import { TriangleAlert, UserMinus } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -39,6 +41,7 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
+import type { CollaboratorInviteEmailDelivery } from '@taucad/types/constants';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
 type CollaboratorEntry = Readonly<{
@@ -49,7 +52,14 @@ type CollaboratorEntry = Readonly<{
 }>;
 
 /** What `POST …/collaborators` answers once, and only once. */
-type IssuedInvitation = Readonly<{ email: string; role: 'read' | 'write'; token: string; expiresAt: string }>;
+type IssuedInvitation = Readonly<{
+  email: string;
+  role: 'read' | 'write';
+  token: string;
+  expiresAt: string;
+  /** Whether the invitation email went out; why it did not is not the owner's to read. */
+  emailDelivery?: CollaboratorInviteEmailDelivery;
+}>;
 
 const roleLabel = (role: 'read' | 'write'): string => (role === 'write' ? 'Can edit' : 'Can view');
 
@@ -72,9 +82,9 @@ const listFailureMessage = "Couldn't load collaborators. Try again.";
  * @param code - The error code in its body, when it carried one.
  * @returns One sentence naming what happened and what to do next.
  */
-const inviteFailureMessage = (status: number, code: string | undefined): string => {
+const inviteFailureMessage = (status: number, code: string | undefined, email: string): string => {
   if (status === 429 || code === 'PROJECT_INVITE_RATE_LIMITED') {
-    return 'You’ve created too many invite links today. Try again tomorrow.';
+    return 'You’ve invited too many people today. Try again tomorrow.';
   }
   if (status === 400) {
     return 'Enter a valid email address.';
@@ -85,7 +95,7 @@ const inviteFailureMessage = (status: number, code: string | undefined): string 
   if (status === 404) {
     return 'This project isn’t in the cloud yet. Back it up to the cloud first.';
   }
-  return 'Couldn’t create the invite link. Try again.';
+  return `Couldn’t invite ${email}. Try again.`;
 };
 
 const collaboratorsEndpoint = (projectId: string): string =>
@@ -179,17 +189,22 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 
   const invite = useMutation({
     async mutationFn(): Promise<IssuedInvitation> {
+      const address = email.trim().toLowerCase();
       const response = await fetch(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), role }),
+        body: JSON.stringify({ email: address, role }),
       });
       if (!response.ok) {
         const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown }>;
         throw recordApiRequestId(
           new Error(
-            inviteFailureMessage(response.status, typeof answered.code === 'string' ? answered.code : undefined),
+            inviteFailureMessage(
+              response.status,
+              typeof answered.code === 'string' ? answered.code : undefined,
+              address,
+            ),
           ),
           response,
         );
@@ -346,11 +361,11 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
             </Select>
             <Button type='submit' variant='outline' disabled={typed === '' || busy} aria-busy={invite.isPending}>
               {invite.isPending ? <Loader className='size-4' /> : undefined}
-              <span>Create invite link</span>
+              <span>Invite</span>
             </Button>
           </div>
           <p id={helpId} className='text-xs text-muted-foreground'>
-            You’ll get an invite link to send them yourself. Tau doesn’t email it.
+            They’ll need an account with this email address to accept.
           </p>
         </form>
 
@@ -365,6 +380,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         {issued === undefined || invitationUrl === undefined ? undefined : (
           <IssuedInviteLink
             email={issued.email}
+            emailDelivery={issued.emailDelivery}
             url={invitationUrl}
             worksUntil={expiryCopy(issued.expiresAt)}
             linkRef={linkRef}
@@ -498,7 +514,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 }
 
 /**
- * Asks before a person loses access (UX Rule 4): a removed collaborator can only come back through a new invite link,
+ * Asks before a person loses access (UX Rule 4): a removed collaborator can only come back through a new invite,
  * so the removal is confirmed with their address rather than undone.
  *
  * @param props - The person waiting to be removed, whether the removal is running, and what each answer does.
@@ -531,8 +547,8 @@ function RemoveCollaboratorDialog({
           <AlertDialogTitle>{`Remove ${person?.email ?? ''} from collaborators?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {person?.status === 'pending'
-              ? 'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.'
-              : 'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.'}
+              ? 'Their invite link will stop working, so they won’t get access to this project. To give them access later, invite them again.'
+              : 'They’ll lose access to this project and can no longer open it. To give access back, invite them again.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -558,28 +574,44 @@ function RemoveCollaboratorDialog({
 }
 
 /**
- * The token, once (D27).
+ * The token, once (D27), and whether it was emailed.
  *
  * A read-only field rather than prose, because a person who cannot use the clipboard still has to be able to select
  * the whole link — and because the field carries the address it belongs to as its own label, so two invitations issued
- * in a row can never be confused for one another.
+ * in a row can never be confused for one another. When the email went out the link is a spare copy; when it did not,
+ * it is the invitation, and the owner is told to send it. Why it was not sent is not said.
  *
- * @param props - Who the link is for, the link, the sentence saying until when it works, and the field's ref.
- * @returns The announced block holding the link, its copy button and what to do with it.
+ * @param props - Who the link is for, what happened to its email, the link, until when it works, and the field's ref.
+ * @returns The announced block holding the outcome, the link, its copy button and what to do with it.
  */
 function IssuedInviteLink({
   email,
+  emailDelivery,
   url,
   worksUntil,
   linkRef,
 }: {
   readonly email: string;
+  /** Absent reads as not sent: the block never claims an email it was not told about. */
+  readonly emailDelivery: CollaboratorInviteEmailDelivery | undefined;
   readonly url: string;
   readonly worksUntil: string | undefined;
   readonly linkRef: React.Ref<HTMLInputElement>;
 }): React.JSX.Element {
+  const isEmailed = emailDelivery?.status === 'sent';
   return (
     <div role='status' aria-label='Invite link created' className='ph-no-capture flex flex-col gap-2'>
+      {isEmailed ? (
+        <p className='text-sm'>{`Invited ${email}. We emailed them.`}</p>
+      ) : (
+        /* The block is the live region, so the caveat is a plain row rather than a second one inside it. */
+        <p className='flex items-start gap-2 text-sm'>
+          <span className='flex h-lh shrink-0 items-center'>
+            <TriangleAlert aria-hidden className='size-4 text-warning' />
+          </span>
+          <span>{`We couldn’t email ${email}. Copy the invite link and send it yourself.`}</span>
+        </p>
+      )}
       <Label htmlFor='collaborator-invitation-link'>{`Invite link for ${email}`}</Label>
       <div className='flex items-center gap-2'>
         <Input
@@ -598,7 +630,9 @@ function IssuedInviteLink({
           browser and the project arrives on their desktop's next cloud listing (blueprint Finding 5, ruling Q4).
           Either way the owner sends the link. */}
       <p className='text-xs text-muted-foreground'>
-        {`Send this link to them yourself. Tau doesn’t email it, and it’s only shown once.${worksUntil ?? ''}`}
+        {isEmailed
+          ? `We emailed them this link. It’s only shown once here.${worksUntil ?? ''}`
+          : `It’s only shown once.${worksUntil ?? ''}`}
         {isDesktopTarget() ? ' It opens in a browser. After they accept, the project appears in their Tau.' : ''}
       </p>
     </div>

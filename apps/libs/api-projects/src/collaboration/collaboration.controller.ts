@@ -2,7 +2,9 @@
 import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Patch, Post } from '@nestjs/common';
 import { UseAuth, User } from '@taucad/api-auth';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
+import type { CollaboratorInviteEmailDelivery } from '@taucad/types/constants';
 import { ProjectAccessService } from '#collaboration/project-access.service.js';
+import { ProjectInviteEmailService } from '#collaboration/project-invite-email.service.js';
 import type { ProjectCollaboratorEntry } from '#collaboration/project-access.service.js';
 import {
   AcceptInvitationDto,
@@ -27,6 +29,7 @@ export class CollaboratorsController {
   public constructor(
     private readonly access: ProjectAccessService,
     private readonly rateLimiter: PublicationRateLimiterService,
+    private readonly inviteEmail: ProjectInviteEmailService,
   ) {}
 
   /**
@@ -57,10 +60,15 @@ export class CollaboratorsController {
    * access to somebody else's storage, so the failure that matters is the one
    * where an outage turns the cap off, not the one where an owner has to retry.
    *
+   * Tau emails the invitation once it is written (stable cloud link blueprint
+   * D6). That budget is the email's bound too. A skipped email never fails the
+   * invite: `emailDelivery` says why nothing went out, and the token is still
+   * returned for the owner to send on themselves.
+   *
    * @param projectId - The project being shared.
    * @param body - The address and the role it is invited at.
    * @param userId - The signed-in caller, who must own the project.
-   * @returns The invitation and its one-time token, which the owner sends on.
+   * @returns The invitation, its one-time token, and what happened to its email.
    * @throws HttpException When the owner is over, or the limiter is unavailable.
    */
   @Post()
@@ -68,7 +76,13 @@ export class CollaboratorsController {
     @Param('projectId') projectId: string,
     @Body() body: InviteCollaboratorDto,
     @User('id') userId: string,
-  ): Promise<{ email: string; role: 'read' | 'write'; token: string; expiresAt: string }> {
+  ): Promise<{
+    email: string;
+    role: 'read' | 'write';
+    token: string;
+    expiresAt: string;
+    emailDelivery: CollaboratorInviteEmailDelivery;
+  }> {
     const access = await this.access.authorize(projectId, userId, 'owner');
 
     const budget = await this.rateLimiter
@@ -81,7 +95,14 @@ export class CollaboratorsController {
       );
     }
 
-    return this.access.invite({ projectId, ownerId: access.ownerId, email: body.email, role: body.role });
+    const invitation = await this.access.invite({
+      projectId,
+      ownerId: access.ownerId,
+      email: body.email,
+      role: body.role,
+    });
+    const emailDelivery = await this.inviteEmail.send({ projectId, ownerId: access.ownerId, ...invitation });
+    return { ...invitation, emailDelivery };
   }
 
   /**

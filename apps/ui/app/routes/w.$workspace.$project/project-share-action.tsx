@@ -11,7 +11,6 @@ import type { ShareMethod } from '#components/publish/project-share-panel.js';
 import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
-import { useProjects } from '#hooks/use-projects.js';
 import { parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
@@ -96,10 +95,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
   const { parameterService, projectId, projectRef, entriesRecord } = useProject();
   const { recordFiles: fileClient } = useFileManager();
-  const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
-  /* The entry's CAD actor is seeded from the live record when a thumbnail needs a fresh unit. */
-  const projectUpdatedAt = projects.find((candidate) => candidate.id === projectId)?.lastActivityAt;
 
   useEffect(() => {
     if (!navigationIntent.shouldOpen) {
@@ -214,7 +210,6 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       projectId={projectId}
       projectName={project?.name ?? 'Untitled'}
       projectDescription={project?.description ?? ''}
-      projectUpdatedAt={projectUpdatedAt}
       entryPath={entryPath}
       collectSnapshot={collectSnapshot}
       initialMethod={navigationIntent.initialMethod}

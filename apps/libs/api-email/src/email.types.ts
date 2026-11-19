@@ -5,6 +5,7 @@ export type EmailTemplateKind =
   | 'verify-email'
   | 'account-exists'
   | 'publication-invite'
+  | 'project-invite'
   | 'payment-failed'
   | 'auto-reload-disabled'
   | 'auto-reload-action-required';
@@ -65,6 +66,20 @@ export type PublicationInviteEmailTemplate = {
   readonly url: string;
 };
 
+/** An owner invited someone to work on a project with them (stable cloud link blueprint E2). */
+export type ProjectInviteEmailTemplate = {
+  readonly kind: 'project-invite';
+  readonly recipientEmail: string;
+  readonly ownerName: string;
+  readonly projectName: string;
+  /** The role the invitation grants. */
+  readonly role: 'read' | 'write';
+  /** Pre-formatted expiry date; the email module does not format dates. */
+  readonly expiresAt: string;
+  /** The one-time `/invitations/<token>` link on the frontend origin. */
+  readonly url: string;
+};
+
 export type PaymentFailedEmailTemplate = {
   readonly kind: 'payment-failed';
   readonly email: string;
@@ -100,9 +115,16 @@ export type EmailTemplate =
   | VerifyEmailTemplate
   | AccountExistsEmailTemplate
   | PublicationInviteEmailTemplate
+  | ProjectInviteEmailTemplate
   | PaymentFailedEmailTemplate
   | AutoReloadDisabledEmailTemplate
   | AutoReloadActionRequiredEmailTemplate;
+
+/**
+ * What `EmailService.send` did: handed the email to the provider, or rendered it
+ * and stopped because no provider is configured (`RESEND_API_KEY` unset).
+ */
+export type EmailSendOutcome = 'sent' | 'disabled';
 
 export type RenderedEmail = {
   readonly html: string;

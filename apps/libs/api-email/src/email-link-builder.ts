@@ -14,6 +14,9 @@ const authEmailPaths = {
   string
 >;
 
+/** Where a collaborator invitation is accepted; the token is the one segment after it. */
+const projectInvitationPath = '/invitations/';
+
 export const sanitizeFrontendRedirectPath = ({
   callbackURL,
   frontendURL,
@@ -108,13 +111,23 @@ export const buildFrontendMagicLinkVerifyUrl = ({
   return magicLinkUrl.toString();
 };
 
-export const buildPublicationViewUrl = ({
+/** A project's stable cloud link, `/s/tau~<shareId>` (stable cloud link blueprint C3). */
+export const buildCloudLinkUrl = ({
   frontendURL,
-  publicationId,
+  shareId,
 }: {
   readonly frontendURL: string;
-  readonly publicationId: string;
-}): string => new URL(`/s/tau~${publicationId}`, frontendURL).toString();
+  readonly shareId: string;
+}): string => new URL(`/s/tau~${shareId}`, frontendURL).toString();
+
+/** The accept page of a collaborator invitation, `/invitations/<token>`. */
+export const buildProjectInvitationUrl = ({
+  frontendURL,
+  token,
+}: {
+  readonly frontendURL: string;
+  readonly token: string;
+}): string => new URL(`${projectInvitationPath}${encodeURIComponent(token)}`, frontendURL).toString();
 
 export const assertEmailTemplateUrlAllowed = ({
   template,
@@ -139,6 +152,15 @@ export const assertEmailTemplateUrlAllowed = ({
   if (template.kind === 'publication-invite') {
     if (!url.pathname.startsWith('/s/') || url.pathname.length <= '/s/'.length) {
       throw new Error('Invalid publication-invite email URL path');
+    }
+
+    return;
+  }
+
+  if (template.kind === 'project-invite') {
+    const token = url.pathname.slice(projectInvitationPath.length);
+    if (!url.pathname.startsWith(projectInvitationPath) || token === '' || token.includes('/') || url.search !== '') {
+      throw new Error('Invalid project-invite email URL path');
     }
 
     return;

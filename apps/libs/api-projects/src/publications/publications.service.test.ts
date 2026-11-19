@@ -2149,6 +2149,37 @@ describe('PublicationsService derived-state repair', () => {
     expect(database.writes.filter((write) => write.table === schema.projectGit)).toEqual([]);
   });
 
+  it('should serve the row another request repaired while this one waited, rather than the one it first read', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    const database = seedDerived({
+      publication: publicationFixture({
+        id: 'pub_derived',
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        revisionId: '',
+        manifestKey: '',
+        visibility: 'public',
+        kernels: [],
+      }),
+      generation: 4,
+      derivedGeneration: 2,
+    });
+    const repairedKey = `publications/pub_derived/${seededRevision(repositoryPath)}.json`;
+    /* Another viewer's repair commits right after this one read the link, so this one finds nothing left to do. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.publication)[0] ?? {}, {
+        revisionId: seededRevision(repositoryPath),
+        manifestKey: repairedKey,
+      });
+    });
+    const service = createLinkService(database, { repositoryPath, storage: createManifestStorageStub() });
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
+    expect(database.rows(schema.publication)[0]?.['manifestKey']).toBe(repairedKey);
+  });
+
   it('should repair to the private tier when the project has no link', async () => {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
     const database = seedDerived({

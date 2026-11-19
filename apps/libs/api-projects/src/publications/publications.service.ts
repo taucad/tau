@@ -932,7 +932,8 @@ export class PublicationsService {
    * claimed the marker would leave both of those behind forever.
    *
    * @param publication - The publication being read.
-   * @returns Whether anything was re-materialized, so the caller re-reads.
+   * @returns Whether the row may have moved, so the caller re-reads: true once it was behind the manifest and the
+   *   repair ran, including when another request's repair moved it while this one waited for the project's lock.
    */
   private async rederivePublications(
     publication: Readonly<{ projectId: string; ownerId: string; tag: string; revisionId: string }>,
@@ -973,13 +974,15 @@ export class PublicationsService {
         /* Every tag the manifest holds, not just the ones a push moved: after a
            crash nobody knows which ones were done, and a tag whose publication
            already records that oid is skipped without reading a byte. */
-        const materialized = await materializePublishedTags(this.materializer, {
+        await materializePublishedTags(this.materializer, {
           projectId: publication.projectId,
           ownerId: publication.ownerId,
           directory: lease.directory,
           tags: tags.map(([ref, value]) => ({ ref, oid: value.oid })),
         });
-        return materialized.length > 0;
+        /* Re-read even when this call moved nothing: the row this read holds was behind, and a repair that
+           committed while this one waited (it skips work already done) left the row this read holds superseded. */
+        return true;
       });
     } catch (error) {
       /* The read still serves what the row points at; nothing moved, and the

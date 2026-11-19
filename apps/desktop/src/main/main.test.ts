@@ -388,9 +388,10 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
-  const { keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
+  const { computeStoreWorkspace, keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
     await importOriginal<typeof Host>();
   return {
+    computeStoreWorkspace,
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => {
@@ -1117,6 +1118,33 @@ describe('desktop main compute owner', () => {
       const reopened = state.resolveFork!({ projectRoot, computeMode: 'durable' });
       expect(storeOf(reopened)).not.toBe(storeOf(first));
       reopened.release!();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should give a copy of a project the project's compute connection and keep other projects apart",
+    async () => {
+      const projectRoot = await bootstrap();
+      const copyRoot = resolve(join(state.userData, 'home', 'project-copy'));
+      const otherRoot = resolve(join(state.userData, 'home', 'other'));
+      const identify = async (root: string, projectId: string): Promise<void> => {
+        await mkdir(join(root, '.tau'), { recursive: true });
+        await writeFile(join(root, '.tau', 'project.json'), `${JSON.stringify({ version: 1, projectId })}\n`);
+      };
+      await identify(projectRoot, 'proj_AAAAAAAAAAAAAAAAAAAAA');
+      await identify(copyRoot, 'proj_AAAAAAAAAAAAAAAAAAAAA');
+      await identify(otherRoot, 'proj_BBBBBBBBBBBBBBBBBBBBB');
+      const project = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const copy = state.resolveFork!({ projectRoot: copyRoot, computeMode: 'durable' });
+      const other = state.resolveFork!({ projectRoot: otherRoot, computeMode: 'durable' });
+      const storeOf = (resolved: typeof project): unknown => (resolved.compute as { store: unknown }).store;
+
+      expect(storeOf(copy)).toBe(storeOf(project));
+      expect(storeOf(other)).not.toBe(storeOf(project));
+      for (const resolved of [project, copy, other]) {
+        resolved.release!();
+      }
     },
     bootMilliseconds,
   );

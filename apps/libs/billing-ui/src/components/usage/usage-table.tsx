@@ -11,10 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
-import { usageColumns, usageEventId, usageEventNetAtoms } from '@taucad/billing-ui/components/usage/columns';
-import { chatLabel, projectLabel } from '@taucad/billing-ui/components/usage/activity-names';
-import type { ProjectNames } from '@taucad/billing-ui/components/usage/activity-names';
-import { useChatName } from '#routes/usage/use-chat-name.js';
+import { usageColumns, usageEventId, usageEventNetAtoms } from '#components/usage/columns.js';
+import { chatLabel, projectLabel } from '#components/usage/activity-names.js';
+import type { ProjectNames } from '#components/usage/activity-names.js';
+import { useChatName } from '#components/usage/use-chat-name.js';
+import type { ChatRecordsReader } from '#components/usage/use-chat-name.js';
 
 const tableHooks = { useReactTable };
 
@@ -29,6 +30,8 @@ type UsageTableProps = {
   /** Row whose credit explanation is open; owned by the page so a refresh keeps it. */
   readonly openEventId: string | undefined;
   readonly onOpenEventChange: (id: string | undefined) => void;
+  /** Reads a project's chat records, so an opened receipt names its chat; read only once a row is opened. */
+  readonly getChatRecordsForResource: ChatRecordsReader;
 };
 
 function DetailRow({
@@ -63,14 +66,16 @@ const tokenValue = (value: string | undefined): string => value ?? 'Not reported
 function UsageEventDetail({
   event,
   projectNames,
+  getChatRecordsForResource,
 }: {
   readonly event: WireUsageEvent;
   readonly projectNames: ProjectNames;
+  readonly getChatRecordsForResource: ChatRecordsReader;
 }): React.JSX.Element {
   /* Mounted only for the row a reader opened, so no chat storage is touched
      until then — the page, prerendered shell included, still renders with no
      local source behind it. */
-  const chatName = useChatName(event.activity.projectHint, event.activity.chatHint);
+  const chatName = useChatName(event.activity.projectHint, event.activity.chatHint, getChatRecordsForResource);
   return (
     <div className='grid gap-4 rounded-md border p-4 text-sm md:grid-cols-3' data-testid='usage-event-detail'>
       <dl className='flex flex-col gap-1'>
@@ -145,6 +150,7 @@ export function UsageTable({
   description,
   openEventId,
   onOpenEventChange,
+  getChatRecordsForResource,
 }: UsageTableProps): React.JSX.Element {
   // TanStack keeps its state on a stable `table` object, so the React Compiler would cache these reads forever.
   'use no memo';
@@ -199,7 +205,13 @@ export function UsageTable({
             onOpenEventChange(id === openEventId ? undefined : id);
           }}
         />
-        {openEvent ? <UsageEventDetail event={openEvent} projectNames={projectNames} /> : undefined}
+        {openEvent ? (
+          <UsageEventDetail
+            event={openEvent}
+            projectNames={projectNames}
+            getChatRecordsForResource={getChatRecordsForResource}
+          />
+        ) : undefined}
         <p className='text-sm text-muted-foreground'>
           {hasMore
             ? `Showing the first ${rows.length} actions of this range; the totals above cover the whole range.`

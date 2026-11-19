@@ -14,8 +14,10 @@ const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
 const useCloudProjects = vi.hoisted(() => vi.fn());
 const useChatName = vi.hoisted(() => vi.fn());
+const getChatRecordsForResource = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useCloudProjects }));
-vi.mock('#routes/usage/use-chat-name.js', () => ({ useChatName }));
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ getChatRecordsForResource }) }));
+vi.mock('@taucad/billing-ui/components/usage/use-chat-name', () => ({ useChatName }));
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: () => ({ tier: 'pro', isResolved: true }),
@@ -283,7 +285,7 @@ describe('UsagePage', () => {
     const detail = screen.getByTestId('usage-event-detail');
     expect(detail).toHaveTextContent('Bracket redesign');
     expect(detail).not.toHaveTextContent('chat-a');
-    expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a');
+    expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a', getChatRecordsForResource);
   });
 
   it('reads no local storage until a row is opened', () => {

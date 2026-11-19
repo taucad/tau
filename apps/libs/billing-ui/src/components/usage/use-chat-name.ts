@@ -1,6 +1,14 @@
 /* oxlint-disable typescript/no-restricted-types -- The billing wire returns explicit JSON nulls; swapping them for `undefined` would stop modelling what the API returns. */
 import { useQuery } from '@tanstack/react-query';
-import { useProjectManager } from '#hooks/use-project-manager.js';
+
+/**
+ * Reads one project's chat records, deleted ones included: the app's project manager
+ * `getChatRecordsForResource`, which the usage route passes in.
+ */
+export type ChatRecordsReader = (
+  resourceId: string,
+  options: { readonly includeDeleted: true },
+) => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>;
 
 /**
  * The name of the chat a receipt was spent in.
@@ -14,11 +22,15 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
  *
  * @param projectHint - `activity.projectHint`; the project whose storage holds the chat.
  * @param chatHint - `activity.chatHint`; the chat being named.
+ * @param getChatRecordsForResource - Reads the chat records of the project named by `projectHint`.
  * @returns The name, `null` when there is nothing to look up or the lookup came
  * back empty, and `undefined` while it is still being read.
  */
-export const useChatName = (projectHint: string | null, chatHint: string | null): string | null | undefined => {
-  const { getChatRecordsForResource } = useProjectManager();
+export const useChatName = (
+  projectHint: string | null,
+  chatHint: string | null,
+  getChatRecordsForResource: ChatRecordsReader,
+): string | null | undefined => {
   const enabled = projectHint !== null && chatHint !== null;
   const { data, isPending } = useQuery({
     queryKey: ['usage-chat-name', projectHint, chatHint],

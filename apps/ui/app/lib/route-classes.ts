@@ -11,7 +11,10 @@
  *   function names and the build moves into place (`scripts/place-static-shells.ts`);
  * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`), and the warm manifest the
  *   build writes from them (`scripts/write-warm-manifest.ts`, read by `warm-next-step.ts` and the marketing site);
- * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`).
+ * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`);
+ * - the web app's one service worker (progressive loading PL7, `app/offline/service-worker.ts`): which documents it
+ *   precaches and answers, and how ({@link WorkerDelivery}); the build generates its precache list from the same
+ *   classes (`scripts/build-service-worker.ts`).
  *
  * The file imports nothing, so build configuration and native Node scripts can read it before app aliases exist.
  */
@@ -26,6 +29,20 @@
  * - `cdn-ssr`: rendered by the server function and kept by the CDN.
  */
 export type RouteDelivery = 'static-shell' | 'prerendered' | 'function' | 'cdn-ssr';
+
+/**
+ * How the web app's one service worker answers a document request of a class (progressive loading PL7, ruling OD3).
+ * The worker precaches the class's one document with the deploy it was built by, and replays it whole, headers
+ * included; it never synthesises a document.
+ *
+ * - `cache-first`: from the precache, so an installed visitor opens the class with no request and offline. A reload, or
+ *   a newer worker installing or waiting, asks the network first instead, so a reload never lands on a replaced deploy.
+ * - `network-first`: the network, answered from the precache when it fails or has not answered within the worker's
+ *   bound (the offline usage page, B5).
+ *
+ * A class without one is never answered by the worker: its documents, data requests and everything else pass through.
+ */
+export type WorkerDelivery = 'cache-first' | 'network-first';
 
 type RouteClassBase = Readonly<{
   /** Key in `critical-budget.json` and in reports. */
@@ -48,6 +65,8 @@ type RouteClassBase = Readonly<{
    * `warm-next-step.ts`): the step a visitor most likely takes next. It names a class with {@link interactive} roots.
    */
   warms?: string;
+  /** How the service worker answers the class's documents; absent when it never does. */
+  worker?: WorkerDelivery;
 }>;
 
 /** A class served by one prerendered document for all of its URLs. */
@@ -74,7 +93,12 @@ export type StaticShellClass = RouteClassBase &
   }>;
 
 /** A class whose documents are not a shared shell. */
-export type DocumentRouteClass = RouteClassBase & Readonly<{ delivery: Exclude<RouteDelivery, 'static-shell'> }>;
+export type DocumentRouteClass = RouteClassBase &
+  Readonly<{
+    delivery: Exclude<RouteDelivery, 'static-shell'>;
+    /** The one path a `prerendered` class's document is prerendered at, when the service worker answers it. */
+    path?: string;
+  }>;
 
 export type RouteClass = StaticShellClass | DocumentRouteClass;
 
@@ -107,6 +131,7 @@ const projectClass: StaticShellClass = {
   label: 'project route',
   delivery: 'static-shell',
   via: 'rewrite',
+  worker: 'cache-first',
   match: '/w/:workspace/:project',
   shellPath: `/w/${shellSentinel}/${shellSentinel}`,
   routes: ['w.$workspace.$project'],
@@ -138,6 +163,8 @@ const homeClass: StaticShellClass = {
   match: '/',
   shellPath: '/',
   routes: ['_index'],
+  // Only for a visit the edge function would give the app ({@link homeAppEntry}); every other `/` passes through.
+  worker: 'cache-first',
   // Home's open graph adds the rich composer, which `useNewProjectComposer` requests at mount.
   interactive: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
   // LB9: a project row and the composer's first send both open the project route.
@@ -151,9 +178,11 @@ export const routeClasses: readonly RouteClass[] = [
   {
     id: 'offline-shell',
     label: 'offline shell',
-    // The neutral account document the offline shell worker reopens (B5 R2); PL7 folds it into the one worker.
+    // The neutral account document the service worker reopens offline (B5 R2); cloud builds only, like its route.
     delivery: 'prerendered',
+    path: '/usage',
     routes: ['usage'],
+    worker: 'network-first',
   },
   {
     id: 'public-file',
@@ -440,4 +469,87 @@ export const renderNetlifyShellRouting = ({
       `[[headers]]\nfor = ${tomlString(prefix)}\n[headers.values]\nSet-Cookie = ${tomlString(shellSkewCookie(skewCookieName))}\n`,
   );
   return [...redirects, ...headers].join('\n');
+};
+
+/**
+ * The installed web app's start URL (`manifest.webmanifest`): `/` with a query the marketing edge function leaves to the
+ * app (`resolveMarketingUrl`), so a launch opens Home whether or not the visitor's `tau-entry` preference is set, and
+ * the service worker answers it from the Home shell.
+ */
+export const appStartUrl = '/?source=pwa';
+
+/** A class the service worker answers, with the document it precaches for it. */
+export type WorkerRouteClass = Readonly<{
+  routeClass: RouteClass;
+  delivery: WorkerDelivery;
+  /** The document's root-relative URL in the client output: the file the precache stores and replays. */
+  document: string;
+  /** The URLs whose navigations the class's document answers. */
+  matches: (pathname: string) => boolean;
+}>;
+
+/**
+ * The classes the service worker answers, each with its precached document: a static shell's served file
+ * ({@link shellDocumentFile}), or a prerendered class's own document at {@link DocumentRouteClass.path}.
+ *
+ * @returns The worker's classes, in registry order.
+ */
+export const workerRouteClasses = (): WorkerRouteClass[] =>
+  routeClasses.flatMap((routeClass): WorkerRouteClass[] => {
+    if (routeClass.worker === undefined) {
+      return [];
+    }
+    if (routeClass.delivery === 'static-shell') {
+      const expression = shellPathExpression(routeClass);
+      return [
+        {
+          routeClass,
+          delivery: routeClass.worker,
+          document: `/${shellDocumentFile(routeClass)}`,
+          matches: (pathname) => expression.test(pathname),
+        },
+      ];
+    }
+    const { path } = routeClass;
+    if (routeClass.delivery !== 'prerendered' || path === undefined) {
+      throw new Error(`${routeClass.label}: only a static shell or a prerendered path can be answered by the worker`);
+    }
+    return [
+      {
+        routeClass,
+        delivery: routeClass.worker,
+        document: `/${prerenderedFiles(path).document}`,
+        matches: (pathname) => pathname === path || pathname === `${path}/`,
+      },
+    ];
+  });
+
+/** The parameters a link to `/` may carry and still get marketing from the edge function (`campaignParameters`). */
+const marketingQueryParameters = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'ref',
+]);
+
+/**
+ * Whether a document request for `/` is one the deployed site answers with Home, the way the marketing edge function
+ * decides it (`selectDelivery` and `resolveMarketingUrl` in `netlify/edge-functions/marketing.ts`): the `tau-entry=app`
+ * preference without `?website`, or a query the edge function leaves to the app ({@link appStartUrl}). Any other `/` is
+ * marketing, which the service worker never answers.
+ *
+ * @param search - The request's query.
+ * @param tauEntry - The `tau-entry` cookie's value, or `undefined` when unset or unreadable.
+ * @returns `true` when the Home shell is the document for this request.
+ */
+export const homeAppEntry = (search: URLSearchParams, tauEntry: string | undefined): boolean => {
+  if (search.has('website')) {
+    return false;
+  }
+  if (tauEntry === 'app') {
+    return true;
+  }
+  return [...search.keys()].some((name) => !marketingQueryParameters.has(name));
 };

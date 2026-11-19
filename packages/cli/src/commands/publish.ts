@@ -1,10 +1,13 @@
 /**
- * `tau publish` — name this project's head and publish it (S32, S42, A21).
+ * `tau publish` — name this project's head and publish it to the project's
+ * cloud link (S32, S42, A21; stable cloud link blueprint).
  *
- * The same machine the Publish dialog drives, reached from a terminal: the verb
+ * The same machine the Share pane drives, reached from a terminal: the verb
  * is `openProjectRevisions().publish`, which sends `publish` then `confirm` to
- * the revision root's `publish` child. Nothing here decides anything the dialog
+ * the revision root's `publish` child. Nothing here decides anything the pane
  * does not — no second manifest, no second upload path, no second failure copy.
+ * The link shows the project's own name and description from `tau.json`, and a
+ * version nobody names is named by the host (`Shared Nov 19`).
  *
  * Two things only a terminal has to be told: which API to publish to
  * (`TAU_API_URL`) and the session token (`TAU_AUTH_TOKEN`). The token authorizes
@@ -26,14 +29,32 @@ import { authApiOrigin, resolveAuthToken } from '#auth.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { requireGitToolchain } from '#commands/history.js';
 
-/** What the project's own `tau.json` says a viewer opens with. */
-const readEntryPath = async (workspaceRoot: string): Promise<string> => {
+/** The draft the host's `publish` verb takes. */
+type PublishDraft = Parameters<ProjectRevisionVerbs['publish']>[0];
+
+/** What the project's own `tau.json` says: its name, its description and the file a viewer opens with. */
+type ProjectManifestFields = Readonly<{
+  name: string | undefined;
+  description: string | undefined;
+  entryPath: unknown;
+}>;
+
+const textField = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+
+const readProjectManifest = async (workspaceRoot: string): Promise<ProjectManifestFields> => {
   const manifestPath = join(workspaceRoot, 'tau.json');
-  let entryPath: unknown;
   try {
-    const manifest: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-    entryPath = (manifest as Readonly<{ assets?: Readonly<{ main?: Readonly<{ entryPath?: unknown }> }> }>).assets?.main
-      ?.entryPath;
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Readonly<{
+      name?: unknown;
+      description?: unknown;
+      assets?: Readonly<{ main?: Readonly<{ entryPath?: unknown }> }>;
+    }>;
+    return {
+      name: textField(manifest.name),
+      description: textField(manifest.description),
+      entryPath: manifest.assets?.main?.entryPath,
+    };
   } catch {
     throw cliError(
       'NO_PROJECT_MANIFEST',
@@ -41,14 +62,32 @@ const readEntryPath = async (workspaceRoot: string): Promise<string> => {
       exitCodes.refused,
     );
   }
-  if (typeof entryPath !== 'string' || entryPath === '') {
+};
+
+/** The file a viewer opens with: `--entry`, else the one `tau.json` names. */
+const entryPathOf = (workspaceRoot: string, entry: string | undefined, manifest: ProjectManifestFields): string => {
+  if (entry !== undefined && entry !== '') {
+    return entry;
+  }
+  if (typeof manifest.entryPath !== 'string' || manifest.entryPath === '') {
     throw cliError(
       'NO_ENTRY_PATH',
-      `${manifestPath} does not say which file this project opens with. Open it in Tau once, or pass --entry.`,
+      `${join(workspaceRoot, 'tau.json')} does not say which file this project opens with. Open it in Tau once, or pass --entry.`,
       exitCodes.refused,
     );
   }
-  return entryPath;
+  return manifest.entryPath;
+};
+
+/** Who can open the link: `--public`, `--private`, or the link's own setting (a first publish is private). */
+const visibilityOf = (args: Readonly<{ public?: boolean; private?: boolean }>): Pick<PublishDraft, 'visibility'> => {
+  if (args.public === true && args.private === true) {
+    throw cliError('CONFLICTING_VISIBILITY', 'Pass --public or --private, not both.', exitCodes.usage);
+  }
+  if (args.public === true) {
+    return { visibility: 'public' };
+  }
+  return args.private === true ? { visibility: 'private' } : {};
 };
 
 /**
@@ -70,31 +109,22 @@ export const requireApi = async (): Promise<Readonly<{ apiBaseUrl: string; apiTo
   return { apiBaseUrl, apiToken };
 };
 
-/** `tau publish <version>`. */
+/** `tau publish [name] [--public|--private]`. */
 export const publishCommand = defineCommand({
   meta: {
     name: 'publish',
-    description: 'Publish a named version of this project and print its link',
+    description: 'Publish this project to its cloud link and print the link',
   },
   args: {
-    version: {
+    name: {
       type: 'positional',
-      description: 'Name for this version, such as v1 (an existing name moves its link forward)',
-      required: true,
+      description:
+        'Name for the version this publishes, such as "Ready for print" (defaults to the version the head already is, or "Shared <date>")',
+      required: false,
     },
     project: {
       type: 'string',
       description: 'Project directory (defaults to the current directory)',
-      required: false,
-    },
-    title: {
-      type: 'string',
-      description: 'Title viewers see (defaults to the project directory’s name)',
-      required: false,
-    },
-    description: {
-      type: 'string',
-      description: 'One or two sentences viewers see under the title',
       required: false,
     },
     entry: {
@@ -109,7 +139,13 @@ export const publishCommand = defineCommand({
     },
     public: {
       type: 'boolean',
-      description: 'Publish so anyone with the link can open it (default: only people you share it with)',
+      description: 'Let anyone with the link open it',
+      required: false,
+    },
+    private: {
+      type: 'boolean',
+      description:
+        'Let only people you invite open it (needs the Pro plan). Without either flag the link keeps its setting; a first publish is private',
       required: false,
     },
     json: {
@@ -125,17 +161,20 @@ export const publishCommand = defineCommand({
     if (!existsSync(workspaceRoot)) {
       throw cliError('NO_PROJECT', `${workspaceRoot} does not exist.`, exitCodes.refused);
     }
-    const entryPath = args.entry === undefined || args.entry === '' ? await readEntryPath(workspaceRoot) : args.entry;
-    const projectName = basename(workspaceRoot);
+    const visibility = visibilityOf(args);
+    const manifest = await readProjectManifest(workspaceRoot);
+    const entryPath = entryPathOf(workspaceRoot, args.entry, manifest);
+    const name = args.name?.trim() ?? '';
     const revisions: ProjectRevisionVerbs = await openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });
     try {
       const outcome = await revisions.publish({
-        tag: args.version,
-        projectName,
+        /* An empty name is the host's to fill: it has the locale (`Shared Nov 19`). */
+        tag: name,
+        ...(name === '' ? { isAutoNamed: true } : {}),
+        projectName: manifest.name ?? basename(workspaceRoot),
+        ...(manifest.description === undefined ? {} : { description: manifest.description }),
         entryPath,
-        visibility: args.public === true ? 'public' : 'private',
-        title: args.title === undefined || args.title === '' ? projectName : args.title,
-        ...(args.description === undefined || args.description === '' ? {} : { description: args.description }),
+        ...visibility,
         ...(args.note === undefined || args.note === '' ? {} : { note: args.note }),
       });
       if (args.json) {

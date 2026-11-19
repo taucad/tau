@@ -29,6 +29,8 @@
  * | 17 | `confirm` while `choosingVersion.reading` is in flight | *Publish* is one gesture: the panel's button and `tau publish <name>` confirm without waiting |
  * | 18 | `pushing --pushSettled(failed\|queued\|conflicted)--> error` | **P39**: a settlement that names this push but did not reach the remote never publishes |
  * | 19 | the push offers `refs/tags/v<number>` with the remote's own value as its lease | **P38**: a re-publish of a version, renamed or not, goes under a lease, never a force (B6) |
+ * | 21 | an auto-named draft on an entry that already is a version | rule 14: that version is published under its own name, with no second version and no rename |
+ * | 22 | `createPublication`'s input | the request body carries the project's name and description and no title; visibility only when chosen |
  */
 
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
@@ -36,7 +38,7 @@ import type { Actor, AnyActorRef, AnyEventObject, AnyMachineSnapshot, AsyncActor
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#publish.machine.js';
-import { publishMachine, selectPublishFacet } from '#publish.machine.js';
+import { autoVersionName, publishMachine, selectPublishFacet } from '#publish.machine.js';
 import type {
   PublishActors,
   PublishMachineEmitted,
@@ -46,7 +48,7 @@ import type {
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
-import type { PublishDraft } from '#publish.types.js';
+import type { PublishDraft, PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';
@@ -68,10 +70,9 @@ const tagV2: RevisionTag = {
 
 const draft: PublishDraft = {
   tag: 'Lid fit',
-  projectName: 'bracket',
+  projectName: 'Bracket',
   entryPath: 'main.ts',
   visibility: 'public',
-  title: 'Bracket',
 };
 
 const isMachine = (value: unknown): boolean =>
@@ -140,6 +141,7 @@ const startPushing = (overrides: Partial<PublishActors> = {}): Started =>
         remoteTags: { v2: 'tag-v2' },
         tag: undefined,
         version: 3,
+        versionName: 'Lid fit',
         requestId: 'pub-1',
         draft,
         pushId: 'push-1',
@@ -178,7 +180,11 @@ const start = (
       createdAt: 2,
     })),
     push: record('push', () => ({ pushId: 'push-1', remote: 'tau' })),
-    createPublication: record('createPublication', () => ({ publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' })),
+    createPublication: record<PublishPublicationActorOutput, PublishPublicationActorInput>('createPublication', () => ({
+      publicationId: 'pub_1',
+      url: 'https://tau.new/s/tau~shr_1',
+      visibility: 'public',
+    })),
     ...overrides,
   };
   const guard = guardActors();
@@ -285,16 +291,24 @@ describe('publishMachine', () => {
     /* A new version, V3: the name is free text and the ref is its number (B6). */
     expect(calls[0]?.input).toStrictEqual({ name: 'Lid fit', revisionId: 'rev-2' });
     expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v3', expected: 'rev-1', expectedTag: undefined });
-    expect(calls[2]?.input).toMatchObject({ projectId: 'p1', tag: 'v3', revisionId: 'rev-2', visibility: 'public' });
-    expect(calls[2]?.input).not.toHaveProperty('version');
+    expect(calls[2]?.input).toStrictEqual({
+      projectId: 'p1',
+      projectName: 'Bracket',
+      tag: 'v3',
+      revisionId: 'rev-2',
+      entryPath: 'main.ts',
+      visibility: 'public',
+    });
     expect(emitted).toContainEqual({
       type: 'published',
       requestId: 'pub-1',
       publicationId: 'pub_1',
-      url: 'https://tau.new/p/pub_1',
+      url: 'https://tau.new/s/tau~shr_1',
       tag: 'v3',
+      name: 'Lid fit',
+      visibility: 'public',
     });
-    expect(selectPublishFacet(actor.getSnapshot()).shareUrl).toBe('https://tau.new/p/pub_1');
+    expect(selectPublishFacet(actor.getSnapshot()).shareUrl).toBe('https://tau.new/s/tau~shr_1');
     actor.stop();
   });
 
@@ -555,6 +569,77 @@ describe('publishMachine', () => {
 
     expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({ tag: 'v3' });
     actor.stop();
+  });
+
+  it('21: publishes an auto-named entry that already is a version under that version’s own name (rule 14)', async () => {
+    const { actor, calls, emitted } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Shared Nov 19', isAutoNamed: true } });
+    await settle();
+
+    /* V2 is on rev-1 and called "Ready for print": no second version, no rename. */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(calls.find((call) => call.name === 'push')?.input).toMatchObject({ tag: 'v2', expectedTag: 'tag-v2' });
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'published', tag: 'v2', name: 'Ready for print' }));
+    actor.stop();
+  });
+
+  it('21: gives an auto-named entry that is not a version yet the auto name', async () => {
+    const { actor, calls, emitted } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Shared Nov 19', isAutoNamed: true } });
+    await settle();
+
+    expect(calls[0]?.input).toStrictEqual({ name: 'Shared Nov 19', revisionId: 'rev-2' });
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'published', tag: 'v3', name: 'Shared Nov 19' }));
+    actor.stop();
+  });
+
+  it('21: keeps today’s rule for an explicit name on an entry that already is a version', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Hinge' } });
+    await settle();
+
+    /* A name the person chose that the entry's version does not have makes a new version. */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Hinge', revisionId: 'rev-1' });
+    actor.stop();
+  });
+
+  it('22: sends no visibility and no draft-only fields when the person chose none', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    await settle();
+    const { visibility: _visibility, ...unchosen } = draft;
+    actor.send({
+      type: 'confirm',
+      draft: { ...unchosen, description: 'A wall bracket', note: 'first', isAutoNamed: true },
+    });
+    await settle();
+
+    expect(calls.find((call) => call.name === 'createPublication')?.input).toStrictEqual({
+      projectId: 'p1',
+      projectName: 'Bracket',
+      tag: 'v3',
+      revisionId: 'rev-2',
+      entryPath: 'main.ts',
+      description: 'A wall bracket',
+    });
+    actor.stop();
+  });
+
+  it('names a version nobody named after the day it is published, in the given locale', () => {
+    const day = new Date(2026, 10, 19, 12);
+
+    expect(autoVersionName(day, 'en-US')).toBe('Shared Nov 19');
+    expect(autoVersionName(day, 'en-GB')).toBe('Shared 19 Nov');
   });
 
   it('19: makes a new version when the name is on another revision, and leases "must not exist" (P38)', async () => {

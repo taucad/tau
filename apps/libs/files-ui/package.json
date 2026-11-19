@@ -54,6 +54,7 @@
     "./machines/file-manager-sync-fs-adapter": "./src/machines/file-manager-sync-fs-adapter.ts",
     "./machines/file-manager-worker-error": "./src/machines/file-manager-worker-error.ts",
     "./machines/file-manager-worker-name": "./src/machines/file-manager-worker-name.ts",
+    "./machines/file-manager-worker-node-port": "./src/machines/file-manager-worker-node-port.ts",
     "./machines/library-access.machine": "./src/machines/library-access.machine.ts",
     "./machines/library-discovery.machine": "./src/machines/library-discovery.machine.ts",
     "./machines/library-recovery.machine": "./src/machines/library-recovery.machine.ts",

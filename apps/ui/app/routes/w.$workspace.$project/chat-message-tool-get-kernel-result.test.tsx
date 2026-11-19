@@ -89,7 +89,7 @@ vi.mock('#components/files/viewer-link.js', () => ({
   },
 }));
 
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer({ children }: { readonly children: string }): React.JSX.Element {
     return <span>{children}</span>;
   },

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
+import { createLazyBundledTypesReads } from '#lib/bundled-types-lazy.js';
 
 /**
  * A fresh profile's `/node_modules` route, mounted as the worker mounts it and

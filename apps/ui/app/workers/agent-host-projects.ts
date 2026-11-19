@@ -23,7 +23,8 @@ export type ProjectHosts<Host extends ProjectHostIncarnation> = Readonly<{
   /**
    * The named host once every control call sent for its project before this one settled; `undefined` when another
    * incarnation, or none, serves the project then. A connect sent right behind its provide reads the host that provide
-   * opened, so the page need not wait for the provide's answer before connecting.
+   * opened, so the page need not wait for the provide's answer before connecting. It also waits behind a rebridge or
+   * release in flight for the same project.
    */
   connectable: (args: Readonly<{ projectId: string; hostId: string }>) => Promise<Host | undefined>;
   /** Open the named host; a different registered one drains then closes once it opens, answered as `replaced`. */

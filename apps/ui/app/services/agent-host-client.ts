@@ -855,8 +855,9 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         },
         transferables,
       });
-      /* The worker serves a project's control calls in the order they were sent, so a connect sent from here on reaches
-       * the host this provide opens without waiting for this answer (STO-25 SP6). */
+      /* The provide is sent (or queued to send) in call order. The worker serves a project's control calls in the order
+       * they were sent, so a connect sent from here on is answered after this provide settles: from the host it
+       * opened, or `needs` when it failed, and the connect then reports this provide's error (STO-25 SP6). */
       onPosted(hostId);
       const answer = await answering;
       /* The replaced incarnation drains its runs on its own bridges (T3); only its bridges go, once it has closed, so a
@@ -1078,8 +1079,10 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         // oxlint-disable-next-line no-await-in-loop -- see above.
         const answer = await live.channel
           .call('connect', { value: { projectId, hostId, port: port1 }, transferables: [port1] })
-          .catch((error: unknown) => {
+          .catch(async (error: unknown) => {
             port2.close();
+            /* A provide that failed is what this connect met: its error wins. */
+            await opening;
             throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
           });
         if (answer.status !== 'connected') {

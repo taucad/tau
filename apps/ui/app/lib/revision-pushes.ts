@@ -26,7 +26,7 @@
 
 import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import type { PushEntry, PushPusher, PushRecordSnapshot } from '@taucad/revisions-ui/types/revision-push.types';
 
 /** The push-read format this client understands (`apps/api` `pushPageFormat`). */

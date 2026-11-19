@@ -14,9 +14,9 @@ import {
   createSubscriptionAction,
   followPaymentRedirect,
 } from '#lib/billing-payment-client.js';
-import { isDesktopTarget } from '#lib/build-target.js';
+import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 import { Button } from '@taucad/ui/components/button';
-import { BillingInlineError } from '@taucad/billing-ui/components/billing/billing-primitives';
+import { BillingInlineError } from '#components/billing/billing-primitives.js';
 
 const enterpriseMailto = 'mailto:enterprise@tau.new';
 
@@ -62,7 +62,7 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
   const settle = (action: WirePaymentAction): void => {
     if (followPaymentRedirect(action)) {
       // In the desktop app the payment page opens in the browser, so the button stays usable to open it again.
-      setIsPending(!isDesktopTarget());
+      setIsPending(!isDesktopTarget);
       return;
     }
     // A retry asks again rather than replaying this answer.

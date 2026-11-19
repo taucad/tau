@@ -18,12 +18,12 @@ import {
   followPaymentRedirect,
   getPaymentAction,
   recoverPaymentAction,
-} from '#lib/billing-payment-client.js';
+} from '@taucad/billing-ui/lib/billing-payment-client';
 import {
   FinancialSessionProvider,
   FinancialSessionScope,
   useFinancialSession,
-} from '#providers/financial-session-provider.js';
+} from '@taucad/billing-ui/providers/financial-session-provider';
 
 export function CloudRootBoundary({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (

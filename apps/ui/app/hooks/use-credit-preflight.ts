@@ -3,7 +3,7 @@ import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
 import { errorCategory } from '@taucad/types/constants';
 import { errorCategoryTitles } from '@taucad/chat/utils';
-import { useAutoReloadEnabled } from '#hooks/use-auto-reload-enabled.js';
+import { useAutoReloadEnabled } from '@taucad/billing-ui/hooks/use-auto-reload-enabled';
 
 /**
  * Refuse a turn the account cannot fund, before it is dispatched.

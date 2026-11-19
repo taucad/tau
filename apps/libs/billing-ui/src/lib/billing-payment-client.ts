@@ -4,8 +4,8 @@ import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
 import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
-import { isDesktopTarget } from '#lib/build-target.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 
 export type PaymentActionBinding = {
   readonly apiBaseUrl: string;
@@ -232,7 +232,7 @@ export const getUnresolvedPaymentActions = async (
 };
 
 /** Whether Stripe opens in the system browser rather than in place, as in the desktop app. */
-export const opensPaymentsInBrowser = (): boolean => isDesktopTarget();
+export const opensPaymentsInBrowser = (): boolean => isDesktopTarget;
 
 export const followPaymentRedirect = (action: WirePaymentAction): boolean => {
   if (action.state !== 'redirect_required' || action.redirectUrl === null) {

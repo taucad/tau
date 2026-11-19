@@ -31,7 +31,7 @@ import {
   tauCloudIntent,
 } from '#lib/tau-cloud-intent.js';
 import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 

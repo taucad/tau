@@ -62,7 +62,7 @@ import {
   withBrowserShareProviderContext,
 } from '#lib/share-providers.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /**
  * What wraps the shared Share pane with the host it reads: the project's workbench host in the workbench, or a

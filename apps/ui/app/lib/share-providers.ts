@@ -14,7 +14,7 @@ import { builtinShareProviderDescriptor } from '@taucad/ui-core/lib/builtin-shar
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },

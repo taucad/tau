@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BillingSettings } from '#components/settings/billing-settings.js';
 import { AccountClosureSettings } from '#components/billing/account-closure-settings.js';
 import { TopupModal } from '#components/billing/topup-modal.js';
-import { useBillingBinding } from '#components/billing/use-billing-binding.js';
+import { useBillingBinding } from '@taucad/billing-ui/components/billing/use-billing-binding';
 import { SettingsGroup } from '@taucad/settings-ui/components/settings/settings-item';
 
 export function CloudBillingSettings(): React.JSX.Element {

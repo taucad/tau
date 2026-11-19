@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 class PreviewResponseError extends Error {
   public readonly status: number;

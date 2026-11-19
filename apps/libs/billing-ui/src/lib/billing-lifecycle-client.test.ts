@@ -6,7 +6,7 @@ import {
   getReloadConsent,
   prepareAccountClosure,
   prepareReloadConsent,
-} from './billing-lifecycle-client.js';
+} from '#lib/billing-lifecycle-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 
 const binding = {

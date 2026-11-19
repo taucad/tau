@@ -15,15 +15,15 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { authClient } from '#lib/auth-client.js';
-import { createPaymentRequestId } from '#lib/billing-payment-client.js';
-import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
+import { createPaymentRequestId } from '@taucad/billing-ui/lib/billing-payment-client';
+import type { PaymentActionBinding } from '@taucad/billing-ui/lib/billing-payment-client';
 import {
   AccountClosurePaymentPending,
   getAccountClosure,
   getCurrentAccountClosure,
   prepareAccountClosure,
-} from '#lib/billing-lifecycle-client.js';
-import { useFinancialSession } from '#providers/financial-session-provider.js';
+} from '@taucad/billing-ui/lib/billing-lifecycle-client';
+import { useFinancialSession } from '@taucad/billing-ui/providers/financial-session-provider';
 import { IconLine, supportEmail } from '@taucad/billing-ui/components/billing/billing-primitives';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */

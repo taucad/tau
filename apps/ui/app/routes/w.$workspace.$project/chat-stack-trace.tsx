@@ -94,6 +94,37 @@ Please update the code to resolve this error.`;
  * @param download - The download's state.
  * @returns A notice that cancels a running download or retries a stopped one.
  */
+/**
+ * The notice for an engine a kernel could not fetch (`details.engineFailure`, such as cadmpeg's engine from the
+ * dependency host). Nothing in the runtime keeps the refusal, so rendering again fetches again: the notice offers that
+ * as "Retry", because a failed build re-runs only on an edit and a native file is not edited.
+ * @param issues - The failed build's issues.
+ * @param retry - Renders the model again.
+ * @returns The notice, or `undefined` when no engine delivery failed.
+ */
+const engineDeliveryNotice = (
+  issues: readonly KernelIssue[] | undefined,
+  retry: () => void,
+): ViewerNotice | undefined => {
+  for (const issue of issues ?? []) {
+    if (issue.severity !== 'error' || typeof issue.details !== 'object' || issue.details === null) {
+      continue;
+    }
+    const failure: unknown = Reflect.get(issue.details, 'engineFailure');
+    if (typeof failure !== 'string') {
+      continue;
+    }
+    const host: unknown = Reflect.get(issue.details, 'host');
+    const where = typeof host === 'string' && host !== '' ? host : 'the engine host';
+    return {
+      message: `The model renders once its engine loads. Retry when ${where} is reachable; no reload is needed.`,
+      actionLabel: 'Retry',
+      onAct: retry,
+    };
+  }
+  return undefined;
+};
+
 const downloadNotice = (download: NativeKernelDownload): ViewerNotice => {
   if (download.status === 'stopped') {
     return { message: download.message, actionLabel: 'Retry', onAct: download.retry };
@@ -246,11 +277,14 @@ function ViewerIssuesContent({
 
   // Download on first use: a native kernel the desktop has not prepared yet downloads at once and renders again.
   const cad = useCad();
-  const download = useNativeKernelDownload(ordered, () => {
+  const renderAgain = useCallback(() => {
     cad?.send({ type: 'initializeModel', entryPath });
-  });
+  }, [cad, entryPath]);
+  const download = useNativeKernelDownload(ordered, renderAgain);
   const shown = download === undefined ? ordered : ordered.filter((issue) => issue.code !== 'KERNEL_NOT_PREPARED');
-  const notices = [notice, download === undefined ? undefined : downloadNotice(download)].filter(
+  // Only while the build stands failed: a retry in flight leaves the entry's old issues listed until it settles.
+  const engineRetry = isCadActorStale ? undefined : engineDeliveryNotice(failureIssues, renderAgain);
+  const notices = [notice, download === undefined ? undefined : downloadNotice(download), engineRetry].filter(
     (listed): listed is ViewerNotice => listed !== undefined,
   );
   const isFailed =

@@ -1,7 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { Box } from 'lucide-react';
 import { Slot as SlotPrimitive } from 'radix-ui';
-import { useProject } from '#hooks/use-project.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 import { cn } from '@taucad/ui/utils/cn';
 
 type ViewerLinkProps = {
@@ -73,7 +73,7 @@ type ViewerLinkProps = {
  * ```
  */
 export function ViewerLink({ path, className, children, asChild = false }: ViewerLinkProps): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
+  const project = useContext(ProjectContext);
 
   const activate = useCallback(() => {
     if (!project) {

@@ -9,6 +9,6 @@
     "types": ["node", "vite/client"],
     "target": "ESNext"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "file-system-access.d.ts"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts", "src/**/*.spec.tsx", "src/**/*.test.tsx"]
 }

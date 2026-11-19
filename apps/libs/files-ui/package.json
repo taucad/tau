@@ -28,8 +28,12 @@
   "exports": {
     "./components/files/export-format-grid": "./src/components/files/export-format-grid.tsx",
     "./components/files/export-selector": "./src/components/files/export-selector.tsx",
+    "./components/files/file-link": "./src/components/files/file-link.tsx",
+    "./components/files/file-selector": "./src/components/files/file-selector.tsx",
+    "./components/files/open-render-button": "./src/components/files/open-render-button.tsx",
     "./components/files/open-render-button.ignore": "./src/components/files/open-render-button.ignore.ts",
     "./components/files/use-export-to-disk": "./src/components/files/use-export-to-disk.ts",
+    "./components/files/viewer-link": "./src/components/files/viewer-link.tsx",
     "./components/filesystem/folder-status": "./src/components/filesystem/folder-status.ts",
     "./components/filesystem/overwrite-confirm-dialog": "./src/components/filesystem/overwrite-confirm-dialog.tsx",
     "./components/filesystem/workspace-directory-panel": "./src/components/filesystem/workspace-directory-panel.tsx",

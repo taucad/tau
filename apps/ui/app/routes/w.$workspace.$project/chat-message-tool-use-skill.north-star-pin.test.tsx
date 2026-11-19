@@ -27,6 +27,7 @@ import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
@@ -137,6 +138,9 @@ const composedRow = (path: string, type: 'dir' | 'file'): [string, FileEntry] =>
       },
 ];
 
+/** The shared project context the skill's file links read, rather than `useProject`. */
+const project = { projectId: 'project-1', projectRef: { send: vi.fn() }, editorRef: { send: editorSend } };
+
 beforeEach(() => {
   editorSend.mockClear();
   treeSnapshot.current = new Map<string, FileEntry>([
@@ -149,7 +153,12 @@ beforeEach(() => {
 
 describe('system skill row links (north star W0, green in W4)', () => {
   it('opens a system skill bundle file as a read-only entry and reveals it', async () => {
-    render(<ChatMessageToolUseSkill part={readSkillPart()} />);
+    // The skill's file links read the project from the shared context, not through `useProject`.
+    render(
+      <ProjectContext.Provider value={project}>
+        <ChatMessageToolUseSkill part={readSkillPart()} />
+      </ProjectContext.Provider>,
+    );
 
     await userEvent.click(screen.getByRole('button', { name: bundle.slug }));
 

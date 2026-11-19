@@ -83,7 +83,7 @@ import {
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
 import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';

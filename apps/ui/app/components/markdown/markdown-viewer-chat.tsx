@@ -11,7 +11,10 @@ import {
   ChatStreamingBlock,
   ChatStreamingFadeProvider,
 } from '@taucad/editor-ui/components/markdown/chat-streaming-block';
-import { ChatMarkdownHyperlink, rehypeChatFileLinks } from '#components/markdown/chat-markdown-hyperlink.js';
+import {
+  ChatMarkdownHyperlink,
+  rehypeChatFileLinks,
+} from '@taucad/editor-ui/components/markdown/chat-markdown-hyperlink';
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
 

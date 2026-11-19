@@ -13,7 +13,7 @@ type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
 /** What the card handed the link, so the wire record it mints is observable. */
 const linked = vi.hoisted(() => [] as Array<{ path: string; provenance: FileProvenance | undefined }>);
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({
     children,
     path,

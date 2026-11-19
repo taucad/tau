@@ -486,7 +486,7 @@ vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   },
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({ onSelect }: { readonly onSelect: (path: string) => void }) => (
     <button
       type='button'

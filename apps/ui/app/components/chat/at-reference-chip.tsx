@@ -4,7 +4,7 @@ import type { FileEntry } from '@taucad/types';
 import { parseCadReferenceTokens } from '@taucad/chat/references';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
 import { resolveAtReference } from '@taucad/chat-ui/utils/at-reference.utils';
 import type { ResolvedAtReference } from '@taucad/chat-ui/utils/at-reference.utils';

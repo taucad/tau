@@ -4,14 +4,15 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OpenRenderButton } from '#components/files/open-render-button.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
+import type { ProjectContextValue } from '@taucad/ui-core/contexts/project-context';
 
-const projectSend = vi.hoisted(() => vi.fn());
-
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    projectRef: { send: projectSend },
-  }),
-}));
+const projectSend = vi.fn();
+const project: ProjectContextValue = {
+  projectId: 'project-1',
+  projectRef: { send: projectSend },
+  editorRef: { send: vi.fn() },
+};
 
 beforeEach(() => {
   projectSend.mockReset();
@@ -25,9 +26,11 @@ describe('OpenRenderButton', () => {
   it('dispatches openInViewer for the entry path on click', async () => {
     const user = userEvent.setup();
     render(
-      <TooltipProvider>
-        <OpenRenderButton path='parts/wing.ts' />
-      </TooltipProvider>,
+      <ProjectContext.Provider value={project}>
+        <TooltipProvider>
+          <OpenRenderButton path='parts/wing.ts' />
+        </TooltipProvider>
+      </ProjectContext.Provider>,
     );
 
     await user.click(screen.getByRole('button', { name: /open/i }));
@@ -43,11 +46,13 @@ describe('OpenRenderButton', () => {
     const parentClick = vi.fn();
 
     render(
-      <TooltipProvider>
-        <div onClick={parentClick}>
-          <OpenRenderButton path='main.scad' />
-        </div>
-      </TooltipProvider>,
+      <ProjectContext.Provider value={project}>
+        <TooltipProvider>
+          <div onClick={parentClick}>
+            <OpenRenderButton path='main.scad' />
+          </div>
+        </TooltipProvider>
+      </ProjectContext.Provider>,
     );
 
     await user.click(screen.getByRole('button', { name: /open/i }));

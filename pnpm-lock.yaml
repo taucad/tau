@@ -1457,9 +1457,6 @@ importers:
       unified:
         specifier: 'catalog:'
         version: 11.0.5
-      unist-util-visit:
-        specifier: 'catalog:'
-        version: 5.1.0
       vscode-languageserver-protocol:
         specifier: ^3.18.0
         version: 3.18.4
@@ -3779,6 +3776,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
+      '@taucad/files-ui':
+        specifier: workspace:*
+        version: link:../files-ui
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem

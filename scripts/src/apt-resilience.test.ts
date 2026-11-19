@@ -67,6 +67,9 @@ const containerInstalls = [
   },
 ] as const;
 
+/** A GitHub Actions `${{ … }}` expression, built so the source holds no template-like string literal. */
+const expression = (body: string): string => ['$', '{{ ', body, ' }}'].join('');
+
 const isAptInstall = (step: Step): boolean => step.uses?.replace(/^\.\/\.tau-ci\//u, './') === `./${actionDirectory}`;
 
 describe('apt installs in workflows and composite actions', () => {
@@ -121,6 +124,52 @@ describe('apt installs in workflows and composite actions', () => {
     }
     // The sandbox action, the lavapipe and tool installs, and every former `--with-deps` site.
     expect(steps).toBeGreaterThanOrEqual(30);
+  });
+
+  it('should take the installer from the workflow’s own commit in a job that checks out another commit', () => {
+    const sparseCopy = (step: Step): boolean =>
+      step.uses?.startsWith('actions/checkout@') === true &&
+      step.with?.['path'] === '.tau-ci' &&
+      step.with['sparse-checkout'] === actionDirectory &&
+      String(step.with['sparse-checkout-cone-mode']) === 'false';
+    const ownCommit = expression('github.sha');
+    const sideLoaded: string[] = [];
+    for (const [where, steps] of lists.filter(([where]) => where.includes('#'))) {
+      const installs = steps.filter((step) => isAptInstall(step));
+      if (installs.length === 0) {
+        continue;
+      }
+      // The job's Tau checkout at the workspace root: none when the workspace is another repository's.
+      const workspace = steps.find(
+        (step) =>
+          step.uses?.startsWith('actions/checkout@') === true &&
+          step.with?.['path'] === undefined &&
+          step.with?.['repository'] === undefined,
+      );
+      if (workspace !== undefined && (workspace.with?.['ref'] ?? '') === '') {
+        // The installer is the checked-out commit's own; no copy beside it.
+        expect(
+          installs.map((step) => step.uses),
+          where,
+        ).toEqual(installs.map(() => `./${actionDirectory}`));
+        continue;
+      }
+      sideLoaded.push(where);
+      const copy = steps.findIndex((step) => sparseCopy(step));
+      expect(copy, `${where}: a sparse checkout of ${actionDirectory} at .tau-ci`).toBeGreaterThanOrEqual(0);
+      const copyStep = steps[copy];
+      // Another repository's workspace leaves checkout's default, the workflow's own commit.
+      if (workspace !== undefined) {
+        expect(copyStep?.with?.['ref'], where).toBe(ownCommit);
+      }
+      for (const step of installs) {
+        expect(step.uses, where).toBe(`./.tau-ci/${actionDirectory}`);
+        expect(steps.indexOf(step), where).toBeGreaterThan(copy);
+      }
+    }
+    // The release gate, the rehearsal gate, viewer parity (called with the candidate), the nightly rows, the
+    // release build, the staging harness, the publish spike and PicoVoxel's own workspaces.
+    expect(sideLoaded.length).toBeGreaterThanOrEqual(12);
   });
 
   it('should run the installer from the action, with apt retries and timeouts', () => {

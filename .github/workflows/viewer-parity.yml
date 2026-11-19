@@ -166,6 +166,16 @@ jobs:
         with:
           ref: ${{ inputs.ref || '' }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
@@ -176,7 +186,7 @@ jobs:
           name: viewer-parity-fixtures
           path: ${{ env.PARITY_FIXTURES_OUT }}
       - name: Install Xvfb and Chromium's system dependencies
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           packages: xvfb
           playwright-browsers: chromium
@@ -221,6 +231,16 @@ jobs:
         with:
           ref: ${{ inputs.ref || '' }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
@@ -231,7 +251,7 @@ jobs:
           name: viewer-parity-fixtures
           path: ${{ env.PARITY_FIXTURES_OUT }}
       - name: Install lavapipe and Chromium's system dependencies
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           packages: mesa-vulkan-drivers
           playwright-browsers: chromium

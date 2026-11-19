@@ -99,13 +99,23 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.throwaway-tag.result == 'success' && format('refs/tags/{0}', env.SPIKE_TAG) || '' }}
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
       - name: Install Chromium for the pack-install check (system dependencies)
         if: env.SPIKE_GATE == 'true'
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           playwright-browsers: chromium
       - name: Install Chromium for the pack-install check

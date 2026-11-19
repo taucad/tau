@@ -140,6 +140,16 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - &setup-nx
         name: Setup Nx Environment
@@ -148,7 +158,7 @@ jobs:
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
       - name: Install browsers for Vitest Browser (system dependencies)
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
@@ -172,7 +182,7 @@ jobs:
       # browsers' SwiftShader (`TAU_E2E_WEBGPU_PROFILE: software`); viewer-parity.yml
       # runs both side by side the same way.
       - name: Install a software Vulkan driver for native rendering
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           packages: mesa-vulkan-drivers
       - name: Select the software Vulkan driver
@@ -350,10 +360,20 @@ jobs:
       actions: 'read'
     steps:
       - *checkout
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - *setup-nx
 
       - name: Install Chromium for Vitest Browser (system dependencies)
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
@@ -540,6 +560,17 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'
@@ -547,7 +578,7 @@ jobs:
 
       - name: Install Chromium for Vitest Browser (system dependencies)
         if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/apt-install
+        uses: ./.tau-ci/.github/actions/apt-install
         with:
           playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser

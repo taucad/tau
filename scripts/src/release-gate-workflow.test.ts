@@ -345,12 +345,16 @@ describe('release-gate.yml', () => {
     });
     expect(rows.env).toEqual(row.env);
     expect(stepUsing(rows, 'actions/checkout@')?.with).toEqual(gatedCheckout);
-    // Every step of a queue row but its checkout and its artifact upload is the gate row's, verbatim.
+    // Every step of a queue row but its checkout and its artifact upload is the gate row's, verbatim, except that
+    // the gate row, which checks out the candidate, takes the apt installer from its own commit's copy at `.tau-ci`
+    // (one more step; apt-resilience.test.ts pins it).
     const own = new Set([stepUsing(row, 'actions/checkout@'), stepUsing(row, 'actions/upload-artifact@')]);
     for (const step of (row.steps ?? []).filter((candidate) => !own.has(candidate))) {
-      expect(stepNamed(rows, step.name ?? ''), step.name).toEqual(step);
+      const gateStep = stepNamed(rows, step.name ?? '');
+      const uses = gateStep?.uses?.replace(/^\.\/\.tau-ci\//u, './');
+      expect(gateStep === undefined ? undefined : { ...gateStep, uses }, step.name).toEqual(step);
     }
-    expect(rows.steps?.length).toBe(row.steps?.length);
+    expect(rows.steps?.length).toBe((row.steps?.length ?? 0) + 1);
   });
 
   describe('end-to-end suite list', () => {

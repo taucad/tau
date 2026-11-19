@@ -1095,17 +1095,24 @@ describe('PublicationsService.getShareForViewer', () => {
     expect(result.publication.id).toBe('pub_test');
   });
 
+  /**
+   * A link service whose version is behind the push (D19), so the read repairs it from a lease; `during` commits when
+   * the repair starts, as a write that lands while it runs would.
+   */
+  const repairingService = (database: TableDatabase, during: () => void): PublicationsService => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    Object.assign(database.rows(schema.publication)[0] ?? {}, { revisionId: '', manifestKey: '', kernels: [] });
+    database.rows(schema.projectGit).push({ projectId: 'proj_x', generation: 4, derivedGeneration: 2 });
+    afterFirstRead(database, schema.projectGit, during);
+    return createLinkService(database, { repositoryPath, storage: createStorageForManifest() });
+  };
+
   it('authorizes the viewer again when a repair re-reads a version a same-name private publish replaced', async () => {
     const database = seedLink({ link: { visibility: 'public' } });
-    const service = createLinkService(database, { storage: createStorageForManifest() });
     /* The repair runs; meanwhile a publish under the same name to people you invite reuses the version's id. */
-    vi.spyOn(
-      service as unknown as { rederivePublications: () => Promise<boolean> },
-      'rederivePublications',
-    ).mockImplementation(async () => {
+    const service = repairingService(database, () => {
       Object.assign(database.rows(schema.publication)[0] ?? {}, { title: 'Invited only' });
       Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'private' });
-      return true;
     });
 
     await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(UnauthorizedException);
@@ -1113,13 +1120,8 @@ describe('PublicationsService.getShareForViewer', () => {
 
   it('serves the repaired version, as the re-read link shows it, to a viewer that link still lets in', async () => {
     const database = seedLink({ link: { visibility: 'public' } });
-    const service = createLinkService(database, { storage: createStorageForManifest() });
-    vi.spyOn(
-      service as unknown as { rederivePublications: () => Promise<boolean> },
-      'rederivePublications',
-    ).mockImplementation(async () => {
+    const service = repairingService(database, () => {
       Object.assign(database.rows(schema.publication)[0] ?? {}, { title: 'Repaired' });
-      return true;
     });
 
     const result = await service.getShareForViewer({ shareId: 'shr_test' });
@@ -1130,13 +1132,8 @@ describe('PublicationsService.getShareForViewer', () => {
   it('serves nothing when a publish moves the link to another version while the repair runs', async () => {
     const database = seedLink({ link: { visibility: 'public' } });
     database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2' }));
-    const service = createLinkService(database, { storage: createStorageForManifest() });
-    vi.spyOn(
-      service as unknown as { rederivePublications: () => Promise<boolean> },
-      'rederivePublications',
-    ).mockImplementation(async () => {
+    const service = repairingService(database, () => {
       Object.assign(database.rows(schema.project)[0] ?? {}, { currentPublicationId: 'pub_newer' });
-      return true;
     });
 
     await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(NotFoundException);

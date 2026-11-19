@@ -774,12 +774,21 @@ export default defineConfig(({ command, mode }) => {
                   /*
                    * Adaptive app deployment mode D6, gate G1: an adaptive build's static Cloud Core (the mode owner,
                    * the financial session providers and purge, the port, the loader, the surface helper and every
-                   * facade) is one request per route class and stays out of the largest chunk. Pinned builds keep
-                   * today's chunking (I10).
+                   * facade) is one request per route class and stays out of the largest chunk. Only the listed
+                   * modules: their dependencies (React, the app runtime, the self-host renderings) stay where the
+                   * pinned builds put them. Pinned builds keep today's chunking (I10).
                    */
-                  ...(deploymentCeiling === 'adaptive' ? [{ name: 'cloud-core', test: cloudCoreModulePattern }] : []),
+                  ...(deploymentCeiling === 'adaptive'
+                    ? [{ name: 'cloud-core', test: cloudCoreModulePattern, includeDependenciesRecursively: false }]
+                    : []),
                 ],
               },
+              /*
+               * A group that leaves its dependencies out can form a cycle between chunks (Core reads the page's
+               * environment; the app runtime reads Core). Rolldown then needs this to keep every module body in source
+               * order, so no Core module runs before what it imports (I1: no startup path may throw).
+               */
+              ...(deploymentCeiling === 'adaptive' ? { strictExecutionOrder: true } : {}),
             },
           },
         },

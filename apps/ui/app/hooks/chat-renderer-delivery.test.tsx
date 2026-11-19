@@ -2,7 +2,7 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type * as ThemeModule from '#hooks/use-theme.js';

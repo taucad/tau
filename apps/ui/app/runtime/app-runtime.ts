@@ -46,7 +46,7 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { chatSdkSource } from '#services/chat-sdk-loader.js';
+import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 import type { LiveProjectSessions } from '#services/chat-session-store.js';
 import { selectLibraryRevision } from '@taucad/files-ui/runtime/project-library';
 import { ProjectLibrary } from '#runtime/project-library.js';

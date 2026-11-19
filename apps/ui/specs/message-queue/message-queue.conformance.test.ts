@@ -4,7 +4,7 @@ import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } fro
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { QueuedChatMessage } from '@taucad/chat-ui/db/chat-message-queue-store';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
-import { chatMessageQueueMachine } from '#machines/chat-message-queue.machine.js';
+import { chatMessageQueueMachine } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const specs = import.meta.dirname;
@@ -65,7 +65,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
         ]),
         sources: hashFiles(workspace, [
           'apps/libs/chat-ui/src/db/chat-message-queue-store.ts',
-          'apps/ui/app/machines/chat-message-queue.machine.ts',
+          'apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts',
           'apps/ui/app/machines/chat-session.machine.ts',
           'apps/ui/app/services/chat-session-store.ts',
           'apps/ui/app/chat-clients/chat-turn-host.tsx',

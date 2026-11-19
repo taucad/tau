@@ -8,12 +8,12 @@ import {
   createChatMessageQueueActor,
   chatMessageQueueMachine,
   chatMessageQueueIgnoredEvents,
-} from './chat-message-queue.machine.js';
+} from '#machines/chat-message-queue.machine.js';
 import type {
   ChatMessageQueueActors,
   ChatMessageQueueMachineInput,
   QueueAdvanceResult,
-} from './chat-message-queue.machine.js';
+} from '#machines/chat-message-queue.machine.js';
 
 const input = { chatId: 'chat', projectId: 'project' };
 const waiting: QueueAdvanceResult = { items: [], status: 'waiting' };

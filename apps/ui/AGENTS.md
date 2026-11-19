@@ -10,7 +10,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 - Close project-scoped workers, services, and subscriptions when project identity changes. Route editor, file, and revision transitions through their owning XState machines and filesystem authorities.
 - Finalize only interrupted tail tool parts: consult the RPC ledger for live tails and the host log for rebuilt tails. Follow [Interrupted Tool-Call Contract Policy](../../docs/policy/interrupted-tool-call-contract.md).
 - Keep the streaming skeleton in the run's single `TurnGroup`. Use `Chat.startupRequest` for durable first turns; `ChatSessionStore` restores refused or stopped sends with attachments.
-- Device composer records: chat-ui `db/composer-record-store`, `#machines/composer-record.machine`, `#hooks/composer-record`. Attachments: chat-ui `db/attachment-store`, `utils/attachment.utils`; `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
+- Device composer records: chat-ui `db/composer-record-store`, `machines/composer-record.machine`, `hooks/composer-record`. Attachments: chat-ui `db/attachment-store`, `utils/attachment.utils`; `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
 - Load editor code only for mounted source panes; keep grammars lazy. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
 - Follow the [chat request config](../../docs/policy/chat-request-config-policy.md), [SSR bundle](../../docs/policy/ssr-bundle-policy.md) and [progressive loading](../../docs/policy/progressive-loading-policy.md) policies.
 

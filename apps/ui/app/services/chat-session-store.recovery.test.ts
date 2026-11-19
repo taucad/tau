@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { UIMessageChunk, ChatStatus } from 'ai';

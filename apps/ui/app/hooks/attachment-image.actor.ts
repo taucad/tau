@@ -22,7 +22,7 @@ import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import type { AttachmentTranscodePort } from '@taucad/agent-host/wire';
 import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
-import { AttachmentRefusedError } from '#utils/attachment-refusal.js';
+import { AttachmentRefusedError } from '@taucad/chat-ui/utils/attachment-refusal';
 
 /** The image step's input: the queued image as read, and what the file claimed to be. */
 export type ResizeImageInput = {

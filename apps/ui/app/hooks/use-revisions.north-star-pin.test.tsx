@@ -10,7 +10,7 @@
  */
 
 import { beforeAll, describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { mock } from 'vitest-mock-extended';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';

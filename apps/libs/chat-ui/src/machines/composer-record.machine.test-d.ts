@@ -1,13 +1,13 @@
 import { expectTypeOf } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
-import type { ComposerRecord, ComposerRecordPatch } from '@taucad/chat-ui/db/composer-record-store';
-import { composerRecordMachine } from './composer-record.machine.js';
+import type { ComposerRecord, ComposerRecordPatch } from '#db/composer-record-store.js';
+import { composerRecordMachine } from '#machines/composer-record.machine.js';
 import type {
   ComposerRecordMachineContext,
   ComposerRecordMachineEmitted,
   ComposerRecordMachineEvent,
-} from './composer-record.machine.js';
+} from '#machines/composer-record.machine.js';
 
 expectTypeOf(composerRecordMachine).toExtend<AnyStateMachine>();
 

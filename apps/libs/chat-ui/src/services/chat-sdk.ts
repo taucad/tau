@@ -4,7 +4,7 @@
  * class's interactive tier holds `ai` (`runtime/import-boundary.node.test.ts`, `lib/critical-graph.node.test.ts`).
  */
 import { createUIMessageStream, readUIMessageStream } from 'ai';
-import { createChatInstance } from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
+import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
 
 /**
  * What the chat uses of the AI SDK. Each member reads its binding when used, as a direct import's call site would.

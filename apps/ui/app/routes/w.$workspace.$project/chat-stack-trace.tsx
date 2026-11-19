@@ -5,7 +5,7 @@ import { idPrefix, languageFromKernel } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { formatViewerIssue, ViewerIssues as ViewerIssuesBar } from '@taucad/workbench-panes/shell/viewer-issues';
 import type { ViewerIssueLocation, ViewerNotice } from '@taucad/workbench-panes/shell/viewer-issues';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
+import { MarkdownViewer } from '@taucad/editor-ui/components/markdown/markdown-viewer';
 import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';

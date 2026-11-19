@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import type { BundledTypesPayload } from '#machines/bundled-types-mount.js';
-import { bundledTypesSentinelPath, ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
+import { populateBundledTypesMount } from '#lib/bundled-types-mount.js';
+import type { BundledTypesPayload } from '#lib/bundled-types-mount.js';
+import { bundledTypesSentinelPath, ensureBundledTypesMount } from '#lib/bundled-types-sentinel.js';
 
 const payload: BundledTypesPayload = [
   { packageName: '@taucad/replicad', content: 'export declare const a: 1;', files: { 'sub.d.ts': 'export {};' } },

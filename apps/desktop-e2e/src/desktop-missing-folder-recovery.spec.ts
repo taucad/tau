@@ -118,6 +118,64 @@ const snapshotTree = async (root: string): Promise<readonly string[]> => {
   return lines.toSorted();
 };
 
+type ChatRecordFile = Readonly<Record<string, unknown>> & {
+  readonly startupRequest?: { readonly messageId?: unknown };
+};
+
+/** Every chat's `chat.json` under `root`, by chat directory. */
+const readChatRecords = async (root: string): Promise<ReadonlyMap<string, ChatRecordFile | undefined>> => {
+  const ids = await readdir(root).catch(() => []);
+  const records = await Promise.all(
+    ids.map(async (id) => [id, await readJson<ChatRecordFile>(join(root, id, 'chat.json'))] as const),
+  );
+  return new Map(records);
+};
+
+/**
+ * The chats under `root` hold what they held before, with one write that opening a chat may make.
+ *
+ * A chat created from Home carries its first prompt as a one-shot start intent, `startupRequest`, until the host has
+ * durably accepted that Start. The producer clears it when the acceptance lands; when the session that dispatched it is
+ * gone by then, the next open of the chat finds the prompt's turn already in the log and clears the intent instead,
+ * without resending it (`ChatSessionStore.startPendingSeed`). That write drops only the accepted intent and moves
+ * `updatedAt`: the prompt itself is the log's turn, which must be unchanged. Every other file, the log included, is
+ * compared byte for byte and by modification time; every other field of every record must be equal.
+ */
+const expectChatHistoryKept = async (
+  root: string,
+  before: { readonly tree: readonly string[]; readonly records: ReadonlyMap<string, ChatRecordFile | undefined> },
+): Promise<void> => {
+  const pathOf = (line: string): string => line.split(' ')[0] ?? '';
+  const isRecordLine = (line: string): boolean => pathOf(line).endsWith('/chat.json');
+  const isOtherLine = (line: string): boolean => !isRecordLine(line);
+  const tree = await snapshotTree(root);
+  expect(tree.filter((line) => isOtherLine(line))).toEqual(before.tree.filter((line) => isOtherLine(line)));
+  expect(tree.filter((line) => isRecordLine(line)).map((line) => pathOf(line))).toEqual(
+    before.tree.filter((line) => isRecordLine(line)).map((line) => pathOf(line)),
+  );
+  const records = await readChatRecords(root);
+  const logs = new Map(
+    await Promise.all(
+      [...before.records.keys()].map(
+        async (id) => [id, await readFile(join(root, id, 'events.jsonl'), 'utf8').catch(() => '')] as const,
+      ),
+    ),
+  );
+  for (const [id, previous] of before.records) {
+    const current = records.get(id);
+    if (previous?.startupRequest === undefined || current?.startupRequest !== undefined) {
+      expect(current, `${id}/chat.json`).toEqual(previous);
+      continue;
+    }
+    const { startupRequest, updatedAt: _previousUpdatedAt, ...kept } = previous;
+    const { updatedAt: _currentUpdatedAt, ...now } = current ?? {};
+    expect(now, `${id}/chat.json without the accepted start intent`).toEqual(kept);
+    const { messageId } = startupRequest;
+    expect(typeof messageId).toBe('string');
+    expect(logs.get(id), `${id}'s log holds the cleared intent's turn`).toContain(String(messageId));
+  }
+};
+
 const createInTrigger = (page: Page): ReturnType<Page['getByRole']> =>
   page.getByRole('button', { name: /^Create in /u }).first();
 
@@ -396,6 +454,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
 
       const chats = join(project, '.tau', 'chats');
       const chatsBefore = await snapshotTree(chats);
+      const recordsBefore = await readChatRecords(chats);
       const manifest = await readJson<{ readonly name: string }>(join(project, 'tau.json'));
       if (manifest === undefined) {
         throw new Error('The folder project has no readable manifest.');
@@ -424,7 +483,8 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
       await second.page.goto('app://tau/projects');
       await second.page.getByRole('link', { name: `Open ${manifest.name}`, exact: true }).click();
       await expectVisible(second.page.getByText(folderPrompt).first(), homeReadyTimeout);
-      expect(await snapshotTree(chats)).toEqual(chatsBefore);
+      /* Removal and re-adding wrote nothing (above); opening the chat may clear its accepted start intent. */
+      await expectChatHistoryKept(chats, { tree: chatsBefore, records: recordsBefore });
       await closeSession(second);
 
       const third = track(await launchDesktopApp({ token, profileRoot: profile, preserveProfile: true }));

@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { TypeScriptProjectService } from '@taucad/lsp/typescript-worker/typescript-service';
 import { kinematicsTypes } from '@taucad/api-extractor/authoring-types';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import { TypeAcquisitionController } from '@taucad/editor-ui/lib/typescript-language/type-acquisition';
-import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { populateBundledTypesMount } from '#lib/bundled-types-mount.js';
+import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
+import { EditorDocument } from '#lib/editor-document.js';
 
 describe('bundled authoring acquisition', () => {
   it('loads real kinematics and spatial through the mounted dependency capability without a manifest dependency', async () => {

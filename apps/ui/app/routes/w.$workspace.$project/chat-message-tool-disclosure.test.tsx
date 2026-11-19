@@ -26,7 +26,7 @@ vi.mock('#components/files/viewer-link.js', () => ({
 vi.mock('#components/files/directory-link.js', () => ({
   DirectoryLink: ({ children }: { children: ReactNode }) => <a href='#directory'>{children}</a>,
 }));
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 

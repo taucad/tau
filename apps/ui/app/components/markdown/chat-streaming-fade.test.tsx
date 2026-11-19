@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Root } from 'hast';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-import { createChatStreamingFadePlugin, getStreamingArrivalStart } from '#components/markdown/chat-streaming-fade.js';
+import {
+  createChatStreamingFadePlugin,
+  getStreamingArrivalStart,
+} from '@taucad/editor-ui/components/markdown/chat-streaming-fade';
 
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ isHighContrast: false, theme: 'light' }) }));
 

@@ -3761,15 +3761,27 @@ importers:
       '@codemirror/view':
         specifier: 'catalog:'
         version: 6.43.15
+      '@streamdown/cjk':
+        specifier: 'catalog:'
+        version: 1.0.4(@types/mdast@4.0.4)(micromark-util-types@2.0.3)(micromark@4.0.3)(react@19.3.1)(unified@11.0.5)
+      '@streamdown/math':
+        specifier: 'catalog:'
+        version: 1.0.3(react@19.3.1)
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../../libs/api-extractor
+      '@taucad/chat-ui':
+        specifier: workspace:*
+        version: link:../chat-ui
       '@taucad/csharp-language':
         specifier: workspace:*
         version: link:../csharp-language
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
@@ -3812,9 +3824,21 @@ importers:
       diff:
         specifier: ^8.0.4
         version: 8.0.4
+      hast-util-sanitize:
+        specifier: 'catalog:'
+        version: 5.0.2
       json-rpc-2.0:
         specifier: ^1.7.1
         version: 1.8.1
+      katex:
+        specifier: 'catalog:'
+        version: 0.18.2
+      lucide-react:
+        specifier: 'catalog:'
+        version: 0.552.0(react@19.3.1)
+      react-router:
+        specifier: 'catalog:'
+        version: 8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       rehype-sanitize:
         specifier: 'catalog:'
         version: 6.0.0
@@ -3827,12 +3851,18 @@ importers:
       remark-rehype:
         specifier: 'catalog:'
         version: 11.1.2
+      streamdown:
+        specifier: 'catalog:'
+        version: 2.7.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       uint8array-extras:
         specifier: 'catalog:'
         version: 1.6.0
       unified:
         specifier: 'catalog:'
         version: 11.0.5
+      unist-util-visit:
+        specifier: 'catalog:'
+        version: 5.1.0
       vscode-json-languageservice:
         specifier: 'catalog:'
         version: 5.7.2
@@ -3858,6 +3888,9 @@ importers:
       '@testing-library/user-event':
         specifier: ^14.6.1
         version: 14.6.7(@testing-library/dom@10.4.2)
+      '@types/hast':
+        specifier: ^3.0.4
+        version: 3.0.5
       react:
         specifier: 'catalog:'
         version: 19.3.1

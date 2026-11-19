@@ -45,10 +45,10 @@ import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extract
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
-import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
-import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
+import { populateBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-mount';
+import type { BundledTypesMountEntry, BundledTypesRoot } from '@taucad/editor-ui/lib/bundled-types-mount';
+import { ensureBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-sentinel';
+import { createLazyBundledTypesReads } from '@taucad/editor-ui/lib/bundled-types-lazy';
 import { homeBackendFromWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
 import { listWorkspaceDirectories } from '@taucad/files-ui/machines/file-manager-sync-fs-adapter';
 import {
@@ -68,7 +68,10 @@ import { createRevisionCompute } from '@taucad/revisions-ui/machines/revision-co
 import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
 import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
 import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
-import { createNodeFsPortBroker, servicesUnavailableCode } from '#machines/file-manager.worker.node-port.js';
+import {
+  createNodeFsPortBroker,
+  servicesUnavailableCode,
+} from '@taucad/files-ui/machines/file-manager-worker-node-port';
 
 /**
  * Handshake for the node filesystem backend (desktop only).

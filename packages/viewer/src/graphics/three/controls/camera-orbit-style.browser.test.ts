@@ -374,7 +374,7 @@ describe('orbit style in the browser (TA5)', () => {
     expect(restored.up.angleTo(unit(poleView.up))).toBeLessThan(1e-9);
 
     const directions = verticalDrag(viewer, { steps: 10, step: -12 });
-    expect(directions.every(isFiniteVector)).toBe(true);
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
     expect(isFiniteVector(readView(viewer).up)).toBe(true);
     expect(largestStep(directions)).toBeLessThan(0.2);
   });
@@ -386,7 +386,7 @@ describe('orbit style in the browser (TA5)', () => {
     expect(restored.up.toArray()).toEqual([0, 0, 1]);
 
     const directions = verticalDrag(viewer, { steps: 10, step: -12 });
-    expect(directions.every(isFiniteVector)).toBe(true);
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
     expect(largestStep(directions)).toBeLessThan(0.2);
     // The drag left the pole about the world up: the view is upright.
     expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);

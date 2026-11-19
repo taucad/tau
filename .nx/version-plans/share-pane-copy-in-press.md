@@ -1,6 +1,6 @@
 ---
 workbench-panes: minor
-agent-plugin: patch
+agent-plugin: minor
 ---
 
 The Share pane's link methods copy inside the press.

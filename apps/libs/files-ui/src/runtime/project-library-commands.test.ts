@@ -9,14 +9,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { mock } from 'vitest-mock-extended';
-import type { ChatProjection } from '#machines/chat-projection.logic.js';
-import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import type { Chat } from '@taucad/chat';
 import { ProjectLibrary } from '#runtime/project-library.js';
-import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
+import type { ProjectLibraryServices } from '#runtime/project-library.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
-import type { ChatStorage } from '#types/storage.types.js';
+import type { ProjectLibraryRootFacade, ProjectLibraryWorker } from '#types/project-library-io.types.js';
+import type { ChatStorage } from '#types/chat-storage.types.js';
 
 /** The chats each record client's store holds; a client with none holds no chats. */
 const stores = vi.hoisted(() => new WeakMap<WeakKey, readonly unknown[]>());
@@ -50,23 +49,44 @@ vi.mock('@taucad/agent-host/browser', () => ({
   },
 }));
 
-vi.mock('#hooks/object-store-worker.js', () => ({
-  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
-}));
+/** A chat's projection, as the stand-in `isCaughtUp` below reads it. */
+type Projection = Readonly<{ caughtUp: boolean }>;
 
-vi.mock('comlink', () => ({ wrap: vi.fn(() => ({})) }));
+function notCalled(): never {
+  throw new Error('not called in this test');
+}
 
-vi.mock('#db/chat-file-storage.js', () => ({
-  createChatFileStore: ({ client }: { client: WeakKey }) => ({
-    getChatsForResource: async () => [...(stores.get(client) ?? [])],
-    readChatLog: async (chatId: string) => new TextEncoder().encode(logs.get(chatId) ?? ''),
+/** The app's services: a worker double, and a chat store over each record client's chats and logs. */
+const services: ProjectLibraryServices<ProjectLibraryWorker, ProjectLibraryRootFacade, Projection> = {
+  startObjectStore: () => ({
+    worker: { terminate: vi.fn() } as unknown as Worker,
+    wrappedWorker: mock<ProjectLibraryWorker>(),
   }),
-}));
+  reportFault: vi.fn(),
+  reportWorkerFailed: vi.fn(),
+  buildSkew: { isSuperseded: () => false, subscribe: () => () => undefined },
+  createChatStore: ({ client }) =>
+    mock<ChatStorage>({
+      getChatsForResource: async () => [...((stores.get(client) ?? []) as Chat[])],
+      readChatLog: async (chatId: string) => new TextEncoder().encode(logs.get(chatId) ?? ''),
+    }),
+  clearLegacyListing: () => undefined,
+  projectTemplates: {
+    createEntrylessProject: notCalled,
+    createInitialProject: notCalled,
+    getKernelOption: notCalled,
+    getKernelDependencies: notCalled,
+    getKernelProjectTemplate: notCalled,
+  },
+  buildUserMessage: notCalled,
+  cloudIntent: { set: notCalled },
+  isCaughtUp: (projection) => projection.caughtUp,
+};
 
 /** A chat log, as the stand-in reader below reads it: `running` holds a run that has not ended. */
 const logWithRun = (ended: boolean): string => (ended ? 'ended' : 'running');
 /* A read owner that admits every read at once: no observation runs in these rows. */
-vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOriginal) => ({
+vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: ChatStorage) => ({
     connect: () => () => undefined,
@@ -81,8 +101,8 @@ vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOr
 const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages: [], createdAt: 0, updatedAt: 0 });
 
 /** A root file facade whose chat store holds `chats` for every project. */
-const facadeWith = (chats: readonly Chat[]): ProjectLibraryFacade => {
-  const fileManager = mock<ProjectLibraryFacade>();
+const facadeWith = (chats: readonly Chat[]): ProjectLibraryRootFacade => {
+  const fileManager = mock<ProjectLibraryRootFacade>();
   stores.set(fileManager.recordFiles, chats);
   return fileManager;
 };
@@ -125,20 +145,22 @@ const chatSessionsOf = ({
   caughtUp = true,
   liveChatIds = [],
 }: Readonly<{ observed?: readonly string[]; caughtUp?: boolean; liveChatIds?: readonly string[] }>) =>
-  mock<ProjectLibraryChatSessions>({
+  mock<ProjectLibraryChatSessions<Projection>>({
     observedChatIdsOf: () => observed,
-    getProjection: () => mock<ChatProjection>({ ledger: { position: { cursor: caughtUp ? 1 : 0 } }, endCursor: 1 }),
-    getProjectClosePlan: async () => mock<ProjectClosePlan>({ liveChatIds: [...liveChatIds] }),
+    getProjection: () => ({ caughtUp }),
+    getProjectClosePlan: async () => ({ liveChatIds: [...liveChatIds] }),
   });
 
-const libraries: ProjectLibrary[] = [];
+type Library = ProjectLibrary<ProjectLibraryWorker, ProjectLibraryRootFacade, Projection>;
+const libraries: Library[] = [];
 const createLibrary = (
   sessions: ProjectLibrarySessions,
-  chatSessions: ProjectLibraryChatSessions,
+  chatSessions: ProjectLibraryChatSessions<Projection>,
   chats: readonly Chat[],
-): ProjectLibrary => {
+): Library => {
   const root = testRootFiles(facadeWith(chats));
   const library = new ProjectLibrary({
+    services,
     queryClient: new QueryClient(),
     sessions: () => sessions,
     chatSessions: () => chatSessions,
@@ -236,16 +258,10 @@ describe('ProjectLibrary project commands (A4a, row L7)', () => {
     expect(registry.sent).toEqual([]);
   });
 
-  it('should read the registry and the chat store the app runtime composed it with', async () => {
-    const { createAppRuntime, selectRuntimeProjectLibrary } = await import('#runtime/app-runtime.js');
-    const runtime = createAppRuntime({ idleFileManagers: true });
-    const library = selectRuntimeProjectLibrary(runtime);
-    /* Neither refuses for want of the registry or the chat store, which a library built without them would. */
-    await expect(library.commands.closeProjectSession('p1')).resolves.toBeUndefined();
-    await expect(library.commands.verifyProjectQuiescent('p1')).resolves.toBeUndefined();
+  it('should refuse a command that asks the registry when it was built without one', async () => {
     const bare = createLibrary(registryOf([]), chatSessionsOf({}), []);
     const root = testRootFiles(facadeWith([]));
-    const unwired = new ProjectLibrary({ queryClient: new QueryClient(), rootFiles: () => root });
+    const unwired = new ProjectLibrary({ services, queryClient: new QueryClient(), rootFiles: () => root });
     libraries.push(unwired);
     await expect(unwired.commands.closeProjectSession('p1')).rejects.toThrow('built without the sessions registry');
     await expect(bare.commands.closeProjectSession('p1')).resolves.toBeUndefined();

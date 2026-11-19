@@ -831,8 +831,6 @@
     "app/runtime/leases.test.ts": 0.4,
     "app/runtime/picogk-browser-assets.test.ts": 0.3,
     "app/runtime/plugin-source-surface.test.ts": 1.1,
-    "app/runtime/project-library-commands.test-d.ts": 6.6,
-    "app/runtime/project-library-commands.test.ts": 2.1,
     "app/runtime/project-library.billing-fence.test.tsx": 1.8,
     "app/runtime/project-library.test.ts": 4.7,
     "app/runtime/project-listing-writer.node.test.ts": 0.2,

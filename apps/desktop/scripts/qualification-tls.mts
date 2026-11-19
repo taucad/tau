@@ -57,7 +57,14 @@ export const linuxConsumerTlsOwner = (name: string): QualificationTlsOwner => {
       asConsumer(['/bin/sh', '-c', 'mkdir -p -m 700 -- "$1" && ls -A -- "$1"', 'sh', path]).trim().length === 0,
   };
 };
-const operationSchema = z.enum(['nss', 'windows', 'macSystemTrust', 'linuxFile', 'linuxRefresh']);
+const operationSchema = z.enum(['nss', 'windows', 'windowsMachine', 'macSystemTrust', 'linuxFile', 'linuxRefresh']);
+/*
+ * Adding a root to (or deleting one from) the CurrentUser Root store raises a modal security warning that a hosted
+ * Windows runner cannot answer, so `certutil -user -addstore Root` blocks until its spawn timeout. The elevated
+ * runner's LocalMachine Root store takes the same root without a prompt, and the user's logical Root store, which
+ * the app's Chromium and Node TLS read, includes it. A non-elevated host fails fast with access denied instead.
+ * `windows` stays only to remove a CurrentUser root an older journal recorded.
+ */
 /*
  * A hosted macOS runner has no session that can answer a trust-settings authorization: user-domain
  * `add-trusted-cert` and admin-domain `remove-trusted-cert` both block on SecurityAgent until killed, and
@@ -137,6 +144,13 @@ const removeOperation = async (
       const roots = command('certutil', ['-user', '-store', 'Root']).replaceAll(/\s/gu, '').toUpperCase();
       if (roots.includes(journal.fingerprint)) {
         command('certutil', ['-user', '-delstore', 'Root', journal.fingerprint]);
+      }
+      break;
+    }
+    case 'windowsMachine': {
+      const roots = command('certutil', ['-store', 'Root']).replaceAll(/\s/gu, '').toUpperCase();
+      if (roots.includes(journal.fingerprint)) {
+        command('certutil', ['-delstore', 'Root', journal.fingerprint]);
       }
       break;
     }
@@ -362,8 +376,8 @@ export const prepareQualificationTls = async (
     };
     switch (owner.platform) {
       case 'win32': {
-        await acquire(['windows'], () => {
-          command('certutil', ['-user', '-addstore', 'Root', caPath]);
+        await acquire(['windowsMachine'], () => {
+          command('certutil', ['-addstore', 'Root', caPath]);
         });
         break;
       }

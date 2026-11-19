@@ -30,8 +30,8 @@ export const projectReadinessStates: readonly ProjectReadiness[] = [
 export type ProjectReadinessReading = Readonly<{
   state: ProjectReadiness;
   /**
-   * The checkout and head the state is about; `undefined` before a head exists while a remote is attached, whose
-   * tree is not known yet.
+   * The checkout and head the state is about; `undefined` before a head exists while a remote is recorded, being
+   * attached or not yet known, whose tree is not known yet.
    */
   tree: string | undefined;
 }>;
@@ -76,6 +76,19 @@ export type ReadinessSource = Pick<
   }>;
 
 /**
+ * Whether the checkout's files are the whole project: no remote is recorded and none is being attached (I7).
+ *
+ * A connect names its kind from its first step, so a remote being attached is never mistaken for none; one that fails
+ * and leaves no remote (an attempt undone by `abandoning`, or one that never recorded its remote) is none again. While
+ * the remotes list is still being read, whether one is recorded is not known.
+ *
+ * @param remote - The remote facet.
+ * @returns `true` when no remote is recorded or being attached.
+ */
+const isLocalOnly = (remote: ReadinessSource['remote']): boolean =>
+  remote.reading !== true && (remote.kind === 'none' || (remote.phase === 'failed' && remote.url === undefined));
+
+/**
  * The tree a reading is about (I7).
  *
  * With no revision and no remote the checkout's files are the whole project: a tree of their own. Attaching a remote
@@ -86,11 +99,11 @@ export type ReadinessSource = Pick<
  * @param status - The projection being read.
  * @param treeWrites - How many writes of another revision's tree have begun on this checkout.
  * @param unrevised - Whether no revision is behind the checkout and no tree write has begun.
- * @returns The tree key, or `undefined` while a remote is attached and its tree is not known.
+ * @returns The tree key, or `undefined` while a remote is recorded, attached or not yet known, and its tree is not.
  */
 const treeOf = (status: ReadinessSource, treeWrites: number, unrevised: boolean): string | undefined => {
   if (unrevised) {
-    return status.remote.phase === 'none' ? `${status.checkoutId ?? ''}::local` : undefined;
+    return isLocalOnly(status.remote) ? `${status.checkoutId ?? ''}::local` : undefined;
   }
   const failed = status.treeWriteFailed === true ? ':failed' : '';
   return `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}${failed}`;

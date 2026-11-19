@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { ReadinessSource } from '#open/readiness.js';
 import { projectReadinessStates, reachesReadiness, readinessOf, settleReadiness } from '#open/readiness.js';
 
-const remote = (phase: ReadinessSource['remote']['phase']): ReadinessSource['remote'] => ({
+const remote = (
+  phase: ReadinessSource['remote']['phase'],
+  changes: Partial<ReadinessSource['remote']> = {},
+): ReadinessSource['remote'] => ({
   kind: phase === 'none' ? 'none' : 'tau',
-  url: undefined,
+  url: phase === 'connected' ? 'https://api.test/v1/projects/p.git' : undefined,
   phase,
   storage: undefined,
   overQuota: [],
@@ -14,6 +17,7 @@ const remote = (phase: ReadinessSource['remote']['phase']): ReadinessSource['rem
   fetchOnly: false,
   provider: undefined,
   repositoryId: undefined,
+  ...changes,
 });
 
 const source = (changes: Partial<ReadinessSource> = {}): ReadinessSource => ({
@@ -218,6 +222,52 @@ describe('settleReadiness', () => {
     expect(settleReadiness(first, readinessOf(local, false))).toEqual(first);
     /* Its first revision is a new tree, complete on its own reading. */
     expect(settleReadiness(first, readinessOf(source({ remote: remote('none') }))).state).toBe('filled');
+  });
+
+  /*
+   * A connect that fails after recording its remote removes it again (`abandoning`) and lands in `failed` with no
+   * remote: nothing is attached and nothing will be pulled, so the project is the local one it was (I7).
+   */
+  it('comes back to the local project’s completeness when a connect fails and leaves no remote', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    expect(connecting.state).toBe('connected');
+    const abandoned = remote('failed', { kind: 'none', url: undefined, error: 'Not on this plan.' });
+    const failed = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, remote: abandoned }), false),
+    );
+    expect(failed).toEqual(local);
+    /* A connect whose remote was never recorded fails with its kind still named, and leaves no remote either. */
+    const unrecorded = remote('failed', { kind: 'tau', url: undefined, error: 'Could not write the remote.' });
+    expect(readinessOf(source({ headRevisionId: undefined, remote: unrecorded }), false)).toEqual(local);
+  });
+
+  it('follows an attached remote that holds no tree back to filled', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    const applied = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, sync: { ...source().sync, hasAppliedRemote: true } }), false),
+    );
+    expect(applied.state).toBe('filled');
+  });
+
+  it('keeps a project with no head unknown while its remotes list is still being read (I7)', () => {
+    const reading = readinessOf(source({ headRevisionId: undefined, remote: remote('none', { reading: true }) }));
+    expect(reading).toEqual({ state: 'connected', tree: undefined });
+    const retrying = remote('failed', { kind: 'none', error: 'config unreadable', reading: true });
+    expect(readinessOf(source({ headRevisionId: undefined, remote: retrying })).state).toBe('connected');
+    /* The read settles on no remote: the local project, complete. */
+    expect(
+      settleReadiness(reading, readinessOf(source({ headRevisionId: undefined, remote: remote('none') }))).state,
+    ).toBe('filled');
   });
 
   it('keeps a project with a head as it is when a remote is attached', () => {

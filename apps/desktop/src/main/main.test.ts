@@ -3053,7 +3053,7 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   it(
     'should not wait for the page to save when a Squirrel update restarts before shell-mounted, and log why (N1)',
     async () => {
-      /* macOS and Windows: Squirrel's `quitAndInstall` runs after the updater's `prepareToRestart`. */
+      /* On macOS and Windows, Squirrel's `quitAndInstall` runs after the updater's `prepareToRestart`. */
       state.autoQuiesce = false;
       await booted();
       await vi.waitFor(() => {

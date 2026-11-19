@@ -15,14 +15,14 @@ import { probeImage } from '@taucad/utils/image-probe';
 import { handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
-import { draftMachine, pendingDraftImages } from '#hooks/draft.machine.js';
-import type { DraftAttachmentModel, PendingDraftImage } from '#hooks/draft.machine.js';
+import { draftMachine, pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
+import type { DraftAttachmentModel, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import { attachmentImageBackend } from '#services/attachment-image-backend.js';
 import type { AttachmentImageClient } from '#services/attachment-image.service.js';
 import { AttachmentImageService } from '#services/attachment-image.service.js';
 import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
-import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
+import { attachmentRefusalCopy } from '@taucad/chat-ui/utils/attachment-refusal';
 
 const fixtureUrls = import.meta.glob<string>('../../../../packages/plugins/image/src/raster/fixtures/*', {
   query: '?url',

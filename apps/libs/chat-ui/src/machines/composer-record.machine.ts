@@ -20,8 +20,8 @@ import type {
   ComposerRecordPatch,
   ComposerRecordReadResult,
   ComposerRecordStore,
-} from '@taucad/chat-ui/db/composer-record-store';
-import { isComposerRecordInputError } from '@taucad/chat-ui/db/composer-record-store';
+} from '#db/composer-record-store.js';
+import { isComposerRecordInputError } from '#db/composer-record-store.js';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { getRetryDelay } from '@taucad/ui-core/utils/backoff.utils';
 

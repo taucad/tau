@@ -1,8 +1,8 @@
 import { expectTypeOf } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
-import { chatMessageQueueMachine } from './chat-message-queue.machine.js';
-import type { ChatMessageQueueActors, ChatMessageQueueMachineInput } from './chat-message-queue.machine.js';
+import { chatMessageQueueMachine } from '#machines/chat-message-queue.machine.js';
+import type { ChatMessageQueueActors, ChatMessageQueueMachineInput } from '#machines/chat-message-queue.machine.js';
 
 expectTypeOf(chatMessageQueueMachine).toExtend<AnyStateMachine>();
 

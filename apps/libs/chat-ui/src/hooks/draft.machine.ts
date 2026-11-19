@@ -38,8 +38,8 @@ import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { isAttachmentMediaType } from '@taucad/agent-host/wire';
-import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
-import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
+import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
 
 /**
  * An attachment held by a draft: a reference, whose `byteLength` is known only

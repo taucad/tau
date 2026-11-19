@@ -27,7 +27,7 @@ import { formatExportDate } from '@taucad/ui-core/utils/date.utils';
 import { getRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { AttachmentName, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
-import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { RequestTerminationCause } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type { ResolvedModel } from '#hooks/use-models.js';
 
 /**

@@ -16,15 +16,11 @@ import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MyUIMessage } from '@taucad/chat';
-import type {
-  ComposerRecord,
-  ComposerRecordPatch,
-  ComposerRecordReadResult,
-} from '@taucad/chat-ui/db/composer-record-store';
-import { ComposerRecordInputError } from '@taucad/chat-ui/db/composer-record-store';
-import * as machineModule from './composer-record.machine.js';
-import { composerRecordIgnoredEvents, composerRecordMachine } from './composer-record.machine.js';
-import type { ComposerRecordMachineEmitted } from './composer-record.machine.js';
+import type { ComposerRecord, ComposerRecordPatch, ComposerRecordReadResult } from '#db/composer-record-store.js';
+import { ComposerRecordInputError } from '#db/composer-record-store.js';
+import * as machineModule from '#machines/composer-record.machine.js';
+import { composerRecordIgnoredEvents, composerRecordMachine } from '#machines/composer-record.machine.js';
+import type { ComposerRecordMachineEmitted } from '#machines/composer-record.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;

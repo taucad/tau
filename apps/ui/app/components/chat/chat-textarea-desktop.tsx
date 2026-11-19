@@ -47,7 +47,7 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
 import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
-import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';

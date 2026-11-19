@@ -7,24 +7,19 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
+import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { ShareError } from '@taucad/share/provider';
-import type { RevisionRow, RevisionTag } from '@taucad/revisions';
-import { entitlementsFromTier } from '@taucad/billing';
+import type { PublishDraft, RevisionRow, RevisionStatusProjection, RevisionTag } from '@taucad/revisions';
 import {
   ProjectSharePanel,
   missingModelFileMessage,
   publishedVersionLabel,
 } from '#components/publish/project-share-panel.js';
-import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
-import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
-import type * as shareProvidersModule from '#lib/share-providers.js';
+import { ProjectShareServicesProvider } from '#components/publish/project-share-services.js';
+import type { ProjectShareServices } from '#components/publish/project-share-services.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { store as preferenceStore } from '#hooks/use-cookie.js';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { metaConfig } from '#constants/meta.constants.js';
 
 const portableProviderPublish = vi.hoisted(() => vi.fn());
 const portableProviderRepublish = vi.hoisted(() => vi.fn());
@@ -36,7 +31,6 @@ const portableProviderLoad = vi.hoisted(() =>
     unpublish: portableProviderUnpublish,
   })),
 );
-const shareProviderPreference = `${metaConfig.cookiePrefix}${cookieName.shareProvider}`;
 const getGithubGistConnectionStatus = vi.hoisted(() => vi.fn(async () => 'not-connected'));
 const connectGithubGist = vi.hoisted(() => vi.fn());
 const awaitGithubGistConnection = vi.hoisted(() => vi.fn<(signal: AbortSignal) => Promise<boolean>>());
@@ -47,66 +41,158 @@ const portableContext = {
   fetch: globalThis.fetch,
 };
 
-vi.mock('#lib/share-providers.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof shareProvidersModule>();
-  return {
-    ...actual,
-    withBrowserShareProviderContext: async (operation: (context: typeof portableContext) => Promise<unknown>) => {
-      try {
-        return await operation(portableContext);
-      } finally {
-        portableContextDispose();
-      }
-    },
-    getGithubGistConnectionStatus,
-    connectGithubGist,
-    awaitGithubGistConnection,
-    shareProviderRegistry: {
-      descriptors: [
-        { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'tau', label: 'Cloud link', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
-      ],
-      load: portableProviderLoad,
-    },
-  };
-});
+/* The remembered sharing method (R8): the app keeps it in a cookie, which outlives one mount of the panel. */
+const shareMethodPreference = new Map<'method', unknown>();
 
-/* eslint-disable @typescript-eslint/naming-convention -- mocked environment exports use environment-variable casing. */
-vi.mock('#environment.config.js', () => ({
-  ENV: { TAU_API_URL: 'https://api.example' },
-}));
-/* eslint-enable @typescript-eslint/naming-convention -- end mocked environment exports. */
+const emptyStatus = (): RevisionStatusProjection => ({
+  projectId: 'p',
+  checkoutId: 'live',
+  checkoutRoot: '/projects/p',
+  line: { kind: 'branch', name: 'main' },
+  registrySettled: true,
+  projectDirty: false,
+  dirty: false,
+  minting: false,
+  headRevisionId: undefined,
+  follow: 'chat',
+  attention: 0,
+  restore: {
+    busy: false,
+    revisionNumber: undefined,
+    undoable: false,
+    canUndo: false,
+  },
+  remote: {
+    kind: 'none',
+    url: undefined,
+    phase: 'none',
+    storage: undefined,
+    overQuota: [],
+    error: undefined,
+    reason: undefined,
+    fetchOnly: false,
+    provider: undefined,
+    repositoryId: undefined,
+    quota: undefined,
+  },
+  branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+  branchVerb: { busy: false, operation: undefined, branch: undefined },
+  publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
+  sync: {
+    state: 'noRemote',
+    pendingCount: 0,
+    online: true,
+    conflictRef: undefined,
+    error: undefined,
+    reason: undefined,
+  },
+  conflicts: [],
+});
 
 /* Publishing is the revision root's `publish` child (A38): the panel holds no
    actor, so the suite scripts the same projection every revision surface reads. */
-vi.mock('#hooks/use-revision-status.js', async () => {
-  const harness = await import('#hooks/use-revision-status.test-harness.js');
-  return harness.revisionStatusMock();
-});
+const revisionStatusHarness = {
+  status: emptyStatus(),
+  /* The frame before the worker has answered at all. */
+  connected: true,
+  /* The history of `main`, newest first. */
+  rows: [] as readonly RevisionRow[],
+  commands: {
+    publishProject: vi.fn<(tag?: string, revisionId?: string) => void>(),
+    confirmPublish: vi.fn<(draft: PublishDraft) => void>(),
+    resetPublish: vi.fn<() => void>(),
+  },
+  reset(): void {
+    this.status = emptyStatus();
+    this.connected = true;
+    this.rows = [];
+    for (const command of Object.values(this.commands)) {
+      command.mockClear();
+    }
+  },
+};
 
-// Pro entitlements by default so the pre-existing private-flow tests exercise
+/* One client for the whole suite, as the app's is memoized on the worker. A history is one line, newest first. */
+const revisionClient = {
+  divergence: async (head: string, base: string) => {
+    const below = (id: string): ReadonlySet<string> => {
+      const line = revisionStatusHarness.rows.some((row) => row.revisionId === id) ? revisionStatusHarness.rows : [];
+      return new Set(line.slice(line.findIndex((row) => row.revisionId === id)).map((row) => row.revisionId));
+    };
+    const [ahead, behind] = [below(head), below(base)];
+    return {
+      ahead: [...ahead].filter((id) => !behind.has(id)).length,
+      behind: [...behind].filter((id) => !ahead.has(id)).length,
+    };
+  },
+};
+
+// Pro by default so the pre-existing private-flow tests exercise
 // publish behaviour, not the tier gate; the gate suite flips this per-test.
-const useEntitlementsMock = vi.hoisted(() => vi.fn());
-vi.mock('@taucad/billing/hooks/use-entitlements', async (importOriginal) => {
-  const actual = await importOriginal<typeof useEntitlementsModule>();
-  return { ...actual, useEntitlements: useEntitlementsMock };
-});
-
+const plan = { canCreatePrivateShares: true, isResolved: true };
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
-vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof useSettingsDialogModule>();
-  return {
-    ...actual,
-    useSettingsDialog: () => ({
-      isOpen: false,
-      section: 'general',
-      open: openSettingsDialogMock,
-      close: vi.fn(),
-    }),
-  };
-});
+
+/* The app's services, as `apps/ui` binds them, over the scripted fakes above. */
+const services: ProjectShareServices = {
+  getGithubGistConnectionStatus: async () =>
+    getGithubGistConnectionStatus() as ReturnType<ProjectShareServices['getGithubGistConnectionStatus']>,
+  connectGithubGist: async (input) => connectGithubGist(input) as ReturnType<ProjectShareServices['connectGithubGist']>,
+  awaitGithubGistConnection: async (signal) => awaitGithubGistConnection(signal),
+  /* No case here comes back from a Gist grant (`?shareAuth=github-gist`), which is all the app's parser reads. */
+  parseGithubGistAuthorizationReturn: () => undefined,
+  shareProviderRegistry: {
+    descriptors: [
+      { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
+      { id: 'tau', label: 'Cloud link', capabilities: ['project.publish', 'project.resolve'] },
+      { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
+      { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
+    ],
+    load: portableProviderLoad as unknown as ProjectShareServices['shareProviderRegistry']['load'],
+  },
+  withBrowserShareProviderContext: async (operation) => {
+    try {
+      return await operation(portableContext as unknown as Parameters<typeof operation>[0]);
+    } finally {
+      portableContextDispose();
+    }
+  },
+  /* The app's `useAuthLinks` sign-in link for an explicit `redirectTo`. */
+  useAuthLinks: ({ redirectTo }) => ({ signIn: `/auth/sign-in?redirectTo=${encodeURIComponent(redirectTo)}` }),
+  useSettingsDialog: () => ({ open: openSettingsDialogMock }),
+  apiBaseUrl: () => 'https://api.example',
+  useShareMethodPreference: () => {
+    const [method, setMethod] = useState(() => shareMethodPreference.get('method'));
+    return [
+      method,
+      (next: string) => {
+        shareMethodPreference.set('method', next);
+        setMethod(next);
+      },
+    ] as const;
+  },
+  useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
+  useRevisionCommands: () => revisionStatusHarness.commands,
+  useRevisionClient: () => revisionClient,
+  /* The cloud build's plan: an upgrade opens billing settings. */
+  useCommercialFeatures: () => ({
+    ...plan,
+    requestUpgrade: () => {
+      openSettingsDialogMock('billing');
+    },
+  }),
+  commercialUpgradeLabel: () => <>Upgrade</>,
+};
+
+/**
+ * Sets the account's plan.
+ *
+ * @param tier - Free cannot make an invite-only link; Pro can.
+ * @param isResolved - Whether the plan is known yet.
+ */
+const planIs = (tier: 'free' | 'pro', isResolved = true): void => {
+  plan.canCreatePrivateShares = tier === 'pro';
+  plan.isResolved = isResolved;
+};
 
 const tag = (number: number, name: string): RevisionTag => ({
   id: String(number).padStart(32, '0'),
@@ -231,7 +317,9 @@ const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<ty
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={initialEntries}>
-        <TooltipProvider>{ui}</TooltipProvider>
+        <TooltipProvider>
+          <ProjectShareServicesProvider value={services}>{ui}</ProjectShareServicesProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -241,7 +329,9 @@ const panelElement = (projectId: string): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter>
       <TooltipProvider>
-        <ProjectSharePanel projectId={projectId} projectName='Demo' entryPath='main.ts' />
+        <ProjectShareServicesProvider value={services}>
+          <ProjectSharePanel projectId={projectId} projectName='Demo' entryPath='main.ts' />
+        </ProjectShareServicesProvider>
       </TooltipProvider>
     </MemoryRouter>
   </QueryClientProvider>
@@ -249,7 +339,7 @@ const panelElement = (projectId: string): React.JSX.Element => (
 
 describe('ProjectSharePanel', () => {
   beforeEach(() => {
-    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('pro'), isResolved: true });
+    planIs('pro');
     revisionStatusHarness.reset();
     openSettingsDialogMock.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
@@ -283,7 +373,7 @@ describe('ProjectSharePanel', () => {
 
   afterEach(() => {
     cleanup();
-    preferenceStore.remove(shareProviderPreference);
+    shareMethodPreference.clear();
   });
 
   it('uses a full-width provider combobox with branded icons and publish-capable choices only', async () => {
@@ -1041,9 +1131,7 @@ describe('ProjectSharePanel', () => {
     /* V2 was published from another device after this one's head. */
     headOfMainAt('rev_v1');
     historyOfMain('rev_v2', 'rev_v1');
-    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
-    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
-    const divergence = vi.spyOn(client, 'divergence');
+    const divergence = vi.spyOn(revisionClient, 'divergence');
     onTestFinished(() => {
       divergence.mockRestore();
     });
@@ -1065,9 +1153,7 @@ describe('ProjectSharePanel', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
     headOfMainAt('rev_v1');
     historyOfMain('rev_v1');
-    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
-    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
-    const divergence = vi.spyOn(client, 'divergence').mockRejectedValue(new Error('NOT_FOUND'));
+    const divergence = vi.spyOn(revisionClient, 'divergence').mockRejectedValue(new Error('NOT_FOUND'));
     onTestFinished(() => {
       divergence.mockRestore();
     });
@@ -1647,7 +1733,7 @@ describe('publishedVersionLabel', () => {
 
 describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   beforeEach(() => {
-    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: true });
+    planIs('free');
     revisionStatusHarness.reset();
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
   });
@@ -1671,7 +1757,7 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   });
 
   it('asks who can open a first link while the plan is still loading, rather than assuming private', async () => {
-    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: false });
+    planIs('free', false);
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
     const publish = await screen.findByRole('button', { name: /publish and copy link/i });
@@ -1688,7 +1774,7 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   });
 
   it('publishes a stopped link again while the plan is still loading, keeping its own setting', async () => {
-    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: false });
+    planIs('free', false);
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(stoppedEnvelope));
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as XStateModule from 'xstate';
 import { useWorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
 import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
-import type { ProjectSharePanelProps } from '#components/publish/project-share-panel.js';
+import type { ProjectSharePanelProps } from '@taucad/publish-ui/components/publish/project-share-panel';
 import {
   parseProjectShareNavigationIntent,
   ProjectShareRouteIntent,
@@ -76,7 +76,6 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 vi.mock('#components/publish/project-share-panel.js', () => ({
-  missingModelFileMessage: 'This project has no model file to share yet.',
   ProjectSharePanel: (properties: ProjectSharePanelProps) => {
     capturedPanelProperties = properties;
     return (

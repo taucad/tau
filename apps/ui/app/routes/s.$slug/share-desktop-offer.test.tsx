@@ -17,7 +17,6 @@ vi.mock('#components/share/tau-publication.js', () => ({
   PublicationInteractiveSurface: () => null,
   ErrorBoundary: () => null,
   loadPublication: async () => ({}),
-  publicationMeta: () => [],
 }));
 vi.mock('@taucad/publish-ui/components/share/github-gist-management', () => ({
   GithubGistManagement: () => null,

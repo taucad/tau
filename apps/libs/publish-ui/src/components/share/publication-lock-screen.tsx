@@ -46,7 +46,7 @@ type VariantConfig = {
 const needOwnerHelpVariants: ReadonlySet<PublicationLockScreenVariant> = new Set(['signInRequired', 'accessDenied']);
 
 /** The auth routes the lock screen links to, each returning to the page it was shown on; the app's `useAuthLinks` makes them. */
-type PublicationLockAuthLinks = {
+export type PublicationLockAuthLinks = {
   readonly magicLink: string;
   readonly signUp: string;
   readonly signOut: string;

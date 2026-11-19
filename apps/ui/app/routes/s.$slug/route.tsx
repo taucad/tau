@@ -24,9 +24,9 @@ import PublicationViewRoute, {
   ErrorBoundary as PublicationErrorBoundary,
   PublicationInteractiveSurface,
   loadPublication as publicationLoader,
-  publicationMeta,
 } from '#components/share/tau-publication.js';
-import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
+import { publicationMeta } from '@taucad/publish-ui/components/share/tau-publication';
+import type { PublicationRouteLoaderData } from '@taucad/publish-ui/components/share/tau-publication';
 import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 import { GithubGistManagement } from '@taucad/publish-ui/components/share/github-gist-management';
 import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/github-gist-services';

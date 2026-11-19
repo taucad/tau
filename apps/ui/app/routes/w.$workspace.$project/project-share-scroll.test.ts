@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * open, so each of those takes height from the one region that scrolls. Overlays keep their primitive's scroll.
  */
 const sectionModules = [
-  '../../components/publish/project-share-panel.tsx',
+  '../../../../libs/publish-ui/src/components/publish/project-share-panel.tsx',
   './project-share-action.tsx',
   './revision-collaborators.tsx',
   '../../../../libs/publish-ui/src/components/publish/publication-access-panel.tsx',

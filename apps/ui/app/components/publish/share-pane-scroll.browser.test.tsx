@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ShareMethod } from '#components/publish/project-share-panel.js';
+import type { ShareMethod } from '@taucad/publish-ui/components/publish/project-share-panel';
 
 /*
  * The Share pane scrolls as one, at phone and desktop sizes, with Collaborators present: the reported failure was

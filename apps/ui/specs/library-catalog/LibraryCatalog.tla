@@ -126,6 +126,13 @@
 \* typed read-back). `use-project-manager.tsx` re-points a type import. No action or correspondence changes.
 \* Tau Cloud naming audit (2026-11-18): `project-library-commands.ts` rewords a refusal sentence; copy only.
 \* No action or correspondence changes.
+\* DC-10 files-ui slice 9 (2026-11-19): `ProjectLibrary` and `ProjectCommands` moved to `@taucad/files-ui`
+\* (`runtime/project-library.ts`, `runtime/project-library-commands.ts`), generic over the worker, facade and
+\* projection types. What only the app supplies arrives as injected services: the worker start, the reporters, the
+\* build-skew write stop, the chat store, the legacy listing clear, the project templates and kernel lock files, the
+\* initial user message, the Tau Cloud backup intent and the projection's catch-up. The app keeps a binding at
+\* `apps/ui/app/runtime/project-library.ts` that passes them. Every port, journal, apply and gate call keeps its order;
+\* `use-project-manager.tsx` re-points imports. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -10,13 +10,13 @@
  */
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import type { Remote } from 'comlink';
 import { projectIdSchema, projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
 import type { Project, ProjectManifest, ProjectManifestReadResult } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/runtime';
+import type { KernelConfiguration } from '@taucad/types/constants';
 import type { ProjectDiscoveryResult, ProjectLocator, StorageRootConfig } from '@taucad/filesystem';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
@@ -27,7 +27,6 @@ import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/work
 import { encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { defaultProjectName } from '@taucad/ui-core/constants/project-names';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
 import {
   deleteProjectFileSystemConfig,
   getAllProjectFileSystemConfigs,
@@ -38,30 +37,14 @@ import {
   isNodeWorkspace,
   isNodeWorkspaceConnected,
   setProjectCreationLocation,
-} from '@taucad/files-ui/filesystem/handle-store';
-import { isOrphanedProjectRoute } from '@taucad/files-ui/filesystem/orphaned-project-route';
-import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
-import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
-import { buildUserMessage } from '#utils/chat.utils.js';
-import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
-import {
-  getEmptyCode,
-  getKernelDependencies,
-  getKernelOption,
-  getKernelProjectTemplate,
-  getMainFile,
-} from '#utils/kernel.utils.js';
-import { directorySlug, homeWorkspaceSlug } from '@taucad/files-ui/utils/project-url.utils';
-import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
-import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { withNamedLock } from '#lib/named-lock.js';
-import { selectCaughtUp } from '#machines/chat-projection.logic.js';
-import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { ChatStorage } from '#types/storage.types.js';
-import type {
-  PendingProjectOperation,
-  PendingProjectStorage,
-} from '@taucad/files-ui/types/pending-project-operation.types';
+} from '#filesystem/handle-store.js';
+import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
+import { directoryPicker } from '#constants/browser.constants.js';
+import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '#utils/project-name.utils.js';
+import { directorySlug, homeWorkspaceSlug } from '#utils/project-url.utils.js';
+import type { ProjectSlugs } from '#utils/project-url.utils.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
+import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import {
   allocateProjectBasePath,
   composerAttachmentsOf,
@@ -73,9 +56,14 @@ import {
   resolveWorkspaceForWrite,
   routeBindsLocator,
   writeProjectLibraryFile,
-} from '@taucad/files-ui/runtime/project-library-storage';
-import type { PersistentStorageRoot } from '@taucad/files-ui/runtime/project-library-storage';
-import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
+} from '#runtime/project-library-storage.js';
+import type { PersistentStorageRoot } from '#runtime/project-library-storage.js';
+import type {
+  InitialEditorState,
+  ProjectLibraryRootFacade,
+  ProjectLibraryWorker,
+} from '#types/project-library-io.types.js';
+import type { ChatStorage } from '#types/chat-storage.types.js';
 
 /** What a duplicate's name ends with. */
 const copySuffix = ' (Copy)';
@@ -261,25 +249,76 @@ export type ProjectLibrarySessions = Readonly<{
 }>;
 
 /**
- * What the commands read of the chat store (A12's created-empty note; row L7's quiescence check).
+ * What the commands read of the chat session store (A12's created-empty note; row L7's quiescence check): a chat's
+ * projection, which {@link ProjectCommandsServices.isCaughtUp} reads, the chats it observes and its close plan. The
+ * app's `ChatSessionStore` satisfies it.
  *
  * @public
  */
-export type ProjectLibraryChatSessions = Pick<
-  ChatSessionStore,
-  'noteCreatedEmpty' | 'observedChatIdsOf' | 'getProjection' | 'getProjectClosePlan'
->;
+export type ProjectLibraryChatSessions<Projection = unknown> = Readonly<{
+  noteCreatedEmpty: (chatId: string) => void;
+  observedChatIdsOf: (projectId: string) => readonly string[];
+  getProjection: (chatId: string) => Projection | undefined;
+  getProjectClosePlan: (projectId: string) => Promise<Readonly<{ liveChatIds: readonly string[] }>>;
+}>;
 
-/** What the commands take from the library: its binding, worker, discovery, journal and listing. */
-export type ProjectCommandsHost = Readonly<{
-  facade: () => Promise<ProjectLibraryFacade>;
+/**
+ * What a new project starts from: the manifest of a project created under Auto, and a kernel's main file, empty code,
+ * ecosystem, npm libraries and project template (its manifest and lock files). The app passes its project constants
+ * and kernel helpers, which read the kernel plugins' published lock files.
+ *
+ * @public
+ */
+export type ProjectTemplates = Readonly<{
+  createEntrylessProject: (projectName: string) => Omit<ProjectManifest, '$schema'>;
+  createInitialProject: (
+    options: Readonly<{
+      projectName: string;
+      mainFileName: string;
+      emptyCodeContent: Uint8Array<ArrayBuffer>;
+      ecosystem: KernelConfiguration['ecosystem'];
+      dependencies?: Readonly<Record<string, string>>;
+      template?: Readonly<Record<string, string>>;
+    }>,
+  ) => Readonly<{
+    projectData: Omit<ProjectManifest, '$schema'>;
+    files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+  }>;
+  getKernelOption: (kernel: KernelProvider) => Pick<KernelConfiguration, 'mainFile' | 'emptyCode' | 'ecosystem'>;
+  getKernelDependencies: (kernel: KernelProvider) => Promise<Record<string, string>>;
+  getKernelProjectTemplate: (kernel: KernelProvider) => Promise<Record<string, string> | undefined>;
+}>;
+
+/**
+ * What the commands take from the app: the project templates, the user message an initial prompt becomes, the Tau
+ * Cloud backup intent a project born here starts with, and whether a chat's projection has caught up with its log.
+ *
+ * @public
+ */
+export type ProjectCommandsServices<Projection = unknown> = Readonly<{
+  projectTemplates: ProjectTemplates;
+  buildUserMessage: (
+    input: Readonly<{ text: string; attachments?: readonly InitialMessageAttachment[] }>,
+  ) => MyUIMessage;
+  /** Tau Cloud's per-project backup intent: a project born with no remote backs up by default (D19). */
+  cloudIntent: Readonly<{ set: (projectId: string, intent: 'default') => void }>;
+  isCaughtUp: (projection: Projection) => boolean;
+}>;
+
+/** What the commands take from the library: its binding, worker, discovery, journal and listing. @public */
+export type ProjectCommandsHost<
+  ObjectStore extends ProjectLibraryWorker = ProjectLibraryWorker,
+  Projection = unknown,
+> = Readonly<{
+  services: ProjectCommandsServices<Projection>;
+  facade: () => Promise<ProjectLibraryRootFacade>;
   chatStore: () => ChatStorage | undefined;
   readChats: <Value>(
     operation: (source: ChatStorage) => Promise<Value>,
     projectId: string | undefined,
     options: Readonly<{ retry: boolean }>,
   ) => Promise<Value>;
-  readiedWorker: () => Promise<Remote<ObjectStoreWorker>>;
+  readiedWorker: () => Promise<ObjectStore>;
   whenDiscoveryReady: () => Promise<void>;
   whenReplaysDrained: () => Promise<void>;
   discover: () => Promise<ProjectDiscoveryResult>;
@@ -289,7 +328,7 @@ export type ProjectCommandsHost = Readonly<{
   ) => Promise<
     Readonly<{
       journaled: (operation: PendingProjectOperation) => void;
-      apply: (operation: PendingProjectOperation, worker: Remote<ObjectStoreWorker>) => Promise<void>;
+      apply: (operation: PendingProjectOperation, worker: ObjectStore) => Promise<void>;
       abandon: () => void;
     }>
   >;
@@ -298,7 +337,7 @@ export type ProjectCommandsHost = Readonly<{
   invalidateListing: () => void;
   noteLibraryChanged: () => void;
   sessions: () => ProjectLibrarySessions | undefined;
-  chatSessions: () => ProjectLibraryChatSessions | undefined;
+  chatSessions: () => ProjectLibraryChatSessions<Projection> | undefined;
   /** One project's own queries changed (D9: the library writes the cache, A4b). */
   invalidateProject: (projectId: string) => void;
   /** A project is gone for good: its own queries are dropped. */
@@ -355,10 +394,10 @@ const resolveCreationStorage = async (
  *
  * @public
  */
-export class ProjectCommands {
-  readonly #host: ProjectCommandsHost;
+export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectLibraryWorker, Projection = unknown> {
+  readonly #host: ProjectCommandsHost<ObjectStore, Projection>;
 
-  public constructor(host: ProjectCommandsHost) {
+  public constructor(host: ProjectCommandsHost<ObjectStore, Projection>) {
     this.#host = host;
   }
 
@@ -607,7 +646,7 @@ export class ProjectCommands {
     mutation.journaled(operation);
     await mutation.apply(operation, worker);
     /* D19: a copy has no remote of its own, so it backs up by default too. */
-    tauCloudIntent.set(targetId, 'default');
+    this.#host.services.cloudIntent.set(targetId, 'default');
     void this.#host.invalidateProjectListing();
     return {
       ...operation.manifest,
@@ -748,7 +787,7 @@ export class ProjectCommands {
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const { leaseSettledChatLogs } = await import('@taucad/files-ui/runtime/project-library-chat-logs');
+    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
     return leaseSettledChatLogs({
       projectId,
       chats,
@@ -795,7 +834,7 @@ export class ProjectCommands {
     if (
       chats.some((chat: Chat) => {
         const projection = chatSessions.getProjection(chat.id);
-        return !observed.has(chat.id) || projection === undefined || !selectCaughtUp(projection);
+        return !observed.has(chat.id) || projection === undefined || !this.#host.services.isCaughtUp(projection);
       })
     ) {
       throw new Error('Wait for every chat history to load before deleting this project.');
@@ -814,7 +853,7 @@ export class ProjectCommands {
     return sessions;
   }
 
-  #chatSessions(): ProjectLibraryChatSessions {
+  #chatSessions(): ProjectLibraryChatSessions<Projection> {
     const chatSessions = this.#host.chatSessions();
     if (chatSessions === undefined) {
       throw new Error('The project library was built without the chat store');
@@ -884,7 +923,7 @@ export class ProjectCommands {
    * Folders on disk, unreadable folders and folders with any file left keep
    * the refusal.
    */
-  async #releaseOrphanedProjectRoute(projectId: string, worker: Remote<ObjectStoreWorker>): Promise<void> {
+  async #releaseOrphanedProjectRoute(projectId: string, worker: ObjectStore): Promise<void> {
     const config = await getProjectFileSystemConfig(projectId);
     const fileManager = await this.#host.facade();
     if (config === undefined || !(await isOrphanedProjectRoute(config, fileManager.scopedStorage))) {
@@ -940,20 +979,20 @@ export class ProjectCommands {
         /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
         projectName = projectNameFromReply(generated) || defaultProjectName;
       }
+      const { projectTemplates: templates } = this.#host.services;
       if (options.kernel === 'auto') {
-        projectData = createEntrylessProject(projectName ?? defaultProjectName);
+        projectData = templates.createEntrylessProject(projectName ?? defaultProjectName);
         files = {};
       } else {
         kernel = options.kernel;
-        const mainFileName = getMainFile(options.kernel);
-        const emptyCode = getEmptyCode(options.kernel);
-        const result = createInitialProject({
+        const { mainFile: mainFileName, emptyCode, ecosystem } = templates.getKernelOption(options.kernel);
+        const result = templates.createInitialProject({
           projectName: projectName ?? defaultProjectName,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
-          ecosystem: getKernelOption(options.kernel).ecosystem,
-          dependencies: await getKernelDependencies(options.kernel),
-          template: await getKernelProjectTemplate(options.kernel),
+          ecosystem,
+          dependencies: await templates.getKernelDependencies(options.kernel),
+          template: await templates.getKernelProjectTemplate(options.kernel),
         });
         projectData = result.projectData;
         files = result.files;
@@ -1014,7 +1053,7 @@ export class ProjectCommands {
     // for display purposes. The permission to run it automatically after
     // route hydration is separate one-shot command state on the chat row.
     const initialUserMessage = options.initialMessage
-      ? buildUserMessage({
+      ? this.#host.services.buildUserMessage({
           text: options.initialMessage.content,
           attachments: options.initialMessage.attachments,
         })
@@ -1098,7 +1137,7 @@ export class ProjectCommands {
        Tau Cloud open, a materialized project, a linked GitHub import), so it
        is left alone. The session decides once it knows the account (W11). */
     if (options.id === undefined) {
-      tauCloudIntent.set(projectId, 'default');
+      this.#host.services.cloudIntent.set(projectId, 'default');
     }
     /* Route callers navigate with the returned slugs immediately. Publish
      * the completed filesystem commit to every active project-list query

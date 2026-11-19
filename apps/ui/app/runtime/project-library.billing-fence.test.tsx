@@ -12,7 +12,7 @@ import { render } from '@testing-library/react';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { flush } from '@taucad/xstate-testing/clock';
 import { describe, expect, it, vi } from 'vitest';
-import type { ProjectLibraryFiles } from '#runtime/project-library.js';
+import type { ProjectLibraryFiles } from '@taucad/files-ui/runtime/project-library';
 
 const files = vi.hoisted(() => ({
   recordFiles: {

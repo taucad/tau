@@ -22,7 +22,7 @@ import { parseProjectCreationLocation } from '@taucad/files-ui/utils/project-cre
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import {
   canOpenCloudProject,
   deletionStoragePrefix,

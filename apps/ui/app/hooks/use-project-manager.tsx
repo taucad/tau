@@ -13,7 +13,8 @@ import type {
   WorkspaceBindingRepairResult,
 } from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
-import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { AppUiPreferences } from '#types/storage.types.js';
+import type { ChatStorage, CommitCancelledDraftRestoreInput } from '@taucad/files-ui/types/chat-storage.types';
 import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
@@ -27,10 +28,15 @@ import {
   selectLibraryWorkspaceConnection,
   selectMetadataObservationError,
   selectMetadataObservationErrors,
-} from '#runtime/project-library.js';
+} from '@taucad/files-ui/runtime/project-library';
 import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
-import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
-import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
+import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
+import type { ProjectLibrary } from '#runtime/project-library.js';
+import type {
+  CreatedProject,
+  CreateProjectOptions,
+  ImportStagingTarget,
+} from '@taucad/files-ui/runtime/project-library-commands';
 import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';

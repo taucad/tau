@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CadmpegError } from 'cadmpeg-ts';
+import { CadmpegError } from 'cadmpeg-ts/core';
 
 import { failureMessage, lossIssue } from '#cadmpeg-issues.js';
 

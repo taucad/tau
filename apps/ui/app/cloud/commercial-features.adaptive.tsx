@@ -1,22 +1,41 @@
+import { useCallback } from 'react';
 import { CloudSurface } from '#cloud/cloud-surface.js';
 import { useCloudFunded } from '#cloud/cloud-mode.js';
-import { useCloudFacts } from '#cloud/cloud-port.js';
-import {
-  CommercialUpgradeLabel as SelfHostUpgradeLabel,
-  useCommercialFeatures as useSelfHostCommercialFeatures,
-} from '#cloud/commercial-features.self-host.js';
+import { useAdaptivePlan } from '#cloud/use-plan-wait.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { CommercialUpgradeLabel as SelfHostUpgradeLabel } from '#cloud/commercial-features.self-host.js';
+import type { CommercialFeatures } from '#cloud/plan-facts.types.js';
 
 /**
- * The adaptive facade of `commercial-features` (adaptive app deployment mode charter D6, W2 skeleton): the hook reads
- * the Cloud port and the label mounts through the one surface helper. Until W4 and W5 fill them, both answer as the
- * self-host build does.
+ * The adaptive facade of `commercial-features` (adaptive app deployment mode charter D6, consumer table): unfunded is
+ * the self-host plan (resolved and open) with the mode's basis; funded is the plan the bridge published for the bound
+ * identity; anything else is unresolved, with its wait kind and Retry (I3, I15). The hook never swaps implementation.
  */
 export function CommercialUpgradeLabel(): React.JSX.Element | undefined {
   const funded = useCloudFunded();
   return <CloudSurface enabled={funded} fallback={<SelfHostUpgradeLabel />} render={() => undefined} />;
 }
 
-export const useCommercialFeatures: typeof useSelfHostCommercialFeatures = () => {
-  useCloudFacts(undefined);
-  return useSelfHostCommercialFeatures();
+export const useCommercialFeatures = (): CommercialFeatures => {
+  const { mode, facts, unresolved } = useAdaptivePlan();
+  const { open: openSettings } = useSettingsDialog();
+  const requestUpgrade = useCallback(() => {
+    openSettings('billing');
+  }, [openSettings]);
+  if (mode.state === 'unfunded') {
+    return {
+      isResolved: true,
+      basis: mode.basis,
+      canCreatePrivateShares: true,
+      canSyncFiles: true,
+      storageLimitBytes: undefined,
+      canUpgradePlan: false,
+      requestUpgrade,
+    };
+  }
+  const commercial = mode.state === 'funded' ? facts?.commercial : undefined;
+  if (mode.state !== 'funded' || commercial === undefined) {
+    return unresolved;
+  }
+  return { isResolved: true, basis: mode.basis, ...commercial, requestUpgrade };
 };

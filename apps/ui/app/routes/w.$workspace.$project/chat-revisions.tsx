@@ -255,7 +255,10 @@ function WhereYouAre(): React.JSX.Element {
   const commands = useRevisionCommands();
   const { restore, undo, isBusy } = useRestoreToPoint();
   const saveRevision = useSaveRevisionRequest();
-  const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
+  /* C3: no Upgrade verb while the plan is unresolved. */
+  const canUpgradePlan = plan.isResolved && plan.canUpgradePlan;
+  const requestUpgrade = plan.isResolved ? plan.requestUpgrade : undefined;
   const { signIn } = useAuthLinks();
   const isAgentWorking = useAgentWorkHere(status) !== undefined;
   const isUnknown = line.kind === 'unknown';
@@ -304,7 +307,7 @@ function WhereYouAre(): React.JSX.Element {
         break;
       }
       case 'Upgrade': {
-        requestUpgrade();
+        requestUpgrade?.();
         break;
       }
       case 'Sign in': {
@@ -1616,7 +1619,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const projectRole = useProjectRole();
   const isSignedOut = useRevisionSessionUser() === undefined;
   /* N4: the plan, read once here — the region itself stays presentational. */
-  const { canSyncFiles, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const conflicts = status?.conflicts ?? [];
   const conflictTexts = useConflictTexts();
@@ -1700,9 +1703,13 @@ export function RevisionsPanelBody(): React.JSX.Element {
             // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
             void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
           }}
-          canSyncFiles={canSyncFiles}
-          onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
-          storageLimitBytes={storageLimitBytes}
+          {...(plan.isResolved
+            ? {
+                canSyncFiles: plan.canSyncFiles,
+                ...(plan.canUpgradePlan ? { onUpgrade: plan.requestUpgrade } : {}),
+                ...(plan.storageLimitBytes === undefined ? {} : { storageLimitBytes: plan.storageLimitBytes }),
+              }
+            : { planWait: { wait: plan.wait, retry: plan.retry } })}
           signInHref={signIn}
           role={projectRole}
           isSignedOut={isSignedOut}

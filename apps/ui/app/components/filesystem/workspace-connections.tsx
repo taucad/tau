@@ -46,7 +46,7 @@ import {
   folderStatusOf,
   useRootStatuses,
   workspaceStorageRootKey,
-} from '#components/filesystem/folder-status.js';
+} from '@taucad/files-ui/components/filesystem/folder-status';
 
 type WorkspaceRow = {
   workspace: Workspace;

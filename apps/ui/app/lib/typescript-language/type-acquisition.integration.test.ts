@@ -5,7 +5,7 @@ import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceF
 import { TypeScriptProjectService } from '@taucad/lsp/typescript-worker/typescript-service';
 import { kinematicsTypes } from '@taucad/api-extractor/authoring-types';
 import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
+import { TypeAcquisitionController } from '@taucad/editor-ui/lib/typescript-language/type-acquisition';
 import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 
 describe('bundled authoring acquisition', () => {

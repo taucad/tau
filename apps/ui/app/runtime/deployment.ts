@@ -70,7 +70,8 @@ export const parseDeploymentRecord = (value: unknown): DeploymentRecord | undefi
 export type DeploymentRecordStore = Readonly<{
   read: () => DeploymentRecord | undefined;
   write: (record: DeploymentRecord) => void;
-  drop: () => void;
+  /** Drop the stored record if it is still the one confirmed at `confirmedAt`; a newer one stays. */
+  drop: (confirmedAt: number) => void;
 }>;
 
 /**
@@ -102,8 +103,13 @@ export const createDeploymentRecordStore = (
         /* Best effort: the page keeps its own copy, and the next page load asks again. */
       }
     },
-    drop: () => {
+    drop: (confirmedAt) => {
       try {
+        const raw = storage()?.getItem(key);
+        const current = typeof raw === 'string' ? parseDeploymentRecord(JSON.parse(raw) as unknown) : undefined;
+        if (current !== undefined && current.confirmedAt !== confirmedAt) {
+          return; // Another tab confirmed since this one read the record: its answer is newer than this 404.
+        }
         storage()?.removeItem(key);
       } catch {
         /* Best effort, as above. */
@@ -238,8 +244,8 @@ export const createDeploymentOwner = ({
       writeRecord: ({ record }) => {
         store?.write(record);
       },
-      dropRecord: () => {
-        store?.drop();
+      dropRecord: ({ confirmedAt }) => {
+        store?.drop(confirmedAt);
       },
     },
   });

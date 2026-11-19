@@ -2,6 +2,7 @@ import { Component, Suspense, useEffect, useSyncExternalStore } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudLoader } from '#cloud/cloud-loader.js';
+import { useCloudIdentity } from '#cloud/cloud-identity.js';
 
 /**
  * The one helper every lazy Cloud surface mounts through (adaptive app deployment mode charter D6, I8, BA11, BA25):
@@ -30,13 +31,21 @@ class CloudSurfaceBoundary extends Component<BoundaryProps, { readonly hasFailed
   }
 }
 
+/** Calls the surface's render beneath both local boundaries, so a throw or a suspension in it is contained. */
+function CloudRendering<Module>({
+  module,
+  render,
+}: Readonly<{ module: Module; render: (module: Module) => ReactNode }>): ReactNode {
+  return render(module);
+}
+
 /** What {@link CloudSurface} takes. @public */
 export type CloudSurfaceProps<Module> = Readonly<{
   /** The entry's loader; none while the surface has no Cloud chunk (the W2 skeleton). */
   loader?: CloudLoader<Module> | undefined;
   /** Whether the mode allows the Cloud rendering (`funded`); otherwise the fallback, and no load starts. */
   enabled: boolean;
-  /** The financial identity's key: a change remounts the Cloud rendering. */
+  /** The financial identity's key: a change remounts the Cloud rendering. The bound identity's by default. */
   identityKey?: string | undefined;
   /** The non-Cloud rendering, shown before, instead of and after a failed Cloud rendering. */
   fallback: ReactNode;
@@ -59,10 +68,12 @@ const noSubscription = (): (() => void) => () => undefined;
 export function CloudSurface<Module>({
   loader,
   enabled,
-  identityKey,
+  identityKey: givenKey,
   fallback,
   render,
 }: CloudSurfaceProps<Module>): React.JSX.Element {
+  const bound = useCloudIdentity();
+  const identityKey = givenKey ?? bound.key;
   const state = useSyncExternalStore(
     loader?.subscribe ?? noSubscription,
     loader?.state ?? idleState,
@@ -79,7 +90,9 @@ export function CloudSurface<Module>({
   }
   return (
     <CloudSurfaceBoundary key={identityKey} fallback={fallback}>
-      <Suspense fallback={fallback}>{render(state.module)}</Suspense>
+      <Suspense fallback={fallback}>
+        <CloudRendering module={state.module} render={render} />
+      </Suspense>
     </CloudSurfaceBoundary>
   );
 }

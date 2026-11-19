@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 921 packages, with the license each declares.
+The web and desktop apps include the following 923 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -365,6 +365,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@vscode/codicons](https://github.com/microsoft/vscode-codicons) | 0.0.46-24 | CC-BY-4.0 |
 | [@vscode/l10n](https://github.com/Microsoft/vscode-l10n) | 0.0.18 | MIT |
 | [@x0k/json-schema-merge](https://github.com/x0k/json-schema-merge) | 1.1.0 | MIT |
+| [@xstate/react](https://github.com/statelyai/xstate) | 7.0.0-alpha.3 | MIT |
 | [@zkochan/js-yaml](https://github.com/nodeca/js-yaml) | 0.0.7 | MIT |
 | [abort-controller](https://github.com/mysticatea/abort-controller) | 3.0.0 | MIT |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
@@ -409,8 +410,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
-| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
-| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.4 | Apache-2.0 |
+| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
+| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
 | [call-bind-apply-helpers](https://github.com/ljharb/call-bind-apply-helpers) | 1.0.2 | MIT |
 | [call-bound](https://github.com/ljharb/call-bound) | 1.0.4 | MIT |
@@ -931,6 +932,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [unpipe](https://github.com/stream-utils/unpipe) | 1.0.0 | MIT |
 | [uqr](https://github.com/unjs/uqr) | 0.1.3 | MIT |
 | [use-callback-ref](https://github.com/theKashey/use-callback-ref/) | 1.3.3 | MIT |
+| [use-isomorphic-layout-effect](https://github.com/Andarist/use-isomorphic-layout-effect) | 1.2.1 | MIT |
 | [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT |
 | [use-sync-external-store](https://github.com/react/react) | 1.7.0 | MIT |
 | [utif2](https://github.com/photopea/UTIF.js) | 4.1.0 | MIT |

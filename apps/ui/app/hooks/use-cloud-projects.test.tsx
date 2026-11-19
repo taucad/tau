@@ -14,11 +14,15 @@ const { account } = vi.hoisted(() => ({
     auth: 'authed' as 'authed' | 'anonymous' | 'indeterminate',
     isResolved: true,
     canSyncFiles: true,
+    basis: 'pinned' as 'pinned' | 'confirmed' | 'remembered' | 'absent',
   },
 }));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => account.auth }));
 vi.mock('#cloud/commercial-features.js', () => ({
-  useCommercialFeatures: () => ({ isResolved: account.isResolved, canSyncFiles: account.canSyncFiles }),
+  useCommercialFeatures: () =>
+    account.isResolved
+      ? { isResolved: true, basis: account.basis, canSyncFiles: account.canSyncFiles }
+      : { isResolved: false, wait: 'checking', retry: () => undefined },
 }));
 const { mockToast } = vi.hoisted(() => ({
   mockToast: vi.fn<
@@ -60,6 +64,7 @@ const {
   materializeOnSignIn,
   materializedCloudProjects,
   nextTauCloudStep,
+  useTauCloudEligibility,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');
@@ -529,4 +534,29 @@ describe('useTauCloudIntentConnection', () => {
       }
     },
   );
+});
+
+/* Adaptive app deployment mode C4 (T-G4, D5): data moves only on a pinned or confirmed plan. */
+describe('useTauCloudEligibility basis', () => {
+  it.each([
+    ['pinned', true],
+    ['confirmed', true],
+    ['remembered', false],
+    ['absent', false],
+  ] as const)('reads a plan whose basis is %s as resolved: %s', (basis, isResolved) => {
+    account.basis = basis;
+    const { result } = renderHook(() => useTauCloudEligibility());
+    expect(result.current.isResolved).toBe(isResolved);
+    account.basis = 'pinned';
+  });
+
+  it('never connects or forgets on a remembered unfunded start, and waits until the answer confirms it', () => {
+    const status = { remote: { kind: 'none', phase: 'none' }, headRevisionId: 'rev-1' } as unknown as Parameters<
+      typeof nextTauCloudStep
+    >[2];
+    expect(nextTauCloudStep('noticed', { auth: 'authed', isResolved: false }, status)).toBe('wait');
+    expect(nextTauCloudStep('noticed', { auth: 'authed', isResolved: true, canSyncFiles: true }, status)).toBe(
+      'connect',
+    );
+  });
 });

@@ -231,9 +231,9 @@ tau tui chat-1 --from=42                   # resume from a cursor
 
 There is no mouse, no colour requirement and no cursor trickery: every row is plain text and every action has a key. Off a terminal — a pipe, a CI job, or `--plain` — `tau tui` refuses with `TUI_NOT_A_TTY` and exit code 3, writes nothing to stdout, and names `tau agent tail <chat> --jsonl` instead.
 
-## Sign in to Tau Cloud
+## Sign in to Tau
 
-Local CAD commands need no account. Cloud projects, backups, publishing and paid services use an account session:
+Local CAD commands need no account. Tau Cloud projects, backups, publishing and paid services need you to sign in:
 
 ```bash
 tau auth login
@@ -251,7 +251,7 @@ Choose staging explicitly for **every** command:
 export TAU_API_URL=https://api.taucad.dev
 tau auth login
 tau auth status
-# Run the cloud operation against a disposable staging project.
+# Run the Tau Cloud operation against a disposable staging project.
 tau auth logout
 ```
 

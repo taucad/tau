@@ -1,31 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 import { CloudOff } from 'lucide-react';
-import { isDesktopTarget } from '#lib/build-target.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
-import { offlineShellMessageType } from '#offline/offline-shell-worker.js';
-import type { OfflineShellMessage, OfflineShellStatus } from '#offline/offline-shell-worker.js';
-
-/** Path the build writes the generated worker to (see `scripts/generate-offline-shell.ts`). */
-const workerUrl = '/offline-shell-worker.js';
-
-/**
- * Whether this bundle should register the offline shell worker.
- *
- * Three gates, each for a different reason:
- *
- * - `PROD` — a dev server has no prerendered document and no generated worker.
- * - `TAU_OFFLINE_SHELL` — defined only by `apps/ui/vite.config.ts`, the web
- *   build whose `react-router.config.ts` `buildEnd` generates the worker.
- *   `desktop/vite.config.ts` and `serve/vite.config.ts` define their own env
- *   and never set it, so the Electron `tau://` build and the `tau serve --ui`
- *   daemon SPA — both of which already boot offline from a packaged index
- *   fallback — never register anything. Dotted access is required: Vite
- *   substitutes `import.meta.env.X` textually, never `import.meta.env['X']`.
- * - `isDesktopTarget()` — belt and braces for the same Electron build.
- */
-const isOfflineShellBuild = (): boolean =>
-  import.meta.env.PROD && import.meta.env.TAU_OFFLINE_SHELL === 'enabled' && !isDesktopTarget();
+import { readInstallStatus, subscribeInstallStatus, useServiceWorker } from '#offline/use-pwa.js';
 
 const subscribeConnectivity = (listener: () => void): (() => void) => {
   globalThis.addEventListener('online', listener);
@@ -38,104 +15,18 @@ const subscribeConnectivity = (listener: () => void): (() => void) => {
 
 const readOnline = (): boolean => globalThis.navigator.onLine;
 const serverOnline = (): boolean => true;
-
-/** Longest wait for an idle period after load before installing anyway. Milliseconds. */
-const installIdleLimit = 10_000;
+const serverInstallStatus = (): undefined => undefined;
 
 /**
- * Run `start` once the page has loaded and the main thread is idle.
- *
- * Installing precaches the usage shell's whole asset list. Started at
- * hydration, that download competed with the requests the page needs to open
- * on a first visit over a slow link.
- *
- * @param start - Called once, after load and idle.
- * @returns Cancels a start that has not run yet.
- */
-const afterLoadAndIdle = (start: () => void): (() => void) => {
-  let cancelIdle: (() => void) | undefined;
-  const scheduleIdle = (): void => {
-    if ('requestIdleCallback' in globalThis) {
-      const idleCallback = requestIdleCallback(start, { timeout: installIdleLimit });
-      cancelIdle = () => {
-        cancelIdleCallback(idleCallback);
-      };
-      return;
-    }
-    const idleTimer = setTimeout(start, 0);
-    cancelIdle = () => {
-      clearTimeout(idleTimer);
-    };
-  };
-  if (document.readyState === 'complete') {
-    scheduleIdle();
-  } else {
-    globalThis.addEventListener('load', scheduleIdle, { once: true });
-  }
-  return () => {
-    globalThis.removeEventListener('load', scheduleIdle);
-    cancelIdle?.();
-  };
-};
-
-/** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
-const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
-
-const isOfflineShellMessage = (data: unknown): data is OfflineShellMessage =>
-  typeof data === 'object' && data !== null && (data as { type?: unknown }).type === offlineShellMessageType;
-
-/**
- * Offline shell registration and its user-facing state (B5 R1/R3).
- *
- * Registers the generated worker on the web origin only, and surfaces what the
- * worker reports: an install or quota failure is shown rather than swallowed,
- * and a shell route opened with no connection says so instead of looking like
- * a broken page. The saved usage this shell reopens is B4/C10-U4's store.
+ * The service worker's registration (`use-pwa.ts`) and the offline usage page's user-facing state
+ * (B5 R1/R3): an install or quota failure is shown rather than swallowed, and the usage page opened with no connection
+ * says so instead of looking like a broken page. The saved usage it reopens is B4/C10-U4's store.
  */
 export function OfflineShell(): React.JSX.Element | undefined {
-  const [status, setStatus] = useState<OfflineShellStatus>();
+  useServiceWorker();
+  const status = useSyncExternalStore(subscribeInstallStatus, readInstallStatus, serverInstallStatus);
   const online = useSyncExternalStore(subscribeConnectivity, readOnline, serverOnline);
   const { pathname } = useLocation();
-
-  /* B-27, D-UI-26: never while a project workspace is open. Installing
-   * downloads the usage shell's whole asset list, which competed with the
-   * kernel, WASM and editor downloads of an opening project; the reader's next
-   * page outside the workspace installs it instead. */
-  const inWorkspace = isWorkspacePath(pathname);
-
-  useEffect(() => {
-    if (!isOfflineShellBuild() || !('serviceWorker' in globalThis.navigator)) {
-      return;
-    }
-    const container = globalThis.navigator.serviceWorker;
-    const onMessage = (event: MessageEvent): void => {
-      if (isOfflineShellMessage(event.data)) {
-        setStatus(event.data.status);
-      }
-    };
-    container.addEventListener('message', onMessage);
-    return () => {
-      container.removeEventListener('message', onMessage);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (inWorkspace || !isOfflineShellBuild() || !('serviceWorker' in globalThis.navigator)) {
-      return;
-    }
-    const container = globalThis.navigator.serviceWorker;
-    const install = async (): Promise<void> => {
-      try {
-        await container.register(workerUrl);
-      } catch {
-        setStatus('failed');
-      }
-    };
-    return afterLoadAndIdle(() => {
-      // async-iife: bootstrap -- installing must never block the view the reader came for.
-      void install();
-    });
-  }, [inWorkspace]);
 
   if (!isOfflineShellPath(pathname)) {
     return undefined;

@@ -514,7 +514,7 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
     case 'failed': {
       return {
         mark: 'failed',
-        sentence: row.runtimeFailure === undefined ? 'Failed to open' : kernelFailure(row.runtimeFailure),
+        sentence: row.runtimeFailure === undefined ? 'Couldn’t open' : kernelFailure(row.runtimeFailure),
       };
     }
     case 'opening': {

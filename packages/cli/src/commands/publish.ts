@@ -74,7 +74,7 @@ export const requireApi = async (): Promise<Readonly<{ apiBaseUrl: string; apiTo
 export const publishCommand = defineCommand({
   meta: {
     name: 'publish',
-    description: 'Publish a named version of this project to Tau Cloud and print its link',
+    description: 'Publish a named version of this project and print its link',
   },
   args: {
     version: {

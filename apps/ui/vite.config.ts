@@ -18,7 +18,12 @@ import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
-import { resolveTauCloudBuildEnabled, unstampedBuildRelease } from './build-environment.js';
+import {
+  resolveServiceWorkerKillSwitch,
+  resolveTauCloudBuildEnabled,
+  serviceWorkerKillSwitchVariable,
+  unstampedBuildRelease,
+} from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -38,6 +43,10 @@ import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
+/** The web build's service worker seam: `retired` with the kill switch (`TAU_SERVICE_WORKER_KILL_SWITCH=true`). */
+const serviceWorkerMode = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable])
+  ? 'retired'
+  : 'enabled';
 /** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases. */
 const uiSourceAliasIdFilter = /^#/u;
 
@@ -597,14 +606,21 @@ export default defineConfig(({ command, mode }) => {
             ),
           }),
       /*
-       * Offline shell seam (B5 R3). Only this config defines it, so only the
-       * web bundle registers the service worker: `desktop/vite.config.ts` and
-       * `serve/vite.config.ts` have their own `define` blocks and their own
-       * `react-router.config.ts` without the `buildEnd` that generates the
-       * worker, and both already boot offline from an SPA index fallback.
+       * Service worker seam (progressive loading PL7). Only this config defines
+       * it, so only the web bundle registers the worker: `desktop/vite.config.ts`
+       * and `serve/vite.config.ts` have their own `define` blocks and their own
+       * `react-router.config.ts` without the `buildEnd` that builds the worker,
+       * and both already boot offline from an SPA index fallback. With the
+       * kill switch on (`TAU_SERVICE_WORKER_KILL_SWITCH=true`,
+       * `build-environment.ts`) it is `retired`: pages register nothing and only
+       * ask an existing registration to fetch the retiring worker.
        */
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-      ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_SERVICE_WORKER': JSON.stringify(serviceWorkerMode),
+          }),
       /*
        * This bundle is served by the web host, never by a `tau serve` daemon
        * (`serve/vite.config.ts`), so its origin has no agent descriptor. The
@@ -759,8 +775,8 @@ export default defineConfig(({ command, mode }) => {
       },
       target: 'es2022',
       /*
-       * The offline shell allowlist is generated from this manifest
-       * (`scripts/generate-offline-shell.ts`), so hashed filenames are never
+       * The service worker's precache list is generated from this manifest
+       * (`scripts/build-service-worker.ts`), so hashed filenames are never
        * hand-maintained. It only lists public build outputs.
        */
       manifest: true,

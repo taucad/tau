@@ -4148,7 +4148,7 @@ describe('useProjectManager.createProject', () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await act(async () => {
-        await expect(reimport(result)).rejects.toThrow(`That project is already on this device: ${orphanedId}`);
+        await expect(reimport(result)).rejects.toThrow('This project is already on this device.');
       });
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
       expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -4171,7 +4171,7 @@ describe('useProjectManager.createProject', () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await act(async () => {
-        await expect(reimport(result)).rejects.toThrow(`That project is already on this device: ${orphanedId}`);
+        await expect(reimport(result)).rejects.toThrow('This project is already on this device.');
       });
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
     });
@@ -4195,7 +4195,7 @@ describe('useProjectManager.createProject', () => {
 
     expect(outcomes.map((outcome) => outcome.status).toSorted()).toEqual(['fulfilled', 'rejected']);
     const refused = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
-    expect(refused?.reason).toEqual(new Error(`That project is already on this device: ${id}`));
+    expect(refused?.reason).toEqual(new Error('This project is already on this device.'));
     expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.projectId === id)).toHaveLength(1);
   });
 
@@ -4240,7 +4240,7 @@ describe('useProjectManager.createProject', () => {
       const again = createAgain(result);
       resolveCommit();
 
-      await expect(again).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      await expect(again).rejects.toThrow('This project is already on this device.');
       expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
       expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
         'test-project',
@@ -4255,7 +4255,7 @@ describe('useProjectManager.createProject', () => {
       mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
       mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
 
-      await expect(createAgain(result)).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      await expect(createAgain(result)).rejects.toThrow('This project is already on this device.');
       expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
       expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
         'test-project',

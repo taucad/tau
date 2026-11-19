@@ -43,7 +43,7 @@ Rules marked _pending_ state the target; the named work package lands their enfo
 | Interactive-tier cut (PL5)                                  | _Pending_. `critical-budget.json` lists the editor and three.js as `knownHeavy` for `project` |
 | Client facts (PL2), runtime entry cut (PL1), hand-off (PL6) | Built                                                                                         |
 | Shared `Deferred` tier boundary (P3)                        | _Pending_. Deferral is per site today                                                         |
-| One service worker from the registry (PL7)                  | _Pending_. `app/offline/offline-shell-worker.ts` covers `/usage` only                         |
+| One service worker from the registry (PL7)                  | Built. `app/offline/service-worker.ts` answers the project and Home shells and `/usage`       |
 
 ## Rules
 
@@ -142,13 +142,15 @@ The viewer is deferred. Never put three.js, a kernel or wasm in an interactive t
 
 ### 11. Serve every document cross-origin isolated
 
-Every document, whoever serves it, carries `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy` and `Cross-Origin-Resource-Policy` and the site's CSP, so `crossOriginIsolated` is true. A service worker replays stored responses whole and never synthesises a document; `offline-shell-worker.ts` already does so for `/usage`.
+Every document, whoever serves it, carries `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy` and `Cross-Origin-Resource-Policy` and the site's CSP, so `crossOriginIsolated` is true. The service worker replays stored responses whole and never synthesises a document.
 
-**Enforced by**: `check-static-shells.mts` header parity between a shell and the function document; `apps/ui/scripts/netlify-headers.test.ts`; `static-host-conformance.sh` on a deployed site. The worker-served clause (isolation on worker-served opens, G4 item 9) is tested with PL7.
+**Enforced by**: `check-static-shells.mts` header parity between a shell and the function document; `apps/ui/scripts/netlify-headers.test.ts`; `static-host-conformance.sh` on a deployed site. The worker-served clause (shell invariant 9) is `apps/ui-e2e/src/service-worker.test.ts`: each shell opened offline from the worker is `crossOriginIsolated`.
 
 ### 12. Run one service worker generated from the registry
 
-**Pending (PL7)**. There is one service worker for the web app. Its precache list is generated from the route-class registry: the shell documents and each class's T1 closure. Never add a path to it by hand, and never precache a deferred-tier asset (see [SSR Bundle Policy](ssr-bundle-policy.md) rule 7 for the editor). Until PL7 lands, `scripts/generate-offline-shell.ts` generates the `/usage` worker's list from build output; do not register a second worker beside it.
+There is one service worker for the web app, `apps/ui/app/offline/service-worker.ts`, on Google Workbox's runtime modules. A class answers documents through it only by naming a `worker` delivery in `route-classes.ts` (`cache-first` for a static shell, `network-first` for `/usage`). Its precache list is generated from the registry by `scripts/build-service-worker.ts`: each answered class's document and the T1 closure its document and `interactive` roots load. Never add a path to it by hand, never give the worker a route for API, auth, `.data` or marketing requests, and never precache a deferred-tier, wasm, kernel or worker asset (see [SSR Bundle Policy](ssr-bundle-policy.md) rule 7 for the editor); hashed files the page fetches are cached on first use only. The worker never calls `skipWaiting` on install: a waiting worker activates when the build-skew verdict is `replaced` (ruling OD3), and a reload asks the network first. Do not register a second worker. Web builds only; desktop and `tau serve` never register it.
+
+**Enforced by**: `check-critical-budget.mts` (the written list equals the generated one; no heavy family, wasm, worker or runtime asset; revisions on documents only; shell invariant 8), `verify-shipped-assets.mts` (each revisioned entry still matches its file after the last deploy step), `app/offline/service-worker-routing.test.ts` and `pwa-registration.test.ts` (routing and the update rule), `apps/ui-e2e/src/service-worker.test.ts` and `stale-deploy-recovery.test.ts` (offline opens, pass-through, a worker-controlled tab across a deploy; shell invariant 9).
 
 ### 13. Make every document work without a service worker
 

@@ -237,11 +237,11 @@ const linkedImportRefusal = (
   /* Another branch already holds the chosen name; the reviewed branch itself moving is a change, not a taken name. */
   if (
     targetBranch !== sourceBranch &&
-    error.message === `Remote branch ${targetBranch} already names another revision.`
+    error.message === `GitHub already has a different branch named ${targetBranch}.`
   ) {
     return {
       title: 'This branch name is taken on GitHub',
-      message: 'Choose another name for the local and sync branch.',
+      message: 'Choose another branch name.',
     };
   }
   return {
@@ -1174,7 +1174,7 @@ export default function ImportRoute(): React.JSX.Element {
                         </p>
                       ) : fetchErrors.branches ? (
                         <p role='status' className='text-sm'>
-                          Could not fetch branches. Import will use the{' '}
+                          Couldn’t list branches. Import will use the{' '}
                           <span className='font-mono'>{selectedBranch}</span> branch.
                         </p>
                       ) : (
@@ -1339,7 +1339,7 @@ export default function ImportRoute(): React.JSX.Element {
                     <p id={repoUrlHintId} className='text-xs text-muted-foreground'>
                       {isRepoUrlRejected
                         ? 'Enter a github.com repository address, like https://github.com/owner/repo.'
-                        : 'Copies files without Git history or sync.'}
+                        : 'Copies the files only. No Git history, and no backup to this repository.'}
                     </p>
                     <Button type='submit' variant='outline' disabled={!canReviewRepository}>
                       Review repository
@@ -1452,7 +1452,7 @@ export default function ImportRoute(): React.JSX.Element {
                   )}
                 </div>
                 <label htmlFor='linked-target-branch' className='text-sm font-medium'>
-                  Local and sync branch
+                  Branch name
                 </label>
                 <div className='max-w-sm space-y-2'>
                   <Input
@@ -1462,17 +1462,17 @@ export default function ImportRoute(): React.JSX.Element {
                     disabled={linkedBusy}
                     onChange={(event) => {
                       setLinkedTargetBranch(event.target.value);
-                      /* A refusal of the old name ("…already names another revision.") is not about the new one. */
+                      /* A refusal of the old name ("GitHub already has a different branch named …") is not about the new one. */
                       if (!linkedReviewBlocked) {
                         setLinkedError(undefined);
                       }
                     }}
                   />
                   <p className='text-xs text-muted-foreground'>
-                    Tau preserves the selected branch’s commits, tracked files, executable modes and Git remote.
+                    Tau keeps the branch’s commits and files, and stays connected to this repository.
                     {linkedSelection.repository.access === 'write'
-                      ? ' Importing does not push to GitHub. Enable writes for this repository in Settings, then choose Push to upload your history.'
-                      : ' This repository is linked read-only; your history stays available on this device.'}
+                      ? ' Importing doesn’t back anything up to GitHub. To back up to it, allow backups to this repository in Settings.'
+                      : ' This repository is read-only, so Tau won’t back up to it. Your history stays on this device.'}
                   </p>
                 </div>
                 <span className='text-sm font-medium'>Chats</span>
@@ -1486,7 +1486,7 @@ export default function ImportRoute(): React.JSX.Element {
                     }}
                   />
                   <Label htmlFor='linked-sync-chats' className='text-sm leading-none font-normal'>
-                    Sync project chats with this repository
+                    Include chats
                   </Label>
                 </div>
                 {/* A blocked review writes nothing, so it lists no setup change (R5). */}

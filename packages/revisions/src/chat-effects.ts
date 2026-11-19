@@ -302,7 +302,7 @@ export const createChatEffects = (
                 name: input.name,
                 status: 'rejected',
                 head: input.offered.get(input.name),
-                reason: 'The remote said nothing about this ref.',
+                reason: 'Couldn’t back up this project’s chats. Tau will try again.',
               }
             : outcomeOf(entry, input.offered),
       };
@@ -311,7 +311,8 @@ export const createChatEffects = (
       if (rateLimited(error)) {
         throw error;
       }
-      const message = error instanceof Error ? error.message : 'This record could not be backed up.';
+      const message =
+        error instanceof Error ? error.message : 'Couldn’t back up this project’s chats. Tau will try again.';
       return {
         outcome: {
           name: input.name,
@@ -373,7 +374,7 @@ export const createChatEffects = (
               name,
               status: 'rejected',
               head: input.offered.get(name),
-              reason: 'The remote said nothing about this ref.',
+              reason: 'Couldn’t back up this project’s chats. Tau will try again.',
             },
           ]),
         );
@@ -385,7 +386,8 @@ export const createChatEffects = (
         throw error;
       }
       if (input.retryRejected === false) {
-        const reason = error instanceof Error ? error.message : 'The repository refused this push.';
+        const reason =
+          error instanceof Error ? error.message : 'Couldn’t back up this project’s chats. Tau will try again.';
         return new Map(
           input.names.map((name) => [name, { name, status: 'rejected', head: input.offered.get(name), reason }]),
         );
@@ -442,7 +444,7 @@ export const createChatEffects = (
         name: input.name,
         status: 'rejected',
         head: undefined,
-        reason: input.refusal ?? 'The remote refused this ref.',
+        reason: input.refusal ?? 'Couldn’t back up part of this project. Try again.',
       };
     }
     input.signal?.throwIfAborted();
@@ -488,7 +490,12 @@ export const createChatEffects = (
     });
     const [entry] = pushed.refs;
     return entry === undefined
-      ? { name: input.name, status: 'rejected', head: undefined, reason: 'The remote said nothing about this ref.' }
+      ? {
+          name: input.name,
+          status: 'rejected',
+          head: undefined,
+          reason: 'Couldn’t back up this project’s chats. Tau will try again.',
+        }
       : outcomeOf(entry);
   };
 

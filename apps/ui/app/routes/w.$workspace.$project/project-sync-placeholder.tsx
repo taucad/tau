@@ -27,11 +27,11 @@ import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { createModelWaitReporter } from '#lib/model-wait-reporting.js';
 
 const messages = {
-  connecting: ['Connecting to Tau Cloud', 'Opening this project on this device.'],
+  connecting: ['Opening project…', 'Opening this project on this device.'],
   downloading: ['Downloading project files', 'Your model will open when its files are ready.'],
-  preparing: ['Preparing project files', 'Getting your downloaded files ready to use.'],
-  offline: ['Connect to download this project', 'This project is not on this device yet. Reconnect, then try again.'],
-  failed: ['Couldn’t download this project', 'The download did not finish. Try again to continue.'],
+  preparing: ['Preparing files…', 'Getting your files ready to open.'],
+  offline: ['You’re offline', 'This project isn’t on this device yet. Go online, then try again.'],
+  failed: ['Couldn’t open this project', 'The download didn’t finish. Try again.'],
   account: ['Sign in to continue', cloudOpenAccountReason],
   ready: ['Project files ready', ''],
 } satisfies Record<ProjectAvailability, readonly [string, string]>;
@@ -314,15 +314,15 @@ export const projectFilesCopy = (
     return ['Project unavailable', 'Your access may have changed. Open History to review the backup.'];
   }
   if (reason === 'unauthorized') {
-    return ['Sign in to continue', 'Your connection needs authorization before this project can download.'];
+    return ['Sign in to continue', 'Sign in again to finish opening this project. Open History to sign in.'];
   }
   if (reason === 'rejected') {
-    return ['Couldn’t back up this project', 'Tau Cloud refused this device’s history. Open History to review it.'];
+    return ['Couldn’t back up this project', 'Changes from this device weren’t backed up. Open History to see why.'];
   }
   if (status?.sync.state === 'conflicted') {
     return [
-      'This project needs a decision',
-      'This device and Tau Cloud both changed it. Open History to choose what to keep.',
+      'Needs your decision',
+      'This project changed here and somewhere else. Open History to choose what to keep.',
     ];
   }
   if (reason === 'quota') {

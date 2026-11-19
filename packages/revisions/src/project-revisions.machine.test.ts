@@ -2807,7 +2807,7 @@ describe('projectRevisionsMachine', () => {
 
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync).toMatchObject({
       state: 'queued',
-      error: 'agent/b waits on your decision; its revisions back up once you choose.',
+      error: 'agent/b is waiting for your decision. It backs up once you choose.',
     });
 
     harness.actor.stop();

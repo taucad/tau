@@ -66,7 +66,7 @@ const inviteFailureMessage = (status: number, code: string | undefined): string 
     return 'Only the project owner can invite people.';
   }
   if (status === 404) {
-    return 'This project is not on Tau Cloud yet. Connect the backup first.';
+    return 'This project is not in the cloud yet. Connect the backup first.';
   }
   return 'Couldn’t create the invite. Try again.';
 };

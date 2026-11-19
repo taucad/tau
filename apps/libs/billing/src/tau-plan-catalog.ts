@@ -83,7 +83,7 @@ export const tauPlanCatalog: readonly PlanCatalogEntry[] = [
       included('Purchased credits never expire'),
       included('All AI models'),
       included('All open-source CAD kernels'),
-      included('Unlimited local geometry testing'),
+      included('Unlimited geometry testing on your device'),
       included('Community support'),
       included('Export to all formats'),
       included('Public share links'),

@@ -8,6 +8,11 @@
  * PicoGK and C# hosts check every runtime file against their own manifests, so a changed byte reaches users as
  * "PicoGK runtime resource integrity mismatch". Run this after the last step that can rewrite `build/client`.
  *
+ * It also re-checks the service worker's precache list (progressive loading PL7, shell invariant 8,
+ * `build/service-worker-precache.json`): every entry with a content revision (the shell documents, fonts and other
+ * unhashed files) must still match its file, or installed workers would replay a document the deploy no longer
+ * serves. Hashed `/assets/*` entries carry no revision, so a debug-id rewrite of a compiled chunk is allowed.
+ *
  * Usage: node apps/ui/scripts/verify-shipped-assets.mts <client-dir>
  * Exit codes: 0 verified, 1 a file changed or is missing, 2 usage.
  */
@@ -16,6 +21,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { z } from 'zod';
+/* oxlint-disable-next-line no-restricted-imports -- Native Node deploy step reads the build's precache helpers. */
+import { precacheEntries, precacheListFile } from './precache-list.ts';
 
 const receiptName = 'tau-asset-receipt.json';
 const receiptSchema = z.object({
@@ -81,6 +88,45 @@ export const verifyShippedAssets = async (
   return { checked, problems: problems.toSorted() };
 };
 
+const precacheSchema = z.array(z.object({ url: z.string().startsWith('/'), revision: z.string().nullable() }));
+
+/**
+ * Re-check every revisioned precache entry against the file the deploy ships.
+ *
+ * @param client - The built client directory; the list sits beside it.
+ * @returns How many entries were checked, and one line per entry that changed or is missing, sorted.
+ */
+export const verifyPrecacheRevisions = async (
+  client: string,
+): Promise<{ readonly checked: number; readonly problems: readonly string[] }> => {
+  const listBytes = await readOptional(path.join(client, '..', precacheListFile));
+  if (!listBytes) {
+    const worker = await readOptional(path.join(client, 'service-worker.js'));
+    return { checked: 0, problems: worker ? [`${precacheListFile}: missing beside a built service worker`] : [] };
+  }
+  const entries = precacheSchema.parse(JSON.parse(new TextDecoder().decode(listBytes)));
+  const problems: string[] = [];
+  let checked = 0;
+  for (const entry of entries) {
+    if (entry.revision === null) {
+      continue;
+    }
+    checked += 1;
+    const bytes = await readOptional(path.join(client, entry.url.slice(1)));
+    if (!bytes) {
+      problems.push(`${entry.url}: precached, but missing`);
+      continue;
+    }
+    const [current] = precacheEntries([entry.url], () => bytes);
+    if (current?.revision !== entry.revision) {
+      problems.push(
+        `${entry.url}: precached with revision ${entry.revision}, but the file now has ${String(current?.revision)}`,
+      );
+    }
+  }
+  return { checked, problems: problems.toSorted() };
+};
+
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const [client, ...extra] = process.argv.slice(2);
   if (!client || extra.length > 0) {
@@ -91,8 +137,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   for (const problem of problems) {
     console.error(`::error::A file the UI build copied verbatim changed after the build: ${problem}`);
   }
-  if (problems.length > 0) {
+  const precache = await verifyPrecacheRevisions(client);
+  for (const problem of precache.problems) {
+    console.error(`::error::A file the service worker precaches changed after the build: ${problem}`);
+  }
+  if (problems.length > 0 || precache.problems.length > 0) {
     process.exit(1);
   }
   console.log(`Verified ${String(checked)} file(s) the UI build copied verbatim under ${client}.`);
+  console.log(`Verified ${String(precache.checked)} revisioned service worker precache entr(ies) under ${client}.`);
 }

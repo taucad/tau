@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break, build epochs with the release fallback and its collector groups, the mesh memo and kept pack facts — measured 30.06 kB brotlied on 2026-11-18, after the fallback review fixes (collector groups, worker-wide switch)",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break, build epochs with the release fallback and its collector groups, the mesh memo, kept pack facts and partner-less prototypes — measured 30.22 kB brotlied on 2026-11-19, after merging partner-less prototypes (N5)",
     "path": ["dist/**/*.mjs"],
     "limit": "30.5 kB"
   },

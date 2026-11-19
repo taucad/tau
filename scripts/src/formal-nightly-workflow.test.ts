@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 /*
  * The formal nightly runs one job per project with a `formal:nightly` target, each with its own
  * 120-minute budget (CI throughput review, Q-4): one serial job of every project ran out of its 60
- * minutes on each scheduled run of 2026-11-07 to 2026-11-11, and `agent-host` alone took 55 on its own job. The project list comes from Nx, so a new
+ * minutes on each scheduled run of 2026-11-07 to 2026-11-11 (the schedule is now retired), and `agent-host` alone took 55 on its own job. The project list comes from Nx, so a new
  * owner's target joins the matrix without a workflow edit, and an empty list fails rather than passes.
  * A project with a `formal:nightly:check` target runs its nightly configs and Apalache in a job of
  * their own, so the matrix is one job per project and target.
@@ -41,9 +41,14 @@ const list = workflow.jobs['projects'];
 const shard = workflow.jobs['formal-nightly'];
 
 describe('formal nightly workflow', () => {
-  it('should keep its schedule and dispatch, run one at a time, and be callable by the queue and the gate', () => {
-    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_call', 'workflow_dispatch']);
-    // The schedule and a dispatch share one group; a caller (the queue, the release gate) passes `ref`.
+  it('should have no schedule, keep its dispatch, run one at a time, and be callable by the queue and the gate', () => {
+    // FN-RETIRE: the release gate runs the whole formal matrix uncached, three times a day and on every desktop
+    // candidate, so the 03:41 nightly is retired (§ 5b of the program's handoff).
+    expect(Object.keys(workflow.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
+    expect(workflow.on).not.toHaveProperty('schedule');
+    const call = workflow.on['workflow_call'] as { readonly inputs?: Record<string, unknown> };
+    expect(Object.keys(call.inputs ?? {}).sort()).toEqual(['projects', 'ref', 'seed', 'uncached']);
+    // Dispatches share one group; a caller (the queue, the release gate) passes `ref`.
     expect(workflow.concurrency).toEqual({
       group: `formal-nightly\${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}`,
       'cancel-in-progress': false,
@@ -81,6 +86,12 @@ describe('formal nightly workflow', () => {
     expect(upload?.if).toBe('always()');
     expect(upload?.with?.['name']).toBe(`formal-nightly-reports-\${{ matrix.tier.slug }}`);
   });
+
+  it('should run the wide tier on a dispatch only, never on a call', () => {
+    expect((workflow.jobs['formal-wide'] as { readonly if?: string } | undefined)?.if).toBe(
+      `\${{ github.event_name == 'workflow_dispatch' && !inputs.ref }}`,
+    );
+  });
 });
 
 /*
@@ -103,7 +114,9 @@ describe('formal nightly check shards and cache', () => {
   it('should run a formal:nightly:check tier as four shards, each named and uploaded on its own', () => {
     const step = list?.steps?.find((candidate) => candidate.id === 'list');
     expect(step?.env?.['CHECK_SHARDS']).toBe(4);
-    expect(step?.run).toContain('if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi');
+    expect(step?.run).toContain(
+      'if [ "$target" = formal:nightly:check ] && [ -f tools/formal/run-seconds.json ]; then shards=$CHECK_SHARDS; fi',
+    );
     expect(step?.run).toContain('range(1; $shards + 1)');
     expect(step?.run).toContain(String.raw`shard: (if $shards > 1 then "\($index)/\($shards)" else "" end)`);
     expect(step?.run).toContain(String.raw`(if $shards > 1 then "-\($index)-of-\($shards)" else "" end)`);

@@ -73,7 +73,7 @@ function ProjectNameCell({
           <div className='flex min-w-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground'>
             <span className='truncate font-mono'>{projectSlugOf(project.locator)}</span>
             {project.cloud?.cloudState === 'deleting' ? (
-              <span role='status'>Deleting from Tau Cloud…</span>
+              <span role='status'>Deleting cloud copy…</span>
             ) : project.onCloud === true ? (
               <OnTauCloudMark />
             ) : undefined}

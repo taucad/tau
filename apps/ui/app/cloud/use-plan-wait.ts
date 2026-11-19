@@ -38,8 +38,9 @@ export const useAdaptivePlan = (): AdaptivePlan => {
   const portWait = useSyncExternalStore(cloudPort.subscribe, readWait, (): 'checking' => 'checking');
   const retry = useCallback(() => {
     retryMode();
+    cloudPort.recheck(key);
     cloudSurfaces.retry();
-  }, [retryMode]);
+  }, [key, retryMode]);
   const wait =
     mode.state === 'unknown'
       ? mode.problem === 'safe-mode'

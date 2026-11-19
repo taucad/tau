@@ -9,7 +9,8 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { CloudIdentityProvider, cloudIdentityValue } from '#cloud/cloud-identity.js';
-import { cloudFactsDeadlineMilliseconds, cloudIdentityKey, cloudPort } from '#cloud/cloud-port.js';
+import { cloudIdentityKey, cloudPort } from '#cloud/cloud-port.js';
+import { askDeadlineMilliseconds } from '#lib/ask-deadline.js';
 import type { CloudIdentity } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.adaptive.js';
@@ -103,7 +104,7 @@ describe('commercial features (consumer table)', () => {
     const { result } = commercialIn(funded, alice);
     expect(result.current).toMatchObject({ isResolved: false, wait: 'checking' });
     act(() => {
-      vi.advanceTimersByTime(cloudFactsDeadlineMilliseconds);
+      vi.advanceTimersByTime(askDeadlineMilliseconds);
     });
     expect(result.current).toMatchObject({ isResolved: false, wait: 'unavailable' });
     act(() => {

@@ -1,8 +1,9 @@
-import { renderHook } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import type { BillingTier, Entitlements } from '@taucad/billing';
-import { useCommercialFeatures } from '#cloud/commercial-features.cloud.js';
+import { entitlementDeadlines, useCommercialFeatures } from '#cloud/commercial-features.cloud.js';
+import { askDeadlineMilliseconds } from '#lib/ask-deadline.js';
 
 const plan = vi.hoisted(() => ({
   current: undefined as (Entitlements & { isResolved: boolean; isError: boolean }) | undefined,
@@ -11,6 +12,19 @@ const plan = vi.hoisted(() => ({
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => plan.current }));
 vi.mock('#hooks/use-settings-dialog.js', () => ({ useSettingsDialog: () => ({ open: vi.fn() }) }));
 vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ refetchQueries: vi.fn() }) }));
+const session = vi.hoisted(() => ({ userId: 'u1' as string | undefined }));
+vi.mock('@taucad/billing/hooks/billing-session', () => ({
+  useBillingSession: () => ({ apiBaseUrl: 'https://api.test', environment: 'staging', userId: session.userId }),
+}));
+
+beforeEach(() => {
+  session.userId = 'u1';
+  entitlementDeadlines.cancel();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const withPlan = (tier: BillingTier, isResolved = true, isError = false) => {
   plan.current = { ...entitlementsFromTier(tier), isResolved, isError };
@@ -40,5 +54,48 @@ describe('useCommercialFeatures storage allowance', () => {
 
   it('should resolve with a pinned basis', () => {
     expect(withPlan('pro')).toMatchObject({ isResolved: true, basis: 'pinned', canCreatePrivateShares: true });
+  });
+});
+
+/* Adaptive app deployment mode I15 on a pinned cloud build: no person-visible wait is open-ended. */
+describe('useCommercialFeatures deadline', () => {
+  it('should check for one ask deadline, then say it cannot check, then resolve when the answer arrives', () => {
+    vi.useFakeTimers();
+    plan.current = { ...entitlementsFromTier('pro'), isResolved: false, isError: false };
+    const view = renderHook(() => useCommercialFeatures());
+    expect(view.result.current).toMatchObject({ isResolved: false, wait: 'checking' });
+    act(() => {
+      vi.advanceTimersByTime(askDeadlineMilliseconds - 1);
+    });
+    expect(view.result.current).toMatchObject({ isResolved: false, wait: 'checking' });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(view.result.current).toMatchObject({ isResolved: false, wait: 'unavailable' });
+    plan.current = { ...entitlementsFromTier('pro'), isResolved: true, isError: false };
+    view.rerender();
+    expect(view.result.current).toMatchObject({ isResolved: true, canCreatePrivateShares: true });
+  });
+
+  it('should check again for one deadline on Retry', () => {
+    vi.useFakeTimers();
+    plan.current = { ...entitlementsFromTier('free'), isResolved: false, isError: false };
+    const view = renderHook(() => useCommercialFeatures());
+    act(() => {
+      vi.advanceTimersByTime(askDeadlineMilliseconds);
+    });
+    const { current } = view.result;
+    expect(current).toMatchObject({ wait: 'unavailable' });
+    act(() => {
+      if (!current.isResolved) {
+        current.retry();
+      }
+    });
+    expect(view.result.current).toMatchObject({ wait: 'checking' });
+  });
+
+  it('should read a signed-out session, whose query is disabled, as unavailable at once, never checking', () => {
+    session.userId = undefined;
+    expect(withPlan('free', false)).toMatchObject({ isResolved: false, wait: 'unavailable' });
   });
 });

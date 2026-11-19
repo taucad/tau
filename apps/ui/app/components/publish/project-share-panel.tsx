@@ -1253,14 +1253,18 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
   /* No link yet, or a stopped one: choose who can open it and publish. Publishing turns a stopped link back on. */
   const notShared = (share: ProjectShare | undefined): React.JSX.Element => {
-    const visibility = chosenVisibility ?? share?.visibility ?? 'private';
-    // Free tier publishes public-only (T4/T5/AD11); derived so an async
-    // entitlements load never strands a locked selection in form state.
-    // Until the plan is known nothing is derived: the radio shows the link's
-    // setting and a publish names only what the person picked, so the server
-    // keeps the link's setting (private for a first publish).
-    const effectiveVisibility: PublishVisibility = canCreatePrivateShares || !isPlanResolved ? visibility : 'public';
-    const submittedVisibility = isPlanResolved || chosenVisibility !== undefined ? effectiveVisibility : undefined;
+    // Only people you invite needs the Pro plan to choose (T4/T5/AD11), but a link that is already private keeps
+    // it after the plan lapses (T16), so its own setting stays on offer. Until the plan is known nothing is locked.
+    const isPrivateAllowed = canCreatePrivateShares || !isPlanResolved || share?.visibility === 'private';
+    // A pick the plan no longer allows (the entitlements answered after it) is dropped rather than sent.
+    const picked = chosenVisibility === 'private' && !isPrivateAllowed ? undefined : chosenVisibility;
+    const effectiveVisibility: PublishVisibility =
+      picked ?? (isPrivateAllowed ? (share?.visibility ?? 'private') : 'public');
+    // A publish names only what the person picked, so the server keeps the link's own setting (private for a first
+    // publish). The one derived setting is a Free plan's first publish: there is no link to keep, and private is
+    // not theirs to choose.
+    const submittedVisibility: PublishVisibility | undefined =
+      picked ?? (share === undefined && !isPrivateAllowed ? 'public' : undefined);
     return (
       <SharePaneFrame isDisabled={busy}>
         <SharePaneSection
@@ -1293,18 +1297,15 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 className='flex flex-col gap-2'
               >
                 <div className='flex flex-wrap items-center gap-2'>
-                  <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
+                  <RadioGroupItem value='private' id='share-vis-private' disabled={!isPrivateAllowed} />
                   <Label
                     htmlFor='share-vis-private'
                     /* A 16px radio's label is its 24px target under a coarse pointer (I3). */
-                    className={cn(
-                      'font-normal pointer-coarse:min-h-6',
-                      !canCreatePrivateShares && 'text-muted-foreground',
-                    )}
+                    className={cn('font-normal pointer-coarse:min-h-6', !isPrivateAllowed && 'text-muted-foreground')}
                   >
                     Only people you invite
                   </Label>
-                  {canCreatePrivateShares || !isPlanResolved ? undefined : (
+                  {isPrivateAllowed ? undefined : (
                     <button
                       type='button'
                       className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'

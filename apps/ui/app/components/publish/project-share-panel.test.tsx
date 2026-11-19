@@ -787,7 +787,7 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('publishes an auto-named version as one gesture, private on a first publish', async () => {
+  it('publishes an auto-named version as one gesture, leaving a first publish to the server default (private)', async () => {
     renderPanel(
       <ProjectSharePanel
         projectId='proj_ok'
@@ -807,7 +807,6 @@ describe('ProjectSharePanel', () => {
       projectName: 'Demo',
       description: 'a beautiful model',
       entryPath: 'main.ts',
-      visibility: 'private',
     });
   });
 
@@ -1169,8 +1168,24 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
     await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
 
+    /* Nothing picked, so nothing named: the server keeps the link's own setting. */
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ isAutoNamed: true, visibility: 'public' }),
+      expect.objectContaining({ isAutoNamed: true }),
+    );
+    expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
+      'visibility',
+    );
+  });
+
+  it('sends the setting the person picked when turning a stopped link back on', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(stoppedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /anyone with the link/i }));
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ visibility: 'public' }),
     );
   });
 
@@ -1467,6 +1482,7 @@ describe('publishedVersionLabel', () => {
 describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   beforeEach(() => {
     useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: true });
+    revisionStatusHarness.reset();
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
   });
 
@@ -1494,6 +1510,34 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
+    expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
+      'visibility',
+    );
+  });
+
+  it('sends public on a first publish, where there is no link to keep and private is not theirs to choose', async () => {
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ visibility: 'public' }),
+    );
+  });
+
+  it('keeps a stopped invite-only link invite-only after the plan lapses (T16)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(stoppedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByText(/for the same people/iu)).toBeInTheDocument();
+    const invited = screen.getByRole('radio', { name: /only people you invite/i });
+    expect(invited).toBeEnabled();
+    expect(invited).toBeChecked();
+    expect(screen.queryByRole('button', { name: /upgrade/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+
+    /* The server keeps the link's own setting: a lapsed plan never turns it public. */
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
     expect(vi.mocked(revisionStatusHarness.commands.confirmPublish).mock.calls[0]?.[0]).not.toHaveProperty(
       'visibility',

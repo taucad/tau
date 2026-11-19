@@ -89,8 +89,6 @@ export declare function makeBox(corner1: Point, corner2: Point): Solid;
 
 // Creates the `Drawing` of an polygon in a defined plane
 declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
-
-export declare function makeLine(v1: Point, v2: Point): Edge;
 ```
 
 ### Classes
@@ -115,6 +113,7 @@ export declare class Sketch implements SketchInterface
           defaultOrigin?: Point;
           defaultDirection?: Point;
       });
+  // Keeps a copy of `newFace`
   baseFace: Face | null | undefined
   delete(): void;
   clone(): Sketch;
@@ -189,7 +188,7 @@ export declare class Drawing implements DrawingInterface
   toSVGPaths(): string[] | string[][];
   offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
   readonly blueprint: Blueprint
-  // … 7 more members in the API reference: serialize, stretch, repr, punchHole, toSVG, toSVGViewBox, approximate
+  // … 8 more members in the API reference: delete, serialize, stretch, repr, punchHole, toSVG, toSVGViewBox, approximate
 
 Shape2D: Blueprint | Blueprints | CompoundBlueprint | null
 
@@ -418,7 +417,7 @@ ManifoldBox: Box
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 838 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 850 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-classes.md` — Classes

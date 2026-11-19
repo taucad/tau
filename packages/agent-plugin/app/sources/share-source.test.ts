@@ -82,12 +82,13 @@ describe('createShareSource', () => {
     expect(methods.map(({ id, label }) => [id, label])).toEqual([['direct', 'Direct link']]);
     expect(methods[0]).toMatchObject({
       kind: 'link',
-      description: 'Create a link that carries the whole project. No account needed.',
-      notice: { title: 'No upload through Tau' },
+      description: 'The whole project travels in the link, so anyone with the link can open it. Nothing is uploaded.',
       encryption: { minBytes: 32, maxBytes: 128 },
-      action: { label: 'Copy direct link' },
-      copiedMessage: 'Direct link copied',
+      shouldRemakeLink: true,
+      action: { label: 'Copy link' },
     });
+    expect(methods[0]).not.toHaveProperty('notice');
+    expect(methods[0]).not.toHaveProperty('copiedMessage');
   });
 
   it('should make the direct link from the project the server packed', async () => {
@@ -128,7 +129,9 @@ describe('createShareSource', () => {
     })) as { readonly url: string; readonly warning?: string };
 
     expect(JSON.stringify(bridge.callTool.mock.calls)).not.toContain(password);
-    expect(outcome.warning).toBe('Shared with 1 unresolved dependency.');
+    expect(outcome.warning).toBe(
+      "1 imported file couldn't be found and isn't in the link. The model may not build for people who open it.",
+    );
     const { hash } = new URL(outcome.url);
     const { secrets } = parseShareUrl({ slug: 'direct', fragment: hash });
     expect(Object.keys(secrets).sort()).toEqual(['jwe', 'v']);
@@ -139,7 +142,7 @@ describe('createShareSource', () => {
     expect(opened.files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json']);
   });
 
-  it('should pass on a direct link refusal as the error sentence', async () => {
+  it('should say a project too large for a direct link is too large', async () => {
     await expect(
       shareWith(
         bridgeAnswering(async () => ({
@@ -148,6 +151,19 @@ describe('createShareSource', () => {
         })),
         'direct',
       ),
-    ).resolves.toEqual({ error: 'Too large.' });
+    ).resolves.toEqual({ error: 'This project is too large for a direct link.' });
+  });
+
+  it("should answer any other refusal or failure in the pane's words, never the server's", async () => {
+    await expect(
+      shareWith(bridgeAnswering(async () => ({ errorCode: 'SHARE_PROVIDER_UNAVAILABLE', message: 'ECONNRESET' }))),
+    ).resolves.toEqual({ error: "Couldn't create the link. Try again." });
+    await expect(
+      shareWith(
+        bridgeAnswering(async () => {
+          throw new Error('bridge closed');
+        }),
+      ),
+    ).resolves.toEqual({ error: "Couldn't create the link. Try again.", warning: undefined });
   });
 });

@@ -59,7 +59,7 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
   BillingSessionProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   useBillingSession: () => ({ apiBaseUrl: undefined, environment: undefined, userId: undefined }),
 }));
-vi.mock('#providers/financial-session-provider.js', () => ({
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
   FinancialSessionProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   FinancialSessionScope: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   useFinancialSession: () => ({ capture: vi.fn() }),

@@ -615,6 +615,8 @@ export const opencascadeKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: opencascadeDetectPattern,
   builtinModuleNames: ['libcascade'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: { libcascade: { name: 'libcascade', version: '3.1.0' } },
   name: 'OpenCascadeKernel',
   // 1.3.0: the model view and GLB export claim `includeEdges` and draw B-rep edge lines themselves,

@@ -352,34 +352,19 @@ export const readShellCaches = async (
   );
 
 /**
- * Waits until the offline shell has installed one complete version.
- *
- * Readiness is the sentinel the worker writes last, so a partially populated
- * cache never counts as installed.
+ * Waits until the web app's service worker (progressive loading PL7) has installed its precache, activated and taken
+ * control of the page. Workbox writes the precache before the worker activates, so an activated controller means a
+ * complete precache. Call it from a page outside a project workspace, where the page registers the worker (B-27).
  *
  * @param timeout - How long to wait.
- * @returns The installed shell version.
+ * @returns The precache's cache name.
  */
 export const waitForOfflineShell = async (timeout = 120_000): Promise<string> => {
-  await target.waitFor(
-    async () => {
-      const names = await caches.keys();
-      const shell = names.find((name) => name.startsWith('tau-offline-shell-'));
-      if (shell === undefined) {
-        return false;
-      }
-      const cache = await caches.open(shell);
-      const version = shell.slice('tau-offline-shell-'.length);
-      return (await cache.match(`/__tau-offline-shell/${version}.ready`)) !== undefined;
-    },
-    undefined,
-    { timeout },
-  );
+  // Synchronous: the wait would take an unsettled promise for a truthy answer.
+  await target.waitFor(() => navigator.serviceWorker.controller?.state === 'activated', undefined, { timeout });
   return target.evaluate(async () => {
-    // A controlled navigation needs an *active* worker, not only a complete cache.
-    await navigator.serviceWorker.ready;
     const names = await caches.keys();
-    return names.find((name) => name.startsWith('tau-offline-shell-')) ?? '';
+    return names.find((name) => name.startsWith('tau-precache-')) ?? '';
   });
 };
 
@@ -447,7 +432,7 @@ export const installUncachedViewOverride = async (): Promise<void> => {
 export const formatInstantInPage = async (instant: string, surface?: 'primary' | 'secondary'): Promise<string> =>
   target.evaluate((value: string) => new Date(value).toLocaleString(), instant, surface);
 
-/** How the shell cache stored one of its prerendered documents. */
+/** How the precache stored one of its documents. */
 export type CachedShellDocument = {
   readonly redirected: boolean;
   readonly status: number;
@@ -455,55 +440,44 @@ export type CachedShellDocument = {
 };
 
 /**
- * Reads a shell document straight out of CacheStorage.
+ * Reads a precached document straight out of CacheStorage.
  *
  * A navigation request's redirect mode is `manual`, so a stored response whose
  * `redirected` flag is set can never be replayed to one.
  *
- * @param path - Manifest path of the document, e.g. `/usage`.
+ * @param path - The document's precache URL, e.g. `/usage/index.html`.
  * @returns The stored response's identity, or `undefined` when it is absent.
  */
 export const readCachedShellDocument = async (path: string): Promise<CachedShellDocument | undefined> =>
   target.evaluate(async (documentPath: string) => {
     const names = await caches.keys();
-    const shell = names.find((name) => name.startsWith('tau-offline-shell-'));
-    if (shell === undefined) {
+    const precache = names.find((name) => name.startsWith('tau-precache-'));
+    if (precache === undefined) {
       return undefined;
     }
-    const cache = await caches.open(shell);
-    const stored = await cache.match(documentPath);
+    const cache = await caches.open(precache);
+    const keys = await cache.keys();
+    const key = keys.find((request) => new URL(request.url).pathname === documentPath);
+    const stored = key === undefined ? undefined : await cache.match(key);
     return stored === undefined ? undefined : { redirected: stored.redirected, status: stored.status, url: stored.url };
   }, path);
 
-/** The build-generated allowlist injected into the worker's own bytes. */
-export type OfflineShellManifest = {
-  readonly version: string;
-  readonly documents: readonly string[];
-  readonly assets: readonly string[];
-};
+/** One entry of the precache list the build injected into the served worker. */
+export type PrecacheListEntry = { readonly url: string; readonly revision: string | null };
 
 /**
- * Reads the allowlist the build generated, from the served worker.
+ * Reads the precache list the build generated, from the served worker: `injectManifest` writes it into the worker's
+ * own bytes, so this is the deployed list itself rather than a copy of it.
  *
- * The manifest is an `esbuild` `define` baked into `offline-shell-worker.js`,
- * so this is the deployed allowlist itself rather than a copy of it.
- *
- * @returns The version, documents and assets the worker may cache.
+ * @returns The precache entries.
  */
-export const readOfflineShellManifest = async (): Promise<OfflineShellManifest> =>
+export const readOfflineShellManifest = async (): Promise<readonly PrecacheListEntry[]> =>
   target.evaluate(async () => {
-    const response = await fetch('/offline-shell-worker.js');
+    const response = await fetch('/service-worker.js');
     const source = await response.text();
-    const list = (key: string): string[] => {
-      const match = new RegExp(`${key}: (\\[[^\\]]*\\])`, 'u').exec(source);
-      if (match?.[1] === undefined) {
-        throw new Error(`The served offline shell worker has no ${key} allowlist`);
-      }
-      return JSON.parse(match[1]) as string[];
-    };
-    const version = /version: "([^"]+)"/u.exec(source)?.[1];
-    if (version === undefined) {
-      throw new Error('The served offline shell worker has no version');
+    const match = /\[\{"revision"[^\]]*\]/u.exec(source);
+    if (match === null) {
+      throw new Error('The served service worker has no precache list');
     }
-    return { version, documents: list('documents'), assets: list('assets') };
+    return JSON.parse(match[0]) as PrecacheListEntry[];
   });

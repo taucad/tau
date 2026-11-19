@@ -30,7 +30,7 @@ vi.mock('#components/auth/settings/security/security-settings.js', () => ({
   SecuritySettings: renderSecuritySettings,
 }));
 vi.mock('#components/auth/api-key/api-keys.js', () => ({ ApiKeys: () => <div>Mounted API keys</div> }));
-vi.mock('#components/settings/billing-settings.js', () => ({
+vi.mock('@taucad/billing-ui/components/settings/billing-settings', () => ({
   BillingSettings: () => (
     <div>
       Mounted billing

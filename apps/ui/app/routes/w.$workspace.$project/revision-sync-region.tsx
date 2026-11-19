@@ -492,7 +492,7 @@ function MovedRepository({
  *
  * One line says where the backup is and how it is doing, a second says why
  * and offers the fix, and **Manage** holds the rest. No card and no Details
- * (M8); People with access lives in Share (Q5). Disconnecting is the one
+ * (M8); Collaborators lives in Share (Q5). Disconnecting is the one
  * action that asks first (I11).
  *
  * Presentational on purpose: it takes the projection's remote facet and three

@@ -90,7 +90,7 @@ const spyOnBindings = (): (() => Counts) => {
   return () => Object.fromEntries(Object.entries(spies).map(([name, spy]) => [name, spy.mock.calls.length]));
 };
 
-type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts };
+type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts; coldGlb: Counts };
 
 /** Explicit tolerances, so the mesh of each copy does not change with the model's size. */
 const coarse = { linearTolerance: 0.1, angularTolerance: 10 };
@@ -134,7 +134,14 @@ const measureCylinders = async (
     const step = await counted(async () => {
       await expectExported(document.export('step'));
     });
-    return { render, glb, stl, step };
+    // A GLB at tolerances no render used: nothing is kept, so it meshes as the render did (N14).
+    const coldGlb = await counted(async () => {
+      const cold = { ...tessellation, linearTolerance: tessellation.linearTolerance * 3 };
+      await expectExported(
+        document.export('glb', { options: { tessellation: cold }, content: { includeEdges: true } }),
+      );
+    });
+    return { render, glb, stl, step, coldGlb };
   } finally {
     document.close();
   }
@@ -176,6 +183,17 @@ const occurrences = (copies: number): Counts => ({
   'gp_Trsf.Value': 12 * copies,
 });
 
+/**
+ * A GLB export after a render at the same tolerances (compute reuse on) composes the meshes the memo kept (N14): no
+ * extraction and no surface-coordinate read, only the occurrence reads, with one more `IsPartner` check against the
+ * memo's kept representative.
+ */
+const keptOccurrences = (copies: number): Counts => ({
+  ...none,
+  ...occurrences(copies),
+  'ReplicadShapeIdentity.IsPartner': copies,
+});
+
 describe('Replicad kernel call counts', () => {
   let small: Measured;
   let large: Measured;
@@ -189,7 +207,7 @@ describe('Replicad kernel call counts', () => {
     texturedFine = await measureCylinders({ copies: 2, anisotropic: true }, fine);
   });
 
-  it('should mesh faces and edges once per prototype on the render-with-edges and GLB export paths', () => {
+  it('should mesh faces and edges once per prototype on render with edges, and compose them on the GLB export', () => {
     // The copies share one prototype, so faces and edges are one native extraction each whatever
     // the copy count; only the per-shape occurrence reads (A19) grow with it.
     const meshed = {
@@ -201,7 +219,13 @@ describe('Replicad kernel call counts', () => {
       small: { ...meshed, ...occurrences(2) },
       large: { ...meshed, ...occurrences(6) },
     });
-    expect({ small: small.glb, large: large.glb }).toEqual({ small: small.render, large: large.render });
+    expect({ small: small.glb, large: large.glb }).toEqual({ small: keptOccurrences(2), large: keptOccurrences(6) });
+    // A GLB at tolerances no render used meshes once per prototype, as the render did; its only extra call is the
+    // partner check against the representative the memo already keeps.
+    expect({ small: small.coldGlb, large: large.coldGlb }).toEqual({
+      small: { ...small.render, 'ReplicadShapeIdentity.IsPartner': 2 },
+      large: { ...large.render, 'ReplicadShapeIdentity.IsPartner': 6 },
+    });
   });
 
   it('should export STL with no per-element binding call and STEP with only the identity reads', () => {
@@ -226,8 +250,8 @@ describe('Replicad kernel call counts', () => {
       coarse: { ...meshed, 'Poly_Triangulation.UVNode': 290, 'BRepAdaptor_Surface.EvalD1': 290 },
       fine: { ...meshed, 'Poly_Triangulation.UVNode': 578, 'BRepAdaptor_Surface.EvalD1': 578 },
     });
-    expect(texturedCoarse.glb).toEqual(texturedCoarse.render);
-    expect(texturedFine.glb).toEqual(texturedFine.render);
+    expect(texturedCoarse.glb).toEqual(keptOccurrences(2));
+    expect(texturedFine.glb).toEqual(keptOccurrences(2));
   });
 });
 
@@ -328,7 +352,9 @@ describe('Replicad ocTracing summary', () => {
       'kernel.export-compute',
     ]);
     // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
-    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash.
-    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 9, 13]);
+    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash. Run-main makes 10 calls
+    // since `@taulabs/replicad` 1.2.0-beta.1 builds each operation once (taucad/replicad#9), and the live tier's cost
+    // estimate of the entry it stores walks its faces (a `TopExp_Explorer`, `More` and `Next`: 3 more).
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([13, 9, 13]);
   });
 });

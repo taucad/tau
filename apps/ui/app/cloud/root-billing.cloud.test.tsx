@@ -1,5 +1,5 @@
 import type * as BillingSessionModule from '@taucad/billing/hooks/billing-session';
-import type * as FinancialSessionModule from '#providers/financial-session-provider.js';
+import type * as FinancialSessionModule from '@taucad/billing-ui/providers/financial-session-provider';
 import { renderToString } from 'react-dom/server';
 import type { ReactNode } from 'react';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
@@ -15,7 +15,7 @@ const getPaymentAction = vi.hoisted(() => vi.fn());
 const recoverPaymentAction = vi.hoisted(() => vi.fn());
 const followPaymentRedirect = vi.hoisted(() => vi.fn());
 const cancelPaymentAction = vi.hoisted(() => vi.fn());
-vi.mock('#lib/billing-payment-client.js', () => ({
+vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => ({
   cancelPaymentAction,
   getPaymentAction,
   followPaymentRedirect,
@@ -41,7 +41,7 @@ vi.mock('@taucad/billing/hooks/billing-session', async (loadOriginal) => {
 const financial = vi.hoisted(() => ({
   capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
 }));
-vi.mock('#providers/financial-session-provider.js', async (loadOriginal) => {
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', async (loadOriginal) => {
   const original = await loadOriginal<typeof FinancialSessionModule>();
   return { ...original, useFinancialSession: () => (boundary.enabled ? original.useFinancialSession() : financial) };
 });

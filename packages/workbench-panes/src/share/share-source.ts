@@ -42,9 +42,11 @@ export type ShareLinkOutcome =
   | Readonly<{ error: string; warning?: string | undefined }>;
 
 /**
- * The card at the top of a link method's body: what the link is and where the project goes.
+ * The card a link method's body drew at its top.
  *
  * @public
+ * @deprecated The pane no longer draws a notice card; it shows `ShareMethodBase.description` under the method picker
+ * instead. It will be removed.
  */
 export type ShareLinkNotice = Readonly<{
   /** Drawn left of the title. */
@@ -62,6 +64,8 @@ export type ShareLinkOption = Readonly<{
   /** Key in the request's `options`; also names the checkbox element (`portable-share-<id>`). */
   id: string;
   label: string;
+  /** One line under the label that says what the option changes. */
+  description?: string;
 }>;
 
 /**
@@ -119,31 +123,53 @@ export type ShareMethodBase = Readonly<{
   /** Shown in the method picker. */
   label: string;
   icon: ShareMethodIcon;
+  /**
+   * One sentence: what the link is and where the project goes. Shown under the method's name in the picker and under
+   * the picker while the method is chosen.
+   */
+  description: string;
 }>;
 
 /**
- * A method the pane draws itself: a notice, a password and other options, and a primary button that makes the link,
- * copies it and confirms the copy with a tick.
+ * A method the pane draws itself: a password and other options, and a primary button that makes the link, copies it
+ * and confirms the copy with a tick.
  *
  * @public
  */
 export type ShareLinkMethod = ShareMethodBase &
   Readonly<{
     kind: 'link';
-    /** Shown under the pane title while this method is chosen. */
-    description: string;
-    notice: ShareLinkNotice;
-    /** Offer password encryption, with the password's UTF-8 byte bounds and the notice shown while it is on. */
+    /**
+     * @deprecated The pane no longer draws a notice card; {@link ShareMethodBase.description} says what the link is.
+     * Ignored; it will be removed.
+     */
+    notice?: Readonly<{ icon: ReactNode; title: string; text: string }>;
+    /** Offer password encryption, with the password's UTF-8 byte bounds. */
     encryption?: Readonly<{
       minBytes: number;
       maxBytes: number;
-      notice: Readonly<{ title: string; text: string }>;
+      /** @deprecated The pane draws its own words for the password; ignored, and it will be removed. */
+      notice?: Readonly<{ title: string; text: string }>;
     }>;
     options?: readonly ShareLinkOption[];
-    /** The primary button before the link exists, for example `Copy direct link`. */
+    /**
+     * Make a fresh link from the project as it is now on every press, and never hold the choices: changing one removes
+     * the link shown. For a link that costs nothing to remake, such as one that carries the project itself. Without it
+     * the first press makes the link, later presses copy that link, and the choices are held once it exists, for a link
+     * that creates something (a Gist) a second press must not create again.
+     */
+    shouldRemakeLink?: boolean;
+    /**
+     * The primary button's label, for example `Copy link`. For a method that does not remake its link, it reads `Copy
+     * link` once the link exists.
+     */
     action: Readonly<{ label: string; icon: ShareMethodIcon }>;
-    /** Announced when the new link is copied. */
-    copiedMessage: string;
+    /** @deprecated Every copy is announced as `Link copied`; ignored, and it will be removed. */
+    copiedMessage?: string;
+    /**
+     * Makes the link. The pane starts copying it inside the press, before this settles, so it may take as long as it
+     * needs.
+     */
     share: (request: ShareLinkRequest) => Promise<ShareLinkOutcome>;
     /**
      * A hook the body calls on every render, for a method that needs more than the link body draws. It runs once per
@@ -160,7 +186,7 @@ export type ShareLinkMethod = ShareMethodBase &
 export type ShareCustomMethod = ShareMethodBase &
   Readonly<{
     kind: 'custom';
-    /** Draws the whole body, including the frame (which carries the title, description and method picker). */
+    /** Draws the whole body, including the frame (which carries the method picker and the method's description). */
     render: () => ReactNode;
   }>;
 

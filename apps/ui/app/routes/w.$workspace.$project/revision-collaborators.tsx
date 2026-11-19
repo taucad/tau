@@ -1,5 +1,5 @@
 /**
- * *People with access* — the owner's half of a collaboration (charter W5, D27).
+ * *Collaborators* — the owner's half of a collaboration (charter W5, D27).
  *
  * There is no invitation email. `POST /v1/projects/:id/collaborators` answers
  * the accept token exactly once and nothing stores it afterwards, so the link
@@ -11,12 +11,23 @@
  * listing through {@link useSharedCount}.
  */
 
-import { Heading } from '@taucad/ui/components/heading';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, UserMinus } from 'lucide-react';
+import { UserMinus } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Badge } from '@taucad/ui/components/badge';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { SharePaneSection } from '@taucad/workbench-panes/share/share-pane';
+import { ShareNotice } from '@taucad/workbench-panes/share/share-notice';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
@@ -26,7 +37,7 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
@@ -42,8 +53,14 @@ type IssuedInvitation = Readonly<{ email: string; role: 'read' | 'write'; token:
 
 const roleLabel = (role: 'read' | 'write'): string => (role === 'write' ? 'Can edit' : 'Can view');
 
-const statusLabel = (status: CollaboratorEntry['status']): string =>
-  status === 'accepted' ? 'Accepted' : status === 'revoked' ? 'Revoked' : 'Invited';
+/** What the owner needs to know about a row: nothing once accepted. */
+const statusLabel = (status: CollaboratorEntry['status']): string | undefined =>
+  status === 'pending' ? 'Invite not accepted yet' : status === 'revoked' ? 'Access removed' : undefined;
+
+/** Rows shown before "Show all"; the list renders in the pane's one scroll area, so it never scrolls on its own. */
+const collapsedRowCount = 5;
+
+const listFailureMessage = "Couldn't load collaborators. Try again.";
 
 /**
  * The refusal, in the words of the person who caused it.
@@ -57,18 +74,18 @@ const statusLabel = (status: CollaboratorEntry['status']): string =>
  */
 const inviteFailureMessage = (status: number, code: string | undefined): string => {
   if (status === 429 || code === 'PROJECT_INVITE_RATE_LIMITED') {
-    return 'Too many invitations today. Try again tomorrow.';
+    return 'You’ve created too many invite links today. Try again tomorrow.';
   }
   if (status === 400) {
     return 'Enter a valid email address.';
   }
   if (status === 403) {
-    return 'Only the project owner can invite people.';
+    return 'Only the project owner can add collaborators.';
   }
   if (status === 404) {
-    return 'This project is not in the cloud yet. Connect the backup first.';
+    return 'This project isn’t in the cloud yet. Back it up to the cloud first.';
   }
-  return 'Couldn’t create the invite. Try again.';
+  return 'Couldn’t create the invite link. Try again.';
 };
 
 const collaboratorsEndpoint = (projectId: string): string =>
@@ -85,7 +102,7 @@ const listCollaborators = async (projectId: string): Promise<readonly Collaborat
     /* F4: a listing nobody could read is not an empty one. Answering `[]`
        told an owner "nobody else has access" while a collaborator with a
        live membership was sitting behind a 500. */
-    throw recordApiRequestId(new Error('The list of people with access could not be loaded.'), response);
+    throw recordApiRequestId(new Error(listFailureMessage), response);
   }
   const body: unknown = await response.json();
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the owner-only route's own DTO, narrowed by the array check.
@@ -115,7 +132,7 @@ const expiryCopy = (isoDate: string): string | undefined => {
   const parsed = new Date(isoDate);
   return Number.isNaN(parsed.getTime())
     ? undefined
-    : `This link works until ${parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}.`;
+    : ` It works until ${parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}.`;
 };
 
 export type RevisionCollaboratorsProps = {
@@ -124,14 +141,14 @@ export type RevisionCollaboratorsProps = {
 };
 
 /**
- * Who else may work on this project, and how one more is invited.
+ * Who else may work on this project, and how one more is invited: the Share pane's "Collaborators" section.
  *
  * Mounted in the Share panel for the owner alone, by {@link ProjectPeopleWithAccess}. A collaborator never sees it:
  * the routes behind it all need `owner`, and offering a control that is always
  * refused is worse than not offering it.
  *
  * @param props - The project being shared.
- * @returns The invite form, the one-time link it issues, and the people list.
+ * @returns The section: the invite form, the one-time link it issues, and the people list.
  */
 export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps): React.JSX.Element {
   const endpoint = collaboratorsEndpoint(projectId);
@@ -140,11 +157,17 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
   const [role, setRole] = useState<'read' | 'write'>('write');
   const [issued, setIssued] = useState<IssuedInvitation>();
   const [failure, setFailure] = useState<string>();
+  /* The person a removal waits to be confirmed for: access cannot be given back without a new invite link. */
+  const [removal, setRemoval] = useState<CollaboratorEntry>();
+  const shouldFocusHeadingRef = useRef(false);
+  /* The row button that asked, so a cancelled removal hands focus back to it. */
+  const removalTriggerRef = useRef<HTMLButtonElement | undefined>(undefined);
 
   const {
     data: people = [],
     isLoading,
     isError,
+    refetch,
   } = useQuery({
     queryKey: collaboratorsKey(projectId),
     queryFn: async () => listCollaborators(projectId),
@@ -201,8 +224,8 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         throw recordApiRequestId(
           new Error(
             response.status === 404
-              ? `${next.email} has no invitation to change.`
-              : `The role for ${next.email} could not be changed. Try again.`,
+              ? `${next.email} no longer has an invite. Add them again.`
+              : `Couldn’t change the role for ${next.email}. Try again.`,
           ),
           response,
         );
@@ -230,11 +253,14 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
     },
     async onSuccess() {
       setFailure(undefined);
+      /* The row's button is disabled once its person is removed, so the dialog hands focus to the heading. */
+      shouldFocusHeadingRef.current = true;
+      setRemoval(undefined);
       await refreshPeople();
-      headingRef.current?.focus();
     },
     onError(error: Error) {
       setFailure(error.message);
+      setRemoval(undefined);
     },
   });
 
@@ -256,179 +282,332 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
    */
   /* One alert, whichever went wrong: a mutation the owner started, or the
      listing that never arrived. Two regions would announce twice. */
-  const alert = failure ?? (isError ? 'The list of people with access could not be loaded.' : undefined);
+  const alert = failure ?? (isError ? listFailureMessage : undefined);
   const linkRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [isListExpanded, setIsListExpanded] = useState(false);
+  const helpId = useId();
   useEffect(() => {
     if (issued !== undefined) {
       linkRef.current?.focus();
     }
   }, [issued]);
+  const shownPeople = isListExpanded ? people : people.slice(0, collapsedRowCount);
 
   return (
-    <div className='flex flex-col gap-3'>
-      <Heading level={3} variant='label' ref={headingRef} tabIndex={-1} className='focus-visible:focus-outline'>
-        People with access
-      </Heading>
-
-      <div className='flex flex-col gap-2'>
-        <Label htmlFor='collaborator-email' className='text-sm font-normal'>
-          Invite by email
-        </Label>
-        <div className='flex flex-wrap items-center gap-2'>
-          <Input
-            id='collaborator-email'
-            type='email'
-            inputMode='email'
-            autoComplete='email'
-            className='min-w-40 flex-1'
-            placeholder='teammate@example.com'
-            value={email}
-            disabled={busy}
-            onChange={(event) => {
-              setEmail(event.target.value);
-            }}
-          />
-          <Select
-            value={role}
-            disabled={busy}
-            onValueChange={(value) => {
-              setRole(value === 'read' ? 'read' : 'write');
-            }}
-          >
-            <SelectTrigger className='w-28' aria-label='Invitation role'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='write'>Can edit</SelectItem>
-              <SelectItem value='read'>Can view</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button
-          size='sm'
-          className='self-end'
-          disabled={typed === '' || busy}
-          onClick={() => {
-            invite.mutate();
+    <SharePaneSection
+      title='Collaborators'
+      description='Collaborators open this project itself and see your latest changes. People with a link see only what you shared.'
+      headingRef={headingRef}
+    >
+      <div data-slot='share-people' className='flex flex-col gap-4'>
+        {/* One row, always open, and no Done: the one-time link it creates stays shown until the next invite replaces it. */}
+        <form
+          className='flex flex-col gap-2'
+          aria-label='Add a collaborator'
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (typed !== '' && !busy) {
+              invite.mutate();
+            }
           }}
         >
-          {invite.isPending ? <Loader className='size-4' /> : undefined}
-          <span>Create invite link</span>
-        </Button>
-      </div>
-
-      {/*
-        The token, once (D27).
-
-        A read-only field rather than prose, because a person who cannot use the
-        clipboard still has to be able to select the whole link — and because
-        the field carries the address it belongs to as its own label, so two
-        invitations issued in a row can never be confused for one another.
-      */}
-      {issued === undefined || invitationUrl === undefined ? undefined : (
-        <div
-          role='status'
-          aria-label='Invitation created'
-          className='ph-no-capture flex flex-col gap-2 rounded-md border border-dashed p-2'
-        >
-          <Label htmlFor='collaborator-invitation-link' className='text-sm font-normal'>
-            {`Invitation link for ${issued.email}`}
-          </Label>
-          <div className='flex items-center gap-2'>
-            <Input
-              ref={linkRef}
-              id='collaborator-invitation-link'
-              readOnly
-              className='min-w-0 flex-1 font-mono text-xs'
-              value={invitationUrl}
-              onFocus={(event) => {
-                event.target.select();
+          <div className='flex flex-wrap items-end gap-2'>
+            <div className='flex min-w-40 flex-1 flex-col gap-2'>
+              <Label htmlFor='collaborator-email'>Email address</Label>
+              <Input
+                id='collaborator-email'
+                type='email'
+                inputMode='email'
+                autoComplete='email'
+                placeholder='teammate@example.com'
+                value={email}
+                disabled={busy}
+                aria-describedby={helpId}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                }}
+              />
+            </div>
+            <Select
+              value={role}
+              disabled={busy}
+              onValueChange={(value) => {
+                setRole(value === 'read' ? 'read' : 'write');
               }}
-            />
-            <CopyButton getText={() => invitationUrl} readyToCopyText='Copy link' copiedText='Copied' size='sm' />
+            >
+              <SelectTrigger className='w-28' aria-label='Role'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='write'>Can edit</SelectItem>
+                <SelectItem value='read'>Can view</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button type='submit' variant='outline' disabled={typed === '' || busy} aria-busy={invite.isPending}>
+              {invite.isPending ? <Loader className='size-4' /> : undefined}
+              <span>Create invite link</span>
+            </Button>
           </div>
-          {/* The desktop shell has no inbound link path, so `app://tau` was
-              never the answer: the invitee finishes in a browser and the
-              project arrives on their desktop's next cloud listing (blueprint
-              Finding 5, ruling Q4). Either way the owner sends the link. */}
-          <p className='text-xs text-muted-foreground'>
-            {isDesktopTarget()
-              ? 'This link opens in the browser. Once they accept, the project appears in their Tau.'
-              : 'Tau does not email this link. Send it to them yourself.'}
+          <p id={helpId} className='text-xs text-muted-foreground'>
+            You’ll get an invite link to send them yourself. Tau doesn’t email it.
           </p>
-          {expiryCopy(issued.expiresAt) === undefined ? undefined : (
-            <p className='text-xs text-muted-foreground'>{expiryCopy(issued.expiresAt)}</p>
-          )}
-        </div>
-      )}
+        </form>
 
-      {alert === undefined ? undefined : (
-        <p role='alert' className='flex items-center gap-2 text-sm'>
-          <AlertTriangle aria-hidden className='size-4 shrink-0 text-feature' />
-          <span>{alert}</span>
-        </p>
-      )}
+        {/*
+          The token, once (D27).
 
-      {isLoading || isError || people.length > 0 ? (
-        <ul aria-label='People with access' className='flex list-none flex-col rounded-md border'>
-          {people.map((person) => (
-            <li key={person.email} className='flex flex-col gap-1 border-b px-3 py-2 last:border-b-0'>
-              <div className='flex min-w-0 items-center gap-2'>
-                <span className='min-w-0 flex-1 truncate text-sm'>{person.email}</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size='icon-xs'
-                      variant='ghost'
-                      className='-mr-1 shrink-0'
-                      disabled={busy || person.status === 'revoked'}
-                      aria-label={`Remove access for ${person.email}`}
-                      onClick={() => {
-                        revoke.mutate(person.email);
-                      }}
-                    >
-                      <UserMinus aria-hidden />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side='left'>Remove access</TooltipContent>
-                </Tooltip>
-              </div>
-              <div className='flex items-center gap-2'>
-                {person.status === 'revoked' ? (
-                  <Badge variant='secondary'>{roleLabel(person.role)}</Badge>
-                ) : (
-                  <Select
-                    size='sm'
-                    value={person.role}
-                    disabled={busy}
-                    onValueChange={(value) => {
-                      changeRole.mutate({ email: person.email, role: value === 'read' ? 'read' : 'write' });
-                    }}
-                  >
-                    <SelectTrigger className='w-28' aria-label={`Role for ${person.email}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value='write'>Can edit</SelectItem>
-                      <SelectItem value='read'>Can view</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-                <span className='text-xs text-muted-foreground'>{statusLabel(person.status)}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className='text-xs text-muted-foreground'>Nobody else has access to this project.</p>
-      )}
+          A read-only field rather than prose, because a person who cannot use the
+          clipboard still has to be able to select the whole link — and because
+          the field carries the address it belongs to as its own label, so two
+          invitations issued in a row can never be confused for one another.
+        */}
+        {issued === undefined || invitationUrl === undefined ? undefined : (
+          <IssuedInviteLink
+            email={issued.email}
+            url={invitationUrl}
+            worksUntil={expiryCopy(issued.expiresAt)}
+            linkRef={linkRef}
+          />
+        )}
+
+        {alert === undefined ? undefined : (
+          <ShareNotice
+            tone='error'
+            actions={
+              failure === undefined && isError ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={() => {
+                    void refetch();
+                  }}
+                >
+                  Try again
+                </Button>
+              ) : undefined
+            }
+          >
+            {alert}
+          </ShareNotice>
+        )}
+
+        {isLoading ? (
+          <div role='status' aria-busy='true' aria-label='Loading collaborators' className='flex flex-col gap-2'>
+            <Skeleton aria-hidden className='h-5 w-48' />
+            <Skeleton aria-hidden className='h-5 w-40' />
+          </div>
+        ) : people.length > 0 ? (
+          <>
+            <ul aria-label='Collaborators' className='flex list-none flex-col gap-3'>
+              {shownPeople.map((person) => {
+                const personStatus = statusLabel(person.status);
+                return (
+                  <li key={person.email} className='flex flex-col gap-1'>
+                    <div className='flex min-w-0 items-start gap-2'>
+                      <span className='min-w-0 flex-1 text-sm [overflow-wrap:anywhere]'>{person.email}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size='icon-sm'
+                            variant='ghost'
+                            className='shrink-0'
+                            disabled={busy || person.status === 'revoked'}
+                            aria-label={`Remove access for ${person.email}`}
+                            onClick={(event) => {
+                              removalTriggerRef.current = event.currentTarget;
+                              setRemoval(person);
+                            }}
+                          >
+                            <UserMinus aria-hidden />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side='left'>Remove access</TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      {person.status === 'revoked' ? (
+                        <Badge variant='secondary'>{roleLabel(person.role)}</Badge>
+                      ) : (
+                        <Select
+                          size='sm'
+                          value={person.role}
+                          disabled={busy}
+                          onValueChange={(value) => {
+                            changeRole.mutate({ email: person.email, role: value === 'read' ? 'read' : 'write' });
+                          }}
+                        >
+                          <SelectTrigger className='w-28' aria-label={`Role for ${person.email}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value='write'>Can edit</SelectItem>
+                            <SelectItem value='read'>Can view</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {personStatus === undefined ? null : (
+                        <span className='text-xs text-muted-foreground'>{personStatus}</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {people.length > collapsedRowCount ? (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='self-start'
+                aria-expanded={isListExpanded}
+                onClick={() => {
+                  setIsListExpanded((expanded) => !expanded);
+                }}
+              >
+                {isListExpanded ? 'Show fewer' : `Show all ${String(people.length)}`}
+              </Button>
+            ) : null}
+          </>
+        ) : isError ? null : (
+          <p className='text-sm text-muted-foreground'>No collaborators yet.</p>
+        )}
+      </div>
+      <RemoveCollaboratorDialog
+        person={removal}
+        isRemoving={revoke.isPending}
+        onConfirm={(person) => {
+          revoke.mutate(person.email);
+        }}
+        onCancel={() => {
+          setRemoval(undefined);
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (shouldFocusHeadingRef.current) {
+            shouldFocusHeadingRef.current = false;
+            headingRef.current?.focus();
+          } else {
+            removalTriggerRef.current?.focus();
+          }
+        }}
+      />
+    </SharePaneSection>
+  );
+}
+
+/**
+ * Asks before a person loses access (UX Rule 4): a removed collaborator can only come back through a new invite link,
+ * so the removal is confirmed with their address rather than undone.
+ *
+ * @param props - The person waiting to be removed, whether the removal is running, and what each answer does.
+ * @returns The dialog, open while a person is waiting.
+ */
+function RemoveCollaboratorDialog({
+  person,
+  isRemoving,
+  onConfirm,
+  onCancel,
+  onCloseAutoFocus,
+}: {
+  readonly person: CollaboratorEntry | undefined;
+  readonly isRemoving: boolean;
+  readonly onConfirm: (person: CollaboratorEntry) => void;
+  readonly onCancel: () => void;
+  readonly onCloseAutoFocus: (event: Event) => void;
+}): React.JSX.Element {
+  return (
+    <AlertDialog
+      open={person !== undefined}
+      onOpenChange={(open) => {
+        if (!open && !isRemoving) {
+          onCancel();
+        }
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{`Remove ${person?.email ?? ''} from collaborators?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {person?.status === 'pending'
+              ? 'Their invite link will stop working, so they won’t get access to this project. To invite them again, create a new invite link.'
+              : 'They’ll lose access to this project and can no longer open it. To give access back, create a new invite link.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isRemoving}>Cancel</AlertDialogCancel>
+          <Button
+            type='button'
+            variant='destructive'
+            disabled={isRemoving}
+            aria-busy={isRemoving}
+            onClick={() => {
+              if (person !== undefined) {
+                onConfirm(person);
+              }
+            }}
+          >
+            {isRemoving ? <Loader className='size-4' /> : null}
+            Remove access
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * The token, once (D27).
+ *
+ * A read-only field rather than prose, because a person who cannot use the clipboard still has to be able to select
+ * the whole link — and because the field carries the address it belongs to as its own label, so two invitations issued
+ * in a row can never be confused for one another.
+ *
+ * @param props - Who the link is for, the link, the sentence saying until when it works, and the field's ref.
+ * @returns The announced block holding the link, its copy button and what to do with it.
+ */
+function IssuedInviteLink({
+  email,
+  url,
+  worksUntil,
+  linkRef,
+}: {
+  readonly email: string;
+  readonly url: string;
+  readonly worksUntil: string | undefined;
+  readonly linkRef: React.Ref<HTMLInputElement>;
+}): React.JSX.Element {
+  return (
+    <div role='status' aria-label='Invite link created' className='ph-no-capture flex flex-col gap-2'>
+      <Label htmlFor='collaborator-invitation-link'>{`Invite link for ${email}`}</Label>
+      <div className='flex items-center gap-2'>
+        <Input
+          ref={linkRef}
+          id='collaborator-invitation-link'
+          readOnly
+          className='min-w-0 flex-1 font-mono text-xs'
+          value={url}
+          onFocus={(event) => {
+            event.target.select();
+          }}
+        />
+        <CopyButton getText={() => url} readyToCopyText='Copy link' copiedText='Copied' size='sm' />
+      </div>
+      {/* The desktop shell has no inbound link path, so `app://tau` was never the answer: the invitee finishes in a
+          browser and the project arrives on their desktop's next cloud listing (blueprint Finding 5, ruling Q4).
+          Either way the owner sends the link. */}
+      <p className='text-xs text-muted-foreground'>
+        {`Send this link to them yourself. Tau doesn’t email it, and it’s only shown once.${worksUntil ?? ''}`}
+        {isDesktopTarget() ? ' It opens in a browser. After they accept, the project appears in their Tau.' : ''}
+      </p>
     </div>
   );
 }
 
 /**
- * *People with access* in the Share panel (C4, Q5).
+ * *Collaborators* in the Share panel (C4, Q5): the last section of the pane's one scroll area, under every
+ * sharing method, because it belongs to the project rather than to a link.
  *
  * The owner alone: every route behind the list needs `owner`, so a
  * collaborator would only meet a refusal. Tau Cloud alone, too (N4) — a
@@ -444,13 +623,5 @@ export function ProjectPeopleWithAccess({ projectId }: RevisionCollaboratorsProp
   if (role !== 'owner' || status?.remote.kind !== 'tau' || status.remote.phase !== 'connected') {
     return undefined;
   }
-  return (
-    <section
-      aria-label='People with access'
-      data-slot='share-people'
-      className='max-h-[50%] shrink-0 overflow-y-auto border-t border-border bg-background p-4'
-    >
-      <RevisionCollaborators projectId={projectId} />
-    </section>
-  );
+  return <RevisionCollaborators projectId={projectId} />;
 }

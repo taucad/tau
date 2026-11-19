@@ -2,7 +2,7 @@
 
 // oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
@@ -51,7 +51,6 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -84,7 +83,6 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -105,8 +103,8 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    expect(screen.getAllByText('Can view')).toHaveLength(1);
-    expect(screen.getByText('Can view · Email not delivered')).toBeInTheDocument();
+    expect(screen.getAllByText('Email not delivered. Send them the link yourself.')).toHaveLength(1);
+    expect(screen.queryByText('Can view')).not.toBeInTheDocument();
     expect(screen.queryByText(/spam|bounced|complain/iu)).not.toBeInTheDocument();
   });
 
@@ -115,7 +113,6 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -146,7 +143,6 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -154,7 +150,9 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    await userEvent.type(screen.getByRole('combobox', { name: 'Invite people by email' }), 'Friend@Example.com{Enter}');
+    const field = screen.getByRole('combobox', { name: 'Invite people by email' });
+    expect(field).toHaveAccessibleDescription("They'll get an email with the link.");
+    await userEvent.type(field, 'Friend@Example.com{Enter}');
     await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
 
     await waitFor(() => {
@@ -162,10 +160,40 @@ describe('PublicationAccessPanel', () => {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'friend@example.com' }),
+        body: JSON.stringify({ email: 'friend@example.com', notifyRecipient: true }),
       });
     });
     expect(onGrantsChanged).toHaveBeenCalledTimes(1);
+    expect(toastSuccessMock).toHaveBeenCalledWith('Invited friend@example.com.');
+  });
+
+  it('settles each address on its own and keeps only the ones that failed', async () => {
+    const onGrantsChanged = vi.fn();
+    globalThis.fetch = vi.fn(async (_url: string, init: { readonly body: string }) => ({
+      ok: !init.body.includes('nope@example.com'),
+    })) as unknown as typeof fetch;
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        visibility='private'
+        grants={[]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={onGrantsChanged}
+      />,
+    );
+
+    const field = screen.getByRole('combobox', { name: 'Invite people by email' });
+    await userEvent.type(field, 'a@example.com{Enter}b@example.com{Enter}nope@example.com{Enter}');
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith("Couldn't invite nope@example.com. Try again.");
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith('Invited 2 people.');
+    expect(onGrantsChanged).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('nope@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('a@example.com')).not.toBeInTheDocument();
   });
 
   it('revokes a grant through the publication access API', async () => {
@@ -174,7 +202,6 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -201,14 +228,129 @@ describe('PublicationAccessPanel', () => {
       });
     });
     expect(onGrantsChanged).toHaveBeenCalledTimes(1);
+    const [message, options] = toastSuccessMock.mock.calls[0] as [string, { action: { label: string } }];
+    expect(message).toBe('Removed access for friend@example.com.');
+    expect(options.action.label).toBe('Undo');
   });
 
-  it('keeps people visible but hides recipient entry for public links', () => {
+  it('puts a removed grant back on Undo without a second invite email', async () => {
+    const onGrantsChanged = vi.fn();
     renderPanel(
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/s/tau~pub_panel'
+        visibility='private'
+        grants={[
+          {
+            id: 'pva_1',
+            publicationId: 'pub_panel',
+            recipientEmail: 'friend@example.com',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            revokedAt: null,
+          },
+        ]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={onGrantsChanged}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    const [, options] = toastSuccessMock.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    options.action.onClick();
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenLastCalledWith('https://api.example/v1/publications/pub_panel/access', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'friend@example.com', notifyRecipient: false }),
+      });
+    });
+    await waitFor(() => {
+      expect(onGrantsChanged).toHaveBeenCalledTimes(2);
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('says so when Undo cannot put the grant back', async () => {
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        visibility='private'
+        grants={[
+          {
+            id: 'pva_1',
+            publicationId: 'pub_panel',
+            recipientEmail: 'friend@example.com',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            revokedAt: null,
+          },
+        ]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /remove access for friend@example.com/i }));
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce({ ok: false } as Response);
+    const [, options] = toastSuccessMock.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    options.action.onClick();
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith("Couldn't give friend@example.com access again. Invite them again.");
+    });
+  });
+
+  it('lists five invited people in flow and the rest on request', async () => {
+    const grants = Array.from(
+      { length: 7 },
+      (_unused, index): PublicationAccessGrant => ({
+        id: `pva_${String(index)}`,
+        publicationId: 'pub_panel',
+        recipientEmail: `person${String(index)}@example.com`,
+        status: 'active',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        revokedAt: null,
+      }),
+    );
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        visibility='private'
+        grants={grants}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { level: 4, name: 'Invited (7)' })).toBeInTheDocument();
+    const list = screen.getByRole('list', { name: 'Invited' });
+    expect(list.className).not.toMatch(/overflow|max-h/u);
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
+    const more = screen.getByRole('button', { name: 'Show all 7' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(more);
+
+    expect(within(list).getAllByRole('listitem')).toHaveLength(7);
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('hides the invite field and the invited list for a link anyone can open', () => {
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
         visibility='public'
         grants={[
           {
@@ -225,8 +367,10 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent('Anyone with the link');
-    expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    const setting = screen.getByRole('combobox', { name: /who can open the link/i });
+    expect(setting).toHaveTextContent('Anyone with the link');
+    expect(setting).toHaveAccessibleDescription('Anyone who has the link can open it.');
+    expect(screen.queryByText('friend@example.com')).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Invite people by email' })).not.toBeInTheDocument();
   });
 });

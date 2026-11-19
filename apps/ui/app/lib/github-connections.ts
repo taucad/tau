@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 const githubId = z.number().int().positive();
 const connectionSchema = z.object({

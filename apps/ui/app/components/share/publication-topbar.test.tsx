@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
@@ -104,6 +104,30 @@ describe('PublicationTopbar', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
 
     expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith(shareUrl);
+  });
+
+  it('starts the copy inside the press and, when the clipboard refuses, shows the link selected', async () => {
+    const clipboard = { writeText: vi.fn<Clipboard['writeText']>().mockRejectedValue(new Error('denied')) };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard });
+    const shareUrl = 'https://tau.example/s/tau~pub_1';
+
+    render(
+      <TooltipProvider>
+        <MemoryRouter>
+          <PublicationTopbar publication={publication} files={new Map()} parameters={{}} shareUrl={shareUrl} />
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith(shareUrl);
+
+    const field = await screen.findByRole('textbox', { name: 'Share link' });
+    expect(field).toHaveValue(shareUrl);
+    expect(screen.getByText('Select the link and copy it.')).toBeVisible();
+    await waitFor(() => {
+      expect(field).toHaveFocus();
+    });
   });
 
   it('does not render viewer-page share controls, even for owners', () => {

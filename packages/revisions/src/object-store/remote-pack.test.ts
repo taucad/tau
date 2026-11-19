@@ -148,6 +148,61 @@ describe('openRemotePack', () => {
     expect(most).toBe(32);
   });
 
+  it('checks a whole entry against its id in the one call that inflates it, and refuses one whose bytes are not it', async () => {
+    // A whole entry was inflated in one compute call and hashed in another: its object crossed to the worker twice and
+    // was framed on the caller's thread in between (SP6-import).
+    const objects = blobs(20);
+    const built = await buildPack(objects, inline);
+    const calls: string[] = [];
+    const counted = Object.fromEntries(
+      Object.entries(inline).map(([name, call]) => [
+        name,
+        async (...args: unknown[]) => {
+          calls.push(name);
+          return (call as (...inner: unknown[]) => Promise<unknown>)(...args);
+        },
+      ]),
+    ) as unknown as typeof inline;
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: counted,
+      fetchRange: async (offset, length) => built.pack.slice(offset, offset + length),
+    });
+    calls.length = 0;
+    const read = await pack.readMany(objects.map((object) => object.oid));
+    expect(read.size).toBe(objects.length);
+    for (const object of objects) {
+      expect(read.get(object.oid)?.data).toStrictEqual(object.data);
+      expect(read.get(object.oid)).not.toHaveProperty('oid');
+    }
+    expect(calls.filter((name) => name === 'sha1' || name === 'inflate')).toEqual([]);
+    expect(calls.filter((name) => name === 'inflateObject')).toHaveLength(objects.length);
+
+    /* An index that names another object at an entry's offset: the read answers other bytes for it, refused. */
+    const [first, second] = built.entries.toSorted((left, right) => left.offset - right.offset);
+    const swapped = await encodePackIndex(
+      built.entries.map((entry) =>
+        entry.oid === first!.oid
+          ? { ...entry, oid: second!.oid }
+          : entry.oid === second!.oid
+            ? { ...entry, oid: first!.oid }
+            : entry,
+      ),
+      built.checksum,
+      sha1Hex,
+    );
+    const lying = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: swapped,
+      compute: inline,
+      fetchRange: async (offset, length) => built.pack.slice(offset, offset + length),
+    });
+    await expect(lying.readMany([first!.oid])).rejects.toThrow(/answered other bytes/u);
+  });
+
   it('asks for the trailer again after a read that failed on the way', async () => {
     const objects = blobs(3);
     const built = await buildPack(objects, inline);

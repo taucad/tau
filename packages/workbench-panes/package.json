@@ -69,6 +69,7 @@
     "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
     "./records/view-record": "./src/records/view-record.ts",
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
+    "./share/share-notice": "./src/share/share-notice.tsx",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
     "./shell/capture-view-control": "./src/shell/capture-view-control.tsx",
@@ -255,6 +256,11 @@
         "types": "./dist/registry/pane-registry.d.mts",
         "import": "./dist/registry/pane-registry.mjs",
         "default": "./dist/registry/pane-registry.mjs"
+      },
+      "./share/share-notice": {
+        "types": "./dist/share/share-notice.d.mts",
+        "import": "./dist/share/share-notice.mjs",
+        "default": "./dist/share/share-notice.mjs"
       },
       "./share/share-pane": {
         "types": "./dist/share/share-pane.d.mts",

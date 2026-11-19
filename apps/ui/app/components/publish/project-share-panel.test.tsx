@@ -12,7 +12,11 @@ import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { ShareError } from '@taucad/share/provider';
 import type { RevisionTag } from '@taucad/revisions';
 import { entitlementsFromTier } from '@taucad/billing';
-import { ProjectSharePanel, publishedVersionLabel } from '#components/publish/project-share-panel.js';
+import {
+  ProjectSharePanel,
+  missingModelFileMessage,
+  publishedVersionLabel,
+} from '#components/publish/project-share-panel.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
 import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
@@ -247,13 +251,16 @@ describe('ProjectSharePanel', () => {
 
     await userEvent.click(trigger);
 
-    const directOption = screen.getByRole('option', { name: 'Direct link' });
-    const tauCloudOption = screen.getByRole('option', { name: 'Cloud link' });
-    const gistOption = screen.getByRole('option', { name: 'GitHub Gist' });
+    const directOption = screen.getByRole('option', { name: /^Direct link/u });
+    expect(directOption).toHaveTextContent(
+      'The whole project travels in the link, so anyone with the link can open it. Nothing is uploaded.',
+    );
+    const tauCloudOption = screen.getByRole('option', { name: /^Cloud link/u });
+    const gistOption = screen.getByRole('option', { name: /^GitHub Gist/u });
     expect(directOption.querySelector('.lucide-link-2')).not.toBeNull();
     expect(tauCloudOption.querySelector('.lucide-cloud')).not.toBeNull();
     expect(gistOption.querySelector('use')).toHaveAttribute('href', '#github');
-    expect(screen.queryByRole('option', { name: 'GitHub repository' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^GitHub repository/u })).not.toBeInTheDocument();
 
     await userEvent.click(gistOption);
     const selected = screen.getByRole('button', { name: 'Share with GitHub Gist' });
@@ -286,7 +293,7 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /copy direct link/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -308,7 +315,7 @@ describe('ProjectSharePanel', () => {
       <ProjectSharePanel projectId='proj_direct' projectName='Direct' entryPath='main.ts' collectSnapshot={vi.fn()} />,
     );
 
-    expect(await screen.findByRole('button', { name: /copy direct link/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Copy link' })).toBeInTheDocument();
     expect(screen.queryByText(/sign in to create/i)).not.toBeInTheDocument();
   });
 
@@ -327,10 +334,12 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByLabelText('Encrypt with a password'));
+    await userEvent.click(screen.getByLabelText('Protect with a password'));
+    /* Protection fills a generated password; this row shares one the person chose instead. */
+    await userEvent.clear(screen.getByLabelText('Password'));
     await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery staple 12345');
     await userEvent.click(screen.getByLabelText('Include password in the link'));
-    await userEvent.click(screen.getByRole('button', { name: /copy direct link/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
 
     expect(portableProviderPublish).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -367,7 +376,7 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /copy direct link/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
     await waitFor(() => {
       expect(operationSignal).toBeDefined();
     });
@@ -385,10 +394,14 @@ describe('ProjectSharePanel', () => {
         collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
       />,
     );
-    expect(screen.getByRole('region', { name: 'Share project' })).toHaveClass('min-h-0', 'min-w-0');
+    const region = screen.getByRole('region', { name: 'Share project' });
+    expect(region).toHaveClass('min-h-0', 'min-w-0');
+    expect(region.querySelector('[data-slot=share-pane-scroll]')).toHaveClass('overflow-y-auto');
     await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
-    await userEvent.click(screen.getByRole('option', { name: 'GitHub Gist' }));
-    expect(await screen.findByText(/tau needs gist access/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('option', { name: /^GitHub Gist/u }));
+    expect(
+      await screen.findByText('GitHub is connected, but Tau needs permission to create Gists.'),
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Allow Gist access' }));
     expect(connectGithubGist).toHaveBeenCalledWith({
       returnUrl: globalThis.location.href,
@@ -412,7 +425,7 @@ describe('ProjectSharePanel', () => {
     const allow = await screen.findByRole('button', { name: 'Allow Gist access' });
     await userEvent.click(allow);
 
-    expect(await screen.findByText('GitHub authorization could not be started.')).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't connect GitHub. Try again.")).toBeInTheDocument();
     expect(allow).toBeEnabled();
   });
 
@@ -446,15 +459,18 @@ describe('ProjectSharePanel', () => {
 
       const allow = await renderDesktopGist();
 
-      expect(await screen.findByRole('status')).toHaveTextContent('Finish in your browser.');
+      expect(
+        await screen.findByText('Finish connecting in your browser. This pane updates when GitHub confirms.'),
+      ).toBeInTheDocument();
       expect(allow).toBeDisabled();
+      expect(allow).toHaveAttribute('aria-busy', 'true');
       getGithubGistConnectionStatus.mockResolvedValue('connected');
       grant(true);
       expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
-      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
     });
 
-    it('should stop waiting on Cancel and offer the grant again', async () => {
+    it('should stop waiting on Stop waiting and offer the grant again', async () => {
       let signal: AbortSignal | undefined;
       awaitGithubGistConnection.mockImplementationOnce(async (received) => {
         signal = received;
@@ -464,12 +480,14 @@ describe('ProjectSharePanel', () => {
       });
 
       const allow = await renderDesktopGist();
-      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Stop waiting' }));
 
       expect(signal?.aborted).toBe(true);
-      expect(screen.getByRole('status')).toHaveTextContent('Stopped waiting for your browser.');
+      expect(
+        screen.getByText("Stopped waiting for your browser. Your GitHub connection hasn't changed."),
+      ).toBeInTheDocument();
       expect(allow).toBeEnabled();
-      /* The Cancel that was clicked is gone; focus returns to the grant rather than the page body. */
+      /* The Stop waiting that was clicked is gone; focus returns to the grant rather than the page body. */
       expect(allow).toHaveFocus();
     });
 
@@ -478,7 +496,7 @@ describe('ProjectSharePanel', () => {
 
       const allow = await renderDesktopGist();
 
-      expect(await screen.findByText('Gist access did not arrive within 10 minutes. Try again.')).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent("GitHub didn't confirm within 10 minutes. Try again.");
       expect(allow).toBeEnabled();
     });
   });
@@ -538,12 +556,13 @@ describe('ProjectSharePanel', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Update Gist' }));
     await waitFor(() => {
       expect(screen.getByLabelText('Share link')).toHaveValue(
         `https://tau.example/s/github-gist~abc123.${'b'.repeat(40)}`,
       );
     });
+    expect(toastSuccessMock).toHaveBeenCalledWith('Gist updated. The link changed, so copy it again.');
     expect(portableProviderRepublish).toHaveBeenCalledWith(
       {
         locator: { providerId: 'github-gist', reference: `abc123.${'a'.repeat(40)}` },
@@ -554,10 +573,10 @@ describe('ProjectSharePanel', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unpublish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete Gist…' }));
     await userEvent.click(
-      within(screen.getByRole('alertdialog', { name: 'Unpublish this GitHub Gist?' })).getByRole('button', {
-        name: 'Unpublish Gist',
+      within(screen.getByRole('alertdialog', { name: 'Delete this Gist?' })).getByRole('button', {
+        name: 'Delete Gist',
       }),
     );
 
@@ -592,7 +611,7 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Create Gist and copy link' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Manage GitHub Gist' }));
     getGithubGistConnectionStatus.mockResolvedValue('not-connected');
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Republish Gist' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Update Gist' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
 
     expect(connectGithubGist).toHaveBeenCalledWith({
@@ -612,7 +631,7 @@ describe('ProjectSharePanel', () => {
       />,
     );
     await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
-    await userEvent.click(screen.getByRole('option', { name: 'GitHub Gist' }));
+    await userEvent.click(screen.getByRole('option', { name: /^GitHub Gist/u }));
     first.unmount();
 
     renderPanel(
@@ -657,10 +676,11 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
+    expect(screen.getByText('Checking your GitHub connection…')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
     });
-    expect(screen.queryByText('GitHub authorization returned. Checking Gist access…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Checking your GitHub connection…')).not.toBeInTheDocument();
   });
 
   it('presents signed-out Tau persistence as a normal state', async () => {
@@ -668,8 +688,9 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_signed_out' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Sign in to create a cloud link.')).toBeInTheDocument();
-    expect(screen.getByText(/saved to your account/i)).toBeInTheDocument();
+    expect(await screen.findByText('Sign in to create a cloud link')).toBeInTheDocument();
+    expect(screen.getByText('Cloud links are saved to your account.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     // Without a snapshot collector the pane offers no direct link, so it does not suggest one.
     expect(screen.queryByText(/use a direct link/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
@@ -696,7 +717,7 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_offline' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText("Couldn't load this project's cloud link.")).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load this project's cloud link");
     expect(screen.getByText('Check your connection, then try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
@@ -707,8 +728,8 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_cloud_deleted' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText("This project isn't in the cloud.")).toBeInTheDocument();
-    expect(screen.getByText(/duplicate the project and share the copy/u)).toBeInTheDocument();
+    expect(await screen.findByText("This project isn't in the cloud")).toBeInTheDocument();
+    expect(screen.getByText(/duplicate the project and share the copy/iu)).toBeInTheDocument();
     expect(screen.queryByText('Check your connection, then try again.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
@@ -716,8 +737,23 @@ describe('ProjectSharePanel', () => {
   it('loads unpublished share state with private visibility selected', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText(/publish a version of this project/i)).toBeInTheDocument();
+    const section = await screen.findByRole('region', { name: 'Publish a version' });
+    expect(
+      within(section).getByText(
+        'People who open the link see this version. Tau keeps a copy so the link works anywhere.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(section).getByRole('radiogroup', { name: 'Who can open the link' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Invite people by email (optional)' })).toHaveAccessibleDescription(
+      "They'll get an email with the link when you publish.",
+    );
+    expect(screen.getByRole('combobox', { name: /version name/i })).toHaveAccessibleDescription(
+      'Names this version in History. A version is permanent; to share later changes, publish a new one.',
+    );
+    expect(screen.getByRole('textbox', { name: /^title$/iu })).toHaveAccessibleDescription(
+      'Shown at the top of the shared page.',
+    );
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeEnabled();
     expect(globalThis.fetch).toHaveBeenCalledWith('https://api.example/v1/projects/proj_ui/share', {
       credentials: 'include',
@@ -783,13 +819,26 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('button', { name: /publish and copy link/i })).toBeDisabled();
   });
 
-  it('copies the machine\u2019s share link once and releases the machine', async () => {
+  it('starts the copy inside the publish press, copies the link the machine makes and releases the machine', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
-    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
 
-    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledOnce();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    view.rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~proj_ok');
@@ -797,8 +846,103 @@ describe('ProjectSharePanel', () => {
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
     });
-    expect(await screen.findByText('People invited to this link')).toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Published. Link copied');
+    expect(await screen.findByRole('heading', { name: 'Invited (1)' })).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    /* The publish button went away with the form; focus lands on the new primary. */
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Copy link' })).toHaveFocus();
+    });
+  });
+
+  it('settles the copy of a second publish that brings the same link', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    /* A fresh element each time: React skips a rerender handed the same element. */
+    const panel = (): React.JSX.Element => (
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+    const link = 'https://tau.example/s/tau~proj_ok';
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
+    });
+
+    /* The reset returns the machine to idle and keeps the link it made. */
+    publishFacet({ phase: 'idle', shareUrl: link });
+    view.rerender(panel());
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: link });
+    view.rerender(panel());
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledTimes(2);
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2);
+    expect(toastSuccessMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands the clipboard a pending link in the publish press, before the machine has made it', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope));
+    const write = vi.fn<(items: unknown[]) => Promise<void>>(async () => undefined);
+    Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: write });
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        declare public readonly items: unknown;
+
+        public constructor(items: unknown) {
+          Object.assign(this, { items });
+        }
+      },
+    );
+    renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+
+    /* The machine has not answered: the write is already running, so Safari counts the press as its gesture. */
+    expect(write).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator.clipboard, 'write');
+  });
+
+  it('says Published and selects the link when the clipboard refuses the publish copy', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(mockJsonResponse(unpublishedEnvelope))
+      .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+    publishFacet({ phase: 'success', shareUrl: 'https://tau.example/s/tau~proj_ok' });
+    view.rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />
+          </TooltipProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Published');
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveFocus();
+    });
   });
 
   it('adds and revokes recipients from the editor Share panel', async () => {
@@ -829,7 +973,7 @@ describe('ProjectSharePanel', () => {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'team@example.com' }),
+        body: JSON.stringify({ email: 'team@example.com', notifyRecipient: true }),
       });
     });
 
@@ -856,8 +1000,14 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    expect(await screen.findByText(/people who open the link still see the published version/i)).toBeInTheDocument();
-    expect(screen.getByText('Who can open the link')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "You've changed this project since you published V2. People who open the link still see V2.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Who can open the link' })).toBeInTheDocument();
+    /* The primary stays Copy link: a timestamp is too weak a signal to steer people to publish (F14). */
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: /who can open the link/i })).toHaveTextContent(
       'Only people you invite',
     );
@@ -898,7 +1048,7 @@ describe('ProjectSharePanel', () => {
     );
   });
 
-  it('switches private publications to public without removing listed grants', async () => {
+  it('switches private publications to public and folds away the invite field and list', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
       .mockResolvedValueOnce(mockJsonResponse({ id: 'pub_ui', visibility: 'public' }))
@@ -924,9 +1074,9 @@ describe('ProjectSharePanel', () => {
       );
     });
 
-    expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('friend@example.com')).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Invite people by email' })).not.toBeInTheDocument();
-    expect(toastSuccessMock).toHaveBeenCalledWith('Link access updated');
+    expect(toastSuccessMock).toHaveBeenCalledWith('Anyone with the link can open it now.');
   });
 
   it('switches public publications back to private and restores recipient entry', async () => {
@@ -952,6 +1102,7 @@ describe('ProjectSharePanel', () => {
 
     expect(await screen.findByRole('combobox', { name: 'Invite people by email' })).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Only people you invite can open the link now.');
   });
 
   it('keeps previous visibility and shows an error toast when visibility update fails', async () => {
@@ -991,7 +1142,9 @@ describe('ProjectSharePanel', () => {
 
     const publishingButton = await screen.findByRole('button', { name: /publishing/iu });
     expect(publishingButton).toBeDisabled();
+    expect(publishingButton).toHaveAttribute('aria-busy', 'true');
     expect(within(publishingButton).getByText(/publishing/i)).toBeInTheDocument();
+    expect(screen.getByText('Publishing this version…')).toHaveAttribute('role', 'status');
   });
 
   it('presents the failure as the one sentence the machine wrote', async () => {
@@ -1009,6 +1162,179 @@ describe('ProjectSharePanel', () => {
 
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('draws the first load as a skeleton and keeps the content on screen through a reload', async () => {
+    const envelope = Promise.withResolvers<Response>();
+    globalThis.fetch = vi.fn(async () => envelope.promise);
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const loading = await screen.findByRole('status', { name: 'Loading cloud link' });
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    envelope.resolve(mockJsonResponse(publishedEnvelope));
+
+    expect(await screen.findByRole('region', { name: 'Published version' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Loading cloud link' })).not.toBeInTheDocument();
+  });
+
+  it('copies the published link inside the press and names the version and date', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    publishFacet({ tags: [tag(2, 'Ready for print')] });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const section = await screen.findByRole('region', { name: 'Published version' });
+    expect(section).toHaveTextContent(/V2 · Ready for print · Published .*2026/u);
+    expect(within(section).getByRole('textbox', { name: 'Share link' })).toHaveValue(
+      'https://tau.example/s/tau~pub_ui',
+    );
+    const buttons = within(section)
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    expect(buttons).toEqual(['Republish this version', 'Publish new version', 'Copy link']);
+
+    await userEvent.click(within(section).getByRole('button', { name: 'Copy link' }));
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('https://tau.example/s/tau~pub_ui');
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Link copied');
+    });
+    expect(revisionStatusHarness.commands.publishProject).not.toHaveBeenCalled();
+  });
+
+  it('selects the published link for a manual copy when the clipboard refuses it', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy link' }));
+
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Share link' })).toHaveFocus();
+  });
+
+  it('starts a new version with no invitees, says the old link keeps working, and Cancel returns', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }));
+
+    const form = screen.getByRole('region', { name: 'Publish a new version' });
+    expect(form).toHaveTextContent(
+      'A new version gets its own link. The current link keeps working and keeps showing V2. Invite people again for the new link.',
+    );
+    expect(screen.getByRole('combobox', { name: /version name/i })).toHaveFocus();
+    expect(screen.queryByRole('region', { name: 'Who can open the link' })).not.toBeInTheDocument();
+    expect(within(form).queryByText('friend@example.com')).not.toBeInTheDocument();
+
+    await userEvent.click(within(form).getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByRole('region', { name: 'Published version' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Publish new version' })).toHaveFocus();
+  });
+
+  it('offers a direct link when the cloud link needs an account the person has not signed in to', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 } as Response);
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_signed_out'
+        projectName='Demo'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+        initialMethod='tau'
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Use a direct link' }));
+
+    expect(screen.getByRole('button', { name: 'Share with Direct link' })).toBeInTheDocument();
+  });
+
+  it('names imported files the direct link leaves out, and a project with no model file, in plain words', async () => {
+    const collectSnapshot = vi
+      .fn()
+      .mockRejectedValueOnce(new Error(missingModelFileMessage))
+      .mockResolvedValueOnce({
+        entryPath: 'main.ts',
+        files: [],
+        warnings: [
+          { code: 'UNRESOLVED_DEPENDENCY', message: 'a' },
+          { code: 'UNRESOLVED_DEPENDENCY', message: 'b' },
+        ],
+      });
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_warn'
+        projectName='Warn'
+        entryPath='main.ts'
+        collectSnapshot={collectSnapshot}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This project has no model file to share yet.');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(
+      await screen.findByText(
+        "2 imported files couldn't be found and aren't in the link. The model may not build for people who open it.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says why a share failed by its code, never in the provider's words", async () => {
+    portableProviderPublish.mockRejectedValueOnce(new ShareError('SHARE_ARTIFACT_LIMIT', 'Artifact exceeds 26214400'));
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_large'
+        projectName='Large'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This project is too large for a direct link. Use a cloud link or a GitHub Gist instead.',
+    );
+    expect(screen.queryByText(/26214400/u)).not.toBeInTheDocument();
+  });
+
+  it('offers Try again when the GitHub connection cannot be checked', async () => {
+    getGithubGistConnectionStatus.mockRejectedValueOnce(new Error('offline'));
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_gist_check'
+        projectName='Gist'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+        initialMethod='github-gist'
+      />,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't check your GitHub connection. Try again.");
+    getGithubGistConnectionStatus.mockResolvedValueOnce('connected');
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
+  });
+
+  it("draws the host sections after the method, in the pane's one scroll area", async () => {
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_ui'
+        projectName='Demo'
+        entryPath='main.ts'
+        extraSections={<p>People section</p>}
+      />,
+    );
+
+    const scroller = screen
+      .getByRole('region', { name: 'Share project' })
+      .querySelector('[data-slot=share-pane-scroll]');
+    expect(scroller).toContainElement(screen.getByText('People section'));
+    expect(scroller).toContainElement(await screen.findByRole('region', { name: 'Publish a version' }));
   });
 });
 
@@ -1031,7 +1357,7 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   it('locks the private option and defaults free users to public', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText(/publish a version of this project/i)).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Publish a version' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeDisabled();
     expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
   });
@@ -1040,7 +1366,7 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
     const user = userEvent.setup();
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await screen.findByText(/publish a version of this project/i);
+    await screen.findByRole('region', { name: 'Publish a version' });
     await user.click(screen.getByRole('button', { name: /upgrade/i }));
 
     expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');

@@ -882,6 +882,45 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
   vertexai: {
+    'gemini-4-neon': {
+      enabled: true,
+      id: 'google-gemini-4-neon',
+      providerKind: 'tau-hosted',
+      name: 'Gemini 4 Neon',
+      slug: 'gemini-4-neon',
+      recommended: true,
+      description:
+        'Frontier-level reasoning at mid-tier cost for complex CAD code, multi-step geometry planning, and large project edits.',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-4-neon',
+      support: {
+        tools: true,
+        toolChoice: false,
+        reasoning: lowToExtraHighReasoning,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
+        maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
+        // Google's standard price; no promotion. Implicit caching only.
+        cost: {
+          inputTokens: 3,
+          outputTokens: 15,
+          cacheReadTokens: 0.15,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        // Google's own default for this model; it rejects MINIMAL outright.
+        thinkingLevel: 'HIGH',
+      },
+    },
     'gemini-4-argon': {
       enabled: true,
       id: 'google-gemini-4-argon',

@@ -2370,6 +2370,9 @@ public static class Params
         issues: [],
         success: true,
       });
+      // ...built with the same script globals (none narrowed: no kernel is selected).
+      // @ts-expect-error - accessing private for test verification
+      worker.bundleGlobalsKeys.set('main.ts', 'null');
 
       const mockBundlerDefinition = {
         name: 'MockBundler',
@@ -3325,6 +3328,54 @@ describe('document cancellation', () => {
     expect(bundlerSignals[1]).toBe(kernelSignals[1]);
     expect(kernelSignals[1]).not.toBe(firstSignal);
     expect(kernelSignals[1]?.aborted).toBe(false);
+    await worker.cleanup();
+  });
+
+  it('runs a module fresh, replacing its cached instance under the same code, only when asked', async () => {
+    const calls: string[] = [];
+    class FreshWorker extends MockKernelWorker {
+      protected override async onEvaluateForOwner(
+        _owner: OperationOwner,
+        _input: NativeBuildInput,
+        runtime: KernelRuntime,
+      ): Promise<EvaluateResult> {
+        await runtime.execute('export default 1;');
+        await runtime.execute('export default 1;', { fresh: true });
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
+      }
+    }
+    const worker = new FreshWorker({ middleware: [], filesystem: createMockFileSystem() });
+    const bundlerDefinition = {
+      name: 'fresh bundler',
+      version: '1.0.0',
+      extensions: ['ts'],
+      initialize: vi.fn(async () => ({})),
+      detectImports: vi.fn(async () => ({ detectedModules: [], dependencies: [] })),
+      bundle: vi.fn(async () => ({ code: '', dependencies: [], unresolvedPaths: [], issues: [], success: true })),
+      execute: vi.fn(async ({ code }: { code: string }) => {
+        calls.push(`execute ${code}`);
+        return { success: true, value: undefined };
+      }),
+      clearExecutionCache: vi.fn((code: string | undefined) => {
+        calls.push(`clear ${String(code)}`);
+      }),
+      registerModule: vi.fn(),
+    };
+    // @ts-expect-error -- install the already-loaded bundler seam used by the production runtime facade.
+    worker.loadedBundlers.set('ts', { definition: bundlerDefinition, ctx: {} });
+    const evaluated: number[] = [];
+    worker.onEvaluated = ({ intent }) => evaluated.push(intent);
+    worker.handleOpenDocument({
+      documentId: 'doc',
+      intent: 0,
+      file: createGeometryFile('main.ts'),
+      parameters: {},
+      watch: false,
+    });
+    await vi.waitFor(() => {
+      expect(evaluated).toEqual([0]);
+    });
+    expect(calls).toEqual(['execute export default 1;', 'clear export default 1;', 'execute export default 1;']);
     await worker.cleanup();
   });
 

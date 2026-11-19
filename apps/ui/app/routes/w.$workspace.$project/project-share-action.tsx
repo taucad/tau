@@ -6,7 +6,7 @@ import { waitFor } from 'xstate';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
 import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
-import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
+import { ProjectSharePanel, missingModelFileMessage } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
 import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -116,7 +116,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       signal?.throwIfAborted();
       const { main } = project.assets;
       if (!main) {
-        throw new Error('The project has no model file to share yet.');
+        throw new Error(missingModelFileMessage);
       }
       const { entryPath, thumbnail } = main;
       const claimId = randomUuid();
@@ -207,25 +207,21 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
 
   const entryPath = project?.assets.main?.entryPath ?? '';
 
-  /* C4: People with access lives in Share, under the publishing methods. */
+  /* C4: Collaborators lives in Share, as the last section of the pane's one scroll area, under every method. */
   return (
-    <div className='flex size-full min-h-0 flex-col'>
-      <div className='min-h-0 flex-1'>
-        <ProjectSharePanel
-          key={projectId}
-          projectId={projectId}
-          projectName={project?.name ?? 'Untitled'}
-          projectDescription={project?.description ?? ''}
-          projectUpdatedAt={projectUpdatedAt}
-          entryPath={entryPath}
-          collectSnapshot={collectSnapshot}
-          initialMethod={navigationIntent.initialMethod}
-          githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
-          githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
-          host={ProjectShareHost}
-        />
-      </div>
-      <ProjectPeopleWithAccess projectId={projectId} />
-    </div>
+    <ProjectSharePanel
+      key={projectId}
+      projectId={projectId}
+      projectName={project?.name ?? 'Untitled'}
+      projectDescription={project?.description ?? ''}
+      projectUpdatedAt={projectUpdatedAt}
+      entryPath={entryPath}
+      collectSnapshot={collectSnapshot}
+      initialMethod={navigationIntent.initialMethod}
+      githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
+      githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
+      host={ProjectShareHost}
+      extraSections={<ProjectPeopleWithAccess projectId={projectId} />}
+    />
   );
 }

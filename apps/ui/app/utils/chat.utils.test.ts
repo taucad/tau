@@ -920,6 +920,39 @@ describe('serializeMessage', () => {
       );
     });
 
+    it.each<[string, Pick<EvaluateModelOutput, 'build' | 'tessellation'>, string]>([
+      [
+        'a computed build and the meshes kept',
+        {
+          build: {
+            reused: false,
+            elapsed: 7735.4,
+            operations: { reused: 412, computed: 108 },
+            costliest: [
+              { operation: 'Shape.fillet', elapsed: 2100.5, calls: 12 },
+              { operation: 'Shape.cut', elapsed: 300, calls: 4 },
+            ],
+          },
+          tessellation: { triangles: 12, vertices: 8, elapsed: 3, meshes: { reused: 30, computed: 4 } },
+        },
+        'Build: computed, 7735 ms; operations 412 reused, 108 computed; costliest Shape.fillet 2101 ms (12 calls), Shape.cut 300 ms (4 calls)\nMesh: 12 triangles, 8 vertices, 3 ms\nMeshes: 30 reused, 4 computed',
+      ],
+      ['a reused build', { build: { reused: true, elapsed: 6.2 } }, 'Build: reused, 6 ms'],
+    ])('serializes the evaluate_model build report of %s', (_case, output, lines) => {
+      const message = baseMessage([
+        {
+          type: 'tool-evaluate_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready', ...output },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        `<tool_call name="evaluate_model">\ntargetFile: main.ts\n</tool_call>\n<tool_result>\nStatus: ready\n${lines}\n</tool_result>`,
+      );
+    });
+
     it('serializes the export_model validation of its files', () => {
       const message = baseMessage([
         {

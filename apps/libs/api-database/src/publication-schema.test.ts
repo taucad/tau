@@ -322,37 +322,67 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
     return { ownerId, projectId };
   };
 
+  /**
+   * The PostgreSQL error under a refused statement, whichever wrapper the driver put it in, so an unrelated failure
+   * (a dropped connection) never passes for the constraint a test names.
+   */
+  const refusalOf = async (statement: PromiseLike<unknown>): Promise<Readonly<Record<string, unknown>>> => {
+    try {
+      await statement;
+    } catch (error) {
+      const cause: unknown = error instanceof Error && error.cause !== undefined ? error.cause : error;
+      return typeof cause === 'object' && cause !== null ? { ...cause } : {};
+    }
+    throw new Error('The statement was not refused.');
+  };
+
   it('should allow one cloud link per project', async () => {
-    const { ownerId, projectId } = await seedOwnedProject('one_link');
-    await db
-      .insert(schema.projectShare)
-      .values({ id: `shr_a_${Date.now()}`, projectId, ownerId, visibility: 'private' });
+    const owners: string[] = [];
+    try {
+      const { ownerId, projectId } = await seedOwnedProject('one_link');
+      owners.push(ownerId);
+      await db
+        .insert(schema.projectShare)
+        .values({ id: `shr_a_${Date.now()}`, projectId, ownerId, visibility: 'private' });
 
-    await expect(
-      db.insert(schema.projectShare).values({ id: `shr_b_${Date.now()}`, projectId, ownerId, visibility: 'public' }),
-    ).rejects.toThrow();
-    /* Each refusal on its own: a project with no link and an unknown setting
-       exercises the visibility check, not the foreign key. */
-    const other = await seedOwnedProject('one_link_other');
-    await expect(
-      db.insert(schema.projectShare).values({
-        id: `shr_c_${Date.now()}`,
-        projectId: other.projectId,
-        ownerId: other.ownerId,
-        visibility: 'secret',
-      }),
-    ).rejects.toThrow();
-    await expect(
-      db.insert(schema.projectShare).values({
-        id: `shr_d_${Date.now()}`,
-        projectId: `${projectId}_missing`,
-        ownerId,
-        visibility: 'private',
-      }),
-    ).rejects.toThrow();
-
-    await db.delete(schema.user).where(eq(schema.user.id, ownerId));
-    await db.delete(schema.user).where(eq(schema.user.id, other.ownerId));
+      expect(
+        await refusalOf(
+          db
+            .insert(schema.projectShare)
+            .values({ id: `shr_b_${Date.now()}`, projectId, ownerId, visibility: 'public' }),
+        ),
+      ).toMatchObject({ code: '23505', constraint_name: 'project_share_project_idx' });
+      /* Each refusal on its own: a project with no link and an unknown setting
+         exercises the visibility check, not the foreign key. */
+      const other = await seedOwnedProject('one_link_other');
+      owners.push(other.ownerId);
+      expect(
+        await refusalOf(
+          db.insert(schema.projectShare).values({
+            id: `shr_c_${Date.now()}`,
+            projectId: other.projectId,
+            ownerId: other.ownerId,
+            visibility: 'secret',
+          }),
+        ),
+      ).toMatchObject({ code: '23514', constraint_name: 'project_share_visibility_check' });
+      expect(
+        await refusalOf(
+          db.insert(schema.projectShare).values({
+            id: `shr_d_${Date.now()}`,
+            projectId: `${projectId}_missing`,
+            ownerId,
+            visibility: 'private',
+          }),
+        ),
+      ).toMatchObject({ code: '23503', constraint_name: 'project_share_project_id_project_id_fk' });
+    } finally {
+      /* The owners take their projects and links with them, whichever assertion failed. */
+      for (const ownerId of owners) {
+        // oxlint-disable-next-line no-await-in-loop -- two rows; order does not matter and parallel deletes gain nothing.
+        await db.delete(schema.user).where(eq(schema.user.id, ownerId));
+      }
+    }
   });
 
   it('should cascade a cloud link and its invited people from the project and from the owner', async () => {

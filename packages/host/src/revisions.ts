@@ -131,6 +131,16 @@ import type { HostRevisionActorResolver } from '#revision-actor.js';
  * One value for every composition in this module, and the same pair the browser
  * worker injects, so a conflict re-derived here settles as it was recorded.
  */
+/**
+ * Names a draft nobody named. Only the host has a locale, so the auto name is made here, not in the machine: by the
+ * `publish` verb and by a page's `confirmPublish`, which the Share pane sends with no name.
+ *
+ * @param draft - The draft as asked.
+ * @returns The draft, with `autoVersionName` as its name when it is auto-named and empty.
+ */
+const autoNamed = (draft: PublishDraft): PublishDraft =>
+  draft.isAutoNamed === true && draft.tag.trim() === '' ? { ...draft, tag: autoVersionName(new Date()) } : draft;
+
 const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
 
 /**
@@ -1775,7 +1785,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         }
         actor.send({
           type: 'publish',
-          event: { type: 'confirm', draft: draft as PublishDraft },
+          event: { type: 'confirm', draft: autoNamed(draft as PublishDraft) },
         });
         break;
       }
@@ -2557,11 +2567,7 @@ export const openProjectRevisions = async (
    * nothing here waits for a frame.
    */
   const publish = async (requested: PublishDraft): Promise<RevisionPublishOutcome> => {
-    /* Only the host has a locale, so the auto name is made here, not in the machine. */
-    const draft: PublishDraft =
-      requested.isAutoNamed === true && requested.tag.trim() === ''
-        ? { ...requested, tag: autoVersionName(new Date()) }
-        : requested;
+    const draft = autoNamed(requested);
     const { actor } = await started();
     const child = actor.getSnapshot().children.publish;
     if (child === undefined) {

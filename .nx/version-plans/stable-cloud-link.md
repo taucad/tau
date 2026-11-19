@@ -16,4 +16,4 @@ Breaking:
 New:
 
 - `PublishDraft.isAutoNamed`: when the revision being published already is a version, that version is published under its own name, with no second version and no rename.
-- `autoVersionName(date, locales?)` from `@taucad/revisions/publish-machine` names a version nobody named, `Shared Nov 19` in the person's locale. The host's `publish` verb uses it for an auto-named draft with an empty name.
+- `autoVersionName(date, locales?)` from `@taucad/revisions/publish-machine` names a version nobody named, `Shared Nov 19` in the person's locale. `@taucad/host` uses it for an auto-named draft with an empty name, from the `publish` verb and from a page's `confirmPublish` request, which the Share pane sends with no name.

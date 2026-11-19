@@ -13,6 +13,7 @@
  *   node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts pin \
  *     --layer out/serve-ui-layer/tau-layer.json --archive out/serve-ui-layer/tau-serve-ui.tar.gz \
  *     (--write <pin> | --check <pin>) [--outputs]
+ * Either way `build` prints the layer's gzipped size beside the line, on stderr; `--max-bytes` takes a positive integer.
  * Exit codes: 0 built, pinned or matching; 1 refused (size, a source map, a link, a digest or a stale pin); 2 usage.
  */
 
@@ -346,13 +347,20 @@ const main = async (argv: readonly string[]): Promise<number> => {
     },
     strict: true,
   });
-  if (command === 'build' && values.client !== undefined && values.out !== undefined) {
-    const record = await buildLayer({
-      client: values.client,
-      out: values.out,
-      ...(values['max-bytes'] === undefined ? {} : { maximumBytes: Number(values['max-bytes']) }),
-    });
+  const maximumBytes = values['max-bytes'] === undefined ? defaultMaximumBytes : Number(values['max-bytes']);
+  if (
+    command === 'build' &&
+    values.client !== undefined &&
+    values.out !== undefined &&
+    Number.isSafeInteger(maximumBytes) &&
+    maximumBytes > 0
+  ) {
+    const record = await buildLayer({ client: values.client, out: values.out, maximumBytes });
     process.stdout.write(`${JSON.stringify(record, undefined, 2)}\n`);
+    // The size on a pass too, beside the refusal's, so every build log states it (X2).
+    process.stderr.write(
+      `The layer is ${String(record.byteLength)} bytes gzipped, within the ${String(maximumBytes)}-byte line (X2).\n`,
+    );
     return 0;
   }
   if (

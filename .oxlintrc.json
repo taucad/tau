@@ -514,6 +514,10 @@
         ],
         "patterns": [
           {
+            "group": ["cadmpeg-ts", "cadmpeg-ts/**", "!cadmpeg-ts/core", "!cadmpeg-ts/digests", "!cadmpeg-ts/formats"],
+            "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+          },
+          {
             "regex": "^\\.",
             "allowImportNamePattern": "^Route$",
             "message": "Use absolute imports instead of relative imports. For example, instead of `import { hexToRgb } from './utils/color.utils'`, use `import { hexToRgb } from '#utils/color.utils'`."
@@ -1474,6 +1478,16 @@
             ],
             "patterns": [
               {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              },
+              {
                 "group": ["#components/*", "#routes/*"],
                 "message": "Hooks must not import from UI components or routes. Move the dependency down or inject it."
               }
@@ -1524,6 +1538,16 @@
               }
             ],
             "patterns": [
+              {
+                "group": [
+                  "cadmpeg-ts",
+                  "cadmpeg-ts/**",
+                  "!cadmpeg-ts/core",
+                  "!cadmpeg-ts/digests",
+                  "!cadmpeg-ts/formats"
+                ],
+                "message": "Import cadmpeg-ts only through its engine-free entries cadmpeg-ts/core, cadmpeg-ts/digests and cadmpeg-ts/formats. The default entry and cadmpeg-ts/wasm/* name all 13 engines, so a bundler copies every one into each build that imports them (cadmpeg engine delivery charter D16, I1)."
+              },
               {
                 "group": ["#components/*", "#hooks/*", "#routes/*"],
                 "message": "Infrastructure must not import from hooks, UI components, or routes. Move the dependency down or inject it."

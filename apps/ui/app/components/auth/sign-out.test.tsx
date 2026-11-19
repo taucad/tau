@@ -9,7 +9,7 @@ const navigate = vi.fn();
 const replaceLocation = vi.fn();
 let callbacks: { onSuccess: () => void; onError: (error: Error) => void };
 
-vi.mock('#providers/financial-session-provider.js', () => ({
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
   useOptionalFinancialSession: () => ({ purge, bind: vi.fn(), capture: vi.fn() }),
 }));
 vi.mock('@better-auth-ui/react', () => ({

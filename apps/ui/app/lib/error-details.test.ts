@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are wire names. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { applyErrorDetails, readErrorDetails, recordErrorDetails } from '#lib/error-details.js';
 import { setReportedUserId } from '#lib/sentry-context.lib.js';
 import { beforeSendSentryEvent } from '#lib/sentry.lib.js';

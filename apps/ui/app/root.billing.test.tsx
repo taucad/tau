@@ -19,7 +19,7 @@ const session = vi.hoisted(() => ({
     userId: 'user-a',
   },
 }));
-vi.mock('#lib/billing-payment-client.js', () => payment);
+vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => payment);
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), warning }),
 }));
@@ -32,7 +32,7 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
 const financialSession = vi.hoisted(() => ({
   capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
 }));
-vi.mock('#providers/financial-session-provider.js', () => ({
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
   useFinancialSession: () => financialSession,
 }));
 

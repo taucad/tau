@@ -32,8 +32,12 @@ import {
 } from '@taucad/billing-ui/components/usage/use-usage-filters';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { ProjectNames } from '@taucad/billing-ui/components/usage/activity-names';
-import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
-import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
+import {
+  useBillingRevisionMinimum,
+  usePersistSavedUsage,
+  useSavedUsage,
+} from '@taucad/billing-ui/db/billing-snapshot-store';
+import type { SavedUsageOutcome } from '@taucad/billing-ui/db/billing-snapshot-store';
 import type { Handle } from '#types/matches.types.js';
 
 /**

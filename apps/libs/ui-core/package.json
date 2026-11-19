@@ -38,6 +38,7 @@
     "./constants/workspace-directory-copy.constants": "./src/constants/workspace-directory-copy.constants.ts",
     "./filesystem/workspace-errors": "./src/filesystem/workspace-errors.ts",
     "./lib/activity-breadcrumbs": "./src/lib/activity-breadcrumbs.ts",
+    "./lib/api-request-id": "./src/lib/api-request-id.ts",
     "./lib/build-target": {
       "tau-desktop": "./src/lib/build-target.desktop.ts",
       "default": "./src/lib/build-target.web.ts"

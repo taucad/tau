@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /**
  * Projects, per signed-in user, whose saved preview the server is known to hold this page session: a create-only

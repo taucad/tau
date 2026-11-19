@@ -7,7 +7,7 @@ import { Button } from '@taucad/ui/components/button';
 import { ENV } from '#environment.config.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { FloatingPanel, FloatingPanelContent } from '#components/ui/floating-panel.js';
-import { readApiRequestId, recordApiRequestId } from '#lib/api-request-id.js';
+import { readApiRequestId, recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { reportUiError, startErrorReporting } from '#lib/error-reporting.js';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
 import {

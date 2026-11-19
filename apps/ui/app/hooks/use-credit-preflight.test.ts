@@ -11,7 +11,9 @@ const billing = vi.hoisted(() => ({
 
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits: () => billing.explanation }));
 vi.mock('@taucad/billing/hooks/use-model-estimates', () => ({ useModelEstimates: () => billing.estimates }));
-vi.mock('#hooks/use-auto-reload-enabled.js', () => ({ useAutoReloadEnabled: () => billing.autoReloadEnabled }));
+vi.mock('@taucad/billing-ui/hooks/use-auto-reload-enabled', () => ({
+  useAutoReloadEnabled: () => billing.autoReloadEnabled,
+}));
 
 /** Only `balance.eligibleAvailableCreditAtoms` is read; the rest is envelope. */
 const withAvailable = (atoms: string): WireBalanceExplanation =>

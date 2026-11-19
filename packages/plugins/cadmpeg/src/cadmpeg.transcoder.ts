@@ -1,9 +1,11 @@
 import { defineTranscoder } from '@taucad/runtime/transcoder';
 import { lookupMimeType } from '@taucad/runtime/types';
-import { createCadmpeg } from 'cadmpeg-ts';
-import type { Cadmpeg } from 'cadmpeg-ts';
+import type { KernelIssue } from '@taucad/runtime/types';
+import type { Cadmpeg } from 'cadmpeg-ts/core';
 import { z } from 'zod';
 
+import { openCadmpeg } from '#cadmpeg-converter.js';
+import { cadmpegOptionsSchema, engineIssue } from '#cadmpeg-engines.js';
 import { failureMessage, lossIssue } from '#cadmpeg-issues.js';
 
 const writerOptionsSchema = z
@@ -19,6 +21,13 @@ const writerOptionsSchema = z
  * `UNSUPPORTED_FORMAT`, and FreeCAD with `REFUSED`; each surfaces as an error issue.
  */
 const writers = { '3dm': 'rhino', sldprt: 'sldprt', f3d: 'f3d', fcstd: 'fcstd' } as const;
+
+/**
+ * A converter, or the issue that stopped one opening. The runtime reports a thrown transcoder
+ * initialization as one untyped message, so an unprepared browser host is reported from
+ * `transcode` with its own code instead.
+ */
+type CadmpegTranscoderContext = { readonly cadmpeg: Cadmpeg } | { readonly unprepared: KernelIssue };
 
 const edges = [
   { from: 'step', to: '3dm', optionsSchema: writerOptionsSchema },
@@ -37,13 +46,25 @@ export const cadmpegTranscoder = defineTranscoder({
   id: 'cadmpeg',
   name: 'CadmpegTranscoder',
   version: '0.1.0',
+  optionsSchema: cadmpegOptionsSchema,
   edges,
 
-  async initialize(): Promise<{ cadmpeg: Cadmpeg }> {
-    return { cadmpeg: await createCadmpeg() };
+  async initialize(options): Promise<CadmpegTranscoderContext> {
+    try {
+      return { cadmpeg: await openCadmpeg(options.engines) };
+    } catch (error) {
+      const unprepared = engineIssue(error, 'TRANSCODER_INITIALIZATION_FAILED');
+      if (unprepared === undefined) {
+        throw error;
+      }
+      return { unprepared };
+    }
   },
 
-  async transcode(input, services, context: { cadmpeg: Cadmpeg }) {
+  async transcode(input, services, context: CadmpegTranscoderContext) {
+    if ('unprepared' in context) {
+      return { success: false, issues: [context.unprepared] };
+    }
     const [file] = input.files;
     if (file === undefined) {
       return {
@@ -68,7 +89,12 @@ export const cadmpegTranscoder = defineTranscoder({
       return {
         success: false,
         issues: [
-          { message: failureMessage(error), code: 'TRANSCODER_EXECUTION_FAILED', type: 'runtime', severity: 'error' },
+          engineIssue(error, 'TRANSCODER_EXECUTION_FAILED') ?? {
+            message: failureMessage(error),
+            code: 'TRANSCODER_EXECUTION_FAILED',
+            type: 'runtime',
+            severity: 'error',
+          },
         ],
       };
     }

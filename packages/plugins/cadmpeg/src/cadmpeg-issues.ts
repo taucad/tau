@@ -1,6 +1,6 @@
 import type { KernelIssue } from '@taucad/runtime/types';
-import { CadmpegError } from 'cadmpeg-ts';
-import type { Loss } from 'cadmpeg-ts';
+import { CadmpegError } from 'cadmpeg-ts/core';
+import type { Loss } from 'cadmpeg-ts/core';
 
 /**
  * One cadmpeg loss as a runtime issue (charter D7): a warning by default,

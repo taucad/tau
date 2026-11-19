@@ -766,7 +766,9 @@ export class PublicationsService {
    * (3) Redis HLL `PFADD` reports the viewer as new for the day.
    *
    * Throws `429 RATE_LIMITED` when the cap is hit, `404` when the publication or its
-   * project's cloud link does not exist, `410` when either has been withdrawn.
+   * project's cloud link does not exist or the link shows another version, `410` when
+   * either has been withdrawn, and `401`/`403` when the link is for invited people and
+   * the caller is not one of them (nor its owner).
    */
   public async recordView(args: { publicationId: string; identity: ResolvedViewerIdentity }): Promise<void> {
     const { publicationId, identity } = args;
@@ -788,25 +790,19 @@ export class PublicationsService {
       throw new GoneException({ code: publicationApiCode.GONE, message: 'Publication is no longer available' });
     }
 
-    const share = await this.selectShareOfProject(this.databaseService.database, publication.projectId);
-    if (share === undefined) {
+    try {
+      /* The link and the version it shows, in one read; a view of any other version is not a view of it. */
+      const { share, current } = await this.selectLinkOrThrow(eq(schema.projectShare.projectId, publication.projectId));
+      if (current?.id !== publication.id) {
+        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+      }
+      /* Only someone the link lets in counts a view: a private link's count is its invited people's. A link anyone
+         can open asks nothing more, so an anonymous ping still counts. */
+      await this.authorizeShareViewer(share, identity.sessionUserId);
+    } catch (error) {
       this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
-      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
+      throw error;
     }
-
-    if (share.disabledAt !== null) {
-      this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
-      throw new GoneException({ code: publicationApiCode.GONE, message: 'This link is no longer shared' });
-    }
-
-    /* The link shows one version; a view of any other is not a view of it. */
-    const current = await this.selectCurrentPublication(this.databaseService.database, publication.projectId);
-    if (current?.id !== publication.id) {
-      this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'invalid_publication' });
-      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
-    }
-
-    await this.assertActiveProject(publication.projectId);
 
     if (identity.sessionUserId !== undefined && identity.sessionUserId === publication.ownerId) {
       this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'owner_self_view' });

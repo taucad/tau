@@ -1696,6 +1696,31 @@ describe('PublicationsService.recordView', () => {
     expect(database.writes).toEqual([]);
   });
 
+  it('counts a view of a link for invited people only from someone it lets in', async () => {
+    const database = seedLink({
+      grants: [grantRow()],
+      users: [
+        { id: 'user_friend', name: 'Friend', image: null, email: 'friend@example.com', emailVerified: true },
+        { id: 'user_stranger', name: 'Stranger', image: null, email: 'stranger@example.com', emailVerified: true },
+      ],
+    });
+    const redis = createRedisStub({ pfaddReturns: 1 });
+    const metrics = createMetricsStub();
+    const service = createViewService(database, { redis, metrics });
+
+    await expect(view(service, { viewerHash: 'anonymous' })).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(view(service, { viewerHash: 'stranger', sessionUserId: 'user_stranger' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(redis.client.pfadd).not.toHaveBeenCalled();
+    expect(database.writes).toEqual([]);
+    expect(metrics.publicationViewsRejectedTotal.add).toHaveBeenCalledWith(1, { reason: 'invalid_publication' });
+
+    await view(service, { viewerHash: 'friend', sessionUserId: 'user_friend' });
+
+    expect(database.writes.filter((write) => write.table === schema.publication)).toHaveLength(1);
+  });
+
   it('short-circuits owner self-view without invoking PFADD or rate limiter', async () => {
     const redis = createRedisStub();
     const rateLimiter = createRateLimiterStub();
@@ -1710,7 +1735,9 @@ describe('PublicationsService.recordView', () => {
   });
 
   it('throws 429 RATE_LIMITED when the per-identity cap is exceeded', async () => {
-    const service = createViewService(seedLink(), { rateLimiter: createRateLimiterStub({ allowed: false }) });
+    const service = createViewService(seedLink({ link: { visibility: 'public' } }), {
+      rateLimiter: createRateLimiterStub({ allowed: false }),
+    });
 
     await expect(view(service, { viewerHash: 'h1' })).rejects.toSatisfy((error: unknown) => {
       if (!(error instanceof HttpException)) {
@@ -1727,7 +1754,7 @@ describe('PublicationsService.recordView', () => {
   });
 
   it('increments viewCount only when PFADD reports a new viewer', async () => {
-    const database = seedLink();
+    const database = seedLink({ link: { visibility: 'public' } });
     const redis = createRedisStub({ pfaddReturns: 1 });
     const metrics = createMetricsStub();
     const service = createViewService(database, { redis, metrics });
@@ -1740,7 +1767,7 @@ describe('PublicationsService.recordView', () => {
   });
 
   it('records duplicate when PFADD returns 0 and skips UPDATE', async () => {
-    const database = seedLink();
+    const database = seedLink({ link: { visibility: 'public' } });
     const redis = createRedisStub({ pfaddReturns: 0 });
     const metrics = createMetricsStub();
     const service = createViewService(database, { redis, metrics });

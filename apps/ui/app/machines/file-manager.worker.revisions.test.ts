@@ -2508,8 +2508,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.writeFile('main.scad', 'cube(20);');
     await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
-    const original = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('', { status: 503 }));
 
     try {
       alpha.send({ command: 'publishProject', apiBaseUrl: 'https://api.test' });
@@ -2525,7 +2524,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         { timeout: 10_000 },
       );
     } finally {
-      globalThis.fetch = original;
+      fetchSpy.mockRestore();
     }
   }, 20_000);
 });

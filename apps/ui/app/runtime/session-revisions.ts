@@ -49,12 +49,12 @@ import {
   getAnonymousRevisions,
   getRevisionSalt,
   getRevisionSessionUser,
-  requestRevisionSalt,
   revisionUserActor,
   subscribeAnonymousRevisions,
   subscribeRevisionSalt,
   subscribeRevisionSessionUser,
-} from '#lib/revision-actor.js';
+} from '@taucad/revisions-ui/lib/revision-actor';
+import { requestRevisionSalt } from '#lib/revision-actor.js';
 import {
   isOwingEditorText,
   isRecordingEditorConflict,

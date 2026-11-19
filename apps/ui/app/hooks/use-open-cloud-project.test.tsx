@@ -8,7 +8,7 @@ import type { ProjectListItem } from '@taucad/files-ui/types/project-library.typ
 import { CloudProjectUnavailableError, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { toLibraryRows } from '#routes/projects_/cloud-projects.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.

@@ -4,9 +4,9 @@
  *
  * Pure: `parsePushPage` keeps only what the who-resolver uses from one answer
  * of `GET /v1/projects/:projectId/git/pushes`, and `joinPushes` gives each held
- * entry to the first push whose tip reaches it. The app's store
- * (`lib/revision-pushes`) does the fetch, with the API origin and the request
- * id, and keeps the per-account records these run over.
+ * entry to the first push whose tip reaches it. The store
+ * (`lib/revision-pushes`) does the fetch, with the injected API origin and the
+ * request id, and keeps the per-account records these run over.
  */
 
 import type { PushEntry, PushPusher } from '#types/revision-push.types.js';

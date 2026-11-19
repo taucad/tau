@@ -19,7 +19,7 @@ import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-sta
 import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let focusedChatId: string | undefined = 'chat-1';

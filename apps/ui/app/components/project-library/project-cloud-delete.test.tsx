@@ -7,7 +7,7 @@ import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { CloudProjectCard, OpenCloudProjectButton } from '#routes/projects_/cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));

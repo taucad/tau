@@ -32,7 +32,7 @@ import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { entryTitleOf } from '@taucad/revisions-ui/lib/revision-entry-title';
 import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 

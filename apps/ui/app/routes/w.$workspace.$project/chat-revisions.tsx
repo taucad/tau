@@ -99,7 +99,7 @@ import {
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';

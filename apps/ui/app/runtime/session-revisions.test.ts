@@ -17,7 +17,7 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
 import type { FlushPhase } from '#runtime/environment.js';
-import { revisionUserActor } from '#lib/revision-actor.js';
+import { revisionUserActor } from '@taucad/revisions-ui/lib/revision-actor';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient, RevisionSessionUser } from '@taucad/revisions-ui/types/revision-client.types';
 import type { RevisionStatusProjection } from '@taucad/revisions';

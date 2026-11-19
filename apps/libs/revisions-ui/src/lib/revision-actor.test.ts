@@ -15,10 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
-import { revisionUserActor, useRevisionSalt } from '#lib/revision-actor.js';
+import { createRevisionActorHooks, revisionUserActor, setRevisionSessionUser } from '#lib/revision-actor.js';
+import { createRevisionPushStore } from '#lib/revision-pushes.js';
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
-vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test.local/' } }));
+const debugFlag = { on: false };
+const pushStore = createRevisionPushStore({ apiBaseUrl: () => 'https://api.test.local/' });
+/* The app's API origin, with the trailing `/` the request drops, and its debug setting. */
+const { useRevisionSalt, useRevisionWhoContext } = createRevisionActorHooks({
+  apiBaseUrl: () => 'https://api.test.local/',
+  useDebugFlag: () => debugFlag.on,
+  pushRecords: pushStore,
+});
 
 /** A second device: a fresh host state, nothing shared with the first. */
 const onAnotherDevice = (): void => {
@@ -159,5 +166,25 @@ describe('useRevisionSalt', () => {
       expect(result.current).toBe('e'.repeat(64));
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useRevisionWhoContext', () => {
+  afterEach(() => {
+    setRevisionSessionUser(undefined);
+    debugFlag.on = false;
+  });
+
+  it('reads the session, the injected debug setting and no push record before a page is read', () => {
+    setRevisionSessionUser({ id: 'user-1', name: 'Lane Person' });
+    debugFlag.on = true;
+
+    const { result } = renderHook(() => useRevisionWhoContext('project-1'));
+
+    expect(result.current).toStrictEqual({
+      session: { id: 'user-1', name: 'Lane Person' },
+      pushRecord: undefined,
+      showAnonymousId: true,
+    });
   });
 });

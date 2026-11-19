@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
-import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { getRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 export const deletionReceiptSchema = z.discriminatedUnion('state', [
   z.object({ id: z.string(), name: z.string(), state: z.enum(['checking', 'deleting']) }),

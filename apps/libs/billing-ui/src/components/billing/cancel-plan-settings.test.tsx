@@ -6,6 +6,8 @@ import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js'
 const createPortalAction = vi.hoisted(() => vi.fn());
 const followPaymentRedirect = vi.hoisted(() => vi.fn());
 vi.mock('#lib/billing-payment-client.js', () => ({
+  /* The web's own page: the desktop's Billing return path is covered by the client's own test. */
+  billingReturnPath: () => `${globalThis.location.pathname}${globalThis.location.search}`,
   createPaymentRequestId: () => 'request-a',
   createPortalAction,
   followPaymentRedirect,

@@ -17,10 +17,14 @@ runs:
     # unloaded too. The probe runs the sandbox's own shape (bwrap with a new user and PID
     # namespace and no capabilities, then a nested user namespace mapping its uid) and
     # fails here, with the host's AppArmor facts, rather than in every native suite.
+    - name: Install Bubblewrap, socat and ripgrep
+      uses: ./.github/actions/apt-install
+      with:
+        packages: bubblewrap socat ripgrep
+
     - name: Install Linux sandbox prerequisites
       shell: bash
       run: |
-        sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         for profile in /etc/apparmor.d/*-userns-restrict; do
           [ -f "$profile" ] || continue

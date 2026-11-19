@@ -23,18 +23,18 @@
   "sources": {
     "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "a9293c32f2cd43071ad44214c879c3d9d30af67491f1c23730998a18cb62a13f",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "ab89825172dbc3da1a4acf792f7ef8591e2eefda49a3a89fe26c58a01116f6cb",
+    "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
     "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "78a63355978a6111ffc2d54ec68cf4f909552e598ecd1b3d281d62883d768496",
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "3b0e9bd944d07faa1a5d224eae228163f1c3ed40104e885d8afdab445e858d36",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "99d8efe4866b3d8ebc23c988055b8d8ab0a1dc20f0a0bbb0951ab89530c9f9f7",
-    "apps/ui/app/components/chat/chat-message-queue.tsx": "f8d1d4376c45e58a148138389b595e7d2f3d53d8d3ada3b108c3b4f11a32bfd0",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "aa326f34e93c35b519e2ace2c8201f3c7d169765e4c3f8becdd116a33cba9ee7",
-    "apps/ui/app/hooks/use-chat.tsx": "b68177e0511c4704aca7d50942009be4dbfc7cf8ab6e5d53f2c72ece704ed6eb",
-    "apps/ui/app/machines/chat-message-queue.machine.ts": "ccc4dbfa9faa5903637829610d0c420e3fb3b12d80eb4c376c7b282a4b158f72",
+    "apps/ui/app/components/chat/chat-message-queue.tsx": "1d2fed0cd4bac8a15dfcd9ac805581ee465e8c6d6c3b2803b3b601366a382fba",
+    "apps/ui/app/components/chat/chat-textarea.tsx": "45e71234fa658c153d621ae02b1fd48e68495da9af15e885ed35087b5704279b",
+    "apps/ui/app/hooks/use-chat.tsx": "a905bb65d19088e3b68e1aedbedd38dc82bcb043c32b9fb780e5722fc42115b6",
     "apps/ui/app/machines/chat-session.machine.ts": "6591885571ef8134b175eaaa4a5662357276623613b2a3f9d7c18f13f638815c",
-    "apps/ui/app/services/chat-session-store.ts": "3a06eb71afa57b8b44c05e4da1ce37207faa1c008b38fe7dffd754a051d047b7"
+    "apps/ui/app/services/chat-session-store.ts": "1c5838c453d262c913150c8994a730c063a4f6c832a28f270fe12e83ff52779e"
   },
   "specs": {
-    "MessageQueue.tla": "18da90ac68fd084f6bbc7c8999d40151e642461ad5986be1d04dfe3e5c0fe4c0",
+    "MessageQueue.tla": "d7c1402de6944f58d74fa31d5ea05c245cf293606116453f0a329f762ff1f42e",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

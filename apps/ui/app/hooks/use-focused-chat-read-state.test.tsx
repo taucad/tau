@@ -2,7 +2,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -10,7 +10,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
-import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import { useComposerRecordToasts } from '@taucad/chat-ui/hooks/use-composer-record-toasts';
 
 vi.mock('@xstate/react', () => ({
   useSelector: <Snapshot, Selection>(
@@ -25,7 +25,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: vi.fn() }))
  * from the store's record, is what the hook reads. */
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
-vi.mock('#hooks/use-composer-record-toasts.js', () => ({ useComposerRecordToasts: vi.fn() }));
+vi.mock('@taucad/chat-ui/hooks/use-composer-record-toasts', () => ({ useComposerRecordToasts: vi.fn() }));
 
 const unreadChats = new Set<string>();
 const recordedUnread = new Set<string>();

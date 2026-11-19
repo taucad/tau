@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import type { ComponentProps, MouseEvent } from 'react';
 import { resolveRootedPath } from '@taucad/utils/path';
 import { cn } from '@taucad/ui/utils/cn';
-import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
+import { MarkdownHyperlink } from '@taucad/editor-ui/components/markdown/markdown-hyperlink';
 import { useProject } from '#hooks/use-project.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';

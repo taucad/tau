@@ -2,6 +2,7 @@ import { CircleAlert, CreditCard, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { zooCloseMessages } from '#cloud/zoo-close-errors.cloud.js';
+import { zooNeutralCloseMessages } from '#cloud/zoo-close-messages.js';
 
 type ZooUpgradeBannerProperties = {
   readonly message: string | undefined;
@@ -11,8 +12,11 @@ type ZooUpgradeBannerProperties = {
 /** Actionable, non-destructive Zoo execution state that leaves the project open. */
 export function ZooUpgradeBanner({ message, onRetry }: ZooUpgradeBannerProperties): React.JSX.Element | undefined {
   const { open: openSettings } = useSettingsDialog();
-  const proRequired = message?.includes(zooCloseMessages.pro) === true;
-  const creditsRequired = message?.includes(zooCloseMessages.credits) === true;
+  /* The pinned map's sentences, or an adaptive build's neutral ones (adaptive app deployment mode W5). */
+  const proRequired =
+    message?.includes(zooCloseMessages.pro) === true || message?.includes(zooNeutralCloseMessages.pro) === true;
+  const creditsRequired =
+    message?.includes(zooCloseMessages.credits) === true || message?.includes(zooNeutralCloseMessages.credits) === true;
   const serviceUnavailable = message?.includes(zooCloseMessages.unavailable) === true;
   if (!proRequired && !creditsRequired && !serviceUnavailable) {
     return undefined;

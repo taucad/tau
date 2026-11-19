@@ -50,7 +50,7 @@ const publishRouter = (ids: readonly string[]): void => {
 const event = (patch: Partial<ErrorEvent> = {}): ErrorEvent => ({ type: undefined, ...patch });
 
 describe('applyTauEventContext', () => {
-  it('should tag the route, device class, build and deploy context', () => {
+  it('should tag the route, device class, build, deploy context and deployment ceiling', () => {
     publishRouter(['root', 'routes/w.$workspace', 'routes/w.$workspace.$project']);
 
     expect(applyTauEventContext(event()).tags).toStrictEqual({
@@ -59,6 +59,8 @@ describe('applyTauEventContext', () => {
       device_class: 'constrained',
       build_id: '1792730113029',
       deploy_context: 'deploy-preview',
+      /* Unit tests build for the `cloud` ceiling. */
+      deployment_ceiling: 'cloud',
     });
   });
 
@@ -94,7 +96,12 @@ describe('applyTauEventContext', () => {
 
     const { tags } = applyTauEventContext(event({ tags: { device_class: 'from-event', e2e_run: 'e2e-1' } }));
 
-    expect(tags).toStrictEqual({ device_class: 'from-event', build_id: '1792730113029', e2e_run: 'e2e-1' });
+    expect(tags).toStrictEqual({
+      device_class: 'from-event',
+      build_id: '1792730113029',
+      deployment_ceiling: 'cloud',
+      e2e_run: 'e2e-1',
+    });
     expect(readRouteId()).toBeUndefined();
     device.constrained = true;
   });

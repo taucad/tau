@@ -9,7 +9,6 @@ import { addSurfaceCoordinates, needsSurfaceCoordinates } from '#utils/surface-c
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { MemoMesh, ReplicadMeshMemo } from '#utils/mesh-memo.js';
-import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
 import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
 import { getOC } from 'replicad';
 
@@ -972,27 +971,22 @@ export function measureShapesDiagonal(shapes: readonly InputShape[]): number {
  *
  * @param shapes - Shapes about to be meshed.
  * @param request - The preset or explicit tolerances.
- * @param reuse - Kept boxes and the tolerance ladder, when the render uses them.
+ * @param reuse - Kept boxes, when the render uses them.
  * @param reuse.meshMemo - Boxes kept across renders (N2); without it every shape is measured.
- * @param reuse.ladder - Snaps a preset's linear tolerance to a rung (E8); without it the preset is exact.
  * @returns Absolute tolerances and the requested form.
  */
 export function resolveReplicadTessellation(
   shapes: readonly InputShape[],
   request: ReplicadTessellationRequest,
-  { meshMemo, ladder }: { meshMemo?: ReplicadMeshMemo; ladder?: ToleranceLadder } = {},
+  { meshMemo }: { meshMemo?: ReplicadMeshMemo } = {},
 ): OcctResolvedTessellation {
-  const resolved = resolveOcctTessellation({
+  return resolveOcctTessellation({
     ...request,
     measureDiagonal: () =>
       meshMemo
         ? meshMemo.diagonal(shapes.filter((config) => hasMeshableShape(config)).map(({ shape }) => shape as Meshable))
         : measureShapesDiagonal(shapes),
   });
-  if (!ladder || resolved.requested === 'explicit') {
-    return resolved;
-  }
-  return { ...resolved, linearTolerance: ladder.quantize(resolved.requested, resolved.linearTolerance) };
 }
 
 /**
@@ -1033,11 +1027,11 @@ export type TessellatedRender = {
  */
 export function renderTessellated(
   shapes: NamedInputShape[],
-  options: Omit<RenderOptions, 'tessellation'> & { request: ReplicadTessellationRequest; ladder?: ToleranceLadder },
+  options: Omit<RenderOptions, 'tessellation'> & { request: ReplicadTessellationRequest },
 ): TessellatedRender {
-  const { request, ladder, ...renderOptions } = options;
+  const { request, ...renderOptions } = options;
   const started = performance.now();
-  const requested = resolveReplicadTessellation(shapes, request, { meshMemo: renderOptions.meshMemo, ladder });
+  const requested = resolveReplicadTessellation(shapes, request, { meshMemo: renderOptions.meshMemo });
   const geometries = render(shapes, { ...renderOptions, tessellation: requested });
   return {
     geometries,

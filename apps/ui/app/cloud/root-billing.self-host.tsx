@@ -5,6 +5,7 @@ export function CloudRootBoundary({ children }: { readonly children: ReactNode }
   return <AuthConfigProvider>{children}</AuthConfigProvider>;
 }
 
-export const useCloudPaymentActionReturn = (): void => {
-  // Self-host builds have no payment return state.
-};
+/** Self-host builds have no payment return to announce. */
+export function CloudPaymentReturn(): undefined {
+  return undefined;
+}

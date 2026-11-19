@@ -1,5 +1,5 @@
 {
-  "apps/ui/app/cloud/root-billing.cloud.tsx": 2,
+  "apps/ui/app/cloud/payment-return.tsx": 2,
   "apps/ui/app/components/animate-ui/effects/motion-highlight.tsx": 1,
   "apps/ui/app/components/auth/check-email.tsx": 1,
   "apps/ui/app/components/auth/magic-link-verify.tsx": 1,
@@ -34,8 +34,6 @@
   "apps/ui/app/hooks/use-chat.tsx": 2,
   "apps/ui/app/hooks/use-chats.ts": 1,
   "apps/ui/app/hooks/use-cloud-projects.ts": 1,
-  "apps/ui/app/hooks/use-composer-record-toasts.ts": 1,
-  "apps/ui/app/hooks/use-draft-image-error-toast.ts": 1,
   "apps/ui/app/hooks/use-editor-document-session.tsx": 2,
   "apps/ui/app/hooks/use-jobs.ts": 1,
   "apps/ui/app/hooks/use-kernel-diagnostics.ts": 1,

@@ -49,11 +49,6 @@ export const replicadOptionsSchema = z.object({
    * recently used entries without live dependents are evicted, and their native shapes deleted.
    */
   computeReuseBytes: z.number().int().positive().optional(),
-  /**
-   * Snap a preset's display tolerance to a quantized ladder with hysteresis, so a pose drag stays on one tolerance
-   * and unchanged parts keep their meshes. It changes the tolerance and so the delivered mesh; off by default.
-   */
-  tessellationLadder: z.boolean().optional().default(false),
 });
 
 /**

@@ -82,8 +82,6 @@ import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { meterOperations, tierBuildReport } from '#utils/operation-cost.js';
 import type { OperationMeter } from '#utils/operation-cost.js';
 import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
-import { createToleranceLadder } from '#utils/tolerance-ladder.js';
-import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
 import { createHandleEpochs, isUseAfterReleaseMessage } from '#build-epochs.js';
 import type { CollectorGroup, HandleEpochs } from '#build-epochs.js';
@@ -292,8 +290,6 @@ type ReplicadContext = {
   collectorWorker: boolean;
   /** Meshes and boxes kept across renders (E7, N2); made by the first render with the live tier, never without it. */
   meshMemo?: ReplicadMeshMemo;
-  /** Display tolerance ladder (E8); only with the `tessellationLadder` option. */
-  toleranceLadder: ToleranceLadder | undefined;
 };
 
 /** What one build delivers: the native handle and the offers derived from it. */
@@ -550,7 +546,6 @@ export const replicadKernel = defineKernel({
       wasm,
       computeReuse: computeReuseOption,
       computeReuseBytes,
-      tessellationLadder,
     } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
@@ -692,7 +687,6 @@ export const replicadKernel = defineKernel({
         epochs: createHandleEpochs(replicadLibrary),
         collectorModules: new Map(),
         collectorWorker: false,
-        toleranceLadder: tessellationLadder ? createToleranceLadder() : undefined,
       };
     } catch (error) {
       occt.release();
@@ -1022,7 +1016,6 @@ export const replicadKernel = defineKernel({
             operation: () =>
               renderTessellated(namedShapes, {
                 request: { tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-                ladder: context.toleranceLadder,
                 collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,

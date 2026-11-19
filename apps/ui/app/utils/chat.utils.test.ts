@@ -10,7 +10,7 @@ import {
   serializeTranscript,
   stampMessageCreatedAt,
 } from '#utils/chat.utils.js';
-import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { RequestTerminationCause } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import { clearLedger, recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { metaConfig } from '#constants/meta.constants.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';

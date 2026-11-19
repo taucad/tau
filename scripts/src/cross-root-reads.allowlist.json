@@ -870,6 +870,11 @@
     "reason": "reads the GitHub workflow it checks; .github is not an Nx project"
   },
   {
+    "file": "scripts/src/apt-resilience.test.ts",
+    "target": ".github/actions",
+    "reason": "lists the composite actions whose apt installs it checks; .github is not an Nx project"
+  },
+  {
     "file": "scripts/src/canvas-vite.config.ts",
     "target": ".",
     "reason": "reads workspace-root configuration or inventory"

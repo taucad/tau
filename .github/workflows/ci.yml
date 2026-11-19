@@ -981,8 +981,12 @@ jobs:
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
+      - name: Install Chromium (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
       - name: Use the pinned browser for Lighthouse
         run: node --input-type=module -e "import { chromium } from 'playwright'; console.log('CHROME_PATH=' + chromium.executablePath())" >> "$GITHUB_ENV"
       - name: Verify affected browser applications
@@ -1158,8 +1162,12 @@ jobs:
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: pnpm exec playwright install chromium firefox webkit
 
       # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
       # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
@@ -1176,9 +1184,11 @@ jobs:
       # Hosts that render under plain Node (the CLI and the daemon) need a Vulkan adapter, and the
       # runner has no GPU: lavapipe, Mesa's Vulkan CPU driver, as in e2e-nightly.yml.
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       # The development billing values a suite that boots the API reads, as in e2e-nightly.yml.
       - name: Prepare API env file

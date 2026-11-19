@@ -32,9 +32,9 @@
  * root's event source and steps the controls, unless they are disabled or the canvas's view cube holds its interaction
  * lock.
  *
- * Orbit style (roll Finding 10): in Tumble, after each step of a held orbit drag, the controls take the camera's screen
- * up as their orbit axis (`applyCameraUp`, which keeps the view), so the drag never reaches a pole and turns through
- * it. Switching to Turntable gives the camera the scene's up again through the camera actor (`setUpDirection`).
+ * Orbit style (roll Finding 10): in Free orbit, after each step of a held orbit drag, the controls take the camera's
+ * screen up as their orbit axis (`applyCameraUp`, which keeps the view), so the drag never reaches a pole and turns
+ * through it. Switching to Turntable gives the camera the scene's up again through the camera actor (`setUpDirection`).
  * Turntable has no roll (roll ruling E), so the driver also straightens a rolled pose it presents in Turntable that
  * neither its own controls nor the view cube made (a restored seed, an adopted record, another sender's pose): the
  * camera keeps the direction and takes the scene up, as the switch does. An automatic change is straightened as one
@@ -353,8 +353,8 @@ export const createControlsAdapter = ({
     let observedZoom = 1;
     let held = false;
     let moved = false;
-    // Whether the last frame read the Tumble orbit style: a switch to Turntable straightens the camera's up.
-    let tumble = false;
+    // Whether the last frame read the Free orbit style: a switch to Turntable straightens the camera's up.
+    let freeOrbit = false;
     let published:
       | Readonly<{ camera: ThreeCamera; renderFrame: RenderFrame; up: CameraVector; near: number; far: number }>
       | undefined;
@@ -569,14 +569,14 @@ export const createControlsAdapter = ({
     const ticker = {
       current(state: RootState, delta: number): void {
         followSurface(state);
-        const wasTumble = tumble;
-        tumble = getCameraRouting?.()?.cameraInput.orbitStyle === 'tumble';
-        if (wasTumble && !tumble) {
+        const wasFreeOrbit = freeOrbit;
+        freeOrbit = getCameraRouting?.()?.cameraInput.orbitStyle === 'free';
+        if (wasFreeOrbit && !freeOrbit) {
           camera.send({ type: 'setUpDirection', axis: getUpAxis() });
         }
         if (controls.enabled && !isInteractionLocked()) {
           controls.update(delta);
-          if (tumble && held && orbitActions.has(controls.currentAction)) {
+          if (freeOrbit && held && orbitActions.has(controls.currentAction)) {
             controls.applyCameraUp();
             controls.update(0);
           }

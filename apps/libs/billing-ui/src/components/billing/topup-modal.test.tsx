@@ -65,6 +65,8 @@ const entitlements = vi.hoisted((): { current: TestEntitlements } => ({
 }));
 const invalidateQueries = vi.hoisted(() => vi.fn());
 vi.mock('#lib/billing-payment-client.js', () => ({
+  /* The web's own page: the desktop's Billing return path is covered by the client's own test. */
+  billingReturnPath: () => `${globalThis.location.pathname}${globalThis.location.search}`,
   ...client,
   BillingPaymentConflict: PaymentConflict,
   BillingCollectionUnavailable: CollectionUnavailable,

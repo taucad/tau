@@ -140,6 +140,16 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - &setup-nx
         name: Setup Nx Environment
@@ -147,8 +157,12 @@ jobs:
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: pnpm exec playwright install chromium firefox webkit
 
       # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
       # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
@@ -168,9 +182,11 @@ jobs:
       # browsers' SwiftShader (`TAU_E2E_WEBGPU_PROFILE: software`); viewer-parity.yml
       # runs both side by side the same way.
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.
@@ -344,10 +360,24 @@ jobs:
       actions: 'read'
     steps:
       - *checkout
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - *setup-nx
 
+      - name: Install Chromium for Vitest Browser (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Run the cloud-build load tier
         timeout-minutes: 45
@@ -530,14 +560,30 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
+      - name: Install Chromium for Vitest Browser (system dependencies)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
         if: steps.gate.outputs.enabled == 'true'
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Prepare API env file
         if: steps.gate.outputs.enabled == 'true'

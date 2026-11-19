@@ -13,7 +13,7 @@
 
 import { createLogic } from 'xstate';
 import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import {
   agentLogEventSchema,
   emptyChatLedger,

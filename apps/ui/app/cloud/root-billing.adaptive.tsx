@@ -7,22 +7,16 @@ import {
   FinancialSessionProvider,
   FinancialSessionScope,
 } from '@taucad/billing-ui/providers/financial-session-provider';
-import { BillingLegalLinksProvider } from '@taucad/billing-ui/providers/billing-legal-links-provider';
-import type { BillingLegalLinks } from '@taucad/billing-ui/providers/billing-legal-links-provider';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { legalUrl } from '#lib/legal-url.js';
 import { ENV } from '#environment.config.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { CloudIdentityProvider, cloudIdentityValue } from '#cloud/cloud-identity.js';
-import { CloudSurface } from '#cloud/cloud-surface.js';
+import { CloudSurface, FundedSurface } from '#cloud/cloud-surface.js';
 import { cloudSurfaces } from '#cloud/cloud-entries.js';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudIdentity } from '#cloud/cloud-port.js';
-
-/** The billing surfaces link Tau's legal pages on this deployment's website (`lib/legal-url`). */
-const billingLegalLinks: BillingLegalLinks = { legalUrl };
 
 /**
  * The adaptive root boundary (adaptive app deployment mode charter D6, D7, D17, I5, I6). The financial session
@@ -30,16 +24,15 @@ const billingLegalLinks: BillingLegalLinks = { legalUrl };
  * remounts when Cloud code arrives. The billing session is bound from the display mode: the API base URL, the billing
  * environment the answer names and the owner only while the mode is `funded`, the signed-out session otherwise, so no
  * billing query can run against an unfunded or unknown API. While bound and signed in, the Cloud chunk's bridge is
- * mounted through the one surface helper to fill the port.
+ * mounted through the one surface helper to fill the port. The billing legal links are the Cloud chunk's own
+ * (`CloudProviders`, charter G1 shrink order), so no billing provider sits in Core for them.
  */
 export function CloudRootBoundary({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (
     <FinancialSessionProvider>
-      <BillingLegalLinksProvider links={billingLegalLinks}>
-        <AuthConfigProvider>
-          <AdaptiveBillingSession>{children}</AdaptiveBillingSession>
-        </AuthConfigProvider>
-      </BillingLegalLinksProvider>
+      <AuthConfigProvider>
+        <AdaptiveBillingSession>{children}</AdaptiveBillingSession>
+      </AuthConfigProvider>
     </FinancialSessionProvider>
   );
 }
@@ -104,7 +97,12 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
               loader={cloudSurfaces}
               enabled
               fallback={undefined}
-              render={(module) => <module.CloudBridge identityKey={bound.key!} />}
+              render={(module) => (
+                <>
+                  <module.CloudBridge identityKey={bound.key!} />
+                  <module.DesktopPaymentFollowUp />
+                </>
+              )}
             />
           )}
         </CloudIdentityProvider>
@@ -113,7 +111,11 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
   );
 }
 
-/** Core never reads or clears a return parameter (I7); the funded Cloud chunk's handler arrives with W5. */
-export const useCloudPaymentActionReturn = (): void => {
-  // Nothing until the funded chunk mounts the handler.
-};
+/**
+ * The payment and portal return (I7): Core never reads or clears a return parameter; the existing handler runs inside
+ * the Cloud chunk, mounted while funded, so a parameter that arrives while the mode is unknown is read once it is
+ * funded, and left alone if it never is.
+ */
+export function CloudPaymentReturn(): React.JSX.Element {
+  return <FundedSurface fallback={undefined} render={(cloud) => <cloud.PaymentReturn />} />;
+}

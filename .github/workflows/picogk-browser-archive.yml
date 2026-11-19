@@ -97,8 +97,10 @@ jobs:
           cp out/picovoxel/dotnet/global.json out/workload-install/global.json
           cd out/workload-install
           dotnet workload install wasm-tools --version 11.0.100-rc.3.26524.4
-          sudo apt-get update
-          sudo apt-get install -y ninja-build cmake
+      - name: Install the native build tools
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ninja-build cmake
       - run: corepack enable && pnpm install --frozen-lockfile
       - name: Acquire the managed dependency the package declares
         # Staging copies the one managed dependency out of this machine's NuGet cache, at the
@@ -245,7 +247,18 @@ jobs:
           name: picogk-parity-inputs
           path: out/inputs
       - run: corepack enable && pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
+      # This job's workspace is PicoVoxel, so Tau's apt installer comes from a sparse checkout beside it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Install the browser's system dependencies
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: ${{ matrix.engine }}
+      - run: pnpm exec playwright install ${{ matrix.engine }}
       - name: Capture this mode
         run: |
           node dotnet/run-parity-browser.mjs "out/inputs/${{ matrix.mode }}" "${{ matrix.engine }}" \
@@ -292,7 +305,18 @@ jobs:
           name: picogk-parity-inputs
           path: out/inputs
       - run: corepack enable && pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
+      # This job's workspace is PicoVoxel, so Tau's apt installer comes from a sparse checkout beside it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Install the browser's system dependencies
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: ${{ matrix.engine }}
+      - run: pnpm exec playwright install ${{ matrix.engine }}
       - name: Measure this path
         env:
           ENGINE: ${{ matrix.engine }}
@@ -476,7 +500,11 @@ jobs:
         with:
           name: ${{ needs.host.outputs.artifact }}
           path: out/picogk-browser-host
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Chromium's system dependencies
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
+      - run: pnpm exec playwright install chromium
       - name: Run the built UI against the prepared bundle
         env:
           PICOGK_BROWSER_ASSETS_ROOT: ${{ github.workspace }}/out/picogk-browser-host

@@ -291,20 +291,34 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
     });
   });
 
-  it('shows Turntable while the orbit style is unset, stores Tumble, and Reset returns to Turntable', async () => {
+  it('shows Turntable while the orbit style is unset, stores Free orbit, and Reset returns to Turntable', async () => {
     renderSection();
-    const orbit = screen.getByRole('combobox', { name: 'Orbit' });
+    const orbit = screen.getByRole('combobox', { name: 'Orbit style' });
     expect(orbit).toHaveTextContent('Turntable');
     orbit.focus();
     await userEvent.keyboard('{Enter}');
     const options = await screen.findAllByRole('option');
-    expect(options.map((option) => option.textContent)).toEqual(['Turntable', 'Tumble']);
-    await userEvent.click(screen.getByRole('option', { name: 'Tumble' }));
-    expect(personRecordStores.viewer.read().controls).toEqual({ orbitStyle: 'tumble' });
-    expect(screen.getByRole('combobox', { name: 'Orbit' })).toHaveTextContent('Tumble');
-    await userEvent.click(within(row('Orbit')).getByRole('button', { name: /Reset to Tau default/u }));
+    expect(options.map((option) => option.textContent)).toEqual(['Turntable', 'Free orbit']);
+    await userEvent.click(screen.getByRole('option', { name: 'Free orbit' }));
+    expect(personRecordStores.viewer.read().controls).toEqual({ orbitStyle: 'free' });
+    expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Free orbit');
+    await userEvent.click(within(row('Orbit style')).getByRole('button', { name: /Reset to Tau default/u }));
     expect(personRecordStores.viewer.read().controls).toEqual({});
-    expect(screen.getByRole('combobox', { name: 'Orbit' })).toHaveTextContent('Turntable');
+    expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Turntable');
+  });
+
+  it('shows Turntable, with nothing to reset, for an orbit style stored as the retired Tumble', () => {
+    localStorage.setItem(
+      `${metaConfig.cookiePrefix}${cookieName.viewerPreferences}`,
+      JSON.stringify({
+        value: { version: 1, controls: { preset: 'alt', orbitStyle: 'tumble' }, gizmo: {}, viewDefaults: {} },
+      }),
+    );
+    renderSection();
+    expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Turntable');
+    expect(within(row('Orbit style')).queryByRole('button', { name: /Reset to Tau default/u })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Mouse controls' })).toHaveTextContent('Alt-drag navigation');
+    expect(personRecordStores.viewer.read().controls).toEqual({ preset: 'alt' });
   });
 
   it('names the person properties as setup and analytics do', () => {

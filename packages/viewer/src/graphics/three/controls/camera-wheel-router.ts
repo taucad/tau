@@ -77,12 +77,12 @@ export const resolvePinchRatio = ({
 };
 
 /**
- * How an orbit drag turns the view: Turntable keeps the world up (the view stops at the poles); Tumble turns freely
- * through them, rolling the view as it goes.
+ * How an orbit drag turns the view: Turntable keeps the world up (the view stops at the poles); Free orbit turns
+ * freely through them, rolling the view as it goes.
  *
  * @public
  */
-export type OrbitStyle = 'turntable' | 'tumble';
+export type OrbitStyle = 'turntable' | 'free';
 
 /**
  * How the person navigates the viewer: their mouse preset, orbit style and the three toggles. Every

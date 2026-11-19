@@ -3,8 +3,9 @@
  * The runtime's import boundary (app state orchestration charter D5; plan § 4 A1a, R2-F16).
  *
  * The project runtime, the revision lifecycle and the host connector are lazy session children, loaded by dynamic
- * import, and so is the chat store's AI SDK (`services/chat-sdk`, progressive loading PL1). So neither entry nor the
- * root route may reach them, or the project and editor machines, through a static import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
+ * import. (The chat store's AI SDK, progressive loading PL1, lives in `@taucad/chat-ui/services/chat-sdk`; guard G2,
+ * `lib/critical-graph.node.test.ts`, holds it off every route's static graph as a `deferredLeaves` entry.) So neither
+ * entry nor the root route may reach them, or the project and editor machines, through a static import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
  * editor. The first three modules do not exist yet; their paths are named now so the lanes that add them (A6) land
  * behind this test.
  *
@@ -35,12 +36,11 @@ const roots = [
   '../serve/app/root.tsx',
 ] as const;
 
-/** Modules only a dynamic import may load (D5, and the PL1 amendment), and the two machines they compose. */
+/** Modules only a dynamic import may load (D5), and the two machines they compose. */
 const lazyOnly = [
   'runtime/project-runtime',
   'runtime/session-revisions',
   'runtime/host-connector',
-  'services/chat-sdk',
   'machines/project.machine',
   'machines/editor.machine',
   // The composer's image conversion runtime and its codecs load only when the first image needs converting (WP5 I6).
@@ -187,13 +187,6 @@ describe('runtime import boundary', () => {
       'runtime/project-runtime is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts',
       'machines/project.machine is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts -> machines/project.machine.ts',
       'machines/editor.machine is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts -> machines/editor.machine.ts',
-    ]);
-  });
-
-  it('should keep the chat store off the AI SDK, which it loads on demand (PL1)', () => {
-    expect(lazyOnlyEdges(staticGraph(['services/chat-session-store.ts']))).toEqual([]);
-    expect(lazyOnlyEdges(staticGraph(['services/chat-sdk.ts']))).toEqual([
-      'services/chat-sdk is reached statically: services/chat-sdk.ts',
     ]);
   });
 });

@@ -29,14 +29,14 @@ import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { buildDraftMessage } from '#hooks/draft.machine.js';
+import { buildDraftMessage } from '@taucad/chat-ui/hooks/draft.machine';
 import type { ComposerRecord } from '@taucad/chat-ui/db/composer-record-store';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { CadAgentExecution } from '@taucad/chat';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
+import { prewarmChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 

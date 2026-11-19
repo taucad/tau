@@ -95,3 +95,5 @@ The Tau Cloud naming audit re-pinned the drift after `chat-session-store.ts` rew
 DC-10 files-ui slice 9 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/files-ui`; no action changed.
 
 The adaptive app deployment mode C6 change re-pinned the drift after `chat-turn-host.tsx` began rebuilding `snapshot.kernel` from the plan read at admission; no action changed.
+
+DC-10 chat-ui slice 1 re-pinned the drift after `chat-message-queue.machine.ts` moved unchanged to `@taucad/chat-ui` and `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` began importing the moved chat modules from there; no action changed.

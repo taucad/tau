@@ -55,16 +55,16 @@ import type {
   ChatTurnGesture,
 } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
-import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
+import { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
+import { buildDraftMessage, draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import {
   createComposerRecordActor,
   draftHydrationOf,
   draftPersistenceFor,
   flushRecord,
   stopWhenWritesSettle,
-} from '#hooks/composer-record.js';
-import type { ComposerRecordRef } from '#hooks/composer-record.js';
+} from '@taucad/chat-ui/hooks/composer-record';
+import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { readChatPlacementsShared, writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import type { ComposerRecord, ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
@@ -125,16 +125,16 @@ import {
   composerTraysOf,
   readRememberedComposerTrays,
   writeRememberedComposerTrays,
-} from '#services/chat-composer-trays.js';
-import type { ComposerTray } from '#services/chat-composer-trays.js';
+} from '@taucad/chat-ui/services/chat-composer-trays';
+import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type {
   ChatMessageQueueIntent,
   ChatMessageQueueStore,
   QueueLock,
 } from '@taucad/chat-ui/db/chat-message-queue-store';
-import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
-import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
+import { createChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
+import type { ChatMessageQueueActor, QueueAdvanceResult } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 import {
   isTransientPresentationFailure,
@@ -142,8 +142,8 @@ import {
   presentationErrorFacts,
   warnPresentation,
 } from '#services/chat-presentation-diagnostics.js';
-import { chatSdkSource } from '#services/chat-sdk-loader.js';
-import type { ChatSdkSource } from '#services/chat-sdk-loader.js';
+import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
+import type { ChatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { DeferredChat } from '#services/deferred-chat.js';
 import type { ChatView } from '#services/deferred-chat.js';
 

@@ -88,7 +88,7 @@ import {
   consumeBranchControl,
   useBranchControlRequest,
   useReportHistoryPaneShown,
-} from '#routes/w.$workspace.$project/revision-pane-requests.js';
+} from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';

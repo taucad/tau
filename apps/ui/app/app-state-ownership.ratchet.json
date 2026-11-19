@@ -60,6 +60,7 @@
       "apps/ui/app/runtime/attachment-image-runtime.definition.ts",
       "apps/ui/app/runtime/attachment-image-runtime.worker.ts",
       "apps/ui/app/runtime/attachment-transcode-sources.ts",
+      "apps/ui/app/runtime/cadmpeg-engines.ts",
       "apps/ui/app/runtime/choices-kernel-selection.ts",
       "apps/ui/app/runtime/choices.ts",
       "apps/ui/app/runtime/converter-client-options.desktop.ts",

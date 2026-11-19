@@ -386,9 +386,12 @@ export class PublicationsService {
    * @returns The current version, its manifest and where each file is served from.
    */
   public async getShareForViewer(args: { shareId: string; viewerUserId?: string }): Promise<PublicationViewResponse> {
-    const { share, current } = await this.selectLinkOrThrow(eq(schema.projectShare.id, args.shareId));
-    const viewerRole = await this.authorizeShareViewer(share, args.viewerUserId);
-    const publication = await this.repairCurrentOrThrow(current);
+    const link = await this.selectLinkOrThrow(eq(schema.projectShare.id, args.shareId));
+    const { share, publication, viewerRole } = await this.repairCurrentOrThrow({
+      ...link,
+      viewerUserId: args.viewerUserId,
+      viewerRole: await this.authorizeShareViewer(link.share, args.viewerUserId),
+    });
 
     const { manifestKey, ogImageKey, thumbnailKey } = publication;
     const shareUrl = this.cloudLinkUrl(share.id);
@@ -474,8 +477,13 @@ export class PublicationsService {
     if (current?.id !== row.id) {
       throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
     }
-    await this.authorizeShareViewer(share, args.viewerUserId);
-    const publication = await this.repairCurrentOrThrow(current);
+    const viewerRole = await this.authorizeShareViewer(share, args.viewerUserId);
+    const { publication } = await this.repairCurrentOrThrow({
+      share,
+      current,
+      viewerUserId: args.viewerUserId,
+      viewerRole,
+    });
 
     const path = normalizeRelativePath(args.path);
     const manifest = await this.loadStoredManifest(publication.manifestKey);
@@ -1085,19 +1093,6 @@ export class PublicationsService {
     return share;
   }
 
-  /**
-   * Every read of a publication's bytes routes through here, which is where D19
-   * puts the repair: a row behind the manifest is re-derived and then re-read.
-   * A repair that fails leaves the row as it was, so the read serves the
-   * version it already recorded once the project is checked active again.
-   */
-  private async repairAndReload(publication: PublicationRow): Promise<PublicationRow> {
-    const repaired = await this.rederivePublications(publication);
-    // Repair can swallow a lifecycle refusal; check again before serving an earlier row.
-    await this.assertActiveProject(publication.projectId);
-    return repaired ? this.selectPublicationOrThrow(publication.id) : publication;
-  }
-
   private async selectPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
     const rows = await this.databaseService.database
       .select()
@@ -1405,13 +1400,50 @@ export class PublicationsService {
     return current?.publication;
   }
 
-  /** The version a live link shows, repaired when it is behind the push; the row stays the one authorized. */
-  private async repairCurrentOrThrow(current: PublicationRow | undefined): Promise<PublicationRow> {
+  /**
+   * The version a live link shows, repaired when it is behind the push. Every read of a publication's bytes routes
+   * through here, which is where D19 puts the repair: a row behind the manifest is re-derived and then re-read. A
+   * repair that fails leaves the row as it was, so the read serves the version it already recorded once the project
+   * is checked active again.
+   *
+   * The re-read after a repair takes the link and its version together, as the first read did, and authorizes the
+   * viewer again: a publish that committed meanwhile (a same-name publish to people you invite reuses the version's
+   * id) is served only to someone that link lets in, and a version the link no longer shows is not served at all.
+   *
+   * @param args - The link and version as first read, the viewer, and the role that read authorized.
+   * @returns The link, the version to serve and the viewer's role, all from the same read.
+   */
+  private async repairCurrentOrThrow(args: {
+    share: ProjectShareRow;
+    current: PublicationRow | undefined;
+    viewerUserId: string | undefined;
+    viewerRole: PublicationViewResponse['viewerRole'];
+  }): Promise<{
+    share: ProjectShareRow;
+    publication: PublicationRow;
+    viewerRole: PublicationViewResponse['viewerRole'];
+  }> {
+    const { share, current, viewerUserId, viewerRole } = args;
     if (current === undefined) {
       throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Link not found' });
     }
 
-    return this.repairAndReload(current);
+    const repaired = await this.rederivePublications(current);
+    // Repair can swallow a lifecycle refusal; check again before serving an earlier row.
+    await this.assertActiveProject(current.projectId);
+    if (!repaired) {
+      return { share, publication: current, viewerRole };
+    }
+
+    const reread = await this.selectLinkOrThrow(eq(schema.projectShare.id, share.id));
+    if (reread.current?.id !== current.id) {
+      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+    }
+    return {
+      share: reread.share,
+      publication: reread.current,
+      viewerRole: await this.authorizeShareViewer(reread.share, viewerUserId),
+    };
   }
 
   private async toProjectShareDto(share: ProjectShareRow): Promise<ProjectShare> {

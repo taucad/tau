@@ -1518,6 +1518,15 @@ describe('materializing the tags a push moved', () => {
     );
 
     expect(database.updates.map((update) => update['visibility'])).toStrictEqual([expected]);
+    /* The bytes went to the same tier the row records, so a mismatch in either direction fails. */
+    const blobTiers = [
+      ...vi.mocked(dependencies.storage.putBlob).mock.calls.map(([args]) => args),
+      ...vi.mocked(dependencies.storage.putBlobStream).mock.calls.map(([args]) => args),
+    ]
+      .filter((args) => args.namespace === 'blobs')
+      .map((args) => args.tier);
+    expect(blobTiers.length).toBeGreaterThan(0);
+    expect(new Set(blobTiers)).toStrictEqual(new Set([expected]));
   });
 
   it('should replace the version and move its reference counts when the tag moves', async () => {

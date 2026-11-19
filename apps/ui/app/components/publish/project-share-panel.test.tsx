@@ -334,7 +334,9 @@ describe('ProjectSharePanel', () => {
       />,
     );
 
-    await userEvent.click(screen.getByLabelText('Encrypt with a password'));
+    await userEvent.click(screen.getByLabelText('Protect with a password'));
+    /* Protection fills a generated password; this row shares one the person chose instead. */
+    await userEvent.clear(screen.getByLabelText('Password'));
     await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery staple 12345');
     await userEvent.click(screen.getByLabelText('Include password in the link'));
     await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));

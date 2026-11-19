@@ -130,7 +130,7 @@ describe('SharePane', () => {
     const method = directMethod();
     renderPane({ methods: [method] });
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Encrypt with a password' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
     expect(
       screen.getByText('The project is encrypted on this device. People need the password to open it.'),
     ).toBeVisible();
@@ -162,6 +162,63 @@ describe('SharePane', () => {
         }),
       );
     });
+  });
+
+  it('should offer a generated password, make another on request and keep one the person typed', async () => {
+    renderPane({ methods: [directMethod({ encryption: { minBytes: 32, maxBytes: 128 } })] });
+
+    const protect = screen.getByRole('checkbox', { name: 'Protect with a password' });
+    await userEvent.click(protect);
+    const field = screen.getByLabelText<HTMLInputElement>('Password');
+    const generated = field.value;
+    expect(generated).toMatch(/^[A-HJ-NP-Za-km-z2-9]{32}$/u);
+    expect(field).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Generate a new password' }));
+    expect(field).not.toHaveValue(generated);
+    expect(field.value).toHaveLength(32);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, 'a password the person chose for this link');
+    await userEvent.click(protect);
+    await userEvent.click(protect);
+    expect(screen.getByLabelText('Password')).toHaveValue('a password the person chose for this link');
+  });
+
+  it('should copy the password inside the press and announce it, and say so when the clipboard refuses', async () => {
+    const notify = vi.fn<(message: string) => void>();
+    renderPane({ methods: [directMethod()], notify });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
+    const password = screen.getByLabelText<HTMLInputElement>('Password').value;
+    await userEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+
+    expect(writeText).toHaveBeenCalledWith(password);
+    await waitFor(() => {
+      expect(notify).toHaveBeenCalledWith('Password copied');
+    });
+
+    writeText.mockRejectedValueOnce(new DOMException('Denied', 'NotAllowedError'));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+    expect(await screen.findByText("Couldn't copy the password. Show it, then select it and copy it.")).toBeVisible();
+  });
+
+  it('should hold the password once the link exists but still show and copy it', async () => {
+    const method = directMethod();
+    renderPane({ methods: [method] });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Include password in the link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toBeVisible();
+    expect(screen.getByText('This link doesn’t include the password. Send the password separately.')).toBeVisible();
+    expect(screen.getByLabelText('Password')).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: 'Generate a new password' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy password' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
   });
 
   it('should hand on its options and show the warning and error a share answers', async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
-import { Check } from 'lucide-react';
+import { Check, Copy, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Input } from '@taucad/ui/components/input';
@@ -14,6 +14,7 @@ import type {
   ShareLinkProtection,
 } from '#share/share-source.js';
 import { ShareNotice } from '#share/share-notice.jsx';
+import { generateSharePassword } from '#share/share-password.js';
 
 const noExtension = (): ShareLinkExtension => ({});
 
@@ -89,7 +90,9 @@ function ShareLinkCheckbox({
 }
 
 /**
- * The password choice of a link method: whether to encrypt, the password, and whether the link carries it.
+ * The password choice of a link method: whether to protect the link, the password with ways to make a new one and copy
+ * it, and whether the link carries it. Once the link exists the choices are held, but the password can still be shown
+ * and copied, because a link without it is no use until the password is sent too.
  *
  * @param props - The bounds, the current choices and where changes go.
  * @returns The fields.
@@ -99,18 +102,24 @@ function ShareLinkEncryption({
   isEncrypted,
   password,
   shouldIncludePassword,
+  isBusy,
   isLocked,
   onEncryptedChange,
   onPasswordChange,
+  onGeneratePassword,
+  onCopyPassword,
   onIncludePasswordChange,
 }: {
   readonly encryption: ShareEncryption;
   readonly isEncrypted: boolean;
   readonly password: string;
   readonly shouldIncludePassword: boolean;
+  readonly isBusy: boolean;
   readonly isLocked: boolean;
   readonly onEncryptedChange: (encrypted: boolean) => void;
   readonly onPasswordChange: (password: string) => void;
+  readonly onGeneratePassword: () => void;
+  readonly onCopyPassword: () => void;
   readonly onIncludePasswordChange: (includePassword: boolean) => void;
 }): React.JSX.Element {
   const helpId = useId();
@@ -118,7 +127,7 @@ function ShareLinkEncryption({
     <>
       <ShareLinkCheckbox
         id='portable-share-encrypted'
-        label='Encrypt with a password'
+        label='Protect with a password'
         description={
           isEncrypted ? 'The project is encrypted on this device. People need the password to open it.' : undefined
         }
@@ -134,7 +143,8 @@ function ShareLinkEncryption({
               id='portable-share-password'
               autoComplete='new-password'
               value={password}
-              disabled={isLocked}
+              disabled={isBusy}
+              readOnly={isLocked}
               aria-invalid={password.length > 0 && !fitsPassword(encryption, password)}
               aria-describedby={helpId}
               onChange={(event) => {
@@ -144,6 +154,29 @@ function ShareLinkEncryption({
             <p id={helpId} className='text-xs text-muted-foreground'>
               {passwordHelp(encryption, password)}
             </p>
+            <div className='flex flex-wrap gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={isLocked}
+                aria-label='Generate a new password'
+                onClick={onGeneratePassword}
+              >
+                <RefreshCw className='size-3.5' aria-hidden />
+                <span>Generate</span>
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={isBusy || password.length === 0}
+                onClick={onCopyPassword}
+              >
+                <Copy className='size-3.5' aria-hidden />
+                <span>Copy password</span>
+              </Button>
+            </div>
           </div>
           <ShareLinkCheckbox
             id='portable-share-include-password'
@@ -262,7 +295,41 @@ function ShareLinkPrimary({
   );
 }
 
+/**
+ * The link once it exists, in a read-only field that selects itself, and a reminder when the password is not in it.
+ *
+ * @param props - The field's ref, the link, and whether the link leaves the password out.
+ * @returns The field and, when the password is left out, the reminder.
+ */
+function ShareLinkResult({
+  linkRef,
+  shareUrl,
+  isPasswordLeftOut,
+}: {
+  readonly linkRef: React.Ref<HTMLInputElement>;
+  readonly shareUrl: string;
+  readonly isPasswordLeftOut: boolean;
+}): React.JSX.Element {
+  return (
+    <>
+      <Input
+        ref={linkRef}
+        aria-label='Share link'
+        readOnly
+        value={shareUrl}
+        onFocus={(event) => {
+          event.target.select();
+        }}
+      />
+      {isPasswordLeftOut ? (
+        <ShareNotice tone='info'>This link doesn’t include the password. Send the password separately.</ShareNotice>
+      ) : null}
+    </>
+  );
+}
+
 const clipboardDenied = "Couldn't copy the link. Select it above and copy it.";
+const passwordClipboardDenied = "Couldn't copy the password. Show it, then select it and copy it.";
 const shareFailed = "Couldn't create the link. Try again.";
 
 /**
@@ -338,6 +405,26 @@ export function ShareLinkBody({
     }
   }, [shareUrl, shouldSelectLink]);
 
+  /* The copy starts inside the press, before any await, so Safari still counts it as the person's gesture. */
+  const copyPassword = async (): Promise<void> => {
+    const copying = navigator.clipboard.writeText(password);
+    setError(undefined);
+    try {
+      await copying;
+      notify?.('Password copied');
+    } catch {
+      setError(passwordClipboardDenied);
+    }
+  };
+
+  /* Turning protection on offers a strong password; one the person typed is kept. */
+  const changeProtection = (next: boolean): void => {
+    setEncrypted(next);
+    if (next && password === '' && method.encryption !== undefined) {
+      setPassword(generateSharePassword(method.encryption));
+    }
+  };
+
   const refuseCopy = (): void => {
     setError(clipboardDenied);
     setShouldSelectLink(true);
@@ -407,9 +494,16 @@ export function ShareLinkBody({
               isEncrypted={encrypted}
               password={password}
               shouldIncludePassword={includePassword}
+              isBusy={busy}
               isLocked={isLocked}
-              onEncryptedChange={setEncrypted}
+              onEncryptedChange={changeProtection}
               onPasswordChange={setPassword}
+              onGeneratePassword={() => {
+                setPassword(generateSharePassword(encryption));
+              }}
+              onCopyPassword={() => {
+                void copyPassword();
+              }}
               onIncludePasswordChange={setIncludePassword}
             />
           ) : null}
@@ -427,15 +521,7 @@ export function ShareLinkBody({
       ) : null}
       {extension.callouts}
       {shareUrl ? (
-        <Input
-          ref={linkRef}
-          aria-label='Share link'
-          readOnly
-          value={shareUrl}
-          onFocus={(event) => {
-            event.target.select();
-          }}
-        />
+        <ShareLinkResult linkRef={linkRef} shareUrl={shareUrl} isPasswordLeftOut={encrypted && !includePassword} />
       ) : null}
       {warning ? <ShareNotice tone='warning'>{warning}</ShareNotice> : null}
       {error ? <ShareNotice tone='error'>{error}</ShareNotice> : null}

@@ -1549,7 +1549,7 @@ describe('RevisionSyncRegion people with access', () => {
     const backup = screen.getByRole('status', { name: 'Backup status' });
     expect(await within(backup).findByText('Shared with 2 people')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('https://api.test/v1/projects/proj_1/collaborators', expect.anything());
-    expect(screen.queryByRole('textbox', { name: 'Invite by email' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Email address' })).toBeNull();
     expect(screen.queryByText('People with access')).toBeNull();
   });
 
@@ -1578,7 +1578,7 @@ describe('RevisionSyncRegion people with access', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByText(/^Shared with/u)).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Invite by email' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Email address' })).toBeNull();
   });
 
   /* N1: the listing answered and did not name this project, which is what an

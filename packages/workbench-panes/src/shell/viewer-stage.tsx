@@ -146,15 +146,18 @@ function StageStatus({
 /**
  * The stage's failure over the canvas region: the runtime error overlay, or, with an action the person can take, one
  * alert with what failed, what it means and the action, announced once (UI Policy § 5). Whatever the canvas still
- * draws stays under it.
+ * draws stays under it. While no model is drawn the alert is centred where the status pill sits, so a wait that fails
+ * says so in the place the person was already looking.
  *
- * @param props - The failed status.
+ * @param props - The failed status and whether a model is drawn.
  * @returns The failure overlay.
  */
 function StageFailure({
   failure,
+  hasModel,
 }: Readonly<{
   failure: Extract<ViewerStageStatus, { kind: 'failed' }>;
+  hasModel: boolean;
 }>): React.JSX.Element {
   if (failure.action === undefined) {
     return <RuntimeErrorOverlay message={failure.message} summary={failure.summary} className={failureClasses} />;
@@ -166,6 +169,7 @@ function StageFailure({
       className={cn(
         failureClasses,
         'flex max-w-[min(24rem,calc(100%-2rem))] flex-col items-center gap-2 p-3 text-center',
+        hasModel ? undefined : statusWithoutModelClasses,
       )}
     >
       <div className='flex items-start gap-2 text-left'>
@@ -308,7 +312,7 @@ export function ViewerStage({
         onPointerCancel={handlePointerLeave}
       >
         {canvas}
-        {failure === undefined ? null : <StageFailure failure={failure} />}
+        {failure === undefined ? null : <StageFailure failure={failure} hasModel={hasModel} />}
         {children}
       </section>
       {partMenu?.renderMenu(decoratePartMenu)}

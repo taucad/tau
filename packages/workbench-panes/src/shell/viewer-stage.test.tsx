@@ -329,6 +329,31 @@ describe('ViewerStage', () => {
       expect(onRetry).toHaveBeenCalledOnce();
     });
 
+    it('should centre a failure with an action where the status pill sits while no model is drawn, and keep it at the top over one', () => {
+      const status = {
+        kind: 'failed',
+        summary: 'Couldn’t open this project',
+        message: 'The download didn’t finish. Try again.',
+        action: <button type='button'>Try again</button>,
+      } as const;
+      const { rerender, graphicsRef } = renderStage({ status, isModelShown: false });
+
+      expect(screen.getByRole('alert')).toHaveClass('top-1/2', '-translate-y-1/2');
+      expect(screen.getByRole('alert')).not.toHaveClass('top-4');
+
+      rerender(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <Stage graphicsRef={graphicsRef} status={status} isModelShown />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(screen.getByRole('alert')).toHaveClass('top-4');
+      expect(screen.getByRole('alert')).not.toHaveClass('top-1/2');
+    });
+
     it('should keep the canvas region busy while the host waits for what it will draw (A15e)', () => {
       const { region, rerender, graphicsRef } = renderStage({
         isWaiting: true,

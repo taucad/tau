@@ -180,10 +180,11 @@ describe('Windows Authenticode verdict', () => {
       });
     };
 
+    // The field list ends at the first colon, so this also proves no other field is named.
     expect(check).toThrow(
-      /^Windows signature disagrees with the required identity in productName \(expected "Tau Staging"\):/u,
+      /^Windows signature disagrees with the required identity in productName \(expected "Tau Staging"\): \{"path":"Tau\.exe"/u,
     );
-    expect(check).not.toThrow(/productVersion \(|subject|timestamp \(|Users|runneradmin|AppData/u);
+    expect(check).not.toThrow(/Users|runneradmin|AppData/u);
   });
 
   it.each([

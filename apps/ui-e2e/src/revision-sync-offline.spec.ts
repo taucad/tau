@@ -195,7 +195,8 @@ test('keeps the Share pane in sync with Gist use without publishing or exposing 
   const share = selectors.getByRole('region', { name: 'Share project' });
   await target.expectVisible(share);
   await target.click(share.getByRole('button', { name: /^Share with/u }));
-  await target.click(selectors.getByRole('option', { name: 'GitHub Gist', exact: true }));
+  /* An option's name carries its description after the method's name. */
+  await target.click(selectors.getByRole('option', { name: /^GitHub Gist/u }));
   await target.expectVisible(share.getByRole('button', { name: 'Manage Gist sharing', exact: true }));
   await target.screenshot(undefined, 'github-share-disabled.png');
   await target.click(share.getByRole('button', { name: 'Manage Gist sharing', exact: true }));

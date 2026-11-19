@@ -126,6 +126,8 @@ class FakeResidentWorker {
   });
 
   public holdNextProvide: Promise<void> | undefined;
+  /** The next provide refuses with this code and registers no host, as a host that failed to open does. */
+  public failNextProvide: string | undefined;
 
   private frozen = false;
   private readonly held: Array<() => void> = [];
@@ -222,6 +224,11 @@ class FakeResidentWorker {
         };
       }
       case 'provide': {
+        const failure = this.failNextProvide;
+        if (failure !== undefined) {
+          this.failNextProvide = undefined;
+          return Promise.reject(Object.assign(new Error('The host did not open.'), { code: failure }));
+        }
         const previous = this.hosts.get(args['projectId'] as string);
         this.hosts.set(args['projectId'] as string, args['hostId'] as string);
         const answer = previous === undefined ? {} : { replaced: previous };
@@ -1046,6 +1053,41 @@ describe('re-brokering project hosts', () => {
     ).toEqual([currentHost]);
     drained.resolve();
     await second.close();
+  });
+
+  /* STO-25 SP6: the worker orders a project's calls, so the page connects once its provide is sent, not answered. */
+  it('should send the connect while its provide is still unanswered, and attach once both answer', async () => {
+    const worker = new FakeResidentWorker();
+    const answered = Promise.withResolvers<void>();
+    worker.holdNextProvide = answered.promise;
+    const client = createTestClient(workerOf(worker));
+    const starting = startRun(client, 'chat-1', 'run-1', 'Build it.');
+
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'connect')).toHaveLength(1);
+    });
+    expect(requestsNamed(worker, 'connect')[0]?.args['hostId']).toBe(
+      requestsNamed(worker, 'provide')[0]?.args['hostId'],
+    );
+    answered.resolve();
+
+    await expect(starting).resolves.toMatchObject({ status: 'applied' });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+
+  /* STO-25 SP6: a connect sent behind a provide that fails is answered `needs`; the provide's error is the connect's. */
+  it("should fail the connect with its provide's error, sending one provide and one connect", async () => {
+    const worker = new FakeResidentWorker();
+    worker.failNextProvide = 'STORAGE_NOT_WRITABLE';
+    const client = createTestClient(workerOf(worker));
+
+    await expect(startRun(client, 'chat-1', 'run-1', 'Build it.')).rejects.toMatchObject({
+      code: 'STORAGE_NOT_WRITABLE',
+    });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    expect(requestsNamed(worker, 'connect')).toHaveLength(1);
+    await client.close();
   });
 
   it('should not let a pending released provide fence a successor during reprovide', async () => {

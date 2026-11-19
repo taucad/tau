@@ -3010,6 +3010,44 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   );
 
   it(
+    'should not wait for the page to save when an update installs before shell-mounted (N1, T-B22.4)',
+    async () => {
+      /* A page that never mounted cannot answer: waiting on it ends in the saving review, which no one is there to
+       * answer, so the automatic install never restarts into the update. */
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn();
+      const installing = state.prepareToInstall!(commit);
+      await vi.waitFor(() => {
+        expect(commit).toHaveBeenCalledOnce();
+      });
+      await expect(installing).resolves.toBe(true);
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still wait for the page to save when an update installs once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn();
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(true);
+      expect(commit).toHaveBeenCalledOnce();
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'should ask once, in a native prompt, when a second launch carries --safe-mode (T-R12.8)',
     async () => {
       await booted();

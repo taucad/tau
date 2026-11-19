@@ -80,6 +80,7 @@ const baseConfig: UserConfig = {
     'src/hooks/use-platform.ts',
     'src/hooks/use-tick-animation.ts',
     'src/hooks/use-wait-clock.ts',
+    'src/utils/clipboard.ts',
     'src/utils/cn.ts',
     'src/utils/keys.ts',
     'src/utils/label.ts',

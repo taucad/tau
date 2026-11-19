@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link2 } from 'lucide-react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -74,8 +74,8 @@ describe('SharePane', () => {
   it('should draw the picker, the method and the host sections in one scroll area', () => {
     renderPane(
       { methods: [directMethod(), customMethod(() => <p>Hosted body</p>)] },
-      <SharePaneSection title='People with access' description='Who opens the project itself.'>
-        <p>Nobody else has access to this project.</p>
+      <SharePaneSection title='Collaborators' description='Who opens the project itself.'>
+        <p>No collaborators yet.</p>
       </SharePaneSection>,
     );
 
@@ -85,7 +85,7 @@ describe('SharePane', () => {
     expect(scroller).toHaveClass('overflow-y-auto');
     expect(scroller).toContainElement(screen.getByRole('button', { name: 'Share with Direct link' }));
     expect(scroller).toContainElement(screen.getByRole('button', { name: 'Create link' }));
-    const people = screen.getByRole('region', { name: 'People with access' });
+    const people = screen.getByRole('region', { name: 'Collaborators' });
     expect(scroller).toContainElement(people);
     expect(within(people).getByText('Who opens the project itself.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share with Direct link' })).toHaveAccessibleDescription(
@@ -130,7 +130,7 @@ describe('SharePane', () => {
     const method = directMethod();
     renderPane({ methods: [method] });
 
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Encrypt with a password' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
     expect(
       screen.getByText('The project is encrypted on this device. People need the password to open it.'),
     ).toBeVisible();
@@ -164,6 +164,63 @@ describe('SharePane', () => {
     });
   });
 
+  it('should offer a generated password, make another on request and keep one the person typed', async () => {
+    renderPane({ methods: [directMethod({ encryption: { minBytes: 32, maxBytes: 128 } })] });
+
+    const protect = screen.getByRole('checkbox', { name: 'Protect with a password' });
+    await userEvent.click(protect);
+    const field = screen.getByLabelText<HTMLInputElement>('Password');
+    const generated = field.value;
+    expect(generated).toMatch(/^[A-HJ-NP-Za-km-z2-9]{32}$/u);
+    expect(field).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Generate a new password' }));
+    expect(field).not.toHaveValue(generated);
+    expect(field.value).toHaveLength(32);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, 'a password the person chose for this link');
+    await userEvent.click(protect);
+    await userEvent.click(protect);
+    expect(screen.getByLabelText('Password')).toHaveValue('a password the person chose for this link');
+  });
+
+  it('should copy the password inside the press and announce it, and say so when the clipboard refuses', async () => {
+    const notify = vi.fn<(message: string) => void>();
+    renderPane({ methods: [directMethod()], notify });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
+    const password = screen.getByLabelText<HTMLInputElement>('Password').value;
+    await userEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+
+    expect(writeText).toHaveBeenCalledWith(password);
+    await waitFor(() => {
+      expect(notify).toHaveBeenCalledWith('Password copied');
+    });
+
+    writeText.mockRejectedValueOnce(new DOMException('Denied', 'NotAllowedError'));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+    expect(await screen.findByText("Couldn't copy the password. Show it, then select it and copy it.")).toBeVisible();
+  });
+
+  it('should hold the password once the link exists but still show and copy it', async () => {
+    const method = directMethod();
+    renderPane({ methods: [method] });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Protect with a password' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Include password in the link' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toBeVisible();
+    expect(screen.getByText('This link doesn’t include the password. Send the password separately.')).toBeVisible();
+    expect(screen.getByLabelText('Password')).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: 'Generate a new password' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy password' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+  });
+
   it('should hand on its options and show the warning and error a share answers', async () => {
     const share = vi.fn(async (_request: ShareLinkRequest) => ({
       error: 'This project is too large for a direct URL.',
@@ -195,11 +252,74 @@ describe('SharePane', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't copy the link. Select it above and copy it.");
+    expect(await screen.findByText('Select the link and copy it.')).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
     const field = screen.getByRole('textbox', { name: 'Share link' });
     await waitFor(() => {
       expect(field).toHaveFocus();
     });
+  });
+
+  it('should start the copy inside the press while the link is still being made', async () => {
+    const write = vi.fn<(items: unknown[]) => Promise<void>>(async () => undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText, write } });
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        declare public readonly items: unknown;
+
+        public constructor(items: unknown) {
+          Object.assign(this, { items });
+        }
+      },
+    );
+    let finish: (url: string) => void = () => undefined;
+    const method = directMethod({
+      share: vi.fn(
+        async () =>
+          new Promise<{ url: string }>((resolve) => {
+            finish = (url) => {
+              resolve({ url });
+            };
+          }),
+      ),
+    });
+    renderPane({ methods: [method] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    /* No await between the press and the clipboard: Safari would refuse a write that started later. */
+    expect(write).toHaveBeenCalledOnce();
+    finish('https://tau.example/s/direct#v=2&zip=late');
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toHaveValue(
+      'https://tau.example/s/direct#v=2&zip=late',
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('should make a fresh link on every press and never hold the choices when the method remakes its link', async () => {
+    const share = vi
+      .fn<(request: ShareLinkRequest) => Promise<{ url: string }>>()
+      .mockResolvedValueOnce({ url: 'https://tau.example/s/direct#v=2&zip=first' })
+      .mockResolvedValueOnce({ url: 'https://tau.example/s/direct#v=2&zip=second' });
+    renderPane({ methods: [directMethod({ shouldRemakeLink: true, share })] });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    expect(await screen.findByRole('textbox', { name: 'Share link' })).toHaveValue(
+      'https://tau.example/s/direct#v=2&zip=first',
+    );
+    const protect = screen.getByRole('checkbox', { name: 'Protect with a password' });
+    expect(protect).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenLastCalledWith('https://tau.example/s/direct#v=2&zip=second');
+    });
+    expect(share).toHaveBeenCalledTimes(2);
+
+    await userEvent.click(protect);
+    expect(screen.queryByRole('textbox', { name: 'Share link' })).toBeNull();
   });
 
   it('should say the link could not be made when a share throws', async () => {

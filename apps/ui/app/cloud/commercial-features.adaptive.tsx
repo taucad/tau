@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
-import { CloudSurface } from '#cloud/cloud-surface.js';
-import { useCloudFunded } from '#cloud/cloud-mode.js';
+import { FundedSurface } from '#cloud/cloud-surface.js';
 import { useAdaptivePlan } from '#cloud/use-plan-wait.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { CommercialUpgradeLabel as SelfHostUpgradeLabel } from '#cloud/commercial-features.self-host.js';
@@ -12,8 +11,7 @@ import type { CommercialFeatures } from '#cloud/plan-facts.types.js';
  * identity; anything else is unresolved, with its wait kind and Retry (I3, I15). The hook never swaps implementation.
  */
 export function CommercialUpgradeLabel(): React.JSX.Element | undefined {
-  const funded = useCloudFunded();
-  return <CloudSurface enabled={funded} fallback={<SelfHostUpgradeLabel />} render={() => undefined} />;
+  return <FundedSurface fallback={<SelfHostUpgradeLabel />} render={(cloud) => <cloud.CommercialUpgradeLabel />} />;
 }
 
 export const useCommercialFeatures = (): CommercialFeatures => {

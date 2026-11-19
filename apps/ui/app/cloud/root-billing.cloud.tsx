@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { forgetPendingPaymentAction, pendingPaymentActions } from '@taucad/billing-ui/lib/pending-payment-actions';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -139,23 +140,48 @@ const useCloudPortalReturn = (): void => {
 
 export const useCloudPaymentActionReturn = (): void => {
   useCloudPortalReturn();
-  const { apiBaseUrl, environment, userId } = useBillingSession();
-  const financialSession = useFinancialSession();
-  const queryClient = useQueryClient();
   const [returnedActionId, clearReturnedAction] = useSearchParameter('payment_action', paymentActionParameter);
   /* Latched at mount, because clearing the parameter re-renders: the bounded
    * re-check below outlives the URL it arrived on, and reading the live value
    * would tear it down the moment it removes itself. Checkout returns on a
    * fresh load, so the mount value is the returned action. */
   const [actionId] = useState(returnedActionId);
+  useAnnouncePaymentAction(actionId, () => {
+    clearReturnedAction('');
+  });
+};
+
+/** The end states of a payment action: announced once, then nothing more will change (adaptive app deployment W5). */
+export const paymentActionEndStates: ReadonlySet<WirePaymentAction['state']> = new Set([
+  'fulfilled',
+  'completed',
+  'failed',
+  'canceled',
+]);
+
+/**
+ * Announce one payment action's outcome with the existing copy, and keep following it while it settles: the body of
+ * the payment return, for the URL's action and for a desktop's stored ones (adaptive app deployment mode D14).
+ *
+ * @param actionId - The action, or `''` for none.
+ * @param onAnnounced - Called with the action once its first outcome is announced, or with nothing when the check
+ *   failed.
+ */
+export const useAnnouncePaymentAction = (
+  actionId: string,
+  onAnnounced: (action: WirePaymentAction | undefined) => void,
+): void => {
+  const { apiBaseUrl, environment, userId } = useBillingSession();
+  const financialSession = useFinancialSession();
+  const queryClient = useQueryClient();
   const inspected = useRef(false);
   /* Held in a ref rather than a dependency: React Router hands out a new
    * `setSearchParams` identity on every URL change, so depending on the writer
    * would tear this effect down the instant it deletes its own parameter. */
-  const clearReturnedActionRef = useRef(clearReturnedAction);
+  const clearReturnedActionRef = useRef(onAnnounced);
   useEffect(() => {
-    clearReturnedActionRef.current = clearReturnedAction;
-  }, [clearReturnedAction]);
+    clearReturnedActionRef.current = onAnnounced;
+  }, [onAnnounced]);
   useEffect(() => {
     if (apiBaseUrl === undefined || environment === undefined || userId === undefined) {
       return;
@@ -319,7 +345,7 @@ export const useCloudPaymentActionReturn = (): void => {
         if (!active) {
           return;
         }
-        clearReturnedActionRef.current('');
+        clearReturnedActionRef.current(action);
         let toastId = announce(action);
         for (let attempt = 0; attempt < returnSettleAttempts && isSettling(action); attempt++) {
           // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
@@ -356,7 +382,7 @@ export const useCloudPaymentActionReturn = (): void => {
       } catch (error) {
         if (active) {
           // A failed check must not leave the parameter to re-run on every reload.
-          clearReturnedActionRef.current('');
+          clearReturnedActionRef.current(undefined);
           toast.warning(
             isNotFound(error)
               ? 'This payment was made from a different account. Sign in to that account to see it.'
@@ -371,3 +397,67 @@ export const useCloudPaymentActionReturn = (): void => {
     };
   }, [actionId, apiBaseUrl, environment, financialSession, queryClient, userId]);
 };
+
+/** The payment and portal return, mounted where the shell called the hook (adaptive app deployment mode W5). */
+export function CloudPaymentReturn(): undefined {
+  useCloudPaymentActionReturn();
+  return undefined;
+}
+
+/* How many times the window regained focus: a store the follow-up reads, so no effect owns the listener. */
+let windowFocusRound = 0;
+/* When the window last regained focus, or this chunk loaded: the time stored actions are aged against. */
+let lastFocusAt = Date.now();
+const subscribeWindowFocus = (listener: () => void): (() => void) => {
+  const onFocus = (): void => {
+    windowFocusRound += 1;
+    lastFocusAt = Date.now();
+    listener();
+  };
+  globalThis.addEventListener('focus', onFocus);
+  return () => {
+    globalThis.removeEventListener('focus', onFocus);
+  };
+};
+const readWindowFocusRound = (): number => windowFocusRound;
+
+/** One stored action, announced with the return's own copy and forgotten once it reaches an end state. */
+function PendingPaymentAnnouncer({ actionId }: { readonly actionId: string }): undefined {
+  useAnnouncePaymentAction(actionId, (action) => {
+    /* A failed check keeps the id: the next focus asks again, until the day is up. */
+    if (action !== undefined && paymentActionEndStates.has(action.state)) {
+      forgetPendingPaymentAction(actionId);
+    }
+  });
+  return undefined;
+}
+
+/**
+ * The desktop learns how a payment it opened in the browser ended (adaptive app deployment mode D14, I7): when its
+ * window regains focus, with or without a visibility change, the billing queries refetch (and no other query) and each
+ * action this identity opened in the last day is announced with the return's own copy; on the next launch too, since
+ * the ids are stored. Stripe itself returns to the web app.
+ *
+ * @returns The announcers, nothing visible.
+ */
+export function DesktopPaymentFollowUp(): React.JSX.Element | undefined {
+  const { environment, userId } = useBillingSession();
+  const queryClient = useQueryClient();
+  const round = useSyncExternalStore(subscribeWindowFocus, readWindowFocusRound, () => 0);
+  useEffect(() => {
+    if (round > 0) {
+      void queryClient.refetchQueries({ queryKey: ['billing'] });
+    }
+  }, [queryClient, round]);
+  if (!isDesktopTarget() || environment === undefined || userId === undefined) {
+    return undefined;
+  }
+  const actionIds = pendingPaymentActions({ environment, ownerId: userId }, lastFocusAt);
+  return (
+    <>
+      {actionIds.map((actionId) => (
+        <PendingPaymentAnnouncer key={`${actionId}:${round}`} actionId={actionId} />
+      ))}
+    </>
+  );
+}

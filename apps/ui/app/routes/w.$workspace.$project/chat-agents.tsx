@@ -12,16 +12,11 @@ import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
-import {
-  formatReceiptTotal,
-  sumReceiptCredits,
-  useReceiptCredits,
-} from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+import { ReceiptCreditsSummary } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import type { AgentProjection, AgentProjectionMetadata, AgentProjectionState } from '#hooks/use-agent-projections.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import {
   FloatingPanel,
@@ -243,17 +238,6 @@ const AgentRow = ({
   );
 };
 
-/** Credits this chat was actually charged, read from its operations' receipts. */
-const AgentCredits = ({ operationIds }: { readonly operationIds: readonly string[] }): React.JSX.Element => {
-  const credits = useReceiptCredits(operationIds);
-  const summary = formatReceiptTotal(sumReceiptCredits(operationIds, credits));
-  return (
-    <span aria-label={`Tau credits: ${summary}`} className='ml-auto shrink-0 font-mono'>
-      {summary}
-    </span>
-  );
-};
-
 const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.JSX.Element => {
   const state = statePresentation[agent.state];
   const StateIcon = state.icon;
@@ -336,8 +320,9 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
                 {agent.pendingApprovalCount > 1 ? ` · ${agent.pendingApprovalCount}` : null}
               </span>
             ) : null}
-            {tauCloudEnabled && agent.operationIds.length > 0 ? (
-              <AgentCredits operationIds={agent.operationIds} />
+            {agent.operationIds.length > 0 ? (
+              /* Credits only where they exist: a build or mode without them renders nothing here (W5). */
+              <ReceiptCreditsSummary operationIds={agent.operationIds} className='ml-auto shrink-0 font-mono' />
             ) : null}
           </div>
         </div>

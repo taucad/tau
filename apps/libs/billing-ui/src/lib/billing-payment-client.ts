@@ -1,3 +1,4 @@
+import { rememberPendingPaymentAction } from '#lib/pending-payment-actions.js';
 import { randomUuid } from '@taucad/utils/id';
 import { toast } from 'sonner';
 import { wirePaymentActionSchema } from '@taucad/billing';
@@ -234,13 +235,34 @@ export const getUnresolvedPaymentActions = async (
 /** Whether Stripe opens in the system browser rather than in place, as in the desktop app. */
 export const opensPaymentsInBrowser = (): boolean => isDesktopTarget;
 
+/** Where Stripe returns a desktop purchase: the web app's Billing settings, a path that exists on the web (D14). */
+export const desktopBillingReturnPath = '/?settings=billing';
+
+/**
+ * The return path a billing call sends (adaptive app deployment mode D14): the current page on the web, where Stripe
+ * returns to it; the web app's Billing settings from the desktop, whose own renderer route does not exist on the web
+ * app Stripe returns to.
+ *
+ * @returns The path and query.
+ * @public
+ */
+export const billingReturnPath = (): string =>
+  opensPaymentsInBrowser() ? desktopBillingReturnPath : `${globalThis.location.pathname}${globalThis.location.search}`;
+
 export const followPaymentRedirect = (action: WirePaymentAction): boolean => {
   if (action.state !== 'redirect_required' || action.redirectUrl === null) {
     return false;
   }
   if (opensPaymentsInBrowser()) {
     // The desktop renderer never navigates to Stripe: the link opens in the browser, Stripe returns there to the web
-    // app, and billing here refreshes when the customer comes back to the window.
+    // app, and billing here refreshes when the customer comes back to the window. The action's id is kept for a day
+    // so this window can announce how it ended, after a restart too (adaptive app deployment mode D14).
+    rememberPendingPaymentAction({
+      actionId: action.actionId,
+      environment: action.environment,
+      ownerId: action.ownerId,
+      openedAt: Date.now(),
+    });
     globalThis.open(action.redirectUrl, '_blank', 'noopener');
     toast('Continue in your browser. Billing here updates when you come back.');
     return true;

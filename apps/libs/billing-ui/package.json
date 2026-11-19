@@ -56,6 +56,7 @@
     "./hooks/use-auto-reload-enabled": "./src/hooks/use-auto-reload-enabled.ts",
     "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",
     "./lib/billing-payment-client": "./src/lib/billing-payment-client.ts",
+    "./lib/pending-payment-actions": "./src/lib/pending-payment-actions.ts",
     "./providers/billing-legal-links-provider": "./src/providers/billing-legal-links-provider.tsx",
     "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
     "./package.json": "./package.json"

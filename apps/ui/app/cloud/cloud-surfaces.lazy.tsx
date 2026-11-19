@@ -7,11 +7,30 @@ import { useAutoReloadEnabled } from '@taucad/billing-ui/hooks/use-auto-reload-e
 import { kernelConfigurations } from '@taucad/types/constants';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
+import paymentSpriteUrl from '@taucad/ui-kit/icons/generated/payment-sprite.svg?url';
+import { SvgSpriteLoader } from '@taucad/ui-kit/icons/svg-sprite-loader';
 
-/**
- * The Cloud chunk (adaptive app deployment mode charter D6): loaded only while the mode is `funded`, through the one
- * loader (`cloud-entries.ts`), and mounted through the one surface helper. Never part of Core.
- */
+/* The funded surfaces (adaptive app deployment mode W5): this module resolves every `#` specifier as the `cloud`
+ * ceiling does, so these are the Cloud implementations, mounted by their facades through `CloudSurface`. */
+/* oxlint-disable no-barrel-files/no-barrel-files -- the one Cloud chunk names the surfaces it carries. */
+export { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.cloud.js';
+export { CloudAccountClosure, CloudBillingSettings } from '#cloud/settings-billing.cloud.js';
+export { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.cloud.js';
+export { CommercialUpgradeLabel } from '#cloud/commercial-features.cloud.js';
+export { KernelCommercialBadge } from '#cloud/kernel-commerce.cloud.js';
+export { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+export { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
+export { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
+export { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
+export { ChatMessageDataUsage, ReceiptCreditsSummary } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+/** The payment and portal return (I7): the existing handler's body and latch, mounted where the hook was called. */
+export { CloudPaymentReturn as PaymentReturn, DesktopPaymentFollowUp } from '#cloud/root-billing.cloud.js';
+/* oxlint-enable no-barrel-files/no-barrel-files */
+
+/** The payment artwork the billing surfaces draw; the base sprite is Core. */
+export function PaymentSprite(): React.JSX.Element {
+  return <SvgSpriteLoader urls={[paymentSpriteUrl]} />;
+}
 
 /**
  * The bridge: mounted inside the financial providers for one identity, it calls the real billing hooks and publishes

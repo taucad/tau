@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { UsageData } from '@taucad/chat';
 import { useModels } from '#hooks/use-models.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
@@ -31,4 +32,15 @@ export function ChatMessageDataUsage({
       reference={lastUsage.attemptId}
     />
   );
+}
+
+/** A build with no credits shows what the caller passes instead (adaptive app deployment mode W5). */
+export function ReceiptCreditsSummary({
+  fallback,
+}: {
+  readonly operationIds: readonly string[];
+  readonly className?: string;
+  readonly fallback?: ReactNode;
+}): ReactNode {
+  return fallback;
 }

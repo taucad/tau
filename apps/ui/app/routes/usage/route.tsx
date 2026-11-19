@@ -1,3 +1,5 @@
+import { useDeploymentMode, useRetryDeploymentMode } from '#cloud/use-deployment-mode.js';
+import { PageNotFound } from '#components/page-not-found.js';
 import { useMemo, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -168,7 +170,7 @@ function FilterMenu<Value extends string>({
   );
 }
 
-export default function UsagePage(): React.JSX.Element {
+function UsageContent(): React.JSX.Element {
   const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProjects, clearFilters, hasActiveFilters } =
     useUsageFilters();
   const minimum = useBillingRevisionMinimum();
@@ -286,5 +288,39 @@ export default function UsagePage(): React.JSX.Element {
         </>
       ) : undefined}
     </PageContent>
+  );
+}
+
+/**
+ * `/usage`, guarded by the display mode (adaptive app deployment mode D8, BA19): the page while `funded`; the app's
+ * not-found, inside the shell, when unfunded; while unknown, checking for at most the ask deadline, then a stated
+ * "can't check" with Retry (I15). A pinned `cloud` build is always funded.
+ *
+ * @returns The page or its stand-in.
+ */
+export default function UsagePage(): React.JSX.Element {
+  const mode = useDeploymentMode();
+  const retry = useRetryDeploymentMode();
+  if (mode.state === 'funded') {
+    return <UsageContent />;
+  }
+  if (mode.state === 'unfunded') {
+    return <PageNotFound />;
+  }
+  return (
+    <div role='status' className='flex flex-col items-start gap-2 p-6 text-sm text-muted-foreground'>
+      {mode.problem === 'pending' ? (
+        <span>Checking this server…</span>
+      ) : mode.problem === 'safe-mode' ? (
+        <span>Usage is off in safe mode. Restart normally to see it.</span>
+      ) : (
+        <>
+          <span>Can’t check this server’s billing right now.</span>
+          <Button variant='outline' size='xs' onClick={retry}>
+            Retry
+          </Button>
+        </>
+      )}
+    </div>
   );
 }

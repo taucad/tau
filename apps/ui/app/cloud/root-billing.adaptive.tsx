@@ -16,7 +16,7 @@ import { legalUrl } from '#lib/legal-url.js';
 import { ENV } from '#environment.config.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { CloudIdentityProvider, cloudIdentityValue } from '#cloud/cloud-identity.js';
-import { CloudSurface } from '#cloud/cloud-surface.js';
+import { CloudSurface, FundedSurface } from '#cloud/cloud-surface.js';
 import { cloudSurfaces } from '#cloud/cloud-entries.js';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudIdentity } from '#cloud/cloud-port.js';
@@ -104,7 +104,12 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
               loader={cloudSurfaces}
               enabled
               fallback={undefined}
-              render={(module) => <module.CloudBridge identityKey={bound.key!} />}
+              render={(module) => (
+                <>
+                  <module.CloudBridge identityKey={bound.key!} />
+                  <module.DesktopPaymentFollowUp />
+                </>
+              )}
             />
           )}
         </CloudIdentityProvider>
@@ -113,7 +118,11 @@ function AdaptiveBillingSession({ children }: { readonly children: ReactNode }):
   );
 }
 
-/** Core never reads or clears a return parameter (I7); the funded Cloud chunk's handler arrives with W5. */
-export const useCloudPaymentActionReturn = (): void => {
-  // Nothing until the funded chunk mounts the handler.
-};
+/**
+ * The payment and portal return (I7): Core never reads or clears a return parameter; the existing handler runs inside
+ * the Cloud chunk, mounted while funded, so a parameter that arrives while the mode is unknown is read once it is
+ * funded, and left alone if it never is.
+ */
+export function CloudPaymentReturn(): React.JSX.Element {
+  return <FundedSurface fallback={undefined} render={(cloud) => <cloud.PaymentReturn />} />;
+}

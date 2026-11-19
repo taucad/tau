@@ -19,6 +19,8 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQueryClient: () => ({ invalidateQueries: query.invalidateQueries }),
 }));
 vi.mock('#lib/billing-payment-client.js', () => ({
+  /* The web's own page: the desktop's Billing return path is covered by the client's own test. */
+  billingReturnPath: () => `${globalThis.location.pathname}${globalThis.location.search}`,
   purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
   createPortalAction,

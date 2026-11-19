@@ -23,7 +23,7 @@ import { DesktopAppNotice } from '#components/desktop/desktop-app-notice.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { billingNavRoutes } from '#cloud/nav-billing.js';
+import { useBillingNavRoutes } from '#cloud/nav-billing.js';
 
 /**
  * The phone sheet header reads [close][wordmark → Home] … [Search] (D10). Wide screens keep search as
@@ -63,12 +63,13 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const desktopTarget = isDesktopTarget();
   const isCompact = desktopTarget && !isMobile;
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
+  const billingNavRoutes = useBillingNavRoutes();
   const navMoreItems = React.useMemo(
     () =>
       [...navRoutes.navMore, ...billingNavRoutes].filter(
         (item) => item.featureFlag === undefined || flags[item.featureFlag],
       ),
-    [flags],
+    [billingNavRoutes, flags],
   );
 
   return (

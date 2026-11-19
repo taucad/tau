@@ -17,6 +17,7 @@ import {
 import { SettingsSectionCard } from '@taucad/settings-ui/components/settings/settings-item';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {
+  billingReturnPath,
   BillingCollectionUnavailable,
   confirmPaymentAction,
   createPaymentRequestId,
@@ -198,7 +199,7 @@ export function AutoReloadSettings({
         { ...binding!, financialSession: token },
         {
           requestId: createPaymentRequestId(),
-          returnPath: `${location.pathname}${location.search}`,
+          returnPath: billingReturnPath(),
         },
       );
       if (token.isCurrent()) {

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import type { UsageData } from '@taucad/chat';
 import { formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
@@ -184,5 +185,30 @@ export function ChatMessageDataUsage({
       credits={showCredits ? summary : undefined}
       reference={lastUsage.attemptId}
     />
+  );
+}
+
+/**
+ * The credits a set of operations was charged, as one short label (adaptive app deployment mode W5): the leaf the chat
+ * details and the agents list mount, so no receipt hook crosses the Cloud boundary.
+ *
+ * @param props - The operations, a class for the label and what to show without a total.
+ * @returns The label.
+ */
+export function ReceiptCreditsSummary({
+  operationIds,
+  className,
+}: {
+  readonly operationIds: readonly string[];
+  readonly className?: string;
+  /** What a build or mode without credits shows instead; unused here. */
+  readonly fallback?: ReactNode;
+}): React.JSX.Element {
+  const credits = useReceiptCredits(operationIds);
+  const summary = formatReceiptTotal(sumReceiptCredits(operationIds, credits));
+  return (
+    <span aria-label={`Tau credits: ${summary}`} className={className}>
+      {summary}
+    </span>
   );
 }

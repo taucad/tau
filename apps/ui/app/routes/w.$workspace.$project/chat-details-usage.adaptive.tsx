@@ -1,12 +1,17 @@
+/* The Cloud implementation's props (TypeScript resolves the unaliased specifier to it); types only. */
+import type { ChatDetailsUsage as CloudChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
 import type { ComponentProps } from 'react';
-import { CloudSurface } from '#cloud/cloud-surface.js';
-import { useCloudFunded } from '#cloud/cloud-mode.js';
+import { FundedSurface } from '#cloud/cloud-surface.js';
 import { ChatDetailsUsage as SelfHostChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.self-host.js';
 
-/** The adaptive facade of the chat details usage (adaptive app deployment mode W2 skeleton): self-host until W5. */
+/** The chat's credits, from the Cloud chunk while funded. */
 export function ChatDetailsUsage(
-  props: ComponentProps<typeof SelfHostChatDetailsUsage> = {},
+  props: ComponentProps<typeof CloudChatDetailsUsage> = {},
 ): React.JSX.Element | undefined {
-  const funded = useCloudFunded();
-  return <CloudSurface enabled={funded} fallback={<SelfHostChatDetailsUsage {...props} />} render={() => undefined} />;
+  return (
+    <FundedSurface
+      fallback={<SelfHostChatDetailsUsage {...props} />}
+      render={(cloud) => <cloud.ChatDetailsUsage {...props} />}
+    />
+  );
 }

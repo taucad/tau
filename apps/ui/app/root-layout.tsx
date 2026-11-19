@@ -49,7 +49,7 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { CloudPaymentReturn, CloudRootBoundary } from '#cloud/root-billing.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import {
   selectRuntimeIdleFileManagers,
@@ -279,12 +279,17 @@ function ProductShell(): React.JSX.Element {
       }),
     [],
   );
-  useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const { pathname } = useLocation();
   /* D24, I19 (A11): the app shell, at one tree position on every route. The host renders it beside the live
    * projects, never inside one, so a project open, a move between projects or a Home visit never remounts it. */
-  const page = <Page />;
+  /* The payment and portal return, where the shell called its hook (adaptive app deployment mode W5). */
+  const page = (
+    <>
+      <CloudPaymentReturn />
+      <Page />
+    </>
+  );
   return isRemoteHostHarness(data?.env.TAU_DEBUG, pathname) ? page : <ProjectSessionsHost>{page}</ProjectSessionsHost>;
 }
 

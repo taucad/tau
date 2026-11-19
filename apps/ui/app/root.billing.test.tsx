@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { useCloudPaymentActionReturn } from '#cloud/root-billing.cloud.js';
 
 const payment = vi.hoisted(() => ({
   getPaymentAction: vi.fn(),

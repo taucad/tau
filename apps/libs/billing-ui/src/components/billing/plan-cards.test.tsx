@@ -23,6 +23,8 @@ const CollectionUnavailable = vi.hoisted(() => class extends Error {});
 const entitlements = vi.hoisted(() => ({ current: { isResolved: true, paymentCollectionAvailable: true } }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => entitlements.current }));
 vi.mock('#lib/billing-payment-client.js', () => ({
+  /* The web's own page: the desktop's Billing return path is covered by the client's own test. */
+  billingReturnPath: () => `${globalThis.location.pathname}${globalThis.location.search}`,
   BillingPaymentConflict: PaymentConflict,
   BillingCollectionUnavailable: CollectionUnavailable,
   purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',

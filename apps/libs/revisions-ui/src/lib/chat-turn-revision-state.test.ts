@@ -4,14 +4,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  deriveTurnRevisionState,
-  turnRevisionDetail,
-  turnRevisionLabel,
-} from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
-import type { TurnRevisionFacts } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
-import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
-import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
+import { deriveTurnRevisionState, turnRevisionDetail, turnRevisionLabel } from '#lib/chat-turn-revision-state.js';
+import type { TurnRevisionFacts, TurnRevisionLog } from '#lib/chat-turn-revision-state.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 
 const revision: RevisionCard = {
   revisionId: 'rev-5',

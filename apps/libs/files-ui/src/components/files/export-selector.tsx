@@ -3,23 +3,22 @@ import { useCallback, useMemo, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { cn } from '@taucad/ui/utils/cn';
-import { ExportFormatGrid } from '@taucad/files-ui/components/files/export-format-grid';
-import type { ExportFormatLayout } from '@taucad/files-ui/components/files/export-format-grid';
+import { ExportFormatGrid } from '#components/files/export-format-grid.js';
+import type { ExportFormatLayout } from '#components/files/export-format-grid.js';
 import { useExportToDisk } from '#components/files/use-export-to-disk.js';
-import { deriveAvailableFormats } from '@taucad/files-ui/utils/export-formats.utils';
-import type { FormatEntry } from '@taucad/files-ui/utils/export-formats.utils';
+import type { CadExportActor } from '#components/files/use-export-to-disk.js';
+import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
 import { sortGeometryUnitEntries } from '@taucad/workbench-panes/units/geometry-units';
-import type { cadMachine } from '#machines/cad.machine.js';
 
 type GeometryUnitEntry = {
   entryPath: string;
-  actor: ActorRefFrom<typeof cadMachine>;
+  actor: CadExportActor;
 };
 
 export type ExportSelectorVariant = 'sub' | 'popover' | 'inline';
@@ -29,12 +28,12 @@ export type ExportSelectorProps = {
    * Single geometry unit mode: when provided, only the selected actor is exported.
    * Mutually exclusive with `geometryUnits`.
    */
-  readonly cadActor?: ActorRefFrom<typeof cadMachine>;
+  readonly cadActor?: CadExportActor;
   /**
    * Multi-geometry unit mode: when provided (and `cadActor` is absent), renders a geometry unit
    * picker plus a per-geometry-unit format grid.
    */
-  readonly geometryUnits?: Map<string, ActorRefFrom<typeof cadMachine>>;
+  readonly geometryUnits?: Map<string, CadExportActor>;
   /**
    * Base filename used when downloading the exported blob. The file extension is appended
    * automatically (`${filenameBase}.${format}`). Required so the component stays decoupled
@@ -195,7 +194,7 @@ function ExportSelectorBody({
   readonly selectedEntryPath: string;
   readonly mainEntryPath: string | undefined;
   readonly onEntryPathChange: (entryPath: string) => void;
-  readonly selectedActor: ActorRefFrom<typeof cadMachine> | undefined;
+  readonly selectedActor: CadExportActor | undefined;
   readonly filenameBase: string;
   readonly onExport?: (entryPath: string, format: FileExtension) => void;
   readonly layout: ExportFormatLayout;

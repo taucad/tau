@@ -2,10 +2,13 @@ import React from 'react';
 import type { UsageData } from '@taucad/chat';
 import { Sparkles } from 'lucide-react';
 import { SvgIcon, unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
-import type { ResolvedModel } from '#hooks/use-models.js';
+import type { IconId } from '@taucad/ui-kit/icons/svg-icon';
 import { Button } from '@taucad/ui/components/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
+
+/** What the usage control reads of the resolved model: its display name and its brand glyph. @public */
+export type ChatUsageModel = Readonly<{ name: string; family: IconId }>;
 
 /** Provider token counts summed over a message's usage parts. @public */
 export type UsageTotals = {
@@ -41,7 +44,7 @@ function ModelGlyph({
   isMono,
   className,
 }: {
-  readonly model: ResolvedModel;
+  readonly model: ChatUsageModel;
   readonly isMono?: boolean;
   readonly className?: string;
 }): React.JSX.Element {
@@ -75,7 +78,7 @@ export function ChatMessageUsage({
   reference,
   vendorReports = [],
 }: {
-  readonly model: ResolvedModel;
+  readonly model: ChatUsageModel;
   /** Display name of the external agent that produced the turn, if any. */
   readonly agent?: string | undefined;
   readonly totals: UsageTotals;

@@ -34,7 +34,7 @@ import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { entryTitleOf } from '@taucad/revisions-ui/lib/revision-entry-title';
-import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
+import type { TurnRevisionState } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 
 /** What a surface draws for one state: one glyph in one tone, the mark it stands for, and the sentence. @public */
 export type RevisionFacts = Readonly<{

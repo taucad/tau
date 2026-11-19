@@ -18,8 +18,8 @@ import { ConflictDecision } from '#routes/w.$workspace.$project/revision-branche
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { conflictLine, lanesScenarios } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
-import type { LanesScenario } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
+import { conflictLine, lanesScenarios } from '@taucad/revisions-ui/lib/history-lanes.test-harness';
+import type { LanesScenario } from '@taucad/revisions-ui/lib/history-lanes.test-harness';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };

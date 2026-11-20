@@ -23,7 +23,13 @@ import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
-import { prepareDeploys, projectShellUrl, startDeployServer, watchWorkerVersions } from './support/two-deploys.ts';
+import {
+  prepareDeploys,
+  projectShellUrl,
+  readBuildId,
+  startDeployServer,
+  watchWorkerVersions,
+} from './support/two-deploys.ts';
 import type { DeployServer, Deploys } from './support/two-deploys.ts';
 // oxlint-enable no-restricted-imports
 
@@ -198,15 +204,22 @@ describe('the web app’s service worker under deploy skew and request faults (P
     await expect.poll(installedVersions, { timeout: 60_000, interval: 500 }).not.toStrictEqual([]);
     await versions.stop();
 
-    // The next worker takes over once no page holds the previous one.
-    await page.close();
-    const next = await context.newPage();
-    watch(next);
-    await next.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+    // The update rule activates it (`pwa-registration.ts` posts this once the verdict is `replaced`), and it takes
+    // the page.
+    const next = page;
+    await next.evaluate(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
+    });
     const takenOver = async (): Promise<boolean> =>
       next.evaluate(async () => {
         const registration = await navigator.serviceWorker.getRegistration();
-        return registration?.waiting === null && navigator.serviceWorker.controller?.state === 'activated';
+        return (
+          registration?.waiting === null &&
+          registration.installing === null &&
+          navigator.serviceWorker.controller === registration.active &&
+          registration.active?.state === 'activated'
+        );
       });
     await expect.poll(takenOver, { timeout: 60_000, interval: 250 }).toBe(true);
 
@@ -216,8 +229,9 @@ describe('the web app’s service worker under deploy skew and request faults (P
       expect(home?.fromServiceWorker()).toBe(true);
       const homeHeaders = await home?.allHeaders();
       expect(homeHeaders?.['server-timing'] ?? '').toContain('sw;desc=cache');
-      const offlineHome = await waitForMount(next);
-      expect(offlineHome.buildId).toBe(String(deploys?.nextBuildId));
+      const homeDocument = (await home?.text()) ?? '';
+      expect(readBuildId(homeDocument)).toBe(deploys?.nextBuildId);
+      // Whether that shell then boots offline is the route manifest's (FP4), not this row's.
       // The project class's closure is not complete, so its shell is never answered from the cache.
       const project = await next.goto(`${live.origin}${projectPath}`, { waitUntil: 'commit' }).catch(() => undefined);
       const projectHeaders = await project?.allHeaders();

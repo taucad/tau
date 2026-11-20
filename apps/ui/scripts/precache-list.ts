@@ -117,19 +117,37 @@ const readStylesheetReferences = (css: string): readonly string[] => {
  * @throws When a document, a root or a referenced file is missing from the build output.
  */
 export const collectPrecacheFiles = (documents: readonly PrecacheDocument[], build: ClientBuildView): string[] => {
+  const files = new Set(Object.values(collectPrecacheClasses(documents, build)).flat());
+  return [...files].toSorted((left, right) => left.localeCompare(right));
+};
+
+/**
+ * Each document's own closure ({@link collectPrecacheFiles} for one document): what its class needs stored before the
+ * worker may serve its shell from the cache (PL7 service worker staging defects blueprint, FP1).
+ *
+ * @param documents - The documents the worker answers.
+ * @param build - Read side of the completed client build.
+ * @returns Per document URL, its sorted closure, the document included.
+ * @throws When a document, a root or a referenced file is missing from the build output.
+ */
+export const collectPrecacheClasses = (
+  documents: readonly PrecacheDocument[],
+  build: ClientBuildView,
+): Record<string, string[]> =>
+  Object.fromEntries(documents.map((document) => [document.document, collectClosure(document, build)]));
+
+const collectClosure = ({ document, roots }: PrecacheDocument, build: ClientBuildView): string[] => {
   const localOrigin = 'https://tau.invalid';
   const fileToKey = new Map(Object.entries(build.manifest).map(([key, chunk]) => [`/${chunk.file}`, key]));
   const pending: string[] = [];
   const collected = new Set<string>();
-  for (const { document, roots } of documents) {
-    const html = build.readText(document.slice(1));
-    if (html === undefined) {
-      throw new Error(`Service worker document ${document} was not prerendered`);
-    }
-    collected.add(document);
-    pending.push(...readDocumentReferences(html));
-    pending.push(...rootKeys(build.manifest, roots).map((key) => `/${build.manifest[key]?.file ?? key}`));
+  const html = build.readText(document.slice(1));
+  if (html === undefined) {
+    throw new Error(`Service worker document ${document} was not prerendered`);
   }
+  collected.add(document);
+  pending.push(...readDocumentReferences(html));
+  pending.push(...rootKeys(build.manifest, roots).map((key) => `/${build.manifest[key]?.file ?? key}`));
 
   while (pending.length > 0) {
     const queuedReference = pending.pop();

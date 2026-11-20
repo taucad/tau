@@ -25,15 +25,15 @@
  * so a page opened from it must carry its own deploy's build id for the guard
  * to tell that a newer deploy replaced it.
  *
- * These pages run without the web app's service worker (PL7): their contexts
- * block service workers. This suite is the recovery of a page whose chunks
- * the network no longer serves. A page the worker controls asks for such a
- * chunk again without its deploy cookie (`retryUnpinnedMiss`), and here the
- * next deploy is a byte-identical copy that has every previous chunk, so
- * whether a page reached recovery depended on whether the worker, registered
- * once the page is idle, had taken it before the deploy (a flake, merge queue
- * job 135169781115). What a worker-controlled tab does across a deploy is
- * `service-worker-deploy.test.ts`'s, in the nightly suite until it ratchets.
+ * These pages run with the web app's service worker (PL7), as a visitor's do:
+ * it registers once the page is idle, and whether it took a page before the
+ * deploy must not change the outcome. Since FP1 of the PL7 service worker
+ * staging defects blueprint the worker answers only from its caches and never
+ * asks the network itself, so a chunk it does not hold is the page's own
+ * request either way. (It used to ask such a chunk again without the deploy
+ * cookie, `retryUnpinnedMiss`, which made the outcome depend on that timing: a
+ * flake, merge queue job 135169781115, answered then by blocking the worker
+ * here.)
  *
  * A page fully loaded on the previous deploy, whose chunks the next deploy still
  * serves (retention modelled), learns that the next deploy is live and then
@@ -120,8 +120,8 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
       { hold, retain },
     );
     server = live;
-    // No worker (see the file comment): recovery must not depend on whether one took the page first.
-    context = await browser.newContext({ serviceWorkers: 'block' });
+    // The worker as a visitor has it (see the file comment): recovery must not depend on whether it took the page first.
+    context = await browser.newContext();
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('console', (message) => {

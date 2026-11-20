@@ -9,10 +9,11 @@
  * the stylesheets' `url()` references (fonts). Dynamic imports are never followed, so no deferred-tier, kernel, wasm or
  * worker asset enters it; `check-critical-budget.mts` holds that on the output (shell invariant 8).
  *
- * The worker source is bundled with Workbox's runtime modules (esbuild), and Google Workbox's `injectManifest`
- * (`workbox-build`) writes the list into it: documents and other unhashed files with a content revision, hashed
- * `/assets/*` files with none, so a later deploy step that rewrites a compiled chunk (Sentry debug ids) cannot make an
- * entry stale; no entry carries an `integrity`. The list is also written beside the client output
+ * The worker source is bundled with the modules it imports (esbuild), each document class's closure defined at
+ * `globalThis.__TAU_PRECACHE_CLASSES` (the worker serves a class's shell from its cache only once all of it is stored),
+ * and Google Workbox's `injectManifest` (`workbox-build`) writes the list into it: documents and other unhashed files
+ * with a content revision, hashed `/assets/*` files with none, so a later deploy step that rewrites a compiled chunk
+ * (Sentry debug ids) cannot make an entry stale; no entry carries an `integrity`. The list is also written beside the client output
  * (`build/service-worker-precache.json`, never served) for the build checks and `verify-shipped-assets.mts`.
  *
  * With the kill switch on (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, `build-environment.ts`) it writes the retiring worker
@@ -26,13 +27,16 @@ import { join } from 'node:path';
 import { build as bundle } from 'esbuild';
 import { injectManifest } from 'workbox-build';
 /* oxlint-disable no-restricted-imports -- Called from react-router.config.ts before app aliases exist. */
-import { collectPrecacheFiles, precacheEntries, precacheListFile } from './precache-list.ts';
+import { collectPrecacheClasses, precacheEntries, precacheListFile } from './precache-list.ts';
 import type { ClientBuildView, PrecacheEntry, ViteManifest } from './precache-list.ts';
 import type { WorkerRouteClass } from '../app/lib/route-classes.ts';
 /* oxlint-enable no-restricted-imports */
 
 /** The expression `app/offline/service-worker.ts` reads its precache list from, replaced by the list. */
 export const serviceWorkerInjectionPoint = 'globalThis.__WB_MANIFEST';
+
+/** The expression `app/offline/service-worker.ts` reads each document class's closure from, replaced at bundling. */
+export const serviceWorkerClassesPoint = 'globalThis.__TAU_PRECACHE_CLASSES';
 
 /** Where the worker is served from, relative to the client output. */
 export const serviceWorkerFile = 'service-worker.js';
@@ -45,13 +49,17 @@ export const serviceWorkerFile = 'service-worker.js';
 export const retiredServiceWorkerFile = 'offline-shell-worker.js';
 
 /**
- * Bundle a worker source into one classic script with the modules it imports (Workbox's runtime modules for the web
+ * Bundle a worker source into one classic script with the modules it imports (Workbox's expiration module for the web
  * app's worker).
  *
  * @param source - The worker source.
  * @param outfile - Where the script is written.
  */
-export const bundleServiceWorker = async (source: string, outfile: string): Promise<void> => {
+export const bundleServiceWorker = async (
+  source: string,
+  outfile: string,
+  classes: Readonly<Record<string, readonly string[]>> = {},
+): Promise<void> => {
   await bundle({
     entryPoints: [source],
     bundle: true,
@@ -61,7 +69,11 @@ export const bundleServiceWorker = async (source: string, outfile: string): Prom
     minify: true,
     legalComments: 'none',
     // Workbox's development logging and assertions are compiled out.
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      // Each document class's closure: the worker serves a shell from its cache only once all of it is stored.
+      [serviceWorkerClassesPoint]: JSON.stringify(classes),
+    },
     outfile,
     logLevel: 'warning',
   });
@@ -106,19 +118,20 @@ export const buildServiceWorker = async (options: {
     exists: (relativePath) => existsSync(resolvePath(relativePath)),
     manifest: JSON.parse(readFileSync(manifestPath, 'utf8')) as ViteManifest,
   };
-  const files = collectPrecacheFiles(
+  const classes = collectPrecacheClasses(
     options.classes.map((workerClass) => ({
       document: workerClass.document,
       roots: workerClass.routeClass.interactive ?? [],
     })),
     build,
   );
+  const files = [...new Set(Object.values(classes).flat())].toSorted((left, right) => left.localeCompare(right));
   const entries = precacheEntries(files, (relativePath) => Uint8Array.from(readFileSync(resolvePath(relativePath))));
 
   const staging = mkdtempSync(join(tmpdir(), 'tau-service-worker-'));
   try {
     const bundled = join(staging, serviceWorkerFile);
-    await bundleServiceWorker(options.workerSourcePath, bundled);
+    await bundleServiceWorker(options.workerSourcePath, bundled, classes);
     const { count, warnings } = await injectManifest({
       swSrc: bundled,
       swDest: resolvePath(serviceWorkerFile),

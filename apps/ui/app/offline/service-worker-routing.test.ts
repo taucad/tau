@@ -1,14 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   answerNavigation,
+  answerSubresource,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
-  retryUnpinnedMiss,
   workerClasses,
 } from '#offline/service-worker-routing.js';
 import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
-import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
+import type { NavigationCandidate, RequestFacts, StoreView } from '#offline/service-worker-routing.js';
 
 const origin = 'https://tau.new';
 const projectDocument = '/w/__shell/__shell/index.html';
@@ -97,13 +97,14 @@ describe('navigationCandidate', () => {
 describe('answerNavigation', () => {
   const answer = (
     path: string,
-    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string }> = {},
+    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string; classComplete: boolean }> = {},
   ): ReturnType<typeof answerNavigation> =>
     answerNavigation({
       candidate: candidateFor(path),
       request: navigation(path, facts.cache === undefined ? {} : { cache: facts.cache }),
       tauEntry: facts.tauEntry,
       updatePending: facts.updatePending ?? false,
+      classComplete: facts.classComplete ?? true,
     });
 
   it('should open a project from the precached shell, cache-first', () => {
@@ -140,6 +141,12 @@ describe('answerNavigation', () => {
   it('should answer the usage page network-first, whatever the cache mode', () => {
     expect(answer('/usage')).toStrictEqual({ kind: 'network-first', document: usageDocument });
   });
+
+  it('should never serve a shell whose class closure is not all stored, so the browser’s own navigation answers', () => {
+    expect(answer('/w/home/bracket-v2', { classComplete: false })).toStrictEqual({ kind: 'network' });
+    expect(answer('/', { tauEntry: 'app', classComplete: false })).toStrictEqual({ kind: 'network' });
+    expect(answer('/usage', { classComplete: false })).toStrictEqual({ kind: 'network' });
+  });
 });
 
 describe('isCachedOnFirstUse', () => {
@@ -161,36 +168,83 @@ describe('isCachedOnFirstUse', () => {
   });
 });
 
-describe('retryUnpinnedMiss', () => {
-  it('should keep a hit and never retry a request already sent without credentials', async () => {
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
-    const hit = new Response('chunk', { status: 200 });
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), hit, fetchFile)).resolves.toBe(hit);
-    const miss = new Response('gone', { status: 404 });
-    await expect(
-      retryUnpinnedMiss(new Request(`${origin}/assets/a.js`, { credentials: 'omit' }), miss, fetchFile),
-    ).resolves.toBe(miss);
-    expect(fetchFile).not.toHaveBeenCalled();
+describe('answerSubresource', () => {
+  const listed = new Set(['/assets/root-A.js', '/assets/blocked-B.js', projectDocument]);
+  const view = (overrides: Partial<{ loaded: boolean; precached: string[]; assets: string[] }> = {}): StoreView => ({
+    isLoaded: () => overrides.loaded ?? true,
+    isListed: (url) => listed.has(url),
+    hasPrecached: (url) => (overrides.precached ?? ['/assets/root-A.js', projectDocument]).includes(url),
+    hasAsset: (url) => (overrides.assets ?? ['/assets/kernel-C.wasm']).includes(url),
+  });
+  const request = (path: string, overrides: Partial<RequestFacts> = {}): RequestFacts => ({
+    url: new URL(path, origin).toString(),
+    method: 'GET',
+    mode: 'cors',
+    cache: 'default',
+    ...overrides,
   });
 
-  it('should ask a miss again without the skew pin, from the live deploy', async () => {
-    const retried = new Response('chunk', { status: 200 });
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>().mockResolvedValue(retried);
-    const miss = new Response('<!DOCTYPE html><title>Not Found</title>', { status: 404 });
+  it('should answer only what the index says a cache holds', () => {
+    expect(answerSubresource(request('/assets/root-A.js'), origin, view())).toStrictEqual({
+      kind: 'precache',
+      url: '/assets/root-A.js',
+    });
+    expect(answerSubresource(request('/assets/kernel-C.wasm'), origin, view())).toStrictEqual({
+      kind: 'asset',
+      url: '/assets/kernel-C.wasm',
+    });
+  });
 
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), miss, fetchFile)).resolves.toBe(retried);
-    expect(fetchFile).toHaveBeenCalledExactlyOnceWith(`${origin}/assets/a.js`, { credentials: 'omit' });
+  it('should give a miss no answer, so the browser makes its own request, and keep the file afterwards', () => {
+    expect(answerSubresource(request('/assets/lazy-D.js'), origin, view())).toStrictEqual({
+      kind: 'browser',
+      keep: '/assets/lazy-D.js',
+    });
+  });
+
+  it('should leave a listed file the install could not store to the browser, with no second copy', () => {
+    expect(answerSubresource(request('/assets/blocked-B.js'), origin, view())).toStrictEqual({
+      kind: 'browser',
+      keep: undefined,
+    });
+  });
+
+  it('should answer nothing before the index has loaded', () => {
+    expect(answerSubresource(request('/assets/root-A.js'), origin, view({ loaded: false }))).toStrictEqual({
+      kind: 'browser',
+      keep: undefined,
+    });
+  });
+
+  it.each([
+    request('/api/v1/projects'),
+    request('/w/home/bracket-v2.data'),
+    request('/assets/root-A.js', { method: 'POST' }),
+    { ...request('/'), url: 'https://cdn.example.com/assets/root-A.js' },
+  ])('should leave $method $url to the browser untouched', (facts) => {
+    expect(answerSubresource(facts, origin, view())).toStrictEqual({ kind: 'browser', keep: undefined });
   });
 });
 
 describe('installMessage', () => {
   it('should report a completed install, a quota failure and any other failure', () => {
     expect(installMessage()).toStrictEqual({ type: serviceWorkerMessageType, status: 'ready' });
-    expect(installMessage(new DOMException('full', 'QuotaExceededError'))).toMatchObject({ status: 'quota-exceeded' });
-    expect(installMessage(new TypeError('Failed to fetch'))).toStrictEqual({
+    expect(installMessage({ incomplete: [] })).toStrictEqual({ type: serviceWorkerMessageType, status: 'ready' });
+    expect(installMessage({ error: new DOMException('full', 'QuotaExceededError') })).toMatchObject({
+      status: 'quota-exceeded',
+    });
+    expect(installMessage({ error: new TypeError('Failed to fetch') })).toStrictEqual({
       type: serviceWorkerMessageType,
       status: 'failed',
       detail: 'Failed to fetch',
+    });
+  });
+
+  it('should report a class it could not store for offline use as failed, though the install completed', () => {
+    expect(installMessage({ incomplete: [projectDocument] })).toStrictEqual({
+      type: serviceWorkerMessageType,
+      status: 'failed',
+      detail: `not stored for offline use: ${projectDocument}`,
     });
   });
 });

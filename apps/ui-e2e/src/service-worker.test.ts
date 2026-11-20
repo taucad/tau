@@ -5,8 +5,8 @@
  * static files, every other request to the server build, cross-origin isolation headers on every response
  * (`coiMiddleware`). A first visit installs the worker; with the browser then offline, Home (the visitor's `tau-entry`
  * preference set, and the installed app's start URL) and a project created on this device open from the worker, each
- * cross-origin isolated, from the precached shell with its headers replayed. API, auth, data requests and marketing
- * pages are never answered by it, and the precache holds exactly the list the build generated from the route-class
+ * cross-origin isolated, from the precached shell with its headers replayed. API, auth and data requests are never
+ * answered by it, a marketing page only with the browser's own navigation (its preload), and the precache holds exactly the list the build generated from the route-class
  * registry: no deferred-tier, wasm or worker asset.
  *
  * Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at a Chromium other than Playwright's
@@ -198,9 +198,12 @@ describe('the web app’s service worker on a built app (PL7)', () => {
       const response = await fetchFromPage(path);
       expect(response.fromServiceWorker(), path).toBe(false);
     }
+    // A navigation is answered with the browser's own navigation, its preload (FP1: answering it otherwise would send
+    // it twice), never with a cached document.
     for (const path of ['/pricing', '/auth/sign-in']) {
       const response = await page.goto(`${origin()}${path}`);
-      expect(response?.fromServiceWorker(), path).toBe(false);
+      const headers = await response?.allHeaders();
+      expect(headers?.['server-timing'] ?? '', path).not.toContain('sw;desc=cache');
     }
     /* oxlint-enable no-await-in-loop */
     // `/` without the app preference is marketing: the network's answer, never the cached Home shell.

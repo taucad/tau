@@ -176,14 +176,12 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
     return { page, live };
   };
 
-  /* The worker-controlled half of TAU-UI-6 (`stale-deploy-recovery.test.ts` runs without the worker). A page the
-   * worker controls navigates after a deploy it has not heard of to a route whose chunk its own deploy no longer
-   * serves. The worker asks again without the deploy cookie (`retryUnpinnedMiss`) and the live deploy still has the
-   * chunk (retained, or unchanged): the route renders on the build the page loaded, one deploy behind, with no error
-   * and no reload, as ruling OD3 allows until the server names the new build. Once it does, the root's client
-   * middleware (RR9) turns the next navigation into a document load from the new deploy. A live deploy without the
-   * chunk answers 404 unpinned too, which is the recovery path the other suite covers. */
-  it('should render a route of a replaced build from the live deploy, then load the next page from it once named', async () => {
+  /* The worker-controlled half of TAU-UI-6 (`stale-deploy-recovery.test.ts`'s third row, under the worker). A page
+   * the worker controls navigates after a deploy it has not heard of to a route whose chunk its own deploy no longer
+   * serves. The chunk is not in the worker's caches, so the worker gives the request no answer (FP1: it never asks the
+   * network itself) and the page's own request gets the live deploy's 404, exactly as without a worker: the route
+   * loader's recovery loads the destination as a document from the new deploy, with no error page. */
+  it('should load a route of a replaced build from the new deploy under the worker, as without one', async () => {
     const { page, live } = await open('/');
     await waitForControllingWorker(page);
 
@@ -193,30 +191,11 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
       globalThis.dispatchEvent(new PopStateEvent('popstate'));
     });
 
-    await page.getByRole('heading', { name: 'Import', exact: true }).waitFor({ timeout: 30_000 });
-    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
-    expect(await readBuildIdOf(page)).toBe(String(deploys?.previousBuildId));
-    expect(live.documents).toStrictEqual(['previous']);
-
-    // The server names the next build, as to a tab restored from the back/forward cache; `build-skew` takes its word
-    // after three answers.
-    await page.evaluate(() => {
-      globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-    });
-    await expect.poll(() => live.buildChecks(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
-    await page.evaluate(() => {
-      const router = (
-        globalThis as unknown as {
-          readonly __reactRouterDataRouter: { navigate: (to: string) => Promise<void> };
-        }
-      ).__reactRouterDataRouter;
-      void router.navigate('/projects');
-    });
-
     await expect
       .poll(async () => readBuildIdOf(page).catch(() => undefined), { timeout: 30_000 })
       .toBe(String(deploys?.nextBuildId));
-    expect(new URL(page.url()).pathname).toBe('/projects');
+    await page.getByRole('heading', { name: 'Import', exact: true }).waitFor({ timeout: 30_000 });
+    expect(new URL(page.url()).pathname).toBe('/import/github.com/taucad/tau');
     expect(live.documents).toStrictEqual(['previous', 'next']);
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
   }, 180_000);

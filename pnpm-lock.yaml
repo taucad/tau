@@ -948,19 +948,7 @@ catalogs:
     workbox-build:
       specifier: 7.4.1
       version: 7.4.1
-    workbox-core:
-      specifier: 7.4.1
-      version: 7.4.1
     workbox-expiration:
-      specifier: 7.4.1
-      version: 7.4.1
-    workbox-precaching:
-      specifier: 7.4.1
-      version: 7.4.1
-    workbox-routing:
-      specifier: 7.4.1
-      version: 7.4.1
-    workbox-strategies:
       specifier: 7.4.1
       version: 7.4.1
     ws:
@@ -5170,19 +5158,7 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
-      workbox-core:
-        specifier: 'catalog:'
-        version: 7.4.1
       workbox-expiration:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-precaching:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-routing:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-strategies:
         specifier: 'catalog:'
         version: 7.4.1
       xstate:

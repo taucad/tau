@@ -742,7 +742,7 @@ describe('retention by time (FP2)', () => {
   it('should still serve a retired asset 29 days after it left the live build', async () => {
     const retiredAt = now - 29 * day;
     const live = await startLiveDeploy(
-      { 'assets/route-OLD1.js': 'old1' },
+      { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1' },
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
         { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 5, retiredAt },
@@ -753,7 +753,8 @@ describe('retention by time (FP2)', () => {
     await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
 
     expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
-    expect((await readIndex(client)).assets).toContainEqual({
+    const { assets } = await readIndex(client);
+    expect(assets).toContainEqual({
       path: 'assets/route-OLD1.js',
       integrity: integrityOf('old1'),
       generation: 6,
@@ -823,7 +824,8 @@ describe('the oldest retained build (FP2)', () => {
     });
 
     expect(result.floor).toBe(1_794_800_000_000);
-    expect((await readIndex(client)).builds).toStrictEqual([
+    const { builds } = await readIndex(client);
+    expect(builds).toStrictEqual([
       { buildId: ownBuildId, generation: 0 },
       { buildId: 1_794_900_000_000, generation: 1, retiredAt: now },
       { buildId: 1_794_800_000_000, generation: 2, retiredAt: now - day },
@@ -863,7 +865,8 @@ describe('the oldest retained build (FP2)', () => {
     const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
     const result = await retainPreviousAssets({ clientDirectory: client, origin: undefined, now });
     expect(result.floor).toBeUndefined();
-    expect((await readIndex(client)).builds).toBeUndefined();
+    const { builds } = await readIndex(client);
+    expect(builds).toBeUndefined();
   });
 
   it('should refuse a live index whose build records are malformed', () => {

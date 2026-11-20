@@ -30,6 +30,15 @@
  * Generations age per distinct build: a redeploy of the build the live deploy
  * already serves keeps every asset at the age the live index lists.
  *
+ * The index also records the builds the deploy serves (`builds`: build id, generation, retirement), kept by the
+ * same rule as their assets, and the oldest of them is the deploy's retained build floor: a cached shell of an older
+ * build names files this deploy no longer serves. It is stamped into the server graph over the placeholder
+ * `unstampedRetainedBuildFloor` (same length, so every byte offset holds), where `/health/build` reads it and
+ * reports it in `minBuildId` (FP2 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`). An index from
+ * before the records lists no builds, so the floor starts at the oldest build recorded: higher than the truth, which
+ * only sends more cached shells to the network first, never fewer. This build's id comes from the record the build
+ * writes beside its output (`build/sentry-release`, `tau-ui@<build id>`); without it no floor is stamped.
+ *
  * It fails closed: a malformed index, an asset that does not match its integrity,
  * a listed asset the live deploy lost, or a live index it cannot read (a network
  * error, any status but 200 or 404 after the retries, or a 200 that is not the
@@ -58,6 +67,9 @@ import process from 'node:process';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout } from 'node:timers/promises';
 import { sri } from '#scripts/subresource-integrity.mts';
+/* oxlint-disable no-restricted-imports -- Native Node build step shares the build configuration's placeholder. */
+import { unstampedRetainedBuildFloor } from '../build-environment.ts';
+/* oxlint-enable no-restricted-imports */
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
 export const servedAssetsIndexFileName = 'tau-served-assets.json';
@@ -75,14 +87,21 @@ export const servedAssetsIndexSchema = 'tau-ui-served-assets-v1';
 /** Deploys after its own that an asset stays served for, however long ago it left the live build. */
 export const retainedGenerations = 2;
 
-/** Milliseconds after leaving the live build that an asset stays served for, up to {@link retainedGenerationsCap}. */
-export const retentionWindow = 7 * 24 * 60 * 60_000;
+/**
+ * Milliseconds after leaving the live build that an asset stays served for, up to {@link retainedGenerationsCap}:
+ * 30 days, so a tab or a service worker's cached shell from a build retired up to a month ago still loads its files
+ * (FP2, operator decision of 2026-11-20; the number is the operator's to confirm).
+ */
+export const retentionWindow = 30 * 24 * 60 * 60_000;
 
 /**
- * Deploys after its own that the window keeps an asset for at most: each deploy downloads every retained
- * asset again (about 15 MiB a staging deploy, measured 2026-11-05), so the window must not grow without bound.
+ * Deploys after its own that the window keeps an asset for at most: each deploy downloads every retained asset again
+ * (about 1.5 MiB a build, 15 MiB a staging deploy at 10 builds, measured 2026-11-05), so the window must not grow
+ * without bound on staging, which deploys many times a day. Production released 16 builds in the 14 days to
+ * 2026-11-18, about 34 in a window, so this cap leaves production's 30 days to the window and bounds a staging deploy
+ * at about 60 MiB. A cap that cuts the window short stays safe: the floor reports the oldest build actually retained.
  */
-export const retainedGenerationsCap = 10;
+export const retainedGenerationsCap = 40;
 
 /** One served asset: its path under the client root, its SRI integrity and its age in deploys. */
 export type ServedAsset = {
@@ -94,10 +113,20 @@ export type ServedAsset = {
   readonly retiredAt?: number;
 };
 
-/** Every asset one deploy serves. */
+/** One build a deploy serves assets for: its id (its build time), its age in deploys and when it left the live build. */
+export type ServedBuild = {
+  readonly buildId: number;
+  /** `0` for the deploy's own build (and a build it redeploys), `n` for one kept from `n` deploys before. */
+  readonly generation: number;
+  /** Milliseconds since the epoch when the build left the live deploy; absent while it is live. */
+  readonly retiredAt?: number;
+};
+
+/** Every asset one deploy serves, and the builds they belong to (absent from an index written before FP2). */
 export type ServedAssetsIndex = {
   readonly schema: typeof servedAssetsIndexSchema;
   readonly assets: readonly ServedAsset[];
+  readonly builds?: readonly ServedBuild[];
 };
 
 /** Characters a published asset path may not carry: controls, a backslash, and URL syntax (`?`, `#`, `%`). */
@@ -191,6 +220,8 @@ type IndexKind = {
    * before, so such an answer is a catch-all on a build from before runtime retention, not an outage.
    */
   readonly catchAllMeansNone: boolean;
+  /** Whether the index records the builds the deploy serves (the assets index only). */
+  readonly recordsBuilds: boolean;
 };
 
 const assetsKind: IndexKind = {
@@ -200,6 +231,7 @@ const assetsKind: IndexKind = {
   isRetired: () => false,
   optional: false,
   catchAllMeansNone: false,
+  recordsBuilds: true,
 };
 
 const runtimesKind: IndexKind = {
@@ -209,6 +241,7 @@ const runtimesKind: IndexKind = {
   isRetired: isRetiredRuntimePath,
   optional: true,
   catchAllMeansNone: true,
+  recordsBuilds: false,
 };
 
 const refusePath = (path: string, where: string): Error =>
@@ -264,6 +297,18 @@ const assertServedAsset = (entry: unknown, isServable: (path: string) => boolean
   return { path, integrity, generation, retiredAt };
 };
 
+/** Check one live build record, which arrives as untrusted JSON. */
+const assertServedBuild = (entry: unknown): ServedBuild => {
+  const { buildId, generation, retiredAt } = (typeof entry === 'object' && entry !== null ? entry : {}) as Partial<
+    Record<keyof ServedBuild, unknown>
+  >;
+  const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+  if (!isCount(buildId) || buildId === 0 || !isCount(generation) || (retiredAt !== undefined && !isCount(retiredAt))) {
+    throw new TypeError(`The live asset index has a malformed build record: ${JSON.stringify(entry)}.`);
+  }
+  return retiredAt === undefined ? { buildId, generation } : { buildId, generation, retiredAt };
+};
+
 /**
  * Check a live index, which arrives as untrusted JSON, once: its schema, every entry, and one entry
  * per path (a path listed twice keeps its youngest generation, so it is downloaded once).
@@ -282,7 +327,7 @@ export const parseServedAssetsIndex = (
 ): ServedAssetsIndex => {
   const { isServable = isServableAssetPath, isRetired = (): boolean => false } = kind;
   const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
-    Record<'schema' | 'assets', unknown>
+    Record<'schema' | 'assets' | 'builds', unknown>
   >;
   if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
     throw new Error(`${source} is not a ${servedAssetsIndexSchema} index.`);
@@ -299,7 +344,22 @@ export const parseServedAssetsIndex = (
       youngest.set(asset.path, asset);
     }
   }
-  return { schema: servedAssetsIndexSchema, assets: [...youngest.values()] };
+  const assets = [...youngest.values()];
+  if (index.builds === undefined) {
+    return { schema: servedAssetsIndexSchema, assets };
+  }
+  if (!Array.isArray(index.builds)) {
+    throw new TypeError(`${source} has a malformed build list.`);
+  }
+  const builds = new Map<number, ServedBuild>();
+  for (const entry of index.builds as readonly unknown[]) {
+    const build = assertServedBuild(entry);
+    const known = builds.get(build.buildId);
+    if (known === undefined || build.generation < known.generation) {
+      builds.set(build.buildId, build);
+    }
+  }
+  return { schema: servedAssetsIndexSchema, assets, builds: [...builds.values()] };
 };
 
 /**
@@ -334,14 +394,27 @@ export const isSameBuild = (previous: ServedAssetsIndex, own: readonly ServedAss
 export const planRetention = (
   previous: ServedAssetsIndex,
   ownPaths: ReadonlySet<string>,
-  options: {
-    readonly now: number;
-    readonly generations?: number;
-    readonly window?: number;
-    readonly cap?: number;
-    readonly shouldAge?: boolean;
-  },
-): readonly ServedAsset[] => {
+  options: RetentionOptions,
+): readonly ServedAsset[] =>
+  keepAged(
+    previous.assets.filter((asset) => !ownPaths.has(asset.path)),
+    options,
+  );
+
+/** How long entries stay served: see {@link planRetention}. */
+type RetentionOptions = {
+  readonly now: number;
+  readonly generations?: number;
+  readonly window?: number;
+  readonly cap?: number;
+  readonly shouldAge?: boolean;
+};
+
+/** Age the live index's entries by one deploy (stamping those leaving the live build now) and keep those in bounds. */
+const keepAged = <T extends { readonly generation: number; readonly retiredAt?: number }>(
+  entries: readonly T[],
+  options: RetentionOptions,
+): readonly T[] => {
   const {
     now,
     generations = retainedGenerations,
@@ -350,18 +423,36 @@ export const planRetention = (
     shouldAge = true,
   } = options;
   const step = shouldAge ? 1 : 0;
-  return previous.assets
-    .filter((asset) => !ownPaths.has(asset.path))
-    .map((asset) => {
-      const aged = { ...asset, generation: asset.generation + step };
-      return asset.generation === 0 && shouldAge ? { ...aged, retiredAt: now } : aged;
+  return entries
+    .map((entry) => {
+      const aged = { ...entry, generation: entry.generation + step };
+      return entry.generation === 0 && shouldAge ? { ...aged, retiredAt: now } : aged;
     })
     .filter(
-      (asset) =>
-        asset.generation <= generations ||
-        (asset.generation <= cap && asset.retiredAt !== undefined && now - asset.retiredAt <= window),
+      (entry) =>
+        entry.generation <= generations ||
+        (entry.generation <= cap && entry.retiredAt !== undefined && now - entry.retiredAt <= window),
     );
 };
+
+/**
+ * The builds a new deploy keeps serving from the live one: the live index's build records but this build's, aged and
+ * kept by the same rule as their assets ({@link planRetention}), so a build is listed exactly while its own assets are.
+ *
+ * @param previous - The live index's build records.
+ * @param ownBuildId - This build's id.
+ * @param options - As {@link planRetention}.
+ * @returns The builds kept.
+ */
+export const planBuildRetention = (
+  previous: readonly ServedBuild[],
+  ownBuildId: number,
+  options: RetentionOptions,
+): readonly ServedBuild[] =>
+  keepAged(
+    previous.filter((build) => build.buildId !== ownBuildId),
+    options,
+  );
 
 /** Files hashed at once: the build holds about 2,000 files and 330 MiB, which must not all be read together. */
 const hashConcurrency = 16;
@@ -639,6 +730,8 @@ type Pass = {
   readonly skip: boolean;
   readonly now: number;
   readonly store: string | undefined;
+  /** This build's id, when known: the assets index then records the builds it serves. */
+  readonly buildId: number | undefined;
 };
 
 type PassResult = {
@@ -648,18 +741,32 @@ type PassResult = {
   readonly index: ServedAssetsIndex;
 };
 
+/**
+ * The oldest build an index records, the deploy's retained build floor.
+ *
+ * @param builds - The builds a deploy serves, its own included.
+ * @returns The lowest build id, or `undefined` when none is recorded.
+ */
+const oldestBuild = (builds: readonly ServedBuild[] | undefined): number | undefined =>
+  builds === undefined || builds.length === 0 ? undefined : Math.min(...builds.map((build) => build.buildId));
+
 /** One index: list the build's own files, keep the live deploy's, write the new index. */
 const retainIndex = async (pass: Pass, kind: IndexKind): Promise<PassResult> => {
   const own = await listOwnAssets(pass.clientDirectory, kind);
   const previous =
     pass.origin === undefined || pass.skip ? undefined : await readLiveIndex(pass.origin, pass.transport, kind);
+  const shouldAge = previous === undefined || !isSameBuild(previous, own);
   const kept =
     previous === undefined
       ? []
-      : planRetention(previous, new Set(own.map((asset) => asset.path)), {
-          now: pass.now,
-          shouldAge: !isSameBuild(previous, own),
-        });
+      : planRetention(previous, new Set(own.map((asset) => asset.path)), { now: pass.now, shouldAge });
+  const builds =
+    kind.recordsBuilds && pass.buildId !== undefined
+      ? [
+          { buildId: pass.buildId, generation: 0 },
+          ...planBuildRetention(previous?.builds ?? [], pass.buildId, { now: pass.now, shouldAge }),
+        ].toSorted((left, right) => left.generation - right.generation)
+      : undefined;
   const download: Download = {
     origin: pass.origin ?? '',
     clientDirectory: pass.clientDirectory,
@@ -670,6 +777,7 @@ const retainIndex = async (pass: Pass, kind: IndexKind): Promise<PassResult> => 
   const index: ServedAssetsIndex = {
     schema: servedAssetsIndexSchema,
     assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
+    ...(builds === undefined ? {} : { builds }),
   };
   await writeFile(join(pass.clientDirectory, kind.fileName), `${JSON.stringify(index)}\n`);
   return {
@@ -699,6 +807,8 @@ export const retainPreviousAssets = async (options: {
   readonly now?: number;
   /** Directory of runtime bundle files kept between deploys (`TAU_RETAIN_ASSETS_STORE`); none: download them all. */
   readonly store?: string;
+  /** This build's id ({@link readOwnBuildId}); unknown, the index records no builds and there is no floor. */
+  readonly buildId?: number;
 }): Promise<{
   readonly retained: number;
   readonly bytes: number;
@@ -708,6 +818,8 @@ export const retainPreviousAssets = async (options: {
   readonly index: ServedAssetsIndex;
   /** The runtime bundle index (`tau-served-runtimes.json`). */
   readonly runtimes: ServedAssetsIndex;
+  /** The oldest build whose assets the new deploy serves, to stamp ({@link stampRetainedBuildFloor}); none when unknown. */
+  readonly floor: number | undefined;
 }> => {
   const pass: Pass = {
     clientDirectory: options.clientDirectory,
@@ -719,6 +831,7 @@ export const retainPreviousAssets = async (options: {
     skip: options.skip === true,
     now: options.now ?? Date.now(),
     store: options.store,
+    buildId: options.buildId,
   };
   // The assets index first: it fails closed on an unreadable live deploy before any runtime is fetched.
   const assets = await retainIndex(pass, assetsKind);
@@ -732,7 +845,76 @@ export const retainPreviousAssets = async (options: {
     storedBytes: assets.storedBytes + runtimes.storedBytes,
     index: assets.index,
     runtimes: runtimes.index,
+    floor: oldestBuild(assets.index.builds),
   };
+};
+
+/** The record of this build's id the build writes beside its output (`vite.config.ts`, `tau-ui@<build id>`). */
+const buildRecordFileName = 'sentry-release';
+
+/**
+ * This build's id, from the record the build writes beside its output.
+ *
+ * @param buildDirectory - `apps/ui/build`.
+ * @returns The build id, or `undefined` when the build wrote no record (a test build) or it names none.
+ */
+export const readOwnBuildId = async (buildDirectory: string): Promise<number | undefined> => {
+  let record: string;
+  try {
+    record = await readFile(join(buildDirectory, buildRecordFileName), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+  const buildId = Number(/^tau-ui@(?<id>\d+)\s*$/u.exec(record)?.groups?.['id']);
+  return Number.isSafeInteger(buildId) && buildId > 0 ? buildId : undefined;
+};
+
+const floorPlaceholder = new RegExp(`(["'\`])${unstampedRetainedBuildFloor}\\1`, 'gu');
+
+/**
+ * Stamp the retained build floor over its placeholder in every server script, where `/health/build` reads it (FP2).
+ * The id has the placeholder's length, so every byte offset, and with it the server source maps, stays valid.
+ *
+ * @param buildDirectory - `apps/ui/build`: it holds `server/`.
+ * @param floor - The oldest build whose assets the deploy serves.
+ * @returns The server scripts that held the placeholder, relative to `server/`.
+ * @throws When the id has another length, or no server script holds the placeholder.
+ */
+export const stampRetainedBuildFloor = async (buildDirectory: string, floor: number): Promise<string[]> => {
+  const stamp = String(floor);
+  if (stamp.length !== unstampedRetainedBuildFloor.length) {
+    throw new Error(
+      `A build id is ${String(unstampedRetainedBuildFloor.length)} characters, got "${stamp}"; stamping it would move every byte after it.`,
+    );
+  }
+  const serverDirectory = join(buildDirectory, 'server');
+  const listed = await readdir(serverDirectory, { recursive: true });
+  const names = listed
+    .map(String)
+    .filter((name) => /\.[cm]?js$/u.test(name))
+    .toSorted();
+  const stamped: string[] = [];
+  for (const name of names) {
+    const file = join(serverDirectory, name);
+    // oxlint-disable-next-line no-await-in-loop -- One server file at a time bounds memory.
+    const source = await readFile(file, 'utf8');
+    const next = source.replaceAll(floorPlaceholder, (_literal, quote: string) => `${quote}${stamp}${quote}`);
+    if (next !== source) {
+      // oxlint-disable-next-line no-await-in-loop -- See above.
+      await writeFile(file, next);
+      stamped.push(name.split(sep).join(posix.sep));
+    }
+  }
+  if (stamped.length === 0) {
+    throw new Error(
+      `No server script under ${serverDirectory} holds the retained floor placeholder: build it with \`pnpm nx build ui\` ` +
+        'before retaining, and retain each build once.',
+    );
+  }
+  return stamped;
 };
 
 const main = async (): Promise<void> => {
@@ -747,15 +929,29 @@ const main = async (): Promise<void> => {
   }
   const configuredStore = process.env['TAU_RETAIN_ASSETS_STORE']?.trim();
   const store = configuredStore === undefined || configuredStore === '' ? undefined : resolve(configuredStore);
-  const { retained, bytes, storedBytes, index, runtimes } = await retainPreviousAssets({
-    clientDirectory: resolve(import.meta.dirname, '../build/client'),
+  const buildDirectory = resolve(import.meta.dirname, '../build');
+  const buildId = await readOwnBuildId(buildDirectory);
+  if (buildId === undefined) {
+    console.warn(
+      `::warning::The build wrote no ${buildRecordFileName} record: the deploy records no builds and its /health/build reports no retained floor.`,
+    );
+  }
+  const { retained, bytes, storedBytes, index, runtimes, floor } = await retainPreviousAssets({
+    clientDirectory: join(buildDirectory, 'client'),
     origin,
     skip,
     store,
+    buildId,
   });
   console.log(
     `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB, ${String(Math.round(storedBytes / 1024))} KiB of it from the store) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} assets and ${String(runtimes.assets.length)} runtime files served.`,
   );
+  if (floor !== undefined) {
+    const stamped = await stampRetainedBuildFloor(buildDirectory, floor);
+    console.log(
+      `✓ Oldest retained build ${String(floor)} of ${String(index.builds?.length ?? 0)} stamped into ${String(stamped.length)} server script(s) as the /health/build floor.`,
+    );
+  }
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {

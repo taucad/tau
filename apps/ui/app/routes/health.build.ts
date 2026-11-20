@@ -1,17 +1,16 @@
 import type { LoaderFunction } from 'react-router';
 import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
-import { readBuildId } from '#lib/build-identity.js';
+import { readBuildId, resolveMinBuildId } from '#lib/build-identity.js';
 
 /**
- * The operator's build floor (`TAU_MIN_BUILD_ID`): the oldest build the site still supports, or `undefined` when unset or
- * not a positive integer. Read on every request, so a change to the site's variable needs no rebuild of this function.
+ * The oldest build whose assets this deploy still serves, as the deploy stamped it into the server graph
+ * (`retain-previous-assets.mts`), or `undefined` where nothing defines it (dev, tests, desktop, `tau serve`). An
+ * unstamped build holds the placeholder, which is no build id.
  *
- * @returns The floor.
+ * @returns The stamped text, or `undefined`.
  */
-const readMinBuildId = (): number | undefined => {
-  const value = Number(process.env['TAU_MIN_BUILD_ID']);
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
-};
+const readRetainedBuildFloor = (): string | undefined =>
+  typeof tauRetainedBuildFloor === 'string' ? tauRetainedBuildFloor : undefined;
 
 /**
  * The build this server renders pages for (`#lib/build-identity`).
@@ -20,12 +19,20 @@ const readMinBuildId = (): number | undefined => {
  * chunks from a genuine failure (`#lib/stale-build-recovery`, TAU-UI-6). The
  * answer must name the live deploy, so neither the browser nor the CDN stores it.
  *
- * `minBuildId`, when the operator sets one, is the oldest build the site still supports: the web app's service worker
- * stops serving its cached shells before the network once its build is below it (FP2 of Brain
- * `research/pl7-service-worker-staging-defects-blueprint.md`), the per-build form of the kill switch.
+ * `minBuildId` is the oldest build the site still supports (FP2 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`): the newer of the operator's floor (`TAU_MIN_BUILD_ID`,
+ * read on every request, the per-build form of the kill switch, also raised on a breaking API change) and the oldest
+ * build whose assets this deploy still serves. The page hands it to the web app's service worker, which then serves
+ * the cached shells of an older build only offline.
  */
 export const loader: LoaderFunction = () =>
   Response.json(
-    { buildId: readBuildId(), minBuildId: readMinBuildId() },
+    {
+      buildId: readBuildId(),
+      minBuildId: resolveMinBuildId({
+        operatorFloor: process.env['TAU_MIN_BUILD_ID'],
+        retainedFloor: readRetainedBuildFloor(),
+      }),
+    },
     { headers: { 'Cache-Control': 'no-store', [cdnCacheControlResponseHeader]: 'no-store' } },
   );

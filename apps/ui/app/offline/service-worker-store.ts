@@ -15,6 +15,8 @@
  *   stored ({@link completeDocuments}).
  * - **Cache on first use is a copy from the HTTP cache** ({@link fillFromHttpCache}): after the page's own request,
  *   `cache: 'only-if-cached'`, so it adds no download and no request a blocker could see. Its failure is ignored.
+ * - **The build floor** a page handed the worker is kept in a cache of its own ({@link storeBuildFloor}), so a worker
+ *   started later knows it without the network (FP2).
  */
 import { isQuotaError } from '#offline/service-worker-routing.js';
 
@@ -210,4 +212,48 @@ export const fillFromHttpCache = async (
     }
   }
   return false;
+};
+
+/** Cache Storage as the build floor uses it. */
+export type FloorStorage = Pick<CacheStorage, 'has' | 'open' | 'delete'>;
+
+/** The key the build floor is stored under in the worker's state cache: a path no deploy serves. */
+export const buildFloorKey = '/__tau/build-floor';
+
+/**
+ * The build floor a worker stored, read without creating its cache (FP2).
+ *
+ * @param caches - The worker's Cache Storage.
+ * @param cacheName - The state cache (`stateCacheName`).
+ * @returns The floor, or `undefined` when none is stored or the stored value is no build id.
+ */
+export const readStoredBuildFloor = async (caches: FloorStorage, cacheName: string): Promise<number | undefined> => {
+  if (!(await caches.has(cacheName))) {
+    return undefined;
+  }
+  const cache = await caches.open(cacheName);
+  const stored = await cache.match(buildFloorKey);
+  const text = stored === undefined ? '' : await stored.text();
+  const floor = /^\d+$/u.test(text) ? Number(text) : Number.NaN;
+  return Number.isSafeInteger(floor) && floor > 0 ? floor : undefined;
+};
+
+/**
+ * Keep the build floor for a worker started later; with none, delete the state cache, which holds nothing else (FP2).
+ *
+ * @param caches - The worker's Cache Storage.
+ * @param cacheName - The state cache (`stateCacheName`).
+ * @param floor - The floor the server reported, or `undefined` for none.
+ */
+export const storeBuildFloor = async (
+  caches: FloorStorage,
+  cacheName: string,
+  floor: number | undefined,
+): Promise<void> => {
+  if (floor === undefined) {
+    await caches.delete(cacheName);
+    return;
+  }
+  const cache = await caches.open(cacheName);
+  await cache.put(buildFloorKey, new Response(String(floor)));
 };

@@ -8,8 +8,9 @@
  * - A document is answered only for a class of the route-class registry that names a {@link WorkerDelivery}, and only
  *   with that class's precached document of this worker's deploy, replayed whole (headers included, so
  *   cross-origin isolation holds). Home (`/`) only for a visit the deployed site gives the app (`homeAppEntry`).
- * - A cache-first document asks the network first instead on a reload, and while a newer worker is installing or
- *   waiting, so neither a reload nor the update rule ever lands on a replaced deploy (ruling OD3).
+ * - A cache-first document asks the network first instead on a reload, while a newer worker is installing or
+ *   waiting, so neither a reload nor the update rule ever lands on a replaced deploy (ruling OD3), and while this
+ *   worker's build is below the last build floor the server reported (FP2, {@link isShellInBounds}).
  * - A class whose closure the worker does not wholly hold is never answered from the cache: its navigation is the
  *   network's (FP1 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`).
  * - Every network answer to a navigation is the browser's own request (navigation preload), never one the worker
@@ -22,7 +23,12 @@
  */
 import { homeAppEntry, workerRouteClasses } from '#lib/route-classes.js';
 import type { WorkerRouteClass } from '#lib/route-classes.js';
-import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import {
+  activateIfBuildMessageType,
+  buildFloorMessageType,
+  serviceWorkerMessageType,
+  skipWaitingMessageType,
+} from '#offline/pwa-messages.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Milliseconds a network-first document waits for the network before the precached one answers (B5's bound). */
@@ -80,28 +86,41 @@ export type NavigationAnswer =
   | Readonly<{ kind: 'cache-first' | 'network-first'; document: string }>;
 
 /**
- * How old a cached shell's build may be for the worker to serve it before the network online: the asset retention
- * window (`retain-previous-assets.mts`, 7 days) less a 2-day margin, so a cached shell's files are still served when
- * it boots (FP2 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`, the operator's ruling on OD3).
- * `retain-previous-assets.test.ts` holds the two together.
- */
-export const cachedShellAgeLimit = 5 * 24 * 60 * 60_000;
-
-/**
- * Whether the worker may serve its cached shells online without asking the network first (FP2). Both bounds are
- * checked without the network: the shell's build (a build id is its build time) is younger than
- * {@link cachedShellAgeLimit}, and not below the last `minBuildId` the server reported (the oldest build it still
- * serves assets for and supports). A missing floor holds; an unknown build id (`0`) does not.
+ * Whether the worker may serve its cached shells online without asking the network first (FP2 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`, the operator's ruling on OD3 as amended 2026-11-20): its
+ * build is not below the last build floor (`minBuildId`) the server reported, the oldest build the site still serves
+ * assets for and supports. No clock is read. With no floor reported the shells hold, as cache-first always did; an
+ * unknown build (`0`) is below any floor.
  *
- * @param input - The worker's build id, the time now and the last floor the server reported.
+ * @param input - The worker's build id and the last floor the server reported, if any.
  * @returns `true` while the cached shells are in bounds.
  */
-export const isShellInBounds = (
-  input: Readonly<{ buildId: number; now: number; floor: number | undefined }>,
-): boolean =>
-  input.buildId > 0 &&
-  input.now - input.buildId < cachedShellAgeLimit &&
-  (input.floor === undefined || input.buildId >= input.floor);
+export const isShellInBounds = (input: Readonly<{ buildId: number; floor: number | undefined }>): boolean =>
+  input.floor === undefined || input.buildId >= input.floor;
+
+/**
+ * The build floor a page hands its worker (`buildFloorMessageType`), from its own `/health/build` check
+ * (`pwa-registration.ts`).
+ *
+ * @param data - The message.
+ * @returns The floor (`undefined` when the server reported none), or `undefined` for any other message or a floor
+ *   that is no build id.
+ */
+export const readBuildFloorMessage = (data: unknown): Readonly<{ minBuildId: number | undefined }> | undefined => {
+  if (typeof data !== 'object' || data === null) {
+    return undefined;
+  }
+  const { type, minBuildId } = data as { type?: unknown; minBuildId?: unknown };
+  if (type !== buildFloorMessageType) {
+    return undefined;
+  }
+  if (minBuildId === undefined) {
+    return { minBuildId: undefined };
+  }
+  return typeof minBuildId === 'number' && Number.isSafeInteger(minBuildId) && minBuildId > 0
+    ? { minBuildId }
+    : undefined;
+};
 
 /** Cache modes a navigation carries when the user asked for a fresh page (a reload). */
 const freshCacheModes = new Set(['reload', 'no-cache', 'no-store']);
@@ -119,7 +138,7 @@ export const answerNavigation = (
     request: RequestFacts;
     tauEntry: string | undefined;
     updatePending: boolean;
-    /** Out of bounds, a cache-first class asks the network first within the 3 s bound (FP2). */
+    /** Below the server's build floor, a cache-first class asks the network first within the 3 s bound (FP2). */
     shellInBounds: boolean;
   }>,
 ): NavigationAnswer => {

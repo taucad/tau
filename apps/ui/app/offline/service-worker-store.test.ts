@@ -226,9 +226,9 @@ describe('the stored build floor (FP2)', () => {
         const entries = caches.get(name) ?? new Map<string, Response>();
         caches.set(name, entries);
         return {
-          match: async (key: RequestInfo | URL) => entries.get(String(key))?.clone(),
-          put: async (key: RequestInfo | URL, response: Response) => {
-            entries.set(String(key), response);
+          match: async (key: string) => entries.get(key)?.clone(),
+          put: async (key: string, response: Response) => {
+            entries.set(key, response);
           },
         } as unknown as Cache;
       },

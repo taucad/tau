@@ -40,6 +40,12 @@ export type RetiringWorkerScope = {
 export const isRetiredWorkerCache = (name: string): boolean => name.startsWith(retiredCachePrefix);
 
 /**
+ * {@link isWorkerCache} as a regular expression's source, for the boot watchdog's inline script (`boot-watchdog.ts`),
+ * which cannot import it. `service-worker-retire.test.ts` holds the two to the same answers.
+ */
+export const workerCacheNamePattern = `^${cachePrefix}-(?:precache-|runtime-|offline-shell-|assets(?:-v\\d+)?$)`;
+
+/**
  * Whether a Cache Storage cache belongs to the web app's worker or the retired `/usage` worker, and so goes with the
  * kill switch: Workbox's precache and runtime caches under the worker's prefix (`tau-precache-…`, `tau-runtime-…`), its
  * asset cache, and the retired worker's caches. Nothing else on the origin.

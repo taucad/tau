@@ -19,6 +19,7 @@
  * | A navigation a class answers (`service-worker-routing.ts`), the class wholly stored | Its precached document, cache-first (shells) or network-first within 3 s (`/usage`) |
  * | The same, on a reload or while a newer worker installs or waits | Network-first within 3 s, the precached document as the fallback |
  * | Any other GET navigation, or a class not wholly stored | The browser's own navigation: the navigation preload response |
+ * | A safe-mode navigation (`?safe=1`) | None: the browser handles it (FP5) |
  * | A file the worker holds (precache, or cached on first use) | The cache |
  * | Any other request | None: the browser handles it. An `/assets/*` or `/csharp-language/*` file is then copied from the HTTP cache for offline use |
  *
@@ -41,6 +42,7 @@ import {
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
+  isSafeModeNavigation,
   navigationCandidate,
   navigationNetworkTimeout,
 } from '#offline/service-worker-routing.js';
@@ -400,6 +402,10 @@ scope.addEventListener('fetch', (event) => {
     return;
   }
   if (request.mode === 'navigate') {
+    if (isSafeModeNavigation(request.url)) {
+      // Safe mode is the way out of a page the worker cannot boot: never the worker's answer (FP5).
+      return;
+    }
     event.respondWith(answerNavigationEvent(event));
     return;
   }

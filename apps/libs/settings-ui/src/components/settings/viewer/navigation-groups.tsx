@@ -27,7 +27,7 @@ import type {
   PersonProfile,
   ViewerPreferences,
 } from '@taucad/preferences';
-import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import {
   gizmoStyleCopy,
   linuxAltNote,
@@ -37,18 +37,16 @@ import {
   resetToTauDefault,
   suggestedLabel,
   viewerControlCopy,
-} from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
-import { setViewerPersonProperties } from '@taucad/settings-ui/components/settings/viewer/viewer-person-properties';
-import { useAnalytics } from '#hooks/use-analytics.js';
-import type { SectionWriteResult } from '#preferences/section-store.js';
-import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
-import { osClass } from '#telemetry/platform-class.js';
+} from '#components/settings/viewer/viewer-settings-copy.js';
+import { setViewerPersonProperties } from '#components/settings/viewer/viewer-person-properties.js';
+import { usePersonSettings } from '#components/settings/person-settings.js';
+import type { PersonSettingsWriteResult } from '#components/settings/person-settings.js';
 
 type ViewerWrites = Readonly<{
   profile: PersonProfile;
   viewer: ViewerPreferences;
-  writeViewer: (patch: LeafPatch<ViewerPreferences>) => SectionWriteResult;
-  onWrite: (result: SectionWriteResult) => void;
+  writeViewer: (patch: LeafPatch<ViewerPreferences>) => PersonSettingsWriteResult;
+  onWrite: (result: PersonSettingsWriteResult) => void;
 }>;
 
 /** The trigger's value fills its column, so the suggestion's badge sits at the right edge beside the chevron. */
@@ -81,8 +79,7 @@ function OptionLabel({
  * @returns The group.
  */
 export function NavigationGroup({ profile, viewer, writeViewer, onWrite }: ViewerWrites): React.JSX.Element {
-  const telemetry = useOnboardingTelemetry();
-  const analytics = useAnalytics();
+  const { telemetry, analytics, osClass } = usePersonSettings();
   const suggestion = suggestedPreset(profile.tool);
   const preset = effectivePreset(viewer, profile);
   const { controls } = viewer;
@@ -232,8 +229,7 @@ export function NavigationGroup({ profile, viewer, writeViewer, onWrite }: Viewe
  * @returns The group.
  */
 export function GizmoGroup({ profile, viewer, writeViewer, onWrite }: ViewerWrites): React.JSX.Element {
-  const telemetry = useOnboardingTelemetry();
-  const analytics = useAnalytics();
+  const { telemetry, analytics } = usePersonSettings();
   const suggestion = suggestedGizmo(profile.tool);
   const style = effectiveGizmoStyle(viewer, profile);
 

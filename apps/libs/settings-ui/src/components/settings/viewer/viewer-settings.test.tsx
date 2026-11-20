@@ -1,46 +1,80 @@
-// @vitest-environment jsdom
-// oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
-import '@testing-library/jest-dom/vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useMemo, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { personProfileSection, viewerPreferencesSection } from '@taucad/preferences';
+import type { LeafPatch, PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/workbench';
-import type { WorkbenchView } from '@taucad/workbench';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { metaConfig } from '#constants/meta.constants.js';
-import { personRecordStores } from '#preferences/person-record.store.js';
-import { useViewLevels } from '#workbench-records/view-levels.js';
-import { viewExceptions } from '#workbench-records/view-exceptions.js';
+import { PersonSettingsProvider } from '#components/settings/person-settings.js';
+import type { PersonSettings, PersonSettingsWriteResult } from '#components/settings/person-settings.js';
+import { ViewerSettings } from '#components/settings/viewer/viewer-settings.js';
+import { viewerPersonPropertyNames } from '#components/settings/viewer/viewer-person-properties.js';
 
-const state = vi.hoisted(() => ({
+/* The host's person record, in memory: each write merges as the stored section does and answers `result`. */
+const record = {
+  profile: personProfileSection.empty,
+  viewer: viewerPreferencesSection.empty,
+  result: 'saved' as PersonSettingsWriteResult,
+};
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+const notify = (): void => {
+  for (const listener of listeners) {
+    listener();
+  }
+};
+const writeProfile = (patch: LeafPatch<PersonProfile>): PersonSettingsWriteResult => {
+  record.profile = personProfileSection.schema.parse(personProfileSection.merge(record.profile, patch));
+  notify();
+  return record.result;
+};
+const writeViewer = (patch: LeafPatch<ViewerPreferences>): PersonSettingsWriteResult => {
+  record.viewer = viewerPreferencesSection.schema.parse(viewerPreferencesSection.merge(record.viewer, patch));
+  notify();
+  return record.result;
+};
+
+const host = {
   capture: vi.fn<(event: string, properties?: Readonly<Record<string, unknown>>) => void>(),
   os: 'macos',
-  viewerControls: true,
-}));
-vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture: state.capture }) }));
-vi.mock('#telemetry/platform-class.js', () => ({ osClass: () => state.os }));
-vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => flag === 'viewerControls' && state.viewerControls,
-  subscribeFeatureFlags: () => () => undefined,
-}));
-vi.mock('#flags/feature-flags.js', () => ({
-  isFeatureEnabled: (flag: string) => flag === 'viewerControls' && state.viewerControls,
-}));
+  telemetry: {
+    viewerPresetSelected: vi.fn<PersonSettings['telemetry']['viewerPresetSelected']>(),
+    viewerGizmoSelected: vi.fn<PersonSettings['telemetry']['viewerGizmoSelected']>(),
+    viewerDefaultChanged: vi.fn<PersonSettings['telemetry']['viewerDefaultChanged']>(),
+    viewerOverrideReset: vi.fn<PersonSettings['telemetry']['viewerOverrideReset']>(),
+    setupAnswersCleared: vi.fn<PersonSettings['telemetry']['setupAnswersCleared']>(),
+  },
+};
+const analytics = { capture: host.capture };
+const osClass = (): string => host.os;
 
-const { ViewerSettings } = await import('#components/settings/viewer/viewer-settings.js');
-const { viewerPersonPropertyNames } =
-  await import('@taucad/settings-ui/components/settings/viewer/viewer-person-properties');
+function Host({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const profile = useSyncExternalStore(subscribe, () => record.profile);
+  const viewer = useSyncExternalStore(subscribe, () => record.viewer);
+  const value = useMemo<PersonSettings>(
+    () => ({ profile, viewer, writeProfile, writeViewer, telemetry: host.telemetry, analytics, osClass }),
+    [profile, viewer],
+  );
+  return <PersonSettingsProvider value={value}>{children}</PersonSettingsProvider>;
+}
 
 const renderSection = (): ReturnType<typeof render> =>
   render(
     <TooltipProvider>
-      <ViewerSettings />
+      <Host>
+        <ViewerSettings />
+      </Host>
     </TooltipProvider>,
   );
 
 const row = (title: string): HTMLElement => screen.getByRole('group', { name: title });
-const viewDefaults = (): Readonly<Record<string, unknown>> => personRecordStores.viewer.read().viewDefaults;
+const viewDefaults = (): Readonly<Record<string, unknown>> => record.viewer.viewDefaults;
 const fieldOfView = (): HTMLElement => within(row('Projection')).getByRole('spinbutton', { name: 'Projection' });
 
 /* Radix Select opens from the keyboard in jsdom, which models no pointer capture. */
@@ -55,19 +89,19 @@ const personProperties = (property: keyof typeof viewerPersonPropertyNames, valu
   $set: { [viewerPersonPropertyNames[property]]: value },
 });
 
-const events = (name: string): unknown[] =>
-  state.capture.mock.calls.filter(([event]) => event === name).map(([, properties]) => properties);
+const personPropertySets = (): unknown[] =>
+  host.capture.mock.calls.filter(([event]) => event === '$set').map(([, properties]) => properties);
+
+const inputs = <Input,>(emitter: { readonly mock: { readonly calls: ReadonlyArray<readonly [Input]> } }): Input[] =>
+  emitter.mock.calls.map(([input]) => input);
 
 beforeEach(() => {
-  localStorage.clear();
-  state.capture.mockReset();
-  state.os = 'macos';
-  state.viewerControls = true;
+  record.profile = personProfileSection.empty;
+  record.viewer = viewerPreferencesSection.empty;
+  record.result = 'saved';
+  host.os = 'macos';
+  vi.clearAllMocks();
   Element.prototype.scrollIntoView = vi.fn();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('View defaults (V4)', () => {
@@ -96,14 +130,14 @@ describe('View defaults (V4)', () => {
     renderSection();
     await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
     expect(viewDefaults()).toEqual({ 'display.grid': false });
-    expect(events('viewer_default_changed')).toEqual([{ level: 'person', field: 'display.grid' }]);
+    expect(inputs(host.telemetry.viewerDefaultChanged)).toEqual([{ level: 'person', field: 'display.grid' }]);
     // Set at this level whatever the value: only Reset removes it.
     await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
     expect(viewDefaults()).toEqual({ 'display.grid': true });
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeEnabled();
     await userEvent.click(within(row('Grid')).getByRole('button', { name: 'Reset to Tau default' }));
     expect(viewDefaults()).toEqual({});
-    expect(events('viewer_override_reset')).toEqual([{ level: 'person', field: 'display.grid' }]);
+    expect(inputs(host.telemetry.viewerOverrideReset)).toEqual([{ level: 'person', field: 'display.grid' }]);
     expect(within(row('Grid')).queryByRole('button', { name: 'Reset to Tau default' })).not.toBeInTheDocument();
   });
 
@@ -114,7 +148,7 @@ describe('View defaults (V4)', () => {
     expect(viewDefaults()).toEqual({ 'display.axes': false, 'display.matcap': true });
     await userEvent.click(screen.getByRole('button', { name: 'Reset all' }));
     expect(viewDefaults()).toEqual({});
-    expect(events('viewer_override_reset')).toEqual([
+    expect(inputs(host.telemetry.viewerOverrideReset)).toEqual([
       { level: 'person', field: 'display.axes' },
       { level: 'person', field: 'display.matcap' },
     ]);
@@ -150,93 +184,47 @@ describe('View defaults (V4)', () => {
     expect(viewDefaults()).toEqual({ 'grid.unit': 'in' });
   });
 
-  it('moves every open view that does not set the leaf at once, and writes no view file', async () => {
-    const inherits = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'main.ts' });
-    const sets: WorkbenchView = { ...inherits, display: { ...inherits.display, grid: false } };
-    // The same file as `inherits`, but this device lists the grid as set in the view, at its format value.
-    viewExceptions.add('project-a', 'pinned', 'display.grid');
-    function OpenView({ viewId, record }: { readonly viewId: string; readonly record: WorkbenchView }) {
-      const levels = useViewLevels('project-a', viewId);
-      const grid = resolveViewSettings({ tau: tauViewDefaults, ...levels, view: record }).values['display.grid'];
-      return <output aria-label={viewId}>{String(grid)}</output>;
-    }
-    const setItem = vi.spyOn(Storage.prototype, 'setItem');
-    render(
-      <TooltipProvider>
-        <ViewerSettings />
-        <OpenView viewId='inherits' record={inherits} />
-        <OpenView viewId='sets' record={sets} />
-        <OpenView viewId='pinned' record={inherits} />
-      </TooltipProvider>,
-    );
-    expect(screen.getByLabelText('inherits')).toHaveTextContent('true');
-    await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
-    expect(screen.getByLabelText('inherits')).toHaveTextContent('false');
-    expect(screen.getByLabelText('sets')).toHaveTextContent('false');
-    expect(screen.getByLabelText('pinned')).toHaveTextContent('true');
-    // The only write is the person's own section; no view file or exception is touched.
-    expect(setItem.mock.calls.map(([name]) => name)).toEqual([expect.stringMatching(/viewer-preferences$/u)]);
-  });
-
-  it('does not apply the defaults to views while viewerControls is off', async () => {
-    personRecordStores.viewer.write({ viewDefaults: { 'display.grid': false } });
-    state.viewerControls = false;
-    const inherits = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'main.ts' });
-    function OpenView() {
-      const levels = useViewLevels('project-a', 'inherits');
-      return (
-        <output aria-label='inherits'>
-          {String(resolveViewSettings({ tau: tauViewDefaults, ...levels, view: inherits }).values['display.grid'])}
-        </output>
-      );
-    }
-    render(<OpenView />);
-    expect(screen.getByLabelText('inherits')).toHaveTextContent('true');
-  });
-
-  it('shows the status line when this device refuses the write, and keeps the value for this tab', async () => {
+  it('shows the status line while the host does not save a write, and a later saved write clears it', async () => {
     renderSection();
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('Quota exceeded', 'QuotaExceededError');
-    });
+    record.result = 'refused';
     await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
     expect(screen.getByRole('status')).toHaveTextContent(
       'Tau could not save this on this device. It applies until you close Tau',
     );
     expect(within(row('Grid')).getByRole('switch', { name: 'Grid' })).not.toBeChecked();
-    // Nothing is blocked; a later write that saves stores both.
-    setItem.mockRestore();
+    record.result = 'saved';
     await userEvent.click(within(row('Axes')).getByRole('switch', { name: 'Axes' }));
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
-    expect(viewDefaults()).toEqual({ 'display.grid': false, 'display.axes': false });
   });
 });
 
 describe('Navigation and Gizmo (V2, V3, M2)', () => {
   it('shows the tool answer’s suggestion until one is chosen, and Reset returns to it', async () => {
-    personRecordStores.profile.write({ tool: 'solidworks' });
+    writeProfile({ tool: 'solidworks' });
     renderSection();
     const select = (): HTMLElement => screen.getByRole('combobox', { name: 'Mouse controls' });
     expect(select()).toHaveTextContent('Middle-drag orbit, Ctrl pan');
-    expect(personRecordStores.viewer.read().controls.preset).toBeUndefined();
+    expect(record.viewer.controls.preset).toBeUndefined();
     await choose('Mouse controls', 'Right-drag orbit');
-    expect(personRecordStores.viewer.read().controls.preset).toBe('right-orbit');
-    expect(events('viewer_preset_selected')).toEqual([{ preset: 'right-orbit', suggested: false, source: 'settings' }]);
-    expect(events('$set')).toEqual([personProperties('mousePreset', 'right-orbit')]);
+    expect(record.viewer.controls.preset).toBe('right-orbit');
+    expect(inputs(host.telemetry.viewerPresetSelected)).toEqual([
+      { preset: 'right-orbit', suggested: false, source: 'settings' },
+    ]);
+    expect(personPropertySets()).toEqual([personProperties('mousePreset', 'right-orbit')]);
     await userEvent.click(within(row('Mouse controls')).getByRole('button', { name: 'Reset to the suggestion' }));
-    expect(personRecordStores.viewer.read().controls.preset).toBeUndefined();
+    expect(record.viewer.controls.preset).toBeUndefined();
     expect(select()).toHaveTextContent('Middle-drag orbit, Ctrl pan');
-    expect(events('$set').at(-1)).toEqual(personProperties('mousePreset', 'middle-ctrl'));
+    expect(personPropertySets().at(-1)).toEqual(personProperties('mousePreset', 'middle-ctrl'));
     // With no preset stored, a changed tool answer moves the shown preset (C9).
     act(() => {
-      personRecordStores.profile.write({ tool: 'fusion' });
+      writeProfile({ tool: 'fusion' });
     });
     expect(select()).toHaveTextContent('Middle-drag pan, Shift orbit');
   });
 
   it('lists the six presets with the suggestion marked, and reports choosing it as suggested', async () => {
-    personRecordStores.profile.write({ tool: 'blender' });
+    writeProfile({ tool: 'blender' });
     renderSection();
     screen.getByRole('combobox', { name: 'Mouse controls' }).focus();
     await userEvent.keyboard('{Enter}');
@@ -251,7 +239,7 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
     ]);
     await userEvent.click(options[0]!);
     await choose('Mouse controls', 'Middle-drag orbit, Shift pan');
-    expect(events('viewer_preset_selected')).toEqual([
+    expect(inputs(host.telemetry.viewerPresetSelected)).toEqual([
       { preset: 'tau', suggested: false, source: 'settings' },
       { preset: 'middle-shift', suggested: true, source: 'settings' },
     ]);
@@ -265,12 +253,12 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
   });
 
   it('notes the Alt preset’s window-manager hazard on Linux only (C14)', () => {
-    state.os = 'linux';
-    personRecordStores.viewer.write({ controls: { preset: 'alt' } });
+    host.os = 'linux';
+    writeViewer({ controls: { preset: 'alt' } });
     const linux = renderSection();
     expect(within(row('Mouse controls')).getByText(/Alt-drag to move windows/u)).toBeInTheDocument();
     linux.unmount();
-    state.os = 'windows';
+    host.os = 'windows';
     renderSection();
     expect(screen.queryByText(/Alt-drag to move windows/u)).not.toBeInTheDocument();
   });
@@ -280,11 +268,11 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
     expect(screen.getByRole('switch', { name: 'Zoom to cursor' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Orbit around cursor' })).not.toBeChecked();
     expect(screen.getByRole('switch', { name: 'Invert zoom' })).not.toBeChecked();
-    expect(personRecordStores.viewer.read().controls).toEqual({});
+    expect(record.viewer.controls).toEqual({});
     await userEvent.click(screen.getByRole('switch', { name: 'Zoom to cursor' }));
     await userEvent.click(screen.getByRole('switch', { name: 'Orbit around cursor' }));
     await userEvent.click(screen.getByRole('switch', { name: 'Invert zoom' }));
-    expect(personRecordStores.viewer.read().controls).toEqual({
+    expect(record.viewer.controls).toEqual({
       zoomToCursor: false,
       orbitAboutCursor: true,
       invertZoom: true,
@@ -300,25 +288,11 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
     const options = await screen.findAllByRole('option');
     expect(options.map((option) => option.textContent)).toEqual(['Turntable', 'Free orbit']);
     await userEvent.click(screen.getByRole('option', { name: 'Free orbit' }));
-    expect(personRecordStores.viewer.read().controls).toEqual({ orbitStyle: 'free' });
+    expect(record.viewer.controls).toEqual({ orbitStyle: 'free' });
     expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Free orbit');
     await userEvent.click(within(row('Orbit style')).getByRole('button', { name: /Reset to Tau default/u }));
-    expect(personRecordStores.viewer.read().controls).toEqual({});
+    expect(record.viewer.controls).toEqual({});
     expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Turntable');
-  });
-
-  it('shows Turntable, with nothing to reset, for an orbit style stored as the retired Tumble', () => {
-    localStorage.setItem(
-      `${metaConfig.cookiePrefix}${cookieName.viewerPreferences}`,
-      JSON.stringify({
-        value: { version: 1, controls: { preset: 'alt', orbitStyle: 'tumble' }, gizmo: {}, viewDefaults: {} },
-      }),
-    );
-    renderSection();
-    expect(screen.getByRole('combobox', { name: 'Orbit style' })).toHaveTextContent('Turntable');
-    expect(within(row('Orbit style')).queryByRole('button', { name: /Reset to Tau default/u })).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Mouse controls' })).toHaveTextContent('Alt-drag navigation');
-    expect(personRecordStores.viewer.read().controls).toEqual({ preset: 'alt' });
   });
 
   it('names the person properties as setup and analytics do', () => {
@@ -332,7 +306,7 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
   });
 
   it('lists the four gizmo styles with the suggestion marked', async () => {
-    personRecordStores.profile.write({ tool: 'game-engine' });
+    writeProfile({ tool: 'game-engine' });
     renderSection();
     expect(screen.getByRole('combobox', { name: 'Gizmo style' })).toHaveTextContent('Axis balls');
     screen.getByRole('combobox', { name: 'Gizmo style' }).focus();
@@ -347,34 +321,23 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
   });
 
   it('stores a gizmo style without touching Show gizmo, and Show gizmo without touching the style', async () => {
-    personRecordStores.profile.write({ tool: 'blender' });
+    writeProfile({ tool: 'blender' });
     renderSection();
     await userEvent.click(within(row('Show gizmo')).getByRole('switch', { name: 'Show gizmo' }));
-    expect(personRecordStores.viewer.read().gizmo).toEqual({});
+    expect(record.viewer.gizmo).toEqual({});
     expect(viewDefaults()).toEqual({ 'display.gizmo': false });
     await choose('Gizmo style', 'Classic cube');
-    expect(personRecordStores.viewer.read().gizmo).toEqual({ style: 'classic-cube' });
+    expect(record.viewer.gizmo).toEqual({ style: 'classic-cube' });
     expect(viewDefaults()).toEqual({ 'display.gizmo': false });
-    expect(events('viewer_gizmo_selected')).toEqual([{ style: 'classic-cube', suggested: false, source: 'settings' }]);
-    expect(events('$set')).toEqual([personProperties('gizmoStyle', 'classic-cube')]);
+    expect(inputs(host.telemetry.viewerGizmoSelected)).toEqual([
+      { style: 'classic-cube', suggested: false, source: 'settings' },
+    ]);
+    expect(personPropertySets()).toEqual([personProperties('gizmoStyle', 'classic-cube')]);
     await userEvent.click(within(row('Show gizmo')).getByRole('switch', { name: 'Show gizmo' }));
-    expect(personRecordStores.viewer.read().gizmo).toEqual({ style: 'classic-cube' });
+    expect(record.viewer.gizmo).toEqual({ style: 'classic-cube' });
     expect(viewDefaults()).toEqual({ 'display.gizmo': true });
     await userEvent.click(within(row('Gizmo style')).getByRole('button', { name: 'Reset to the suggestion' }));
-    expect(personRecordStores.viewer.read().gizmo).toEqual({});
+    expect(record.viewer.gizmo).toEqual({});
     expect(viewDefaults()).toEqual({ 'display.gizmo': true });
-  });
-
-  it('follows a change another tab stores, without a reload', () => {
-    renderSection();
-    act(() => {
-      const name = `${metaConfig.cookiePrefix}${cookieName.viewerPreferences}`;
-      localStorage.setItem(
-        name,
-        JSON.stringify({ value: { version: 1, controls: { preset: 'shift-middle' }, gizmo: {}, viewDefaults: {} } }),
-      );
-      globalThis.dispatchEvent(new StorageEvent('storage', { key: name }));
-    });
-    expect(screen.getByRole('combobox', { name: 'Mouse controls' })).toHaveTextContent('Middle-drag pan, Shift orbit');
   });
 });

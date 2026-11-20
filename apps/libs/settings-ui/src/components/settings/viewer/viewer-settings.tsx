@@ -6,9 +6,9 @@
 import { useCallback, useState } from 'react';
 import { GizmoGroup, NavigationGroup } from '#components/settings/viewer/navigation-groups.js';
 import { ViewDefaultsGroup } from '#components/settings/viewer/view-defaults-group.js';
-import { viewerStorageRefused } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
-import { usePersonRecord } from '#preferences/use-person-record.js';
-import type { SectionWriteResult } from '#preferences/section-store.js';
+import { viewerStorageRefused } from '#components/settings/viewer/viewer-settings-copy.js';
+import { usePersonSettings } from '#components/settings/person-settings.js';
+import type { PersonSettingsWriteResult } from '#components/settings/person-settings.js';
 
 /**
  * The Viewer settings section.
@@ -16,11 +16,11 @@ import type { SectionWriteResult } from '#preferences/section-store.js';
  * @returns The section.
  */
 export function ViewerSettings(): React.JSX.Element {
-  const { profile, viewer, writeViewer } = usePersonRecord();
+  const { profile, viewer, writeViewer } = usePersonSettings();
   /* A write this device would not store still applies in this tab; the line says so and blocks nothing. A later
    * write that saves stores the earlier ones with it, so the line goes. */
   const [isRefused, setIsRefused] = useState(false);
-  const onWrite = useCallback((result: SectionWriteResult) => {
+  const onWrite = useCallback((result: PersonSettingsWriteResult) => {
     setIsRefused(result !== 'saved');
   }, []);
 

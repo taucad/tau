@@ -47,14 +47,19 @@ describe('no-unowned-code-load', () => {
           code: "import { lazy as reactLazy } from 'react';",
         },
         {
-          name: 'a worker realm, which FP10 owns',
+          name: 'an import() inside a worker through the worker loader (FP10)',
           filename: 'apps/ui/app/workers/agent-host.worker.ts',
-          code: "const module = await import('./agent-host.impl.js');",
+          code: "import { loadInWorker } from '#workers/worker-load.js';\nconst module = await loadInWorker(async () => import('./agent-host.impl.js'));",
         },
         {
-          name: 'a module worker outside workers/',
+          name: 'a module worker outside workers/ through the worker loader',
           filename: 'apps/ui/app/machines/file-manager.worker.ts',
-          code: "const types = await import('@taucad/api-extractor/kernel-types');",
+          code: "import { loadInWorker } from '#workers/worker-load.js';\nconst types = await loadInWorker(async () => import('@taucad/api-extractor/kernel-types'));",
+        },
+        {
+          name: 'a page worker made by the module-worker factory (FP10)',
+          filename: page,
+          code: "import { createModuleWorker } from '#lib/module-worker.js';\nconst worker = createModuleWorker(() => new Worker(new URL('./a.worker.ts', import.meta.url), { type: 'module' }), { name: 'kernel' });",
         },
         {
           name: 'server code, which no page realm runs',
@@ -106,6 +111,24 @@ describe('no-unowned-code-load', () => {
           filename: page,
           code: "import { load } from './elsewhere.js'; const m = await load(async () => import('./x.js'));",
           errors: [{ messageId: 'unownedImport' }],
+        },
+        {
+          name: 'a bare import() inside a worker realm',
+          filename: 'apps/ui/app/workers/agent-host.worker.ts',
+          code: "const module = await import('./agent-host.impl.js');",
+          errors: [{ messageId: 'unownedWorkerImport' }],
+        },
+        {
+          name: "the page's load() inside a worker realm",
+          filename: 'apps/ui/app/workers/agent-host.worker.ts',
+          code: "import { load } from '#lib/code-loading.js';\nconst module = await load(async () => import('./agent-host.impl.js'));",
+          errors: [{ messageId: 'unownedWorkerImport' }],
+        },
+        {
+          name: 'a page worker made around the factory',
+          filename: page,
+          code: "const worker = new Worker(new URL('./a.worker.ts', import.meta.url), { type: 'module' });",
+          errors: [{ messageId: 'unownedWorker' }],
         },
         {
           name: "React's lazy, imported by name",

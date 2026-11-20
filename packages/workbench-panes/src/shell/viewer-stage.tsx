@@ -66,8 +66,12 @@ export type ViewerStageCanvasProps = Readonly<{
  */
 export type ViewerStageProps = Readonly<
   Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'className'> & {
-    /** The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. */
-    graphicsRef: GraphicsRef;
+    /**
+     * The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. `undefined` while the
+     * host has none yet (such as a project still opening): the stage is laid out with its status and failure, draws no
+     * model, and keeps its identity when the actor arrives.
+     */
+    graphicsRef: GraphicsRef | undefined;
     /** The canvas region's element id, unique on the page; the view cube draws inside it. */
     regionId: string;
     /** The canvas region's accessible name. "CAD canvas" when absent. */
@@ -247,14 +251,14 @@ export function ViewerStage({
   const ownRegionRef = useRef<HTMLElement | null>(null);
   const regionRef = partMenu?.regionProps.ref ?? ownRegionRef;
   const [isPointerOver, setIsPointerOver] = useState(false);
-  const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
+  const hasArtifact = useSelector(graphicsRef, (state) => state?.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
-  const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
+  const unitId = useSelector(graphicsRef, (state) => state?.context.modelInteractionUnitId);
   // A mounted Three canvas (or the placeholder holding its place during the WebGPU probe) attaches a canvas actor that
   // awaits its first frame on screen; until then the region is busy, so assistive technology and automation wait for a
   // drawn stage. On a software adapter that first frame can take seconds of pipeline compiling. Content that draws no
   // frames (an SVG) attaches no canvas, so it is never busy.
-  const canvasRef = useSelector(graphicsRef, (state) => state.context.canvas?.ref);
+  const canvasRef = useSelector(graphicsRef, (state) => state?.context.canvas?.ref);
   const isBusy = useSelector(canvasRef, selectCanvasAwaitingFrame);
 
   const handlePointerMove = useCallback(
@@ -316,10 +320,13 @@ export function ViewerStage({
         {children}
       </section>
       {partMenu?.renderMenu(decoratePartMenu)}
-      <HoveredModelComponentBadge
-        unitId={unitId}
-        isSuppressed={!isPointerOver || !hasModel || partMenu?.isOpen === true}
-      />
+      {/* The hover label reads the view's model interaction, which comes with its graphics actor. */}
+      {graphicsRef === undefined ? null : (
+        <HoveredModelComponentBadge
+          unitId={unitId}
+          isSuppressed={!isPointerOver || !hasModel || partMenu?.isOpen === true}
+        />
+      )}
       {controls === undefined ? null : (
         /* The bar is centred on the last line and grows upward as tools start. */
         <div

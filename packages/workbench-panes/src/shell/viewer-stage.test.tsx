@@ -392,4 +392,67 @@ describe('ViewerStage', () => {
       );
     });
   });
+
+  describe('before the host has a graphics actor', () => {
+    function LateStage({
+      graphicsRef,
+      status,
+    }: {
+      readonly graphicsRef: ViewerGraphics | undefined;
+      readonly status?: ViewerStageProps['status'];
+    }): React.JSX.Element {
+      const partMenu = useViewerPartMenu({ graphicsRef });
+      return (
+        <ViewerStage
+          graphicsRef={graphicsRef}
+          regionId='viewer-canvas-test'
+          renderCanvas={renderCanvas}
+          partMenu={partMenu}
+          status={status}
+          statusExtra={<span data-testid='wait-pill' />}
+        />
+      );
+    }
+    const renderLate = (ui: React.ReactElement): React.ReactElement => (
+      <KeyboardProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </KeyboardProvider>
+    );
+
+    it('should lay out the stage with its status and failure, open no part menu, and keep it when the actor arrives', () => {
+      const failed: ViewerStageProps['status'] = {
+        kind: 'failed',
+        summary: 'You’re offline',
+        message: 'Go online, then try again.',
+        action: <button type='button'>Try again</button>,
+      };
+      const view = render(
+        renderLate(
+          <GraphicsProvider graphicsRef={undefined}>
+            <LateStage graphicsRef={undefined} status={failed} />
+          </GraphicsProvider>,
+        ),
+      );
+      const region = screen.getByRole('application', { name: 'CAD canvas' });
+      const layout = region.closest<HTMLElement>('[data-slot="viewer-stage"]')!;
+      expect(screen.getByTestId('wait-pill')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('You’re offline');
+      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+      graphics = createViewerGraphics();
+      view.rerender(
+        renderLate(
+          <GraphicsProvider graphicsRef={graphics}>
+            <LateStage graphicsRef={graphics} />
+          </GraphicsProvider>,
+        ),
+      );
+      expect(screen.getByRole('application', { name: 'CAD canvas' }).closest('[data-slot="viewer-stage"]')).toBe(
+        layout,
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
 });

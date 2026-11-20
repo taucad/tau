@@ -24,7 +24,9 @@
  *
  * Lifecycle: no `skipWaiting` on install, so an open page keeps the worker and precache it loaded with; a page activates
  * a waiting worker (`skipWaitingMessageType`) once its build-skew verdict is `replaced`, so the next document load gets
- * the new deploy. Install never fails on an entry: it stores what it can fetch and reports the rest to its pages.
+ * the new deploy, and a page already on the waiting worker's build activates it at once (`activateIfBuildMessageType`,
+ * FP3). Over a pre-fix worker (its caches are unversioned or `precache-v2`) it skips waiting on install, since the
+ * pages that worker stalls never run the code that would activate a successor (D16). Install never fails on an entry: it stores what it can fetch and reports the rest to its pages.
  * Activation turns navigation preload on, claims pages no worker controlled yet (a first visit), and deletes the
  * previous version's precache entries and the retired `/usage` worker's caches. Every stored response is replayed whole,
  * so `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`, `Cross-Origin-Resource-Policy` and the CSP come
@@ -35,6 +37,7 @@ import { CacheExpiration } from 'workbox-expiration';
 import { PrecacheController } from 'workbox-precaching';
 import type { PrecacheEntry } from 'workbox-precaching';
 import {
+  activatesWorker,
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
@@ -48,8 +51,8 @@ import {
   readStoredUrls,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import { assetCacheName, cachePrefix, skipWaitingMessageType } from '#offline/pwa-messages.js';
-import { isRetiredWorkerCache } from '#offline/service-worker-retire.js';
+import { assetCacheName, cachePrefix, precacheNamePart } from '#offline/pwa-messages.js';
+import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/pwa-caches.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** A `FetchEvent`, which the DOM library does not declare. */
@@ -87,6 +90,9 @@ type InjectedGlobal = {
   /** Each answered class's document and the files its closure holds, by URL. */
   // oxlint-disable-next-line @typescript-eslint/naming-convention -- An injection point, beside Workbox's.
   readonly __TAU_PRECACHE_CLASSES: Readonly<Record<string, readonly string[]>>;
+  /** The build id of the deploy this worker belongs to, as its documents publish it (`TAU_BUILD_ID`), or `0`. */
+  // oxlint-disable-next-line @typescript-eslint/naming-convention -- An injection point, beside Workbox's.
+  readonly __TAU_BUILD_ID: number;
 };
 type ClientLike = { postMessage(message: ServiceWorkerMessage): void };
 /** An `ExtendableEvent` (install, activate, fetch), which the DOM library does not declare. */
@@ -97,7 +103,8 @@ const asWorkboxEvent = (event: LifecycleEvent): WorkboxEvent => event as unknown
 
 const scope = globalThis as unknown as WorkerScope;
 
-setCacheNameDetails({ prefix: cachePrefix });
+// `tau-precache-v3-<scope>`: the version tells a fixed worker's caches from a pre-fix worker's (FP3).
+setCacheNameDetails({ prefix: cachePrefix, precache: precacheNamePart });
 
 /** The precache's bookkeeping: each entry's cache key, and the cleanup of a previous version's entries on activation. */
 const precache = new PrecacheController();
@@ -105,6 +112,7 @@ const precache = new PrecacheController();
 precache.addToCacheList((globalThis as unknown as InjectedGlobal).__WB_MANIFEST);
 const precacheName = precache.strategy.cacheName;
 const classes = (globalThis as unknown as InjectedGlobal).__TAU_PRECACHE_CLASSES;
+const workerBuildId = (globalThis as unknown as InjectedGlobal).__TAU_BUILD_ID;
 const assetExpiration = new CacheExpiration(assetCacheName, {
   maxAgeSeconds: 30 * 24 * 60 * 60,
   maxEntries: 2000,
@@ -156,9 +164,19 @@ const postToPages = async (message: ServiceWorkerMessage): Promise<void> => {
   }
 };
 
+/** Whether this origin holds a pre-fix worker's caches, so this worker replaces one (FP3). */
+const replacesPreFixWorker = async (): Promise<boolean> => {
+  const names = await scope.caches.keys();
+  return names.some((name) => isPreFixWorkerCache(name));
+};
+
 scope.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
+      // A pre-fix worker can stall the pages it controls, which then never run the page code that would activate a
+      // successor (D16): over one, this worker activates as soon as it is installed. With FP1 a page of another build
+      // loses nothing under it online, since every miss is the browser's own request.
+      const overPreFix = await replacesPreFixWorker();
       await indexReady;
       const cache = await scope.caches.open(precacheName);
       const report = await installPrecache({
@@ -186,6 +204,9 @@ scope.addEventListener('install', (event) => {
               message: `${String(report.failed.length)} of ${String(report.failed.length + report.stored.length)} files not stored: ${report.failed[0]?.url ?? ''} ${report.failed[0]?.reason ?? ''}`,
             };
       await postToPages(installMessage(failure));
+      if (overPreFix) {
+        await scope.skipWaiting();
+      }
     })(),
   );
 });
@@ -197,7 +218,8 @@ scope.addEventListener('activate', (event) => {
       await scope.registration.navigationPreload?.enable();
       await precache.activate(asWorkboxEvent(event));
       const names = await scope.caches.keys();
-      const retired = names.filter((name) => isRetiredWorkerCache(name));
+      // The retired `/usage` worker's caches and a pre-fix worker's, whose precache Workbox's cleanup cannot see.
+      const retired = names.filter((name) => isRetiredWorkerCache(name) || isPreFixWorkerCache(name));
       await Promise.all(retired.map(async (name) => scope.caches.delete(name)));
       reloadIndex();
       await indexReady;
@@ -207,11 +229,7 @@ scope.addEventListener('activate', (event) => {
 });
 
 scope.addEventListener('message', (event) => {
-  if (
-    typeof event.data === 'object' &&
-    event.data !== null &&
-    (event.data as { type?: unknown }).type === skipWaitingMessageType
-  ) {
+  if (activatesWorker(event.data, workerBuildId)) {
     // async-iife: bootstrap -- a message listener cannot await; activation proceeds on its own.
     void scope.skipWaiting();
   }

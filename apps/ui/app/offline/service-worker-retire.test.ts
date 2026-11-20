@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {
-  activateRetirement,
+  deleteOrphanWorkerCaches,
+  isPreFixWorkerCache,
   isRetiredWorkerCache,
   isWorkerCache,
-  retireServiceWorker,
-  workboxExpirationDatabase,
-} from '#offline/service-worker-retire.js';
+} from '#offline/pwa-caches.js';
+import { activateRetirement, retireServiceWorker, workboxExpirationDatabase } from '#offline/service-worker-retire.js';
 import type { RetiringWorkerScope } from '#offline/service-worker-retire.js';
 
 /** A worker global whose calls are recorded in order. */
@@ -106,6 +106,9 @@ describe('the service worker kill switch (PL7)', () => {
       'tau-precache-v2-https://tau.new/',
       'tau-runtime-https://tau.new/',
       'tau-assets',
+      // A fixed worker's (FP3): its precache and asset cache carry the cache version.
+      'tau-precache-v3-https://tau.new/',
+      'tau-assets-v3',
       // The retired worker's cache for one shell version (`offlineShellCacheName`, shipped up to ui@0.3.0).
       'tau-offline-shell-3f9a2c1d0b7e',
     ]) {
@@ -116,5 +119,23 @@ describe('the service worker kill switch (PL7)', () => {
     }
     expect(isRetiredWorkerCache('tau-offline-shell-3f9a2c1d0b7e')).toBe(true);
     expect(isRetiredWorkerCache('tau-precache-v2-https://tau.new/')).toBe(false);
+  });
+
+  it('should tell a pre-fix worker’s caches from a fixed worker’s (FP3)', () => {
+    for (const name of ['tau-precache-v2-https://tau.new/', 'tau-runtime-https://tau.new/', 'tau-assets']) {
+      expect(isPreFixWorkerCache(name), name).toBe(true);
+    }
+    for (const name of ['tau-precache-v3-https://tau.new/', 'tau-assets-v3', 'tau-offline-shell-3f9a', 'other']) {
+      expect(isPreFixWorkerCache(name), name).toBe(false);
+    }
+  });
+
+  it('should delete every worker cache and nothing else when no worker owns them', async () => {
+    const { scope, calls } = createScope(['tau-assets', 'tau-precache-v3-https://tau.new/', 'another-app-cache']);
+
+    const deleted = await deleteOrphanWorkerCaches(scope.caches);
+
+    expect(deleted).toStrictEqual(['tau-assets', 'tau-precache-v3-https://tau.new/']);
+    expect(calls).toStrictEqual(['delete tau-assets', 'delete tau-precache-v3-https://tau.new/']);
   });
 });

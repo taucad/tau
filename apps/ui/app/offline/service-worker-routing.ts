@@ -22,7 +22,7 @@
  */
 import { homeAppEntry, workerRouteClasses } from '#lib/route-classes.js';
 import type { WorkerRouteClass } from '#lib/route-classes.js';
-import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Milliseconds a network-first document waits for the network before the precached one answers (B5's bound). */
@@ -159,3 +159,25 @@ export const installMessage = (error?: unknown): ServiceWorkerMessage =>
         status: isQuotaError(error) ? 'quota-exceeded' : 'failed',
         detail: describeError(error),
       };
+
+/**
+ * Whether a message from a page activates this worker (FP3 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`): the update rule's `SKIP_WAITING` always does; an
+ * activate-if-build message does when the page is already on this worker's build, which is then the live one, so
+ * activation loses that page nothing (a reload under the previous worker lands there, and its worker would otherwise
+ * wait for the tab's lifetime). A build id of `0` is unknown and never matches.
+ *
+ * @param data - The message.
+ * @param buildId - This worker's build id (`__TAU_BUILD_ID`, written by the build), or `0`.
+ * @returns `true` to skip waiting.
+ */
+export const activatesWorker = (data: unknown, buildId: number): boolean => {
+  if (typeof data !== 'object' || data === null) {
+    return false;
+  }
+  const { type, buildId: pageBuildId } = data as { type?: unknown; buildId?: unknown };
+  if (type === skipWaitingMessageType) {
+    return true;
+  }
+  return type === activateIfBuildMessageType && buildId !== 0 && pageBuildId === buildId;
+};

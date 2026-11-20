@@ -5,6 +5,7 @@ import {
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
+  readDocumentBuildId,
   workerClasses,
 } from '#offline/service-worker-routing.js';
 import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
@@ -246,5 +247,15 @@ describe('installMessage', () => {
       status: 'failed',
       detail: `not stored for offline use: ${projectDocument}`,
     });
+  });
+});
+
+describe('readDocumentBuildId', () => {
+  it('should read the build id the root loader writes into a document, escaped or not', () => {
+    expect(readDocumentBuildId('<script>window.ENV = {"TAU_BUILD_ID":"1795126317415"}</script>')).toBe(
+      1_795_126_317_415,
+    );
+    expect(readDocumentBuildId(String.raw`enqueue("[\"TAU_BUILD_ID\":\"42\"]")`)).toBe(42);
+    expect(readDocumentBuildId('<html></html>')).toBeUndefined();
   });
 });

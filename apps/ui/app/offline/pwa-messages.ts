@@ -23,6 +23,12 @@ export const retiredServiceWorkerUrl = '/offline-shell-worker.js';
 /** `type` of the message the page sends a waiting worker to activate it (workbox-window's `messageSkipWaiting`). */
 export const skipWaitingMessageType = 'SKIP_WAITING';
 
+/**
+ * `type` of the message a page sends a worker to ask which build it serves; the worker answers on the message's port
+ * with `{ build }`, the build id its precached documents carry (FP3). Workers from before FP3 never answer.
+ */
+export const workerBuildMessageType = 'tau-service-worker-build';
+
 /** `type` of every message the worker posts to its pages. */
 export const serviceWorkerMessageType = 'tau-service-worker';
 

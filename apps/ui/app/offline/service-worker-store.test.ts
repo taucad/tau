@@ -146,6 +146,18 @@ describe('createWorkerStore', () => {
     );
   });
 
+  it('should report the build its precached documents carry', async () => {
+    const caches = createCaches();
+    const fetch = async (input: string): Promise<Response> =>
+      ok(input.startsWith(homeDocument) ? '<script>window.ENV = {"TAU_BUILD_ID":"42"}</script>' : input);
+    const store = createWorkerStore({ caches, fetch }, manifest);
+    await expect(store.readBuildId()).resolves.toBeUndefined();
+
+    await store.install();
+
+    await expect(store.readBuildId()).resolves.toBe(42);
+  });
+
   it('should delete on activation what this list no longer names and a pre-fix worker’s precache', async () => {
     const caches = createCaches();
     const precache = await caches.open(precacheCacheName);

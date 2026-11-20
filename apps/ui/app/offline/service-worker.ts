@@ -41,7 +41,7 @@ import {
 import type { NavigationCandidate, SubresourceAnswer } from '#offline/service-worker-routing.js';
 import { createWorkerStore } from '#offline/service-worker-store.js';
 import type { StoreEntry } from '#offline/service-worker-store.js';
-import { skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { cachePrefix, skipWaitingMessageType, workerBuildMessageType } from '#offline/pwa-messages.js';
 import { isRetiredWorkerCache } from '#offline/service-worker-retire.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
@@ -75,7 +75,10 @@ type WorkerScope = {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   addEventListener(type: 'install' | 'activate', listener: (event: LifecycleEvent) => void): void;
   addEventListener(type: 'fetch', listener: (event: FetchEventLike) => void): void;
-  addEventListener(type: 'message', listener: (event: { readonly data: unknown }) => void): void;
+  addEventListener(
+    type: 'message',
+    listener: (event: { readonly data: unknown; readonly ports?: readonly MessagePort[] }) => void,
+  ): void;
 };
 /** The globals the build writes the precache list and its classes into (`scripts/build-service-worker.ts`). */
 type InjectedGlobal = {
@@ -98,6 +101,12 @@ const store = createWorkerStore(
 // async-iife: bootstrap -- the index loads at worker start; a request before it is the browser's.
 void store.load();
 
+/** Whether this origin holds a worker built before FP1: its Workbox precache is `tau-precache-v2-<scope>`. */
+const replacesPreFixWorker = async (): Promise<boolean> => {
+  const names = await scope.caches.keys();
+  return names.some((name) => name.startsWith(`${cachePrefix}-precache-v2-`));
+};
+
 const postToPages = async (message: ServiceWorkerMessage): Promise<void> => {
   for (const client of await scope.clients.matchAll({ includeUncontrolled: true })) {
     client.postMessage(message);
@@ -110,6 +119,12 @@ scope.addEventListener('install', (event) => {
       try {
         const report = await store.install();
         await postToPages(installMessage({ incomplete: report.incomplete }));
+        if (await replacesPreFixWorker()) {
+          // FP3 (operator decision 6, a one-time departure from OD3's "a page keeps the worker it loaded with"): a
+          // pre-fix worker can hold its pages in a stall that no page code ever leaves, so the fixed worker takes over
+          // without waiting for a page to ask. With FP1 an open page of the previous build loses nothing online.
+          await scope.skipWaiting();
+        }
       } catch (error) {
         // Only quota fails an install: the version stays uninstalled and the previous one keeps serving.
         await postToPages(installMessage({ error }));
@@ -133,13 +148,17 @@ scope.addEventListener('activate', (event) => {
 });
 
 scope.addEventListener('message', (event) => {
-  if (
-    typeof event.data === 'object' &&
-    event.data !== null &&
-    (event.data as { type?: unknown }).type === skipWaitingMessageType
-  ) {
+  const type =
+    typeof event.data === 'object' && event.data !== null ? (event.data as { type?: unknown }).type : undefined;
+  if (type === skipWaitingMessageType) {
     // async-iife: bootstrap -- a message listener cannot await; activation proceeds on its own.
     void scope.skipWaiting();
+  } else if (type === workerBuildMessageType) {
+    const [port] = event.ports ?? [];
+    // async-iife: bootstrap -- the answer goes back on the asker's port (`pwa-registration.ts`).
+    void (async () => {
+      port?.postMessage({ build: await store.readBuildId() });
+    })();
   }
 });
 

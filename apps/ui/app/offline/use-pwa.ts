@@ -19,7 +19,7 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { Topic } from '@taucad/events';
-import { queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
+import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
 
@@ -145,7 +145,7 @@ export function useServiceWorker(): void {
           if (!stopped) {
             stop = startServiceWorker({
               inWorkspace,
-              verdict: { readServerVerdict, subscribeServerVerdict, queryLiveBuild },
+              verdict: { buildId, readServerVerdict, subscribeServerVerdict, queryLiveBuild },
               onInstallStatus: setInstallStatus,
             });
           }

@@ -18,7 +18,7 @@
  */
 import { CacheExpiration } from 'workbox-expiration';
 import { assetCacheName, cachePrefix } from '#offline/pwa-messages.js';
-import { isQuotaError } from '#offline/service-worker-routing.js';
+import { isQuotaError, readDocumentBuildId } from '#offline/service-worker-routing.js';
 import type { StoreView } from '#offline/service-worker-routing.js';
 
 /**
@@ -63,6 +63,8 @@ export type WorkerStore = StoreView &
     activate: () => Promise<void>;
     /** The precache's response for a URL, or `undefined` when it holds none after all. */
     readPrecached: (url: string) => Promise<Response | undefined>;
+    /** The build this worker serves, read from its precached documents, or `undefined` when none is stored. */
+    readBuildId: () => Promise<number | undefined>;
     /** The first-use cache's response for a URL, or `undefined`. */
     readAsset: (url: string) => Promise<Response | undefined>;
     /**
@@ -325,6 +327,18 @@ export const createWorkerStore = (
     activate,
     readPrecached: async (url) => readFrom(precacheCacheName, keys.get(url)),
     readAsset: async (url) => readFrom(assetCacheName, url),
+    readBuildId: async () => {
+      for (const document of Object.keys(manifest.classes)) {
+        // oxlint-disable-next-line no-await-in-loop -- The first stored document answers.
+        const response = await readFrom(precacheCacheName, keys.get(document));
+        // oxlint-disable-next-line no-await-in-loop -- As above.
+        const build = response === undefined ? undefined : readDocumentBuildId(await response.text());
+        if (build !== undefined) {
+          return build;
+        }
+      }
+      return undefined;
+    },
     keep,
     hasPending: () => pending.size > 0,
     flush,

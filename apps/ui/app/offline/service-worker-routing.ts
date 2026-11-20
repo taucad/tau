@@ -187,6 +187,17 @@ export const answerSubresource = (
 };
 
 /**
+ * The build id a document carries (`window.ENV.TAU_BUILD_ID`, written by the root loader into every document).
+ *
+ * @param html - The document.
+ * @returns The build id, or `undefined` when the document names none.
+ */
+export const readDocumentBuildId = (html: string): number | undefined => {
+  const match = /TAU_BUILD_ID\\?":\\?"(\d+)/u.exec(html);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
+};
+
+/**
  * Whether a precache install failure was the origin's storage quota.
  *
  * @param error - The install's rejection.

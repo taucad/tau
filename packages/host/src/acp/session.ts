@@ -51,7 +51,7 @@
  * is nowhere for a replayed update to go.
  */
 
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -144,6 +144,24 @@ const maskedPath = (message: string): Error => Object.assign(new Error(message),
 
 /** ACP protocol version this client speaks. @internal */
 export const protocolVersion = 1;
+
+/**
+ * The `.agents` directory under a session or skill root, in this platform's separators.
+ *
+ * @param directory - The root.
+ * @returns `<directory>/.agents`.
+ * @internal
+ */
+export const agentsDirectoryOf = (directory: string): string => join(directory, '.agents');
+
+/**
+ * The `.agents/skills` directory under a session or skill root, in this platform's separators.
+ *
+ * @param directory - The root.
+ * @returns `<directory>/.agents/skills`.
+ * @internal
+ */
+export const agentsSkillsDirectoryOf = (directory: string): string => join(directory, '.agents', 'skills');
 
 /** JSON-RPC code both pinned adapters answer with when the user is logged out. @internal */
 export const authRequiredCode = -32_000;

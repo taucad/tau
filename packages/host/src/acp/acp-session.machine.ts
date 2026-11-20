@@ -65,6 +65,8 @@ import {
   protocolVersion,
   providerSentence,
   recoverableSessionLoss,
+  agentsDirectoryOf,
+  agentsSkillsDirectoryOf,
 } from '#acp/session.js';
 import type { AcpAgentFacts, AcpLimitReset, AcpSessionFailure, AcpSessionPresentation } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
@@ -560,7 +562,9 @@ const lifecycleDirectories = (context: AcpSessionContext) => {
                   grokPermissionModeOf(context.opening?.configuration?.[grokPermissionConfigId]) ?? 'ask',
                 )
               : {}),
-            ...(directories.length > 0 ? { pluginDirs: directories.map((directory) => `${directory}/.agents`) } : {}),
+            ...(directories.length > 0
+              ? { pluginDirs: directories.map((directory) => agentsDirectoryOf(directory)) }
+              : {}),
           },
         }
       : {}),
@@ -1568,7 +1572,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
           adapter: context.adapter,
           permissionReadback: context.facts.permissionReadback,
           cwd: context.cwd,
-          skillDirectories: context.directories.map((directory) => `${directory}/.agents/skills`),
+          skillDirectories: context.directories.map((directory) => agentsSkillsDirectoryOf(directory)),
           sessionMessageId: context.sessionMessageId,
           sessionCommitted: context.sessionCommitted,
           presentation: context.presentation,

@@ -6,7 +6,8 @@
 
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,7 +25,9 @@ import type { AcpExecutableFileSystem } from '#acp/locate.js';
 import { acpAdapterEnvironment } from '#acp/spawn.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
-const fakeAgentPath = new URL('fixtures/fake-agent.ts', import.meta.url).pathname;
+import { answeringScript, writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
+
+const fakeAgentPath = fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url));
 
 describe('resolveAcpAdapters', () => {
   it('refuses an adapter that is not installed rather than throwing', () => {
@@ -63,7 +66,7 @@ describe('resolveAcpAdapters', () => {
         continue;
       }
       expect(agent.modulePath.endsWith('.js')).toBe(true);
-      expect(agent.modulePath.startsWith('/')).toBe(true);
+      expect(isAbsolute(agent.modulePath)).toBe(true);
     }
     const codex = agents.find((agent) => agent.id === 'codex');
     const installed = await readFile(codex?.modulePath ?? '', 'utf8');
@@ -103,8 +106,37 @@ afterEach(async () => {
   await Promise.all(stubRoots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
+/** Windows has no shebang: a stub CLI there is a real `.exe` (`fixtures/windows-executable.ts`). */
+const windowsHost = process.platform === 'win32';
+
 /**
- * A PATH directory holding one shell stub per CLI, each answering `--version`.
+ * Where a stub CLI named `name` lives in `directory` on this host.
+ *
+ * @param directory - The stub's directory.
+ * @param name - The bare command name.
+ * @returns `<directory>/<name>`, with `.exe` on Windows.
+ */
+const stubCliPath = (directory: string, name: string): string => join(directory, windowsHost ? `${name}.exe` : name);
+
+/**
+ * Write one stub CLI that prints `line` for `--version`.
+ *
+ * @param path - Where to write it; ends in `.exe` on Windows.
+ * @param line - The version line.
+ * @param shape - `host` starts on this host; `posix` is a `#!/bin/sh` file whatever the host, for a
+ *   POSIX platform's resolution rules that never start it.
+ */
+const writeStubCli = async (path: string, line: string, shape: 'host' | 'posix' = 'host'): Promise<void> => {
+  if (windowsHost && shape === 'host') {
+    await writeWindowsExecutable(path, answeringScript(line));
+    return;
+  }
+  await writeFile(path, `#!/bin/sh\necho '${line}'\n`);
+  await chmod(path, 0o755);
+};
+
+/**
+ * A PATH directory holding one stub per CLI, each answering `--version`.
  *
  * @param versions - Version each stub reports, by CLI name.
  * @returns The directory to put on PATH.
@@ -113,14 +145,29 @@ const stubCliDirectory = async (versions: Readonly<Record<string, string>>): Pro
   const directory = await mkdtemp(join(tmpdir(), 'tau-acp-cli-'));
   stubRoots.push(directory);
   await Promise.all(
-    Object.entries(versions).map(async ([name, version]) => {
-      const path = join(directory, name);
-      await writeFile(path, `#!/bin/sh\necho '${version} (stub)'\n`);
-      await chmod(path, 0o755);
-    }),
+    Object.entries(versions).map(async ([name, version]) =>
+      writeStubCli(stubCliPath(directory, name), `${version} (stub)`),
+    ),
   );
   return directory;
 };
+
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+/**
+ * A PATH that puts `directory` ahead of the host's system directories, and the host variables a
+ * Windows process needs to start at all.
+ *
+ * @param directory - The stub directory.
+ * @returns `PATH`, plus `SystemRoot` on Windows.
+ */
+const stubPathEnvironment = (directory: string): NodeJS.ProcessEnv => {
+  if (!windowsHost) {
+    return { PATH: [directory, '/usr/bin', '/bin'].join(delimiter) };
+  }
+  const systemRoot = process.env['SystemRoot'] ?? String.raw`C:\Windows`;
+  return { PATH: [directory, join(systemRoot, 'System32')].join(delimiter), SystemRoot: systemRoot };
+};
+/* eslint-enable @typescript-eslint/naming-convention -- end of wire-named environments. */
 
 /**
  * The real file system, confined to one directory, so a CLI installed on the
@@ -135,14 +182,14 @@ const confinedTo = (root: string): AcpExecutableFileSystem => ({
 });
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
-describe.skipIf(process.platform === 'win32')('executable resolution', () => {
+describe('executable resolution', () => {
   const resolveFrom = new URL('../../../cli/src/commands/serve.ts', import.meta.url).href;
 
   it('finds each CLI once, and that file is what both module adapters are told to run', async () => {
     /* D3: the probe checks one executable, so the adapter must run that same
      * file rather than the vendor copy its own SDK would otherwise look for. */
     const directory = await stubCliDirectory({ claude: '2.1.301', codex: '0.162.1' });
-    const environment = { PATH: `${directory}:/usr/bin:/bin` };
+    const environment = stubPathEnvironment(directory);
     const { agents } = resolveAcpAdapters({
       resolveFrom,
       pins: acpAgentProfiles.filter((profile) => profile.package !== undefined),
@@ -150,13 +197,13 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     });
 
     expect(agents.map((agent) => [agent.id, agent.executablePath])).toEqual([
-      ['claude', join(directory, 'claude')],
-      ['codex', join(directory, 'codex')],
+      ['claude', stubCliPath(directory, 'claude')],
+      ['codex', stubCliPath(directory, 'codex')],
     ]);
     const [claude, codex] = agents.map((agent) => acpAdapterEnvironment(environment, agent));
-    expect(claude).toMatchObject({ CLAUDE_CODE_EXECUTABLE: join(directory, 'claude') });
+    expect(claude).toMatchObject({ CLAUDE_CODE_EXECUTABLE: stubCliPath(directory, 'claude') });
     expect(claude).not.toHaveProperty('CODEX_PATH');
-    expect(codex).toMatchObject({ CODEX_PATH: join(directory, 'codex') });
+    expect(codex).toMatchObject({ CODEX_PATH: stubCliPath(directory, 'codex') });
     expect(codex).not.toHaveProperty('CLAUDE_CODE_EXECUTABLE');
 
     const probed = await probeAcpAgents({ agents, refused: [] }, { environment });
@@ -165,7 +212,7 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
 
   it('refuses a Claude CLI older than the Agent SDK its adapter drives', async () => {
     const directory = await stubCliDirectory({ claude: '2.1.200' });
-    const environment = { PATH: `${directory}:/usr/bin:/bin` };
+    const environment = stubPathEnvironment(directory);
     const discovery = resolveAcpAdapters({
       resolveFrom,
       pins: acpAgentProfiles.filter((profile) => profile.id === 'claude'),
@@ -180,7 +227,7 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
 
   it('leaves the executable unset when no such CLI exists, so the probe refuses it without running anything', async () => {
     const home = await stubCliDirectory({});
-    const environment = { PATH: home, HOME: home };
+    const environment = { PATH: home, HOME: home, USERPROFILE: home };
     const fileSystem = confinedTo(home);
     const discovery = resolveAcpAdapters({
       resolveFrom,
@@ -200,6 +247,12 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
   });
 
   describe('app-bundled Codex', () => {
+    /* The macOS bundle is darwin's alone. The tests below that touch real files apply the darwin rules
+     * (`platform: 'darwin'`, `path.posix`) to this host's temporary directory, which on Windows is a
+     * `C:\...` path that posix joins cannot express, and they start an extensionless bundle CLI, which
+     * Windows never runs (libuv tries only the name's own extension, `.com` and `.exe`). The Windows
+     * fallback rules run against real `.exe` files in `registry.conformance.test.ts` instead. */
+    const darwinFilesHere = process.platform !== 'win32';
     const chatGptCodex = 'Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
     const codexProfiles = acpAgentProfiles.filter((profile) => profile.id === 'codex');
 
@@ -214,8 +267,7 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
       stubRoots.push(home);
       const bundled = join(home, chatGptCodex);
       await mkdir(dirname(bundled), { recursive: true });
-      await writeFile(bundled, `#!/bin/sh\necho 'codex-cli ${version}'\n`);
-      await chmod(bundled, 0o755);
+      await writeStubCli(bundled, `codex-cli ${version}`, 'posix');
       return { home, bundled };
     };
 
@@ -229,27 +281,30 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
       ]);
     });
 
-    it('finds the Codex the ChatGPT desktop app bundles when PATH has none, and runs that file', async () => {
-      const { home, bundled } = await bundledCodexHome('0.164.0-alpha.11.1');
-      const environment = { PATH: await stubCliDirectory({}), HOME: home };
-      const discovery = resolveAcpAdapters({
-        resolveFrom,
-        pins: codexProfiles,
-        environment,
-        platform: 'darwin',
-        fileSystem: confinedTo(home),
-      });
+    it.runIf(darwinFilesHere)(
+      'finds the Codex the ChatGPT desktop app bundles when PATH has none, and runs that file',
+      async () => {
+        const { home, bundled } = await bundledCodexHome('0.164.0-alpha.11.1');
+        const environment = { PATH: await stubCliDirectory({}), HOME: home };
+        const discovery = resolveAcpAdapters({
+          resolveFrom,
+          pins: codexProfiles,
+          environment,
+          platform: 'darwin',
+          fileSystem: confinedTo(home),
+        });
 
-      expect(discovery.agents[0]).toMatchObject({ executablePath: bundled, executableSource: 'fallback' });
-      expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).toMatchObject({
-        CODEX_PATH: bundled,
-      });
-      const probed = await probeAcpAgents(discovery, { environment });
-      expect(probed.refused).toEqual([]);
-      expect(probed.agents.map((agent) => agent.id)).toEqual(['codex']);
-    });
+        expect(discovery.agents[0]).toMatchObject({ executablePath: bundled, executableSource: 'fallback' });
+        expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).toMatchObject({
+          CODEX_PATH: bundled,
+        });
+        const probed = await probeAcpAgents(discovery, { environment });
+        expect(probed.refused).toEqual([]);
+        expect(probed.agents.map((agent) => agent.id)).toEqual(['codex']);
+      },
+    );
 
-    it('prefers a Codex on PATH over the bundled one', async () => {
+    it.runIf(darwinFilesHere)('prefers a Codex on PATH over the bundled one', async () => {
       const { home } = await bundledCodexHome('0.164.0');
       const directory = await stubCliDirectory({ codex: '0.162.1' });
       const discovery = resolveAcpAdapters({
@@ -264,7 +319,7 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
       expect(discovery.agents[0]?.executablePath).toBe(join(directory, 'codex'));
     });
 
-    it('still refuses a bundled Codex older than the adapter drives', async () => {
+    it.runIf(darwinFilesHere)('still refuses a bundled Codex older than the adapter drives', async () => {
       const { home } = await bundledCodexHome('0.140.0');
       const environment = { PATH: await stubCliDirectory({}), HOME: home };
       const discovery = resolveAcpAdapters({
@@ -496,23 +551,30 @@ describe('discoverAcpAgents', () => {
   });
 });
 
-describe.skipIf(process.platform === 'win32')('discoverAcpAgents for a CLI that did not resolve', () => {
+describe('discoverAcpAgents for a CLI that did not resolve', () => {
   it('should not start the model probe', async () => {
     /* The model probe spawns with this process's environment, so a stub on
      * this process's PATH records whether it was started even though
      * discovery's own PATH has no such CLI. */
     const directory = await stubCliDirectory({});
     const marker = join(directory, 'model-probe-started');
-    const stub = join(directory, 'tau-unresolved-cli');
-    await writeFile(stub, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
-    await chmod(stub, 0o755);
-    vi.stubEnv('PATH', `${directory}:${process.env['PATH'] ?? ''}`);
+    const stub = stubCliPath(directory, 'tau-unresolved-cli');
+    if (windowsHost) {
+      await writeWindowsExecutable(
+        stub,
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '');\nprocess.exit(1);`,
+      );
+    } else {
+      await writeFile(stub, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+      await chmod(stub, 0o755);
+    }
+    vi.stubEnv('PATH', [directory, process.env['PATH'] ?? ''].join(delimiter));
     try {
       const discovery = await discoverAcpAgents({
         resolveFrom: import.meta.url,
         pins: [{ id: 'ghost', displayName: 'Ghost', cli: 'tau-unresolved-cli', args: ['acp'], configEnv: [] }],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-        environment: { PATH: await stubCliDirectory({}), HOME: directory },
+        environment: { PATH: await stubCliDirectory({}), HOME: directory, USERPROFILE: directory },
         fileSystem: confinedTo(directory),
         modelProbeTimeout: 2000,
       });

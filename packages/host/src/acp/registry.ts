@@ -27,7 +27,7 @@
  * profile to them.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -77,6 +77,66 @@ function wireConfigOption(option: SessionConfigOption): Record<string, unknown> 
 }
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * End a Windows process tree, without waiting.
+ *
+ * `execFile`'s timeout ends only the process it started, and on Windows a child that process started keeps
+ * the stdout pipe open, so the run would settle only when that child exits. `taskkill /T` ends the tree,
+ * which it finds through the root's parent links, so it must run while the root is still alive.
+ *
+ * @param pid - Root of the tree.
+ */
+const endWindowsTree = (pid: number | undefined): void => {
+  if (pid === undefined) {
+    return;
+  }
+  const systemRoot = process.env['SystemRoot'];
+  const taskkill = systemRoot ? join(systemRoot, 'System32', 'taskkill.exe') : 'taskkill.exe';
+  spawn(taskkill, ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).once(
+    'error',
+    () => undefined,
+  );
+};
+
+/**
+ * Run `<executable> --version` within `budget` milliseconds.
+ *
+ * On Windows the budget ends the whole tree instead of `execFile`'s own timeout, which would end the root
+ * first and leave `taskkill /T` nothing to walk (see {@link endWindowsTree}).
+ *
+ * @param executable - The CLI to run.
+ * @param environment - Its environment.
+ * @param budget - Milliseconds before it is ended.
+ * @returns Its stdout.
+ * @throws What `execFile` rejects with; on Windows a run ended at the budget is `killed` by `taskkill /T /F`.
+ */
+const runVersion = async (executable: string, environment: NodeJS.ProcessEnv, budget: number): Promise<string> => {
+  const windows = process.platform === 'win32';
+  const run = execFileAsync(executable, ['--version'], {
+    ...(windows ? {} : { timeout: budget }),
+    env: environment,
+    windowsHide: true,
+  });
+  /* Set from the timer; a holder, so the catch below reads it rather than a narrowed local. */
+  const budgetSpent = { tree: false };
+  const tree = windows
+    ? setTimeout(() => {
+        budgetSpent.tree = true;
+        endWindowsTree(run.child.pid);
+      }, budget)
+    : undefined;
+  try {
+    const { stdout } = await run;
+    return String(stdout);
+  } catch (error) {
+    throw budgetSpent.tree
+      ? Object.assign(new Error('The --version probe ran past its budget.'), { killed: true, signal: 'taskkill /T /F' })
+      : error;
+  } finally {
+    clearTimeout(tree);
+  }
+};
 
 /** Milliseconds one `<cli> --version` probe may take before the agent is refused. @public */
 export const acpCliProbeTimeout = 10_000;
@@ -727,11 +787,8 @@ export const probeAcpAgents = async (
       const executable = adapter.executablePath ?? location?.executablePath ?? adapter.cli;
       const started = performance.now();
       try {
-        const { stdout } = await execFileAsync(executable, ['--version'], {
-          timeout: options.probeTimeout ?? acpCliProbeTimeout,
-          env: environment,
-        });
-        const line = String(stdout).trim().split('\n')[0] ?? '';
+        const stdout = await runVersion(executable, environment, budget);
+        const line = stdout.trim().split('\n')[0] ?? '';
         const installed = /\d+\.\d+\.\d+/u.exec(line)?.[0];
         const elapsed = Math.round(performance.now() - started);
         if (installed === undefined && elapsed >= budget) {

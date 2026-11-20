@@ -8,9 +8,11 @@
  * is the fix, and this is the test that keeps it honest.
  */
 
+import { once } from 'node:events';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Client } from '@agentclientprotocol/sdk';
@@ -18,7 +20,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { acpAgentProfiles, resolveAcpAdapters } from '#acp/registry.js';
 import { acpAdapterEnvironment, spawnAcpAdapter } from '#acp/spawn.js';
+import type { SpawnedAcpAdapter } from '#acp/spawn.js';
 import type { AcpAdapter, AcpWireFrame } from '#acp/index.js';
+import { writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
 
 const fakeAgent: AcpAdapter = {
   id: 'codex',
@@ -26,18 +30,50 @@ const fakeAgent: AcpAdapter = {
   package: 'fixture',
   version: '0.0.0',
   configEnv: [],
-  modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+  modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
 };
 
 const roots: string[] = [];
-const spawned: Array<{ close(): void }> = [];
+const spawned: SpawnedAcpAdapter[] = [];
 
 afterEach(async () => {
-  for (const adapter of spawned.splice(0)) {
-    adapter.close();
-  }
+  /* Each adapter's tree must be gone before its cwd is removed: Windows refuses to remove a directory
+   * that is a live process's working directory (EBUSY). */
+  await Promise.all(
+    spawned.splice(0).map(async (adapter) => {
+      const { child } = adapter;
+      const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : undefined;
+      adapter.close();
+      await exited;
+    }),
+  );
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
+
+/** Windows has no shebang: a stub CLI there is a real `.exe` (`fixtures/windows-executable.ts`). */
+const windowsHost = process.platform === 'win32';
+
+/** The host's own system directories, for a stub PATH. */
+const systemPath: readonly string[] = windowsHost
+  ? [join(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32')]
+  : ['/usr/bin', '/bin'];
+
+/**
+ * Write a stub CLI: a `#!/bin/sh` script, or on Windows a `.exe` that runs a CommonJS body with this Node.js.
+ *
+ * @param path - Where to write it, without `.exe`.
+ * @param posix - The shell body.
+ * @param windows - The same behaviour as CommonJS; its arguments are `process.argv.slice(2)`.
+ * @returns The stub's path, with `.exe` on Windows.
+ */
+const writeCliStub = async (path: string, posix: string, windows: string): Promise<string> => {
+  if (windowsHost) {
+    return writeWindowsExecutable(`${path}.exe`, windows);
+  }
+  await writeFile(path, `#!/bin/sh\n${posix}\n`);
+  await chmod(path, 0o755);
+  return path;
+};
 
 const branch = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-acp-spawn-'));
@@ -83,6 +119,35 @@ describe('acpAdapterEnvironment', () => {
       XDG_CONFIG_HOME: '/home/tau/.config',
       GROK_HOME: '/home/tau/.grok',
     });
+  });
+
+  it('passes the Windows system layout on win32 only, matching names without regard to case', () => {
+    const base: NodeJS.ProcessEnv = {
+      Path: String.raw`C:\Windows\System32`,
+      SystemRoot: String.raw`C:\Windows`,
+      ComSpec: String.raw`C:\Windows\System32\cmd.exe`,
+      PATHEXT: '.COM;.EXE',
+      USERPROFILE: String.raw`C:\Users\tau`,
+      APPDATA: String.raw`C:\Users\tau\AppData\Roaming`,
+      LOCALAPPDATA: String.raw`C:\Users\tau\AppData\Local`,
+      TEMP: String.raw`C:\Users\tau\AppData\Local\Temp`,
+      codex_home: String.raw`C:\Users\tau\.codex`,
+      OPENAI_API_KEY: 'sk-should-never-travel',
+      Tau_Host_Agent_Token: 'admission-secret',
+    };
+
+    expect(Object.keys(acpAdapterEnvironment(base, { configEnv: ['CODEX_HOME'] }, 'win32')).toSorted()).toEqual([
+      'APPDATA',
+      'ComSpec',
+      'LOCALAPPDATA',
+      'PATHEXT',
+      'Path',
+      'SystemRoot',
+      'TEMP',
+      'USERPROFILE',
+      'codex_home',
+    ]);
+    expect(acpAdapterEnvironment(base, { configEnv: ['CODEX_HOME'] }, 'linux')).toEqual({});
   });
 
   it('passes the user’s own proxy and CA settings, and still no credential', () => {
@@ -135,7 +200,7 @@ describe('spawnAcpAdapter', () => {
                 id: 'grok',
                 displayName: 'Grok Build',
                 cli: process.execPath,
-                args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+                args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
                 configEnv: [],
               },
         cwd,
@@ -179,6 +244,12 @@ describe('spawnAcpAdapter', () => {
       expect(echoed.env).not.toContain('ANTHROPIC_API_KEY');
       expect(echoed.env).not.toContain('TAU_HOST_AGENT_TOKEN');
       expect(echoed.env).toContain('PATH');
+      if (windowsHost) {
+        /* Without SystemRoot Winsock cannot load its providers, and the CLI cannot reach its vendor. */
+        expect(echoed.env?.map((name) => name.toUpperCase())).toEqual(
+          expect.arrayContaining(['SYSTEMROOT', 'USERPROFILE', 'TEMP', 'COMSPEC']),
+        );
+      }
 
       // Wire log: both directions were observed, and no credential is in them.
       expect(frames.some((frame) => frame.direction === 'client->agent')).toBe(true);
@@ -189,7 +260,7 @@ describe('spawnAcpAdapter', () => {
   );
 });
 
-describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () => {
+describe('the pinned Claude adapter', () => {
   it('starts the user’s own claude for a session, not the Agent SDK’s platform copy', async () => {
     /* C2/P1: staged without its optional platform package, the adapter's SDK
      * fails every `session/new` with "native binary not found" unless it is
@@ -198,11 +269,18 @@ describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () =>
     const bin = join(root, 'bin');
     const calls = join(root, 'calls.log');
     await mkdir(bin);
-    await writeFile(join(bin, 'claude'), `#!/bin/sh\necho "$@" >> '${calls}'\necho '2.1.301 (stub)'\n`);
-    await chmod(join(bin, 'claude'), 0o755);
+    const stub = await writeCliStub(
+      join(bin, 'claude'),
+      `echo "$@" >> '${calls}'\necho '2.1.301 (stub)'`,
+      [
+        `require('node:fs').appendFileSync(${JSON.stringify(calls)}, process.argv.slice(2).join(' ') + '\\n');`,
+        `process.stdout.write('2.1.301 (stub)\\n');`,
+      ].join('\n'),
+    );
     const environment = {
-      PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: [bin, dirname(process.execPath), ...systemPath].join(delimiter),
       HOME: root,
+      USERPROFILE: root,
       CLAUDE_CONFIG_DIR: root,
     };
     const { agents } = resolveAcpAdapters({
@@ -211,7 +289,7 @@ describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () =>
       environment,
     });
     const [claude] = agents;
-    expect(claude?.executablePath).toBe(join(bin, 'claude'));
+    expect(claude?.executablePath).toBe(stub);
     const adapter = spawnAcpAdapter({ adapter: claude ?? fakeAgent, cwd: root, environment });
     spawned.push(adapter);
     /* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived connection the run uses. */
@@ -233,7 +311,7 @@ describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () =>
   }, 30_000);
 });
 
-describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned fallback', () => {
+describe('spawnAcpAdapter with a versioned fallback', () => {
   /**
    * A home holding one versioned tool that runs the fake agent, as a vendor app bundles its CLI.
    *
@@ -244,18 +322,23 @@ describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned 
   const bundledTool = async (root: string, version: string): Promise<string> => {
     const file = join(root, 'Vendor', version, 'bin', 'tool');
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
-    await chmod(file, 0o755);
-    return file;
+    return writeCliStub(
+      file,
+      `exec '${process.execPath}' "$@"`,
+      [
+        `const { status } = require('node:child_process').spawnSync(process.execPath, process.argv.slice(2), { stdio: 'inherit' });`,
+        `process.exit(status ?? 1);`,
+      ].join('\n'),
+    );
   };
 
   const versionedAdapter = (executablePath: string): AcpAdapter => ({
     id: 'grok',
     displayName: 'Grok Build',
     cli: 'tool',
-    args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+    args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
     configEnv: [],
-    fallbackExecutables: { [process.platform]: ['~/Vendor/*/bin/tool'] },
+    fallbackExecutables: { [process.platform]: [windowsHost ? '~/Vendor/*/bin/tool.exe' : '~/Vendor/*/bin/tool'] },
     executablePath,
     executableSource: 'fallback',
   });
@@ -269,7 +352,7 @@ describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned 
     const adapter = spawnAcpAdapter({
       adapter: versionedAdapter(stale),
       cwd: root,
-      environment: { PATH: '/usr/bin:/bin', HOME: root },
+      environment: { PATH: systemPath.join(delimiter), HOME: root, USERPROFILE: root },
     });
     spawned.push(adapter);
     /* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived connection the run uses. */
@@ -296,7 +379,7 @@ describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned 
       spawnAcpAdapter({
         adapter: versionedAdapter(stale),
         cwd: root,
-        environment: { PATH: '/usr/bin:/bin', HOME: root },
+        environment: { PATH: systemPath.join(delimiter), HOME: root, USERPROFILE: root },
       });
 
     expect(spawnGone).toThrow(/is gone\. The tool CLI was not found on PATH/u);

@@ -282,6 +282,47 @@
         }
       }
     },
+    "build:desktop-adaptive": {
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
+      "outputs": ["{projectRoot}/desktop/build-adaptive"],
+      "inputs": [
+        "production",
+        "^production",
+        "{workspaceRoot}/apps/desktop/package.json",
+        {
+          "env": "TAU_TELEMETRY_HOST"
+        },
+        {
+          "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
+        },
+        {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
+          "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+        }
+      ],
+      "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
+      "options": {
+        "cwd": "{projectRoot}/desktop",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192",
+          "REACT_ROUTER_ROOT": ".",
+          "TAU_CLOUD_ENABLED": "adaptive",
+          "TAU_UI_BUILD_DIRECTORY": "build-adaptive"
+        }
+      },
+      "metadata": {
+        "description": "The adaptive desktop renderer (adaptive app deployment mode charter W6): `TAU_CLOUD_ENABLED=adaptive` into `desktop/build-adaptive/`, beside the shipped `build:desktop`, for the desktop e2e tier that launches it through `TAU_DESKTOP_CLIENT_ROOT`. Not packaged; W8 makes the shipped renderer adaptive and retires it."
+      }
+    },
     "check-desktop-payload": {
       "executor": "nx:run-commands",
       "cache": true,
@@ -306,6 +347,32 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts"
+      }
+    },
+    "check-desktop-payload-adaptive": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "The desktop payload gate over the adaptive renderer (`build:desktop-adaptive`, adaptive app deployment mode charter W6): the same ownership rules, and the renderer must carry the `adaptive` ceiling."
+      },
+      "dependsOn": [
+        "build:desktop-adaptive",
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        }
+      ],
+      "inputs": [
+        "{projectRoot}/scripts/check-desktop-payload.mts",
+        {
+          "dependentTasksOutputFiles": "{apps/ui/desktop/build-adaptive,apps/desktop/dist/main,apps/desktop/dist/preload,out/csharp-language/stage,out/openscad-language/stage}/**",
+          "transitive": true
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts --renderer apps/ui/desktop/build-adaptive/client --expect-ceiling adaptive"
       }
     },
     "check-critical-budget": {

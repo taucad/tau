@@ -29,8 +29,8 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (Se
 
 ## Still in the app
 
-- `settings-registry.ts` keeps the deployment gates: the Experimental rows from the app's feature flags (`flags/flag.constants`), the Tau Cloud gate (`cloud/cloud-enabled`), the desktop gate (`lib/build-target`), the build-time flag defaults and the runtime flags (`flags/use-feature`). `deployment-settings-provider.tsx` hands its gated sections to `SettingsSectionsProvider`.
-- `hooks/use-settings-dialog.ts`: `tauCloudBuildEnabled` and React Router search parameters.
+- `settings-registry.ts` keeps the deployment gates: the Experimental rows from the app's feature flags (`flags/flag.constants`), the deployment-mode gate (`cloud/deployment-mode`), the desktop gate (`lib/build-target`), the build-time flag defaults and the runtime flags (`flags/use-feature`). `deployment-settings-provider.tsx` hands its gated sections to `SettingsSectionsProvider`.
+- `hooks/use-settings-dialog.ts`: the deployment mode and React Router search parameters.
 - Every other settings component reads app state (`#hooks/*`, `#lib/*`, `#cloud/*`, `#flags/*`, `#preferences/*`, `#telemetry/*`, `#routes/*`, `#runtime/*`) or renders one that does.
 - `machine-details.tsx`, its fixture and test need `components/print/machine-facts` and the print test fixtures. They move with the print domain.
 - `model-settings.tsx`: `hooks/use-models`.

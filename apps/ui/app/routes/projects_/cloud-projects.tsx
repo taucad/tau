@@ -15,7 +15,7 @@
  * view-only one says so rather than looking like a project to change.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { ProjectCard } from '#components/project-card.js';
 import { CloudProjectPreview } from '#components/project-library/cloud-project-preview.js';
@@ -24,14 +24,8 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { CardFooter, CardHeader } from '@taucad/ui/components/card';
-import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/use-cloud-projects.js';
-import { isCloudProjectPending, getCloudDeletionState, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
+import { isCloudProjectPending, getCloudDeletionState } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
-import { cloudProjectStub } from '#hooks/use-open-cloud-project.js';
-import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 
 /** A project only Tau Cloud holds, as a library row (D20). @public */

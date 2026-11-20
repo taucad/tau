@@ -153,17 +153,17 @@ describe('nextTauCloudStep', () => {
     expect(nextTauCloudStep(undefined, entitled, status('rev-1'))).toBe('wait');
   });
 
-  // ── D20: materialized projects ───────────────────────────────────────────
-  it('should connect a materialized project on its first open, before any revision', () => {
+  // ── D20: projects opened from the cloud ──────────────────────────────────
+  it('should connect a project opened from the cloud before any revision', () => {
     expect(nextTauCloudStep('open', notEntitled, status(undefined))).toBe('connect');
   });
 
-  it('should keep a materialized project owed until a person is signed in', () => {
+  it('should keep a project opened from the cloud owed until a person is signed in', () => {
     expect(nextTauCloudStep('open', { ...entitled, auth: 'anonymous' }, status(undefined))).toBe('wait');
     expect(nextTauCloudStep('open', { ...entitled, auth: 'indeterminate' }, status(undefined))).toBe('wait');
   });
 
-  it('should keep a materialized project owed until its authored manifest is reconciled', () => {
+  it('should keep a project opened from the cloud owed until its authored manifest is reconciled', () => {
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connecting'))).toBe('wait');
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'failed'))).toBe('wait');
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connected'))).toBe('wait');
@@ -409,8 +409,8 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBeUndefined();
   });
 
-  // ── D20: materialized projects ───────────────────────────────────────────
-  it('should connect a materialized project on open and keep it owed until the connection lands', async () => {
+  // ── D20: projects opened from the cloud ──────────────────────────────────
+  it('should connect a project opened from the cloud and keep it owed until the connection lands', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => Response.json([{ id: projectId, name: 'Gearbox', role: 'owner' }])),
@@ -425,7 +425,7 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBe('open');
   });
 
-  it('should keep a materialized project owed, unconnected, while signed out', () => {
+  it('should keep a project opened from the cloud owed, unconnected, while signed out', () => {
     account.auth = 'anonymous';
     tauCloudIntent.set(projectId, 'open');
 

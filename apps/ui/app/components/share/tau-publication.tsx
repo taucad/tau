@@ -1,4 +1,3 @@
-import { lazy } from 'react';
 import type { ComponentProps } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import {
@@ -14,8 +13,9 @@ import { getEnvironment } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { authClient } from '#lib/auth-client.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
-const SharedProjectWorkbench = lazy(async () => {
+const SharedProjectWorkbench = lazyCode(async () => {
   const module = await import('#components/share/shared-project-workbench.js');
   return { default: module.SharedProjectWorkbench };
 });

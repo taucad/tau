@@ -10,13 +10,17 @@ import {
   readTerminalTheme,
   terminalTextRendering,
 } from '#components/terminal/terminal-theme.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
 export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
 
 /** The default loader: the renderer module is imported only when a Terminal tab first draws. @public */
 export const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
+  const { createTerminalRenderer } = await loadCode(async () => {
+    const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
+    return { createTerminalRenderer };
+  });
   return createTerminalRenderer(options);
 };
 

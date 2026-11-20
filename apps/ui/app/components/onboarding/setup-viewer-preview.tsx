@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useState } from 'react';
+import { Suspense, useCallback, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { Loader } from '@taucad/ui/components/loader';
@@ -7,6 +7,7 @@ import { SetupPreviewFallback } from '#components/onboarding/setup-preview-fallb
 import type { SetupLivePreviewProps } from '#components/onboarding/setup-live-preview.js';
 import { canCreateWebGl } from '#components/onboarding/webgl-support.js';
 import type { PreviewFallbackReason } from '#telemetry/onboarding-telemetry.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /** What the preview area shows and how its viewer moves. */
 export type SetupViewerPreviewProps = Omit<SetupLivePreviewProps, 'onContextLost'> &
@@ -19,31 +20,26 @@ export type SetupViewerPreviewProps = Omit<SetupLivePreviewProps, 'onContextLost
 type LoadedPreviewProps = SetupLivePreviewProps & Readonly<{ mapping: CameraPresetId; onRetry: () => void }>;
 
 /**
- * The diagram in place of a preview whose chunk did not load, with Try again.
+ * The diagram in place of a preview whose chunk did not load. It offers no Try again: this page keeps a module that
+ * failed to load failed, so importing it afresh would fail the same way (FP9); the next page load tries again.
  *
- * @param properties - The mapping and the retry.
+ * @param properties - The mapping.
  * @returns The diagram.
  */
-function ChunkFailedPreview({ mapping, onRetry }: LoadedPreviewProps): React.JSX.Element {
-  return <SetupPreviewFallback mapping={mapping} reason='chunk_failed' onRetry={onRetry} />;
+function ChunkFailedPreview({ mapping }: LoadedPreviewProps): React.JSX.Element {
+  return <SetupPreviewFallback mapping={mapping} reason='chunk_failed' />;
 }
 
 /**
- * Load the live preview's chunk. A rejected import resolves to the diagram rather than throwing, so the area needs no
- * error boundary; Try again makes a new lazy component, which imports the chunk afresh.
+ * Load the live preview's chunk, as optional code: a failed load degrades to the diagram rather than throwing, so the
+ * area needs no error boundary. A retry after a lost WebGL context makes a new lazy component over the same module.
  *
  * @returns The component to render.
  */
-const loadLivePreview = async (): Promise<{ default: ComponentType<LoadedPreviewProps> }> => {
-  try {
-    const { default: LivePreview } = await import('#components/onboarding/setup-live-preview.js');
-    return { default: LivePreview };
-  } catch {
-    return { default: ChunkFailedPreview };
-  }
-};
-
-const createLivePreview = (): ComponentType<LoadedPreviewProps> => lazy(loadLivePreview);
+const createLivePreview = (): ComponentType<LoadedPreviewProps> =>
+  lazyCode<ComponentType<LoadedPreviewProps>>(async () => import('#components/onboarding/setup-live-preview.js'), {
+    fallback: ChunkFailedPreview,
+  });
 
 /**
  * The placeholder, at the preview's final size, while the chunk loads.

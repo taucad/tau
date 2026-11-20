@@ -16,6 +16,7 @@ const loadSentry = async (): Promise<typeof SentryLibrary | undefined> => {
   if (!ENV.SENTRY_DSN) {
     return undefined;
   }
+  // oxlint-disable-next-line tau-lint/code-loading-owner -- the error tracker's own code: its failure is handed over by `recoverFromSdkLoadFailure` and never reported, which the owner would do.
   return import('#lib/sentry.lib.js');
 };
 

@@ -79,6 +79,7 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Wait for a file manager's content and tree services, up to the ready bound.
@@ -1164,7 +1165,10 @@ function FileManagerScope({
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const { createFileSystemBridgeProxy } = await loadCode(async () => {
+        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        return { createFileSystemBridgeProxy };
+      });
       // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
       const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;

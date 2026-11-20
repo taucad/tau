@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { XIcon } from 'lucide-react';
@@ -32,74 +32,75 @@ import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
  * first opens. Only the active surface is mounted (Terminal survives hiding), so a phone that
  * stays on the chat never downloads the editor (CodeMirror and the dockview
  * workbench), parameters, converter or revision panels. */
-const ChatFileTree = lazy(async () => {
+const ChatFileTree = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-file-tree.js');
   return { default: module.ChatFileTree };
 });
-const ChatParameters = lazy(async () => {
+const ChatParameters = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
   return { default: module.ChatParameters };
 });
-const ChatEditorLayout = lazy(async () => {
+const ChatEditorLayout = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-editor-layout.js');
   return { default: module.ChatEditorLayout };
 });
-const ChatDetails = lazy(async () => {
+const ChatDetails = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-details.js');
   return { default: module.ChatDetails };
 });
-const ChatConverter = lazy(async () => {
+const ChatConverter = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-converter.js');
   return { default: module.ChatConverter };
 });
-const ProjectShareWorkbenchPanel = lazy(async () => {
+const ProjectShareWorkbenchPanel = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/project-share-action.js');
   return { default: module.ProjectShareWorkbenchPanel };
 });
-const ChatRevisions = lazy(async () => {
+const ChatRevisions = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
   return { default: module.ChatRevisions };
 });
 /* The bodies the desktop Workbench registers, each behind its own availability gate, so a phone reaches every
  * registry pane (I1) with the same content and refusals. */
-const ModelPanelBody = lazy(async () => {
+const ModelPanelBody = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-explorer.js');
   return { default: module.ModelPanelBody };
 });
-const KinematicsPanelBody = lazy(async () => {
+const KinematicsPanelBody = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-kinematics.js');
   return { default: module.KinematicsPanelBody };
 });
-const PrintPanelBody = lazy(async () => {
+const PrintPanelBody = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-print.js');
   return { default: module.PrintPanelBody };
 });
-const BrowserPane = lazy(async () => {
+const BrowserPane = lazyCode(async () => {
   const module = await import('#components/browser/browser-pane.js');
   return { default: module.BrowserPane };
 });
-const AgentsPanelBody = lazy(async () => {
+const AgentsPanelBody = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-agents.js');
   return { default: module.AgentsPanelBody };
 });
-const JobsPanelBody = lazy(async () => {
+const JobsPanelBody = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-jobs.js');
   return { default: module.JobsPanelBody };
 });
-const TelemetryPanelContent = lazy(async () => {
+const TelemetryPanelContent = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-kernel.js');
   return { default: module.TelemetryPanelContent };
 });
-const ChatConsole = lazy(async () => {
+const ChatConsole = lazyCode(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-console.js');
   return { default: module.ChatConsole };
 });
-const ProjectTerminalPane = lazy(async () => {
+const ProjectTerminalPane = lazyCode(async () => {
   const module = await import('#components/terminal/terminal-pane.js');
   return { default: module.ProjectTerminalPane };
 });

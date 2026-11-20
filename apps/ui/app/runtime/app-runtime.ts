@@ -88,6 +88,7 @@ import type { Model } from '#lib/model-catalog.js';
 import { createDeploymentOwner, initialDeploymentMode } from '#cloud/deployment-mode.js';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { setReportedDeploymentMode } from '#lib/sentry-context.lib.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The app runtime root actor. @public */
 export type AppRuntime = Actor<typeof appRuntimeMachine>;
@@ -317,9 +318,9 @@ const lateObservable = <T>(initial: T): LateObservable<T> => {
 /**
  * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
  */
-const loadSessionRuntimeModule = async () => import('#runtime/project-runtime.session.js');
+const loadSessionRuntimeModule = async () => loadCode(async () => import('#runtime/project-runtime.session.js'));
 /* The session's `revisions` module (D5): one loader for its children and the registry's early open (STO-25 SP6). */
-const loadSessionRevisions = async () => import('#runtime/session-revisions.js');
+const loadSessionRevisions = async () => loadCode(async () => import('#runtime/session-revisions.js'));
 
 /**
  * How each session builds its project runtime (A6d): the lazy module, over the library, the chat store, the query
@@ -454,7 +455,7 @@ export const createAppRuntime = ({
   /* A7b: what each session's facts are wired to. Each port is a closure over the composition, never machine context. */
   const sessionWiring: SessionWiring = {
     loadRevisions: loadSessionRevisions,
-    loadHostConnector: async () => import('#runtime/host-connector.js'),
+    loadHostConnector: async () => loadCode(async () => import('#runtime/host-connector.js')),
     registerCloseCut: (cut) => unload.register('session', cut),
     /* A7c: each live session's runtime writes what it owes at the producer stage, before any close cut (D26). */
     registerProducer: (flush) => unload.register('producer', flush),

@@ -49,6 +49,7 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * The focused project's palette items. Rendered inside the focused project's view (A11), they register into the
@@ -193,8 +194,8 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
       }
       // The capture recipe and the camera rig bring three.js; they load with the first capture (progressive loading PL5).
       const [{ captureCadImages, omittedSectionCutsNotice }, { getGraphicsCameraState }] = await Promise.all([
-        import('#services/headless-capture.js'),
-        import('@taucad/viewer/graphics/graphics-camera'),
+        loadCode(async () => import('#services/headless-capture.js')),
+        loadCode(async () => import('@taucad/viewer/graphics/graphics-camera')),
       ]);
       const { files, omittedSectionCutIds } = await captureCadImages({
         cadRef: claimedActor,

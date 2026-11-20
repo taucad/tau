@@ -276,7 +276,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
  * wake or a dead connection does; a missing file would not catch it. The TAU-UI-6 rows above are the control: a chunk
  * a replaced build no longer serves.
  */
-describe('a code load that fails once on the build the server still runs (FP9)', () => {
+describe('a code load that fails once on the build the server still runs (FP9, FP10)', () => {
   let browser: Browser | undefined;
   let deploys: Deploys | undefined;
   let server: DeployServer | undefined;
@@ -402,5 +402,88 @@ describe('a code load that fails once on the build the server still runs (FP9)',
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
     // The page was worked on, so it never reloads by itself for code it can do without.
     expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
+
+  /**
+   * Let a chat turn reach the agent host without an API: the page's model catalog and the self-host deployment answer,
+   * as the browser specs' fixtures give them. The run's own model call then fails, which these rows do not read.
+   */
+  const routeTurnAdmission = async (origin: string): Promise<void> => {
+    const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+      // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
+      await import('../../libs/api-llm-gateway/src/models/model.constants.js');
+    const catalog = Object.values(modelList)
+      .flatMap((entries) => Object.values(entries))
+      .filter((entry) => isModelListEntryEnabled(entry))
+      .map((entry) => modelListEntryToModel(entry));
+    const answer = (body: unknown) => ({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    await context?.route(/\/v1\/models(?:\?|$)/u, async (route) => route.fulfill(answer(catalog)));
+    await context?.route(/\/v1\/deployment(?:\?|$)/u, async (route) =>
+      route.fulfill(answer({ version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 })),
+    );
+  };
+
+  const implementation = /^\/assets\/agent-host\.impl-[\w-]+\.js$/u;
+  const agentWorkerScript = /^\/assets\/agent-host\.worker-[\w-]+\.js$/u;
+
+  /*
+   * FP10 (row 10 of the blueprint's table): the agent host worker's own import of its implementation fails. The
+   * server answers it 404 once, as an edge that has not caught up with a deploy does, then serves it. The worker is a
+   * realm of its own, so the page replaces it with a new worker instead of asking the one whose import failed again.
+   */
+  it('should replace the agent host worker whose implementation failed to load once, with no reload', async () => {
+    const { page, live, failures } = await open();
+    await routeTurnAdmission(live.origin);
+    const failed = live.failNext(implementation, { answer: 'not-found' });
+
+    await startChatFromHome(page, live.origin);
+    await failed;
+
+    // A new worker, which loads the implementation: the failed one is never asked again.
+    try {
+      await expect.poll(() => live.requestCount(agentWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+    } catch (error) {
+      throw new Error(
+        `The page asked the failed worker again instead of starting another (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.waitForTimeout(3000);
+    expect(await page.getByText(/failed to load|did not finish loading/iu).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
+
+  it('should offer Reload, never Try again, once new workers could not load the agent host either', async () => {
+    const { page, live } = await open();
+    await routeTurnAdmission(live.origin);
+    void live.failNext(implementation, { answer: 'not-found', count: 3 });
+
+    await startChatFromHome(page, live.origin);
+
+    try {
+      await page
+        .getByText(/failed to load|did not finish loading/iu)
+        .first()
+        .waitFor({ timeout: 60_000 });
+    } catch (error) {
+      const shown = await page.locator('[data-decision="run-error"]').allInnerTexts();
+      throw new Error(
+        `No load failure card (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); run cards: ${JSON.stringify(shown)}`,
+        { cause: error },
+      );
+    }
+    await page.waitForTimeout(1000);
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);
+    // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
+    expect(live.requestCount(agentWorkerScript)).toBeGreaterThanOrEqual(3);
   }, 120_000);
 });

@@ -313,6 +313,12 @@ export type FailNextOptions = Readonly<{
    * same file (`empty`) alone. Any destination by default.
    */
   dest?: string;
+  /**
+   * How the request fails: the connection reset after the response began (`reset`, the default), or Netlify's
+   * deleted-asset answer once (`not-found`), as an edge that has not caught up with a deploy gives one. A browser
+   * keeps a module whose fetch was answered 404 failed for the realm's life, without asking again.
+   */
+  answer?: 'reset' | 'not-found';
 }>;
 
 /**
@@ -421,6 +427,7 @@ export const startDeployServer = async (
   const drops: Array<{
     readonly path: RegExp;
     readonly dest: string | undefined;
+    readonly answer: 'reset' | 'not-found';
     remaining: number;
     readonly fired: (path: string) => void;
   }> = [];
@@ -471,6 +478,10 @@ export const startDeployServer = async (
     }
     fault.remaining -= 1;
     fault.fired(request.originalUrl);
+    if (fault.answer === 'not-found') {
+      sendDeletedAsset(response);
+      return;
+    }
     // Headers and the start of a body, then the connection is reset: the body never completes, and a browser does not
     // retry a response it has begun to read.
     response.writeHead(200, {
@@ -580,9 +591,9 @@ export const startDeployServer = async (
     origin: `http://127.0.0.1:${String(port)}`,
     documents,
     requests,
-    failNext: async (path, { count = 1, dest } = {}) =>
+    failNext: async (path, { count = 1, dest, answer = 'reset' } = {}) =>
       new Promise<string>((resolve) => {
-        drops.push({ path, dest, remaining: count, fired: resolve });
+        drops.push({ path, dest, answer, remaining: count, fired: resolve });
       }),
     requestCount: (path) => seen.filter((url) => path.test(url)).length,
     buildChecks: () => buildChecks,

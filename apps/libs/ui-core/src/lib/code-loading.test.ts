@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isCodeLoadFailure, loadCode, setCodeLoadFailureSink } from '#lib/code-loading.js';
+import { isCodeLoadFailure, loadCode, setCodeLoadFailureSink, workerCodeLoadFailureType } from '#lib/code-loading.js';
 
 const chromium = (): TypeError =>
   new TypeError('Failed to fetch dynamically imported module: https://tau.new/assets/metal-morph-spinner-D7Jh-ODB.js');
@@ -96,5 +96,45 @@ describe('loadCode', () => {
     expect(outer).toHaveBeenCalledOnce();
     expect(inner).not.toHaveBeenCalled();
     restoreOuter();
+  });
+});
+
+describe('loadCode in a dedicated module worker (FP10)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const inWorker = (): ReturnType<typeof vi.fn> => {
+    const postMessage = vi.fn();
+    // Any scope is this worker's own: `globalThis instanceof DedicatedWorkerGlobalScope`.
+    vi.stubGlobal('DedicatedWorkerGlobalScope', { [Symbol.hasInstance]: () => true });
+    vi.stubGlobal('postMessage', postMessage);
+    return postMessage;
+  };
+
+  it('should tell the page by default, which replaces the worker, and rethrow', async () => {
+    const postMessage = inWorker();
+    const failure = chromium();
+
+    await expect(loadCode(rejecting(failure))).rejects.toBe(failure);
+
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith({ type: workerCodeLoadFailureType, message: failure.message });
+  });
+
+  it('should keep optional code inside the worker, which degrades', async () => {
+    const postMessage = inWorker();
+
+    await expect(loadCode(rejecting(chromium()), { optional: true })).rejects.toThrow();
+
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('should tell nobody outside a worker when no recovery is installed', async () => {
+    const postMessage = vi.fn();
+    vi.stubGlobal('postMessage', postMessage);
+
+    await expect(loadCode(rejecting(chromium()))).rejects.toThrow();
+
+    expect(postMessage).not.toHaveBeenCalled();
   });
 });

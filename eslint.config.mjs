@@ -363,10 +363,8 @@ const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
  */
 export const uiFoundationProtocolDebtFiles = [
   { file: 'apps/libs/ui-core/src/lib/external-agent.ts', work: 'W2' },
-  { file: 'apps/libs/ui-core/src/lib/geospec-rpc-result.ts', work: 'W1' },
   { file: 'apps/libs/ui-core/src/lib/large-object-guard.test.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/lib/large-object-guard.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/lib/tau-plugin-store-catalog.ts', work: 'W1' },
   { file: 'apps/libs/ui-core/src/utils/run-auto-resume.ts', work: 'W2' },
   { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.test.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.ts', work: 'W3' },
@@ -374,7 +372,6 @@ export const uiFoundationProtocolDebtFiles = [
   { file: 'apps/libs/ui-core/src/workers/agent-host-placement.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.test.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.ts', work: 'W3' },
-  { file: 'apps/libs/ui-kit/src/icons/svg-icon.tsx', work: 'W1' },
 ];
 
 /**

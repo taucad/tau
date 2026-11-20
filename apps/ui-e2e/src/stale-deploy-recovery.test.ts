@@ -355,7 +355,8 @@ describe('a code load that fails once on the build the server still runs (FP9)',
     await page.waitForLoadState('networkidle');
     expect(live.documents).toStrictEqual(['previous', 'previous']);
     expect(await buildIdOf(page)).toBe(String(deploys?.previousBuildId));
-    expect(live.requests(chunk)).toBeGreaterThanOrEqual(2);
+    // The new page mounts the palette items once idle, so its own request for the chunk may follow the load.
+    await expect.poll(() => live.requests(chunk), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
   }, 120_000);

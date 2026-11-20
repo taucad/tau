@@ -17,6 +17,8 @@
     "**/agent/resources.js",
     "**/agent/resources.d.ts",
     "**/wasm/**",
+    // The PL7 service worker as shipped before FP1: minified build output kept verbatim for the boot suite.
+    "apps/ui-e2e/fixtures/service-worker/**",
     "**/out-tsc/**",
     "**/coverage/**",
     "**/.nx/**",

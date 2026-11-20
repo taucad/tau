@@ -609,6 +609,27 @@ export const prepareDeploys = async (name: string, options: Readonly<{ rename?: 
   };
 };
 
+/** The worker PL7 shipped before FP1, with its precache list as the injection point again. */
+const preFixWorkerFile = resolve(import.meta.dirname, '../../fixtures/service-worker/pre-fix-service-worker.js');
+
+/**
+ * The pre-fix worker (CacheFirst on first use, all-or-nothing install) precaching this build's list: what a browser
+ * that installed the worker before FP1 still runs, on the files of today's deploy.
+ *
+ * @param without - Precache URLs to leave out, as for a worker from before a file joined the interactive tier.
+ * @returns The worker script.
+ */
+export const readPreFixWorker = (without: readonly string[] = []): string => {
+  const entries = (
+    JSON.parse(readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8')) as Array<{ url: string }>
+  ).filter((entry) => !without.includes(entry.url));
+  const script = readFileSync(preFixWorkerFile, 'utf8');
+  const point = 'globalThis.__WB_MANIFEST';
+  // The last occurrence: the first is the fixture's own comment.
+  const at = script.lastIndexOf(point);
+  return `${script.slice(0, at)}${JSON.stringify(entries)}${script.slice(at + point.length)}`;
+};
+
 /** `apps/ui/scripts/build-service-worker.ts`'s build, as far as the suites call it. */
 type BuildServiceWorker = (options: {
   readonly buildDirectory: string;

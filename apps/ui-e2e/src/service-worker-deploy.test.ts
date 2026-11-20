@@ -120,8 +120,16 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   /** A fresh browser context on a fresh pair of deploys, with the previous one live and its page loaded. */
   const open = async (
     path: string,
-    workers?: Readonly<Record<Deploy, string>>,
-    retiredWorkers?: Readonly<Record<Deploy, string>>,
+    {
+      workers,
+      retiredWorkers,
+      retain = false,
+    }: Readonly<{
+      workers?: Readonly<Record<Deploy, string>>;
+      retiredWorkers?: Readonly<Record<Deploy, string>>;
+      /** The live next deploy also serves the previous deploy's files (`retain-previous-assets.mts`). */
+      retain?: boolean;
+    }> = {},
   ): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
     if (browser === undefined || deploys === undefined) {
       expect.fail('the builds and browser did not start');
@@ -129,7 +137,7 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
     const live = await startDeployServer(
       deploys.builds,
       { shells: deploys.shells, workers: workers ?? deploys.workers.scripts, retiredWorkers },
-      { hold: false },
+      { hold: false, retain },
     );
     server = live;
     context = await browser.newContext();
@@ -139,14 +147,14 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   };
 
   /* The worker-controlled half of TAU-UI-6 (`stale-deploy-recovery.test.ts` runs without the worker). A page the
-   * worker controls navigates after a deploy it has not heard of to a route whose chunk its own deploy no longer
-   * serves. The worker asks again without the deploy cookie (`retryUnpinnedMiss`) and the live deploy still has the
-   * chunk (retained, or unchanged): the route renders on the build the page loaded, one deploy behind, with no error
-   * and no reload, as ruling OD3 allows until the server names the new build. Once it does, the root's client
-   * middleware (RR9) turns the next navigation into a document load from the new deploy. A live deploy without the
-   * chunk answers 404 unpinned too, which is the recovery path the other suite covers. */
+   * worker controls navigates after a deploy it has not heard of to a route whose chunk the live deploy still serves
+   * (retained, `retain-previous-assets.mts`). The worker does not hold it, so the page's own request fetches it: the
+   * route renders on the build the page loaded, one deploy behind, with no error and no reload, as ruling OD3 allows
+   * until the server names the new build. Once it does, the root's client middleware (RR9) turns the next navigation
+   * into a document load from the new deploy. A live deploy without the chunk answers 404, which is the recovery path
+   * the other suite covers (the worker never asks again on the page's behalf: FP1). */
   it('should render a route of a replaced build from the live deploy, then load the next page from it once named', async () => {
-    const { page, live } = await open('/');
+    const { page, live } = await open('/', { retain: true });
     await waitForControllingWorker(page);
 
     live.deploy();
@@ -237,8 +245,7 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
 
   it('should retire an installed worker with one deploy of the kill switch', async () => {
     const { page, live } = await open('/projects', {
-      previous: deploys?.workers.scripts.previous ?? '',
-      next: killSwitchWorker,
+      workers: { previous: deploys?.workers.scripts.previous ?? '', next: killSwitchWorker },
     });
     await waitForControllingWorker(page);
     const installed = await readWorkerState(page);
@@ -290,11 +297,10 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   const openWithLegacyWorker = async (
     next: Readonly<{ worker: string; retiredWorker: string }>,
   ): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
-    const opened = await open(
-      '/projects',
-      { previous: '', next: next.worker },
-      { previous: legacyWorker, next: next.retiredWorker },
-    );
+    const opened = await open('/projects', {
+      workers: { previous: '', next: next.worker },
+      retiredWorkers: { previous: legacyWorker, next: next.retiredWorker },
+    });
     await opened.page.evaluate(async () => {
       await navigator.serviceWorker.register('/offline-shell-worker.js');
       await navigator.serviceWorker.ready;

@@ -48,6 +48,7 @@ import {
   createReturningVisitor,
   prepareDeploys,
   readBootState,
+  readPreFixWorker,
   startDeployServer,
   waitForControllingWorker,
 } from './support/two-deploys.ts';
@@ -284,11 +285,56 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     expect(outcome).toBe('installed');
   }, 180_000);
 
+  it('FP1: should install without one file, mount Home online and offline, and never serve that class from cache', async () => {
+    const { same, browser: launched } = requireDeploys();
+    // A precached script the project shell preloads and Home's shell does not name.
+    const homeShell = readFileSync(join(buildRoot, 'client/__shell/home/index.html'), 'utf8');
+    const entries = JSON.parse(
+      readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8'),
+    ) as PrecacheEntry[];
+    const projectOnly = entries.find(
+      ({ url }) => url.endsWith('.js') && same.shells.previous.includes(`"${url}"`) && !homeShell.includes(url),
+    )?.url;
+    if (projectOnly === undefined) {
+      expect.fail('the project shell names no precached script Home’s does not');
+    }
+    const live = await startDeployServer(
+      same.builds,
+      { shells: same.shells, workers: same.workers.scripts },
+      {
+        hold: false,
+        retain: true,
+      },
+    );
+    server = live;
+    // Only the worker's requests for the file fail; no page asks for it here but a prefetch, which the fault fails too.
+    live.inject({ path: projectOnly, destination: workerOnly, answer: 'reset' });
+    context = await launched.newContext();
+    await context.addCookies([{ name: 'tau-entry', value: 'app', url: live.origin }]);
+    const page = await context.newPage();
+    await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+    await waitForControllingWorker(page);
+    expect(live.requests.some((request) => request.path === projectOnly && request.fault === 'reset')).toBe(true);
+
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await waitForMount(page);
+
+    await context.setOffline(true);
+    const homeOffline = await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    expect(homeOffline?.fromServiceWorker()).toBe(true);
+    await waitForMount(page);
+    // The project class is incomplete: its navigation is the network's, which is offline.
+    await expect(page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' })).rejects.toThrow(
+      /ERR_INTERNET_DISCONNECTED|ERR_FAILED/u,
+    );
+  }, 180_000);
+
   it('row 6: should free a browser that a stalled worker holds with one deploy of the kill switch', async () => {
     const { same } = requireDeploys();
     const chunk = readBlockedChunk();
     const { page, live } = await openUnderWorker(same, {
-      previous: withoutPrecacheEntry(same.workers.scripts.previous, chunk),
+      // A worker from before FP1 (the fixed one never stalls the page): the stall to free is the pre-fix worker's.
+      previous: readPreFixWorker([chunk]),
       next: killSwitchWorker,
     });
     // Row 1's fault: the page is stalled on the previous deploy, reload after reload.

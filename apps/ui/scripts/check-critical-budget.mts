@@ -31,8 +31,10 @@
  * generated from the registry (each answered class's document, its references and its interactive tier), so nothing
  * was added by hand; it holds each guarded class's measured closure; no entry is a wasm file, a worker or runtime
  * asset, or a chunk holding any heavy module family; hashed `/assets/*` entries carry no revision, every other entry
- * carries one, and none carries an `integrity`. It also reports the precache's size. A build with the kill switch
- * (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, read here as the build read it) must list nothing.
+ * carries one, and none carries an `integrity`; every same-origin file a precached shell names, in markup or in its
+ * inline scripts' text, is in it, the icon sprites excepted (PL7 staging defects, FP4). It also reports the precache's
+ * size. A build with the kill switch (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, read here as the build read it) must list
+ * nothing.
  *
  * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
  * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
@@ -66,7 +68,7 @@ import type { ViteManifest } from '#scripts/interactive-closure.ts';
 /* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
 import { routeClasses, workerRouteClasses } from '../app/lib/route-classes.ts';
 import { resolveServiceWorkerKillSwitch, serviceWorkerKillSwitchVariable } from '../build-environment.ts';
-import { collectPrecacheFiles, isHashedUrl, precacheListFile } from './precache-list.ts';
+import { collectPrecacheFiles, findUnlistedShellFiles, isHashedUrl, precacheListFile } from './precache-list.ts';
 import type { ClientBuildView, PrecacheDocument } from './precache-list.ts';
 import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
 import type { WarmManifest } from '../app/lib/warm-manifest.ts';
@@ -847,6 +849,19 @@ const main = (): void => {
       killSwitch,
     }),
   );
+  if (!killSwitch && precache !== undefined) {
+    // Every file a precached shell names, in markup or script text, is precached (FP4): the generated list could
+    // otherwise miss one the collector does not read, as it missed the route manifest.
+    problems.push(
+      ...findUnlistedShellFiles(
+        workerClasses.map((workerClass) => ({
+          document: workerClass.document,
+          html: clientView.readText(workerClass.document.slice(1)) ?? '',
+        })),
+        new Set(precache.map((entry) => entry.url)),
+      ),
+    );
+  }
   if (killSwitch) {
     console.info(`Service worker precache (${variant}): none, the build ships the kill switch`);
   } else if (precache !== undefined) {

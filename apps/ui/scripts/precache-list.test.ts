@@ -3,7 +3,7 @@
  * output and fail the build when it cannot.
  */
 import { expect, it } from 'vitest';
-import { collectPrecacheFiles, precacheEntries } from '#scripts/precache-list.js';
+import { collectPrecacheFiles, findUnlistedShellFiles, precacheEntries } from '#scripts/precache-list.js';
 import type { ClientBuildView, PrecacheDocument, ViteManifest } from '#scripts/precache-list.js';
 
 const usage: PrecacheDocument = { document: '/usage/index.html', roots: [] };
@@ -226,5 +226,20 @@ it('collects the route manifest a shell’s inline module script imports, though
     '/assets/manifest-0a1b2c3d.js',
     '/assets/shared-ddd.js',
     '/fonts/GeistMono-Variable.woff2',
+  ]);
+});
+
+it('reports every file a shell names in markup or script text that the precache does not hold, sprites excepted', () => {
+  const html = `<link rel="modulepreload" href="/assets/entry-aaa.js"/>
+    <meta rel="icon" href="/favicon.ico"/>
+    <script>fetch("/assets/sprite-x1y2z3w4.svg")</script>
+    <script>const icon = '/assets/badge-q1w2e3r4.png'</script>
+    <script type="module">import "/assets/manifest-0a1b2c3d.js";</script>`;
+
+  expect(
+    findUnlistedShellFiles([{ document: '/__shell/home/index.html', html }], new Set(['/assets/entry-aaa.js'])),
+  ).toStrictEqual([
+    'precache: /__shell/home/index.html names /assets/badge-q1w2e3r4.png, which the worker does not precache',
+    'precache: /__shell/home/index.html names /assets/manifest-0a1b2c3d.js, which the worker does not precache',
   ]);
 });

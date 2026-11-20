@@ -90,6 +90,48 @@ const readDocumentReferences = (html: string): readonly string[] => {
   return references;
 };
 
+/** The text of every inline `<script>` of a document, with whether it is a module script. */
+const readInlineScripts = (html: string): ReadonlyArray<Readonly<{ module: boolean; text: string }>> =>
+  [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu)]
+    .filter((match) => !/(?:^|\s)src=/iu.test(match[1] ?? ''))
+    .map((match) => ({ module: /(?:^|\s)type=["']?module/iu.test(match[1] ?? ''), text: match[2] ?? '' }));
+
+/**
+ * The same-origin modules a document's inline module scripts import, statically or dynamically, by a literal specifier:
+ * React Router's route manifest (`/assets/manifest-<version>.js`) is named only this way, in script text, never in an
+ * attribute (PL7 service worker staging defects blueprint, D4).
+ */
+export const readInlineModuleImports = (html: string): readonly string[] =>
+  readInlineScripts(html)
+    .filter((script) => script.module)
+    .flatMap((script) => [
+      ...script.text.matchAll(/(?:\bimport\s*(?:[\w*{}\s,$]+\s*from\s*)?|\bimport\s*\(\s*)["']([^"']+)["']/gu),
+    ])
+    .map((match) => match[1] ?? '')
+    .filter((reference) => isSameOriginPath(reference) && !isExcluded(reference));
+
+/** A file name a document's inline script text names as a string, e.g. `"/assets/sprite-x.svg"`. */
+const namedFile = /["'`](\/(?!\/)[\w./-]+\.(?:js|mjs|css|woff2?|svg|png|jpe?g|webp|ico|json|webmanifest|wasm))["'`]/gu;
+
+/**
+ * Every same-origin file a document names: in its asset-bearing markup, and as a string in any of its inline scripts.
+ *
+ * @param html - The document.
+ * @returns The files, each once.
+ */
+export const readNamedFiles = (html: string): readonly string[] => [
+  ...new Set([
+    ...readDocumentReferences(html),
+    ...readInlineScripts(html).flatMap((script) => [...script.text.matchAll(namedFile)].map((match) => match[1] ?? '')),
+  ]),
+];
+
+/**
+ * Files a shell may name without the worker precaching them: the icon sprites, which an inline script fetches after
+ * the page renders and whose failure leaves only icons blank.
+ */
+export const isExemptFromPrecache = (url: string): boolean => /^\/assets\/[\w-]*sprite[\w-]*\.svg$/u.test(url);
+
 /** `url(/fonts/x.woff2)` references inside a stylesheet the document loads. */
 const readStylesheetReferences = (css: string): readonly string[] => {
   const references: string[] = [];
@@ -147,6 +189,10 @@ const collectClosure = ({ document, roots }: PrecacheDocument, build: ClientBuil
   }
   collected.add(document);
   pending.push(...readDocumentReferences(html));
+  // A module the document's inline script imports by a literal specifier (the route manifest) is read as a leaf: it is
+  // generated outside Vite's manifest, and its text is data.
+  const inlineImports = new Set(readInlineModuleImports(html));
+  pending.push(...inlineImports);
   pending.push(...rootKeys(build.manifest, roots).map((key) => `/${build.manifest[key]?.file ?? key}`));
 
   while (pending.length > 0) {
@@ -176,7 +222,9 @@ const collectClosure = ({ document, roots }: PrecacheDocument, build: ClientBuil
         ),
       );
     }
-    pending.push(...expandChunk(reference, fileToKey.get(reference), build));
+    if (!inlineImports.has(reference) || fileToKey.has(reference)) {
+      pending.push(...expandChunk(reference, fileToKey.get(reference), build));
+    }
   }
 
   return [...collected].toSorted((left, right) => left.localeCompare(right));
@@ -232,3 +280,24 @@ export const precacheEntries = (
           .digest('hex')
           .slice(0, 32),
   }));
+
+/**
+ * The files a shell document names, in markup or in its inline scripts' text, that the worker's precache list does not
+ * hold (PL7 service worker staging defects blueprint, FP4): a precached shell served offline, or once its deploy has
+ * aged out of asset retention, would ask the network for each and fail to boot. Only {@link isExemptFromPrecache}
+ * files may be left out.
+ *
+ * @param documents - Each precached document's URL and text.
+ * @param listed - The URLs of the worker's precache list.
+ * @returns One message per unlisted file.
+ */
+export const findUnlistedShellFiles = (
+  documents: ReadonlyArray<Readonly<{ document: string; html: string }>>,
+  listed: ReadonlySet<string>,
+): string[] =>
+  documents.flatMap(({ document, html }) =>
+    readNamedFiles(html)
+      .map((reference) => new URL(reference, 'https://tau.invalid').pathname)
+      .filter((url) => !isExcluded(url) && !listed.has(url) && !isExemptFromPrecache(url))
+      .map((url) => `precache: ${document} names ${url}, which the worker does not precache`),
+  );

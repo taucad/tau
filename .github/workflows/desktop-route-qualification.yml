@@ -281,5 +281,5 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.scope == 'all' && 'desktop-route-recovery-receipts' || format('desktop-{0}-recovery-receipts', inputs.scope) }}
-          path: out/qualification-receipts/recovery-receipts.json
+          path: out/qualification-recovery-receipts/recovery-receipts.json
           if-no-files-found: error

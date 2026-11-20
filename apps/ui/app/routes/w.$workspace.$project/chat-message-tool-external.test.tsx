@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render as renderBare, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import { userEvent } from '@testing-library/user-event';
 import { readUIMessageStream } from 'ai';
 import type { DynamicToolUIPart, UIMessageChunk } from 'ai';
@@ -21,7 +25,7 @@ import { classifyActivityPart } from '@taucad/chat-ui/utils/assistant-message-ac
 import chatMessageSource from '#routes/w.$workspace.$project/chat-message.tsx?raw';
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn()] }));
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
@@ -30,20 +34,23 @@ vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
 }));
 const imageHash = 'c'.repeat(64);
 const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
-vi.mock('#hooks/use-file-manager.js', () => {
-  // The provider memoizes its record client; attachment sources are keyed by that identity.
-  const fileManager = {
-    recordFiles: {
-      readFile: async (path: string) => {
-        if (path === `${attachmentDirectory}/${imageHash}.png`) {
-          return new Uint8Array([137, 80, 78, 71]);
-        }
-        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
-      },
+// The provider memoizes its record client; attachment sources are keyed by that identity.
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({
+    readFile: async (path: string) => {
+      if (path === `${attachmentDirectory}/${imageHash}.png`) {
+        return new Uint8Array([137, 80, 78, 71]);
+      }
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
     },
-  };
-  return { useOptionalFileManager: () => fileManager };
+  }),
 });
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre>{text}</pre>,
 }));

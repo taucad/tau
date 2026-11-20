@@ -465,7 +465,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
   },
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({
     onSelect,
     placeholder,

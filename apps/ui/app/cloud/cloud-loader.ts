@@ -2,13 +2,14 @@ import { Topic } from '@taucad/events';
 import { reportUiError } from '#lib/error-reporting.js';
 import { recoverFromCaughtError } from '#lib/stale-build-recovery.js';
 import { onceBootStage } from '#lib/boot-signals.js';
+import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * The one owner of a Cloud chunk's `import()` (adaptive app deployment mode charter D6, I8, I15, BA10, BA25).
  *
  * One memoised import per entry, with a deadline. A rejection, or the deadline passing, clears the memo and is
  * reported once; the first failure is retried once automatically, later ones only when the person asks
- * (`retry`). A failure goes to the existing stale-build recovery, which alone may reload the page. Nothing renders
+ * (`retry`), except a module the browser failed to load, which this page can never load again (FP9). A failure goes to the existing stale-build recovery, which alone may reload the page. Nothing renders
  * from an unsettled `lazy()`: a surface reads {@link CloudLoader.state} and renders its non-Cloud rendering until the
  * entry is `loaded`. Part of Core.
  */
@@ -119,11 +120,14 @@ export const createCloudLoader = <Module>({
         report(error);
       }
       recover(error);
-      if (failures === 1) {
+      /* A module the browser failed to load stays failed in this page (PL7 staging defects FP9): importing it again
+       * cannot succeed, so only a deadline that passed is retried; the recovery alone may reload the page. */
+      const canRetry = !isCodeLoadFailure(error);
+      if (failures === 1 && canRetry) {
         start(); // I8: one automatic retry.
         return;
       }
-      set({ status: 'failed', retryable: true });
+      set({ status: 'failed', retryable: canRetry });
     };
     const cancel = setTimer(() => {
       fail(new CloudImportTimeoutError(deadlineMilliseconds));
@@ -156,7 +160,7 @@ export const createCloudLoader = <Module>({
       }
     },
     retry: () => {
-      if (state.status === 'failed') {
+      if (state.status === 'failed' && state.retryable) {
         start();
       }
     },

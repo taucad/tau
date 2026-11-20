@@ -15,6 +15,7 @@ import wasmUrl from '@aurigax-ai/ghostty-web/ghostty-vt.wasm?url';
 import type { Terminal as AurigaxTerminal, TerminalTheme } from '#components/terminal/aurigax-ghostty-web';
 import { isOpenableTerminalLink, outputLines, outputSlices } from '#components/terminal/terminal-output-text.js';
 import type { TerminalTextRendering } from '#components/terminal/terminal-theme.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** @public */
 export type TerminalRendererOptions = {
@@ -274,7 +275,7 @@ const loadTerminalFont = async (fontFamily: string, fontSize: number): Promise<v
  * @public
  */
 export const createTerminalRenderer = async (options: TerminalRendererOptions): Promise<TerminalRendererView> => {
-  const aurigax = await import('#components/terminal/aurigax-ghostty-web');
+  const aurigax = await loadCode(async () => import('#components/terminal/aurigax-ghostty-web'));
   /* (1) The selection manager auto-scrolls while a drag is within 30 px of an edge, so a drag along the first rows
    * grows upward. Zero keeps auto-scroll for drags that leave the canvas, as xterm does. */
   Reflect.set(aurigax.SelectionManager, 'AUTO_SCROLL_EDGE_SIZE', 0);

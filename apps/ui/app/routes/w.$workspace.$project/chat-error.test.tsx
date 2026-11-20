@@ -185,6 +185,41 @@ describe('ChatError', () => {
     projection.stop();
   });
 
+  /* PL7 staging defects FP10: the agent host's own code failed to load in every worker the page would start; sending
+   * again meets the same failure, so the card offers Reload and never Try again. */
+  it.each([
+    ['its code', { code: 'WORKER_LOAD_FAILED', message: 'The agent-host worker failed to load: x' }],
+    [
+      "the browser's own wording",
+      {
+        message:
+          'Agent host worker failed to load: Failed to fetch dynamically imported module: https://tau.new/assets/agent-host.impl-BuKhIGu5.js',
+      },
+    ],
+  ])('offers Reload, never Try again, when the agent host could not load (%s)', async (_label, failure) => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, reload });
+    const projection = createActor(chatProjectionLogic).start();
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: { category: errorCategory.generic, title: 'Something went wrong', ...failure },
+        projection: projection.getSnapshot().context,
+        // Before the host log catches up, as when the host never opened.
+        attachmentStatus: 'lost',
+      } as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Part of Tau did not finish loading')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledOnce();
+    projection.stop();
+    vi.unstubAllGlobals();
+  });
+
   it('retires an untyped legacy connection card only after the current host log catches up', () => {
     const projection = createActor(chatProjectionLogic).start();
     const legacy: ChatErrorPayload = {

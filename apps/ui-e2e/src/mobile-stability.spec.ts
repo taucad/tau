@@ -104,13 +104,6 @@ const benignConsole: ReadonlyArray<
       new URL(url).origin === esmShOrigin,
   },
   {
-    // The served Content-Security-Policy-Report-Only header names a directive that only an enforced policy can carry.
-    name: 'report-only CSP notice',
-    matches: ({ text }) =>
-      text ===
-      "The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy.",
-  },
-  {
     /* On the software WebGPU profile the stage's startup GPU device is lost ("no valid external Instance") and the
      * stage draws with WebGL. Observed in most runs, always before the baseline: the probe shows the one device made
      * at startup, none live at the baseline, and none made afterwards. Pinned to that exact message and to the opening

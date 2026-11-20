@@ -1,4 +1,5 @@
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** Milliseconds a query may take before its worker is reset. */
 const queryTimeout = 120_000;
@@ -38,7 +39,10 @@ const acquireWorker = (): Worker => {
   if (worker) {
     return worker;
   }
-  const created = new Worker(new URL('measurement-exact.worker.ts', import.meta.url), { type: 'module' });
+  const created = createModuleWorker(
+    () => new Worker(new URL('measurement-exact.worker.ts', import.meta.url), { type: 'module' }),
+    { name: 'measurement-exact' },
+  );
   created.addEventListener('error', () => {
     resetWorker('The AP242 worker failed.');
   });

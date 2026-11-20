@@ -112,7 +112,7 @@ describe('buildReportOnlyContentSecurityPolicy', () => {
           .filter((part) => !part.startsWith('img-src ') && !part.startsWith('connect-src '))
           .join('; ');
       expect(withoutHostLists(policy)).toBe(
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests; report-to default;",
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; report-to default;",
       );
     },
   );

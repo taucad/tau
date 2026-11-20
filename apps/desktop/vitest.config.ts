@@ -3,7 +3,6 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   // Mirrors electron.vite.config.ts for a self-host build; unit tests exercise that transport.
   define: {
-    tauCloudBuildEnabled: 'false',
     tauTelemetryHostCloudBuild: 'false',
     tauSentryDsn: '""',
     tauSentryRelease: '""',

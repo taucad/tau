@@ -9,6 +9,7 @@ import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
 import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Longest wait for an idle period before requesting the editor runtime anyway. Milliseconds.
@@ -129,7 +130,10 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
     const request = ++runtimeLoadSequence.current;
     const runtimeSpan = pageProjectOpenPerformance().begin('editor.runtime');
     try {
-      const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
+      const { CodeEditorView } = await loadCode(async () => {
+        const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
+        return { CodeEditorView };
+      });
       runtimeSpan.finish(request === runtimeLoadSequence.current ? 'ok' : 'superseded');
       if (request === runtimeLoadSequence.current) {
         setFailure(undefined);

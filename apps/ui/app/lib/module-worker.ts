@@ -1,7 +1,7 @@
 /**
  * The one factory for the page's module workers (PL7 service worker staging defects blueprint, FP10).
  *
- * Vite bundles a worker only from `new Worker(new URL('…', import.meta.url), { type: 'module' })` written at the call
+ * Vite bundles a worker only from a `new Worker` whose script URL is a `new URL` literal relative to `import.meta.url`, written at the call
  * site, so the factory takes that expression as a thunk. It reports the worker's failures (`reportWorkerFailures`)
  * and, when the script itself fails to load (a plain `error` event with nothing in it, which a running worker's
  * uncaught error never is), tells the worker's owner with a `WORKER_LOAD_FAILED` error. An owner that can start a new
@@ -36,7 +36,7 @@ const isScriptLoadFailure = (event: Event): boolean =>
 /**
  * Create a module worker through the owner.
  *
- * @param create - `() => new Worker(new URL('…', import.meta.url), { type: 'module' })`.
+ * @param create - A thunk that constructs the module worker with its `new URL` literal at the call site.
  * @param options - Its name and the owner's answer to a load failure.
  * @returns The worker.
  */

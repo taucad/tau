@@ -605,13 +605,17 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     };
 
     /** The floor the worker stored (`tau-state-v3`), read without creating its cache. */
-    const readStoredFloor = async (page: Page): Promise<string | undefined> =>
-      page
-        .evaluate(async () => {
+    const readStoredFloor = async (page: Page): Promise<string | undefined> => {
+      try {
+        return await page.evaluate(async () => {
           const stored = await caches.match('/__tau/build-floor', { cacheName: 'tau-state-v3' });
           return stored === undefined ? undefined : stored.text();
-        })
-        .catch(() => undefined);
+        });
+      } catch {
+        // Between documents.
+        return undefined;
+      }
+    };
 
     /**
      * A returning visitor's two visits: the first installs the previous deploy's worker (and, with `floor`, the

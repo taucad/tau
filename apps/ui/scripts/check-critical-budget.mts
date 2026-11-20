@@ -66,7 +66,7 @@ import type { ViteManifest } from '#scripts/interactive-closure.ts';
 /* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
 import { routeClasses, workerRouteClasses } from '../app/lib/route-classes.ts';
 import { resolveServiceWorkerKillSwitch, serviceWorkerKillSwitchVariable } from '../build-environment.ts';
-import { collectPrecacheFiles, isHashedUrl, precacheListFile } from './precache-list.ts';
+import { collectPrecacheFiles, isHashedUrl, precacheListFile, readNamedFiles } from './precache-list.ts';
 import type { ClientBuildView, PrecacheDocument } from './precache-list.ts';
 import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
 import type { WarmManifest } from '../app/lib/warm-manifest.ts';
@@ -414,6 +414,12 @@ const precacheEntryProblems = (
 };
 
 /**
+ * Files a worker document names that the precache may leave out: the icon sprites, which the sprite loader fetches after
+ * first paint (`svg-sprite-loader.tsx`). A sprite that fails to load costs the icons, never the boot.
+ */
+export const isPrecacheExemptFile = (url: string): boolean => /^\/assets\/[\w-]*sprite[\w-]*\.svg$/u.test(url);
+
+/**
  * The service worker precache list's violations (shell invariant 8).
  *
  * @param input - The written list (`undefined` when missing), the list the registry generates for this build, each
@@ -429,6 +435,11 @@ export const findPrecacheProblems = (input: {
   moduleIds: ModuleIdManifest;
   /** The kill switch build (`TAU_SERVICE_WORKER_KILL_SWITCH=true`): its retiring worker precaches nothing. */
   killSwitch?: boolean;
+  /**
+   * Each worker document and every same-origin file it names, in markup or in script text (`readNamedFiles`): a
+   * precached shell boots offline, or past asset retention, only if all of them are precached (D4).
+   */
+  named?: ReadonlyMap<string, readonly string[]>;
 }): string[] => {
   if (input.entries === undefined) {
     return [`precache: build/${precacheListFile} is missing`];
@@ -448,6 +459,13 @@ export const findPrecacheProblems = (input: {
       .filter((url) => !expected.has(url))
       .map((url) => `precache: ${url} is in the worker's list but not generated from the registry`),
   ];
+  for (const [document, named] of input.named ?? []) {
+    problems.push(
+      ...named
+        .filter((url) => !listed.has(url) && !isPrecacheExemptFile(url))
+        .map((url) => `precache: ${document} names ${url}, which the worker does not precache`),
+    );
+  }
   for (const [id, closure] of input.closures) {
     if (input.workerClassIds.includes(id)) {
       problems.push(
@@ -845,6 +863,12 @@ const main = (): void => {
       manifest,
       moduleIds,
       killSwitch,
+      named: new Map(
+        precacheDocuments.map(({ document }) => [
+          document,
+          readNamedFiles(clientView.readText(document.slice(1)) ?? ''),
+        ]),
+      ),
     }),
   );
   if (killSwitch) {

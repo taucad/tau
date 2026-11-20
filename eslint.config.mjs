@@ -615,6 +615,8 @@ const config = [
       // .NET build output beside C# projects (runtime bootstraps such as dotnet.js).
       '**/dotnet/**/bin',
       '**/dotnet/**/obj',
+      // The PL7 service worker as shipped before FP1: minified build output kept verbatim for the boot suite.
+      'apps/ui-e2e/fixtures/service-worker/**',
       '**/generated',
       // `@taucad/api-extractor` output, one per kernel package.
       '**/agent/resources.js',

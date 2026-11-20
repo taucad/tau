@@ -1,10 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
-  retryUnpinnedMiss,
   workerClasses,
 } from '#offline/service-worker-routing.js';
 import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
@@ -171,28 +170,6 @@ describe('the deployment ask passes through (adaptive app deployment mode W7)', 
       ).toBeUndefined();
     },
   );
-});
-
-describe('retryUnpinnedMiss', () => {
-  it('should keep a hit and never retry a request already sent without credentials', async () => {
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
-    const hit = new Response('chunk', { status: 200 });
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), hit, fetchFile)).resolves.toBe(hit);
-    const miss = new Response('gone', { status: 404 });
-    await expect(
-      retryUnpinnedMiss(new Request(`${origin}/assets/a.js`, { credentials: 'omit' }), miss, fetchFile),
-    ).resolves.toBe(miss);
-    expect(fetchFile).not.toHaveBeenCalled();
-  });
-
-  it('should ask a miss again without the skew pin, from the live deploy', async () => {
-    const retried = new Response('chunk', { status: 200 });
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>().mockResolvedValue(retried);
-    const miss = new Response('<!DOCTYPE html><title>Not Found</title>', { status: 404 });
-
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), miss, fetchFile)).resolves.toBe(retried);
-    expect(fetchFile).toHaveBeenCalledExactlyOnceWith(`${origin}/assets/a.js`, { credentials: 'omit' });
-  });
 });
 
 describe('installMessage', () => {

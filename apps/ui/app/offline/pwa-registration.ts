@@ -42,7 +42,7 @@ import {
   serviceWorkerMessageType,
   skipWaitingMessageType,
 } from '#offline/pwa-messages.js';
-import { deleteOrphanWorkerCaches } from '#offline/service-worker-retire.js';
+import { deleteOrphanWorkerCaches } from '#offline/pwa-caches.js';
 import type { ServiceWorkerInstallStatus, ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Where the build writes the worker (`scripts/build-service-worker.ts`); its scope is the whole origin. */

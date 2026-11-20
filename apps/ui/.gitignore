@@ -1,6 +1,6 @@
 # Build
 build
-build-adaptive
+build-self-host
 dist
 
 # Public

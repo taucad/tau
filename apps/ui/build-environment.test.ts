@@ -11,7 +11,7 @@ import {
 
 describe('resolveTauDeploymentCeiling', () => {
   it.each([
-    [undefined, 'self-host'],
+    [undefined, 'adaptive'],
     ['false', 'self-host'],
     ['true', 'cloud'],
     ['adaptive', 'adaptive'],
@@ -28,7 +28,7 @@ describe('resolveTauDeploymentCeiling', () => {
 describe('resolveUiBuildDirectory', () => {
   it('defaults to build and takes one directory name', () => {
     expect(resolveUiBuildDirectory(undefined)).toBe('build');
-    expect(resolveUiBuildDirectory('build-adaptive')).toBe('build-adaptive');
+    expect(resolveUiBuildDirectory('build-self-host')).toBe('build-self-host');
     expect(() => resolveUiBuildDirectory('../elsewhere')).toThrow('one directory name');
   });
 });

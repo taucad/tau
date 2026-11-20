@@ -232,8 +232,9 @@ describe('desktop split graph: renderer edge (cut)', () => {
       /^package-(?:macos|linux|windows)/u.test(target),
     );
 
+    /* The shipped renderer carries the `adaptive` ceiling since the adaptive app deployment mode flip (W8). */
     expect(check?.options?.command).toBe(
-      'node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts',
+      'node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts --expect-ceiling adaptive',
     );
     expect(check?.dependsOn).toEqual(['build:desktop', { projects: ['desktop'], target: 'build' }]);
     expect(desktopTargets).not.toHaveProperty('check-renderer-payload');

@@ -3,13 +3,14 @@
  * The adaptive desktop renderer (adaptive app deployment mode charter W6): the shell decides funded or not from the
  * API's `GET /v1/deployment` answer at runtime, and nothing it shows waits for that answer.
  *
- * Every row launches this checkout's desktop (unpackaged, or the package `TAU_E2E_DESKTOP_EXECUTABLE` names) with the
- * adaptive renderer (`ui:build:desktop-adaptive`) through `TAU_DESKTOP_CLIENT_ROOT`. The API is the run's real one,
+ * Every row launches this checkout's desktop (unpackaged, or the package `TAU_E2E_DESKTOP_EXECUTABLE` names) with its
+ * shipped renderer, `adaptive` since the flip (W8); only the row that removes the Cloud chunk points
+ * `TAU_DESKTOP_CLIENT_ROOT` at an altered copy. The API is the run's real one,
  * funded (`development`), reached through a pass-through proxy that can answer or hold the deployment route alone:
  * the one case the harness lacks, the route failing while the rest answers.
  *
- * A completed-artifact run is a locked release package that ignores `TAU_DESKTOP_CLIENT_ROOT`; until the shipped
- * renderer is adaptive (W8) these rows skip there.
+ * A completed-artifact run is a locked release package: it ignores `TAU_API_URL`, so no row can put the proxy in front
+ * of its API, and these rows skip there.
  */
 import { execFile } from 'node:child_process';
 import { cp, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -29,8 +30,8 @@ import { deleteTauTestUser, seedTauTestUser, tauBillingAccountArgs, tauTestAccou
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolvePath(import.meta.dirname, '../../..');
-const adaptiveClientRoot =
-  process.env['TAU_E2E_ADAPTIVE_CLIENT_ROOT'] ?? join(workspaceRoot, 'apps/ui/desktop/build-adaptive/client');
+/** The shipped renderer of this checkout's unpackaged build: the copy the Cloud-chunk row alters. */
+const shippedClientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot, 'apps/ui/desktop/build/client');
 const deploymentPath = '/v1/deployment';
 const selfHostedApi = process.env['TAU_E2E_API_SELF_HOST'] === 'true';
 const launchTimeout = 120_000;
@@ -391,7 +392,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       ...(options.preserveProfile === true ? { preserveProfile: true } : {}),
       env: {
         TAU_API_URL: proxy.url,
-        TAU_DESKTOP_CLIENT_ROOT: options.clientRoot ?? adaptiveClientRoot,
+        ...(options.clientRoot === undefined ? {} : { TAU_DESKTOP_CLIENT_ROOT: options.clientRoot }),
       },
     });
     return { session, ...(email === undefined ? {} : { email }), ...(token === 'unused' ? {} : { token }) };
@@ -475,7 +476,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
   it('keeps the shell usable with the Cloud chunk removed from the renderer', async () => {
     const copy = await mkdtemp(join(tmpdir(), 'tau-desktop-adaptive-client-'));
     temporary.push(copy);
-    await cp(adaptiveClientRoot, copy, { recursive: true });
+    await cp(shippedClientRoot, copy, { recursive: true });
     const removed = await cloudChunkFiles(copy);
     expect(removed.length).toBeGreaterThan(0);
     await Promise.all(removed.map(async (file) => rm(join(copy, file), { force: true })));

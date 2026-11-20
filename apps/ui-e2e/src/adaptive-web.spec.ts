@@ -4,12 +4,12 @@ import * as target from '#support/external-target.js';
 import { cloudStandInCommands } from '#support/cloud-stand-ins.js';
 
 /**
- * The adaptive web build (adaptive app deployment mode charter W7, `ui-e2e:test:e2e:adaptive`): `TAU_CLOUD_ENABLED=
- * adaptive` served from `apps/ui/build-adaptive`. The page decides funded or not from the API's `GET /v1/deployment`
+ * The adaptive web build (adaptive app deployment mode charter W7, `ui-e2e:test:e2e:adaptive`): `ui:build`, `adaptive`
+ * since the flip (W8). The page decides funded or not from the API's `GET /v1/deployment`
  * answer, after first paint, and nothing it shows waits for that answer.
  *
  * No API runs: the cloud stand-ins answer the signed-in session and refuse every other API path, and each row gives
- * the deployment route its own answer, holds it, or leaves it refused. Other tiers serve a pinned build and skip.
+ * the deployment route its own answer, holds it, or leaves it refused. Other tiers skip these rows.
  */
 
 type AdaptiveCommands = {
@@ -25,7 +25,7 @@ type AdaptiveCommands = {
 
 const commands = target.commands as unknown as AdaptiveCommands;
 const cloud = cloudStandInCommands(target.commands);
-/** Only the adaptive tier serves `build-adaptive`; every other tier serves a pinned build and skips these rows. */
+/** Only the adaptive tier runs these rows: it answers the deployment route itself and has no API behind it. */
 const adaptiveTier = await commands.uiIsAdaptiveTier();
 const deploymentPattern = String.raw`/v1/deployment(?:\?|$)`;
 const apiOrigin = 'http://localhost:4000';

@@ -3,6 +3,7 @@ import type { CsharpLanguageAssets } from '@taucad/csharp-language/protocol';
 import type { OpenscadLanguageAssets } from '@taucad/openscad-language/protocol';
 import type { EditorDocument } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 export type EditorLanguageLease = Readonly<{ extensions: Extension[]; dispose(): void }>;
 
@@ -60,35 +61,50 @@ async function acquireFamily(request: EditorLanguageRequest): Promise<EditorLang
     case 'javascript':
     case 'javascriptreact':
     case 'jsx': {
-      const { acquireTypeScriptLanguage } = await import('#lib/typescript-language/typescript-codemirror.js');
+      const { acquireTypeScriptLanguage } = await loadCode(async () => {
+        const { acquireTypeScriptLanguage } = await import('#lib/typescript-language/typescript-codemirror.js');
+        return { acquireTypeScriptLanguage };
+      });
       request.signal.throwIfAborted();
       return acquireTypeScriptLanguage(request);
     }
     case 'kcl': {
-      const { acquireKclLanguage } = await import('#lib/kcl-language/kcl-codemirror.js');
+      const { acquireKclLanguage } = await loadCode(async () => {
+        const { acquireKclLanguage } = await import('#lib/kcl-language/kcl-codemirror.js');
+        return { acquireKclLanguage };
+      });
       request.signal.throwIfAborted();
       return acquireKclLanguage({ ...request, createWorker: request.host.createKclWorker });
     }
     case 'openscad': {
-      const { acquireOpenScadLanguage } = await import('#lib/openscad-language/openscad-codemirror.js');
+      const { acquireOpenScadLanguage } = await loadCode(async () => {
+        const { acquireOpenScadLanguage } = await import('#lib/openscad-language/openscad-codemirror.js');
+        return { acquireOpenScadLanguage };
+      });
       request.signal.throwIfAborted();
       return acquireOpenScadLanguage({ ...request, assets: request.host.openscadAssets() });
     }
     case 'csharp': {
-      const { acquireCsharpLanguage } = await import('#lib/csharp-language/csharp-codemirror.js');
+      const { acquireCsharpLanguage } = await loadCode(async () => {
+        const { acquireCsharpLanguage } = await import('#lib/csharp-language/csharp-codemirror.js');
+        return { acquireCsharpLanguage };
+      });
       request.signal.throwIfAborted();
       return acquireCsharpLanguage({ ...request, assets: request.host.csharpAssets() });
     }
     case 'json':
     case 'jsonc': {
-      const { acquireJsonLanguage } = await import('#lib/json-language/json-codemirror.js');
+      const { acquireJsonLanguage } = await loadCode(async () => {
+        const { acquireJsonLanguage } = await import('#lib/json-language/json-codemirror.js');
+        return { acquireJsonLanguage };
+      });
       request.signal.throwIfAborted();
       return acquireJsonLanguage(request);
     }
     case 'python': {
       const [{ autocompletion }, { pythonKernelCompletions }] = await Promise.all([
-        import('@codemirror/autocomplete'),
-        import('#lib/python-language/python-completions.js'),
+        loadCode(async () => import('@codemirror/autocomplete')),
+        loadCode(async () => import('#lib/python-language/python-completions.js')),
       ]);
       request.signal.throwIfAborted();
       return { extensions: [autocompletion({ override: [pythonKernelCompletions] })], dispose: () => undefined };

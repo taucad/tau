@@ -15,6 +15,7 @@ import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
@@ -24,7 +25,10 @@ export const shareProviderRegistry = createShareProviderRegistry([
     descriptor: builtinShareProviderDescriptor,
     load: async () => {
       try {
-        const { builtinShareProvider } = await import('#lib/builtin-share-provider.js');
+        const { builtinShareProvider } = await loadCode(async () => {
+          const { builtinShareProvider } = await import('#lib/builtin-share-provider.js');
+          return { builtinShareProvider };
+        });
         return builtinShareProvider;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {

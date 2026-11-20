@@ -11,11 +11,16 @@ import {
   resolveViewerGraphicsBackendPreference,
 } from '@taucad/ui-core/utils/graphics-backend-override';
 import { parseRenderTierQueryOverride, renderTierOverrideAllowed } from '#components/geometry/render-tier-override.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
-const SectionViewTestBridge = React.lazy(async () => {
-  const module = await import('#components/geometry/debug/section-view-test-bridge.js');
-  return { default: module.SectionViewTestBridge };
-});
+const SectionViewTestBridge = lazyCode(
+  async () => {
+    const module = await import('#components/geometry/debug/section-view-test-bridge.js');
+    return { default: module.SectionViewTestBridge };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 /**
  * Map the app's theme, accent colour and feature flags onto the viewer's environment, so every

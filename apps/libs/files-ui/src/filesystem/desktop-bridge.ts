@@ -28,6 +28,7 @@ import type {
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
 import { isDesktopTarget as isDesktopBuildTarget } from '@taucad/ui-core/lib/build-target';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * The `window.tau` object the preload script installs on the desktop build:
@@ -444,7 +445,10 @@ export const desktopBridge = (): DesktopBridge | undefined => {
   const connectServices = async (concern: string, context?: Readonly<Record<string, string>>): Promise<MessagePort> => {
     /* Dynamic so the electron renderer module never enters the web bundle's
      * eager graph — this module is reached from it. */
-    const { awaitElectronRelayedPort } = await import('@taucad/runtime/electron/renderer');
+    const { awaitElectronRelayedPort } = await loadCode(async () => {
+      const { awaitElectronRelayedPort } = await import('@taucad/runtime/electron/renderer');
+      return { awaitElectronRelayedPort };
+    });
     servicesRequests += 1;
     const requestId = `tau-services-${servicesRequests}`;
     const relayed = awaitElectronRelayedPort(shell.relayTag, (payload) => payload['requestId'] === requestId);

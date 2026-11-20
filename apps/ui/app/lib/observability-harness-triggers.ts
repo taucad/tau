@@ -2,6 +2,7 @@ import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** One canvas step: 2048 x 2048 RGBA is 16 MiB, the same step as one WebAssembly allocation. */
 const canvasPressureEdge = 2048;
@@ -121,11 +122,11 @@ export const triggerObservabilityKernelTermination = async (status: (message: st
     { createUiRuntimeConfig },
     { ENV: environment },
   ] = await Promise.all([
-    import('@taucad/runtime/client'),
-    import('@taucad/runtime/transport/web'),
-    import('@taucad/runtime/filesystem'),
-    import('#runtime/ui-runtime.config.js'),
-    import('#environment.config.js'),
+    loadCode(async () => import('@taucad/runtime/client')),
+    loadCode(async () => import('@taucad/runtime/transport/web')),
+    loadCode(async () => import('@taucad/runtime/filesystem')),
+    loadCode(async () => import('#runtime/ui-runtime.config.js')),
+    loadCode(async () => import('#environment.config.js')),
   ]);
   const worker = reportWorkerFailures(
     new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),

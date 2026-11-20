@@ -9,9 +9,10 @@
 # `mirror+file:/etc/apt/apt-mirrors.txt`) refused connections and fetched at 16.9 kB/s, and
 # three merge-queue jobs failed with exit 100 (135562329370, 135559657198, 135539446511).
 #
-# Each attempt runs `apt-get update` and then `apt-get install -y <arguments>`, with apt's own
-# per-fetch retries and timeouts and a deadline on each call. A failed attempt waits (exponential
-# backoff), switches the runner's Azure mirror sources to the Ubuntu archive, and tries again.
+# Each attempt runs `apt-get update`, `apt-get install -y --download-only <arguments>` and then
+# `apt-get install -y <arguments>`, with apt's own per-fetch retries and timeouts and a deadline on
+# the two network steps. A failed attempt waits (exponential backoff), repairs an interrupted dpkg,
+# switches the runner's Azure mirror sources to the Ubuntu archive, and tries again.
 # When every attempt fails the script exits non-zero: nothing is skipped.
 #
 # With APT_INSTALL_PLAYWRIGHT_BROWSERS set, it then asks Playwright which system packages those
@@ -23,7 +24,7 @@
 #   APT_INSTALL_PLAYWRIGHT_BROWSERS  Space- or comma-separated Playwright browsers whose system dependencies to install
 #   APT_INSTALL_ATTEMPTS             Attempts per install before failing (default: 4)
 #   APT_INSTALL_BACKOFF_SECONDS      First wait between attempts, doubled after each (default: 15)
-#   APT_INSTALL_CALL_TIMEOUT_SECONDS Deadline for one apt-get call before it is stopped and the attempt fails (default: 300)
+#   APT_INSTALL_CALL_TIMEOUT_SECONDS Deadline for `apt-get update` or the package download before it is stopped and the attempt fails (default: 300)
 #   APT_INSTALL_PLAYWRIGHT           Playwright command (default: pnpm exec playwright)
 #   APT_INSTALL_ETC                  apt configuration directory whose sources fall back (default: /etc/apt)
 #   APT_INSTALL_FALLBACK_URI         Archive the Azure mirror sources switch to (default: the Ubuntu archive for the host)
@@ -74,9 +75,16 @@ apt_options=(
 
 # apt's timeouts cover a silent connection, not a transfer that stalls after its headers: on 2026-11-20 two
 # merge-queue jobs (136044021730, 136044058038) sat in `apt-get update` for 58 minutes after the mirror list moved
-# on to archive.ubuntu.com, until the job timeout cancelled them. A deadline per call turns that into a failed
-# attempt, which retries on the archive fallback.
+# on to archive.ubuntu.com, until the job timeout cancelled them. So the network steps (`update` and a
+# `--download-only` install) run under a deadline, and one that misses it is a failed attempt, which retries on
+# the archive fallback. The install that unpacks and configures the downloaded packages runs with no deadline:
+# stopping dpkg part-way leaves it interrupted (job 136328471853, whose 300 s ran out mid-unpack after a 108 kB/s
+# download, then failed every retry with "dpkg was interrupted").
 apt_get() {
+  "${sudo[@]}" env DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" "$@"
+}
+
+apt_get_fetch() {
   local status=0
   "${sudo[@]}" timeout --kill-after=15 "$call_timeout" \
     env DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" "$@" || status=$?
@@ -86,10 +94,19 @@ apt_get() {
   return "$status"
 }
 
-# With no arguments an attempt only refreshes the package lists.
+# With no arguments an attempt only refreshes the package lists. Packages are fetched under the deadline first,
+# so the install itself reads only the local archive cache.
 update_and_install() {
-  apt_get update || return
-  [ $# -eq 0 ] || apt_get install -y "$@"
+  apt_get_fetch update || return
+  [ $# -gt 0 ] || return 0
+  apt_get_fetch install -y --download-only "$@" || return
+  apt_get install -y "$@"
+}
+
+# Finish any package an earlier attempt (or another step) left half-configured, so the retry is not refused.
+repair_dpkg() {
+  "${sudo[@]}" env DEBIAN_FRONTEND=noninteractive dpkg --configure -a ||
+    echo "::warning::dpkg --configure -a failed; retrying apt anyway"
 }
 
 fallback_applied=false
@@ -126,6 +143,7 @@ with_retries() {
     fi
     echo "::warning::apt attempt $attempt of $attempts failed; retrying in ${wait}s"
     sleep "$wait"
+    repair_dpkg
     use_fallback_sources
     attempt=$((attempt + 1))
     wait=$((wait * 2))

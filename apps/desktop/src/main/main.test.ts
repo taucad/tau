@@ -613,7 +613,6 @@ describe('desktop main compute owner', () => {
   const bootMilliseconds = 30_000;
 
   const bootstrap = async (): Promise<string> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
     await import('#main/main.js');
     await vi.waitFor(() => {
@@ -1849,7 +1848,6 @@ describe('desktop main admission gates', () => {
   );
 
   const boot = async (): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-admission-'));
     if (app.isPackaged) {
       Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
@@ -2012,7 +2010,6 @@ describe('desktop main admission gates', () => {
 describe('desktop quit bounds', () => {
   it('nests each quit wait strictly outside the host close it awaits (rule 9, RV-W2b #1)', async () => {
     const host = await vi.importActual<typeof Host>('@taucad/host');
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-quit-'));
     const { quitQuiesceMilliseconds, quitRendererMilliseconds } = await import('#main/main.js');
 
@@ -2037,7 +2034,6 @@ describe('desktop main deep links', () => {
   const bootMilliseconds = 30_000;
 
   const boot = async (): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-links-'));
     await import('#main/main.js');
   };
@@ -2255,7 +2251,6 @@ describe('desktop main Bambu Studio channels', () => {
   it(
     'should answer Bambu Studio calls only for the trusted renderer',
     async () => {
-      vi.stubGlobal('tauCloudBuildEnabled', false);
       state.userData = await mkdtemp(join(tmpdir(), 'tau-main-bambu-'));
       await import('#main/main.js');
       await vi.waitFor(() => {
@@ -2280,7 +2275,6 @@ describe('desktop main Bambu Studio channels', () => {
 
 describe('desktop main machine binding channel', () => {
   it('refuses machine and slicer IPC without creating the machine store when disabled', async () => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     const { desktopEnvironment } = await import('#main/environment.js');
     vi.mocked(desktopEnvironment).mockReturnValueOnce({
       TAU_API_URL: 'http://127.0.0.1:1',
@@ -2320,7 +2314,6 @@ describe('desktop main machine binding channel', () => {
   it(
     'should forward an access code only when one was typed, and refuse one over 256 characters',
     async () => {
-      vi.stubGlobal('tauCloudBuildEnabled', false);
       state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-'));
       await import('#main/main.js');
       await vi.waitFor(() => {
@@ -2375,7 +2368,6 @@ describe('desktop main machine store', () => {
    * @returns The environment main adds for the services utility.
    */
   const boot = async (before?: (userData: string) => Promise<void>): Promise<NodeJS.ProcessEnv> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-store-'));
     await before?.(state.userData);
     await import('#main/main.js');
@@ -2545,7 +2537,6 @@ describe('desktop main boot hardening (WP5)', () => {
 
   /** Boot main over fresh user data, after `before` lays out what an earlier launch left there. */
   const boot = async (before?: (userData: string) => Promise<void>): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-hardening-'));
     await before?.(state.userData);
     await import('#main/main.js');
@@ -2805,7 +2796,6 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   const testBuild = 'test+unknown+unpackaged';
 
   const boot = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-boot-health-'));
     await before?.(state.userData);
     const original = process.argv;
@@ -3223,7 +3213,6 @@ describe('desktop main update path without a renderer (WP7)', () => {
   const bootMilliseconds = 30_000;
 
   const boot = async (): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-update-path-'));
     if (app.isPackaged) {
       Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });

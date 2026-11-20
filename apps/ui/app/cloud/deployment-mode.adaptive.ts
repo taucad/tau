@@ -1,4 +1,5 @@
 import { ENV } from '#environment.config.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { createDeploymentOwner as createOwner } from '#runtime/deployment.js';
 import type { DeploymentOwnerLogic } from '#runtime/deployment.js';
@@ -19,6 +20,14 @@ export type DeploymentOwnerOptions = Readonly<{
 /** Build the owner the runtime invokes as `deployment`. @public */
 export type DeploymentOwnerFactory = (options: DeploymentOwnerOptions) => DeploymentOwnerLogic;
 
+/**
+ * The page's API URL, or none during the desktop build's SPA prerender: that render has no `window.ENV` (preload
+ * injects it in the app), and its snapshot is `unknown` whatever the owner holds (I13).
+ */
+const pageApiUrl = (): string | undefined =>
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent during desktop SPA prerender.
+  isDesktopTarget() && globalThis.window === undefined ? undefined : ENV.TAU_API_URL;
+
 /** The adaptive owner over the page's API URL, fetch, `localStorage` and `online` event. */
 export const createDeploymentOwner: DeploymentOwnerFactory | undefined = ({ now }) =>
-  createOwner({ apiUrl: ENV.TAU_API_URL, ...(now === undefined ? {} : { now }) });
+  createOwner({ apiUrl: pageApiUrl(), ...(now === undefined ? {} : { now }) });

@@ -215,7 +215,7 @@ const config: KnipConfig = {
       entry: ['scripts/svg-sprite.d.ts'],
     },
     'apps/libs/desktop-services-host': {
-      // Ambient `tauCloudBuildEnabled` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
+      // Ambient `tauTelemetryHostCloudBuild` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
       entry: ['src/build-environment.d.ts'],
     },
     'apps/libs/api-lifecycle': {
@@ -237,7 +237,7 @@ const config: KnipConfig = {
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
-        // Ambient `tauCloudBuildEnabled`, defined by electron.vite.config.ts.
+        // Ambient build constants (`tauSentryDsn` and the rest), defined by electron.vite.config.ts.
         'src/build-environment.d.ts',
       ],
       ignoreDependencies: [

@@ -8,7 +8,7 @@ import { join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
-import { inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
+import { desktopCeilingOf, inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -552,5 +552,40 @@ describe('Desktop renderer ownership', () => {
     await writeFile(join(packaged, 'clipper2z.wasm'), Buffer.from([0, 97, 115, 109, 2, 0, 0, 0]));
     const changed = await inspectDesktopPayload({ ...paths, app });
     expect(changed.violations).toContain('Packaged renderer differs from loose build: clipper2z.wasm');
+  });
+});
+
+describe('Desktop renderer deployment ceiling (adaptive app deployment mode W6)', () => {
+  it('reads the ceiling from the module graph', () => {
+    expect(desktopCeilingOf(['apps/ui/app/cloud/deployment-ceiling.adaptive.ts'])).toBe('adaptive');
+    expect(desktopCeilingOf(['/abs/apps/ui/app/cloud/deployment-ceiling.cloud.ts'])).toBe('cloud');
+    expect(desktopCeilingOf(['apps/ui/app/cloud/nav-billing.adaptive.tsx'])).toBe('adaptive');
+    expect(desktopCeilingOf(['apps/ui/app/root-layout.tsx'])).toBeUndefined();
+    expect(() =>
+      desktopCeilingOf([
+        'apps/ui/app/cloud/deployment-ceiling.adaptive.ts',
+        'apps/ui/app/cloud/deployment-ceiling.self-host.ts',
+      ]),
+    ).toThrow(/more than one/u);
+  });
+
+  it('reports the ceiling and refuses a renderer built for another', async () => {
+    const paths = await fixture();
+    await writeFile(
+      join(paths.renderer, 'tau-module-graph-123.json'),
+      JSON.stringify({
+        chunks: [
+          {
+            fileName: 'renamed.js',
+            moduleIds: ['apps/ui/app/root-layout.tsx', 'apps/ui/app/cloud/deployment-ceiling.adaptive.ts'],
+          },
+        ],
+      }),
+    );
+    const adaptive = await inspectDesktopPayload({ ...paths, expectedCeiling: 'adaptive' });
+    expect(adaptive.ceiling).toBe('adaptive');
+    expect(adaptive.violations).toEqual([]);
+    const pinned = await inspectDesktopPayload({ ...paths, expectedCeiling: 'self-host' });
+    expect(pinned.violations).toEqual(['Renderer deployment ceiling is adaptive, expected self-host']);
   });
 });

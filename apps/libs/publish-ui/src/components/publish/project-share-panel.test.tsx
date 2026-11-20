@@ -1870,6 +1870,67 @@ describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
     );
   });
 
+  /* A private pick made before the plan answered, then refused by it, waits for an explicit pick rather than publishing. */
+  it('holds a private pick the plan then refuses, publishing nothing until public is picked', async () => {
+    planIs('free', false);
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /only people you invite/i }));
+    planIs('free');
+    view.rerender(panelElement('proj_ui'));
+
+    const publish = await screen.findByRole('button', { name: /publish and copy link/i });
+    await userEvent.click(publish);
+    expect(revisionStatusHarness.commands.confirmPublish).not.toHaveBeenCalled();
+    expect(publish).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /anyone with the link/i })).not.toBeChecked();
+    expect(screen.getByText('Private links need the Pro plan. Choose who can open the link.')).toBeVisible();
+  });
+
+  it('publishes public once public is picked after the plan refuses a private pick', async () => {
+    planIs('free', false);
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /only people you invite/i }));
+    planIs('free');
+    view.rerender(panelElement('proj_ui'));
+    await userEvent.click(await screen.findByRole('radio', { name: /anyone with the link/i }));
+    await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ visibility: 'public' }),
+    );
+    expect(screen.queryByText(/choose who can open the link/iu)).not.toBeInTheDocument();
+  });
+
+  it('defaults a first publish on a known Free plan to public, asking nothing', async () => {
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    const publish = await screen.findByRole('button', { name: /publish and copy link/i });
+    expect(screen.getByRole('radio', { name: /anyone with the link/i })).toBeChecked();
+    expect(screen.queryByText(/choose who can open the link/iu)).not.toBeInTheDocument();
+    await userEvent.click(publish);
+
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ defaultVisibility: 'public' }),
+    );
+  });
+
+  it('keeps a private pick made before the plan answered when the plan is paid', async () => {
+    planIs('free', false);
+    const view = renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('radio', { name: /only people you invite/i }));
+    planIs('pro');
+    view.rerender(panelElement('proj_ui'));
+    await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
+
+    expect(screen.getByRole('radio', { name: /only people you invite/i })).toBeChecked();
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ visibility: 'private' }),
+    );
+  });
+
   it('offers Stop sharing on every plan', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publicEnvelope));
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);

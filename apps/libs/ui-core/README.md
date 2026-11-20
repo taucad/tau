@@ -17,6 +17,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` and
 | `./services/<name>`   | Parameter-set service, filesystem source identity, headless-capture presentation                                                                                                                                       |
 | `./machines/<name>`   | `import-staging`, `import-linked`                                                                                                                                                                                      |
 | `./workers/<name>`    | Agent-host placement and evidence, system-skills overlay                                                                                                                                                               |
+| `./contexts/<name>`   | `project-context` (`ProjectContext`) and `file-manager-context` (`FileManagerContext`): the React contexts the app's project and file-manager providers fill, typed by what library components read                    |
 | `./filesystem/<name>` | `workspace-errors`                                                                                                                                                                                                     |
 | Test helpers          | `lib/xstate-test.utils`, `lib/project.fixture`, `lib/composed-view-client.fixture`, `lib/testing/worker-stub`, `workers/test/rooted-provider.fixture` (app suites only)                                                |
 

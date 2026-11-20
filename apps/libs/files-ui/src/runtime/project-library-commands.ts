@@ -64,6 +64,7 @@ import type {
   ProjectLibraryWorker,
 } from '#types/project-library-io.types.js';
 import type { ChatStorage } from '#types/chat-storage.types.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** What a duplicate's name ends with. */
 const copySuffix = ' (Copy)';
@@ -787,7 +788,10 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+    const { leaseSettledChatLogs } = await loadCode(async () => {
+      const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+      return { leaseSettledChatLogs };
+    });
     return leaseSettledChatLogs({
       projectId,
       chats,

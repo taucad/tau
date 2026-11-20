@@ -5,9 +5,9 @@
     "limit": "31.5 kB"
   },
   {
-    "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",
+    "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23; 1.75 MB (operator approved 2026-11-20): @taulabs/replicad 1.2.1-beta.0 (upstream v1.2.1 merge) grows replicad.js.map to 1.60 MB, payload measured 1.73 MB",
     "path": ["dist/**/*.ttf", "dist/**/*.map"],
     "brotli": false,
-    "limit": "1.6 MB"
+    "limit": "1.75 MB"
   }
 ]

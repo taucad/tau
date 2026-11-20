@@ -139,10 +139,11 @@ describe('setup preview fallback', () => {
     expect(screen.getByTestId('setup-preview-fallback')).toHaveTextContent('Orbit');
   });
 
-  it('offers Try again when the chunk failed', async () => {
+  // A failed chunk offers none: the page keeps the failed module (FP9). A lost WebGL context can be tried again.
+  it('offers Try again when the WebGL context was lost', async () => {
     const onRetry = vi.fn();
     const user = userEvent.setup();
-    render(<SetupPreviewFallback mapping='tau' reason='chunk_failed' onRetry={onRetry} />);
+    render(<SetupPreviewFallback mapping='tau' reason='context_lost' onRetry={onRetry} />);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(onRetry).toHaveBeenCalledOnce();
   });

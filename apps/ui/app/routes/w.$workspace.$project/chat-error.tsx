@@ -8,6 +8,7 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { cn } from '@taucad/ui/utils/cn';
+import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
 import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
 import { cardOf, pageHeadlineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
@@ -148,6 +149,31 @@ function codedErrorCard({
   const { code } = error;
   if (code === 'USER_STOPPED') {
     return <ChatErrorPausedTurn className={className} title='You stopped this turn' resumable={resumable} />;
+  }
+  /* FP10: the agent host's own code failed to load and the page has already replaced its worker as often as it will.
+   * Sending again would meet the same failure in this page, so the card offers Reload, never Try again. */
+  if (code === 'WORKER_LOAD_FAILED' || isCodeLoadFailure(new Error(error.message))) {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title='Part of Tau did not finish loading'
+        description='Reload the page to continue.'
+        actions={
+          <Button
+            variant='outline'
+            size='xs'
+            onClick={() => {
+              globalThis.location.reload();
+            }}
+          >
+            <RefreshCcw className='size-3.5' />
+            Reload
+          </Button>
+        }
+      />
+    );
   }
   const { category, retry } = cardOf(code, error.category);
   const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;

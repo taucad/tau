@@ -4,13 +4,11 @@ import {
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
-  isSafeModeNavigation,
   navigationCandidate,
   workerClasses,
 } from '#offline/service-worker-routing.js';
 import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
-import { safeModeHref } from '#lib/boot-signals.js';
 
 const origin = 'https://tau.new';
 const projectDocument = '/w/__shell/__shell/index.html';
@@ -163,6 +161,18 @@ describe('isCachedOnFirstUse', () => {
   });
 });
 
+describe('the deployment ask passes through (adaptive app deployment mode W7)', () => {
+  it.each([`https://api.tau.new/v1/deployment`, `${origin}/v1/deployment`])(
+    'should neither cache nor answer %s, so the answer is always the network one',
+    (url) => {
+      expect(isCachedOnFirstUse({ url, method: 'GET' }, origin)).toBe(false);
+      expect(
+        navigationCandidate({ url, method: 'GET', mode: 'cors', cache: 'no-store' }, origin, isPrecached),
+      ).toBeUndefined();
+    },
+  );
+});
+
 describe('installMessage', () => {
   it('should report a completed install, a quota failure and any other failure', () => {
     expect(installMessage()).toStrictEqual({ type: serviceWorkerMessageType, status: 'ready' });
@@ -191,19 +201,6 @@ describe('activatesWorker (FP3)', () => {
   it('should ignore anything else', () => {
     for (const data of [undefined, null, 'SKIP_WAITING', { type: 'other' }]) {
       expect(activatesWorker(data, 7)).toBe(false);
-    }
-  });
-});
-
-describe('isSafeModeNavigation (FP5)', () => {
-  it('should know the safe-mode link the strip and the error document send', () => {
-    expect(isSafeModeNavigation(new URL(safeModeHref, origin).href)).toBe(true);
-    expect(isSafeModeNavigation(`${origin}/w/home/bracket?safe=1`)).toBe(true);
-  });
-
-  it('should leave every other navigation to the worker’s rules', () => {
-    for (const url of [`${origin}/`, `${origin}/?safe=0`, `${origin}/?unsafe=1`, 'not a url']) {
-      expect(isSafeModeNavigation(url), url).toBe(false);
     }
   });
 });

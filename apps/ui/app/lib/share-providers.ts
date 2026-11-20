@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createShareArtifactWorkerCodec } from '@taucad/share/artifact-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 import { directShareProvider, directShareProviderDescriptor } from '@taucad/share/direct';
 import { bitbucketShareProvider, bitbucketShareProviderDescriptor } from '@taucad/share/bitbucket';
 import { githubShareProvider, githubShareProviderDescriptor } from '@taucad/share/github';
@@ -15,6 +16,7 @@ import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
@@ -24,7 +26,10 @@ export const shareProviderRegistry = createShareProviderRegistry([
     descriptor: builtinShareProviderDescriptor,
     load: async () => {
       try {
-        const { builtinShareProvider } = await import('#lib/builtin-share-provider.js');
+        const { builtinShareProvider } = await loadCode(async () => {
+          const { builtinShareProvider } = await import('#lib/builtin-share-provider.js');
+          return { builtinShareProvider };
+        });
         return builtinShareProvider;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
@@ -253,7 +258,7 @@ type BrowserShareProviderContext = ShareProviderContext & {
 
 export const createBrowserShareProviderContext = (): BrowserShareProviderContext => {
   const archiveUrl = `${ENV.TAU_API_URL}/v1/repositories/archive`;
-  const artifactCodec = createShareArtifactWorkerCodec();
+  const artifactCodec = createShareArtifactWorkerCodec({ createModuleWorker });
   return {
     origin: shareOrigin(),
     archiveUrl,

@@ -35,6 +35,11 @@
  * Orbit style (roll Finding 10): in Free orbit, after each step of a held orbit drag, the controls take the camera's
  * screen up as their orbit axis (`applyCameraUp`, which keeps the view), so the drag never reaches a pole and turns
  * through it. Switching to Turntable gives the camera the scene's up again through the camera actor (`setUpDirection`).
+ * Turntable has no roll (roll ruling E), so the driver also straightens a rolled pose it presents in Turntable that
+ * neither its own controls nor the view cube made (a restored seed, an adopted record, another sender's pose): the
+ * camera keeps the direction and takes the scene up, as the switch does. An automatic change is straightened as one
+ * (`adoptPersistedPose` with the up direction, never saved, I7); a person's as one (`setUpDirection`). A view along
+ * the scene up keeps its roll, as `setUpDirection` keeps it there.
  */
 import type { RootState } from '@react-three/fiber';
 import type { Mesh } from 'three';
@@ -53,16 +58,20 @@ import {
   Vector4,
 } from 'three';
 import { createCallbackLogic } from 'xstate';
-import { perspectiveVerticalSpan } from '@taucad/camera';
+import { perspectiveVerticalSpan, resolveCameraUp } from '@taucad/camera';
 import type { CameraVector } from '@taucad/camera';
-import type { CameraDriverSnapshot } from '@taucad/camera/machine';
+import type { CameraDriverSnapshot, CameraSource } from '@taucad/camera/machine';
 import { resolveMetersPerRenderUnit, shouldRebaseRenderFrame, shouldRescaleRenderFrame } from '@taucad/spatial';
 import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
 import { applyCameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
-import type { CameraInputRouting, CameraPivotPicker } from '#graphics/three/controls/camera-wheel-router.js';
+import type {
+  CameraInputRouting,
+  CameraPivotPicker,
+  OrbitStyle,
+} from '#graphics/three/controls/camera-wheel-router.js';
 import { hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
@@ -87,6 +96,15 @@ type FrameSubscribe = (
 export const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
+
+/*
+ * Changes no person commanded (charter D20): a Turntable straightening of one is automatic too, so the record never
+ * saves it (I7). The view cube's own poses and an up change are never straightened: the cube keeps a Turntable view
+ * upright itself, and an up change is the straightening.
+ */
+const automaticSources: ReadonlySet<CameraSource> = new Set(['framing', 'persisted', 'viewport', 'bounds']);
+const unstraightenedSources: ReadonlySet<CameraSource> = new Set(['gizmo', 'up']);
+const turntableUprightRequest = 'turntable-upright';
 
 /** The `camera-controls` actions that orbit: a mouse drag, a one-finger drag and the two-finger rotate gestures. */
 const orbitActions: ReadonlySet<number> = new Set([
@@ -354,6 +372,34 @@ export const createControlsAdapter = ({
       scene.updateMatrixWorld(true);
     };
 
+    /*
+     * Roll ruling E: in Turntable, a rolled pose that neither these controls nor the view cube made gets the scene up.
+     * Once per presented change, never per frame. The guard is the camera's own (`resolveCameraUp`): when the scene up
+     * is parallel to the view, `setUpDirection` would keep the roll, so nothing is sent and nothing loops.
+     */
+    const straightenTurntable = (snapshot: CameraDriverSnapshot): void => {
+      const { source } = snapshot.lastChange;
+      // Turntable only, by name: every other orbit style keeps its roll. An unset style is Turntable, the default.
+      const orbitStyle: OrbitStyle = getCameraRouting?.()?.cameraInput.orbitStyle ?? 'turntable';
+      if (observing || unstraightenedSources.has(source) || orbitStyle !== 'turntable') {
+        return;
+      }
+      const axis = getUpAxis();
+      const sceneUp = upAxes[axis];
+      const { direction, up } = snapshot.view;
+      if (
+        up.every((value, index) => value === sceneUp[index]) ||
+        resolveCameraUp({ direction, preferredUp: sceneUp }).some((value, index) => value !== sceneUp[index])
+      ) {
+        return;
+      }
+      camera.send(
+        automaticSources.has(source)
+          ? { type: 'adoptPersistedPose', requestId: turntableUprightRequest, upDirection: axis }
+          : { type: 'setUpDirection', axis },
+      );
+    };
+
     /* The driver: presents one camera change on this canvas. */
     const publish = (nativeCamera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
       const writeControls =
@@ -418,6 +464,8 @@ export const createControlsAdapter = ({
         far: nativeCamera.far,
       };
       invalidate();
+      // Last, so a straightening this change causes is presented after this one.
+      straightenTurntable(snapshot);
     };
 
     const onControlStart = (): void => {

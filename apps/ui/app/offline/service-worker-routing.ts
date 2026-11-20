@@ -161,21 +161,6 @@ export const installMessage = (error?: unknown): ServiceWorkerMessage =>
       };
 
 /**
- * Whether a navigation asks for safe mode (`?safe=1`, `boot-signals.ts`'s `safeModeHref`): the worker never answers it,
- * so safe mode reaches the network as if no worker were there (FP5), and its page unregisters the worker.
- *
- * @param url - The navigation's URL.
- * @returns `true` for a safe-mode navigation.
- */
-export const isSafeModeNavigation = (url: string): boolean => {
-  try {
-    return new URL(url).searchParams.get('safe') === '1';
-  } catch {
-    return false;
-  }
-};
-
-/**
  * Whether a message from a page activates this worker (FP3 of Brain
  * `research/pl7-service-worker-staging-defects-blueprint.md`): the update rule's `SKIP_WAITING` always does; an
  * activate-if-build message does when the page is already on this worker's build, which is then the live one, so

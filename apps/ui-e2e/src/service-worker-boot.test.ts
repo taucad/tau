@@ -563,32 +563,6 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     }, 180_000);
   });
 
-  describe('recovery before mount (FP5)', () => {
-    it('should mount the app when the strip’s Reload is pressed in a page a pre-fix worker stalls', async () => {
-      const { same } = requireDeploys();
-      // No deploy: the browser keeps the pre-fix worker, and every reload of its own stalls again (D5).
-      const { page } = await stallUnderPreFixWorker(same.workers.scripts.next);
-      failedAssets = [];
-      const reloaded = page.waitForEvent('load', { timeout: 30_000 });
-      await page.locator('#tau-boot-strip [data-boot-action=reload]').click();
-      await reloaded;
-      const state = await waitForMount(page);
-      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(same.previousBuildId) });
-      expect(failedAssets).toStrictEqual([]);
-    }, 180_000);
-
-    it('should answer safe mode from the network and leave the worker', async () => {
-      const { same } = requireDeploys();
-      const { page, live } = await openUnderWorker(same, same.workers.scripts);
-      const response = await page.goto(`${live.origin}/?safe=1`, { waitUntil: 'commit' });
-      expect(response?.fromServiceWorker()).toBe(false);
-      await waitForMount(page);
-      await expect
-        .poll(async () => readWorkerState(page), { timeout: 30_000, interval: 250 })
-        .toMatchObject({ registered: false, caches: [] });
-    }, 180_000);
-  });
-
   describe('when the precached shell names a route manifest the live deploy no longer serves (D4)', () => {
     /**
      * A returning visitor's two visits. The first installs the worker from a page outside a project workspace; between

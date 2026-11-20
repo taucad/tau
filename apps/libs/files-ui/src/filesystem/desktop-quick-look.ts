@@ -7,6 +7,7 @@ import { getComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preferenc
 import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type PreviewProjectFileOptions = {
   readonly path: string;
@@ -61,7 +62,7 @@ export const previewProjectFileInQuickLook = async (
   }
 
   const [{ createRuntimeClient }, resolveOptions, observeRuntimeClient] = await Promise.all([
-    import('@taucad/runtime/client'),
+    loadCode(async () => import('@taucad/runtime/client')),
     services.resolveKernelOptions(options.projectId, getComputeReuseMode()),
     services.loadRuntimeObserver(),
   ]);

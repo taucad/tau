@@ -8,9 +8,8 @@ import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
-import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
-import { cn } from '@taucad/ui/utils/cn';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
@@ -125,19 +124,21 @@ type TrackedFilesWait = Readonly<{ active: boolean; startedAt: number }>;
  *
  * A wait the open itself waited for (the session still reports the first check `pending` or `slow`) began with the
  * open, which has already waited the open bound for it (A14): the bound is the indicator delay, so its indicator shows
- * as the stage mounts. Every other wait, such as a later check or a download that begins on screen, starts now.
+ * as the stage mounts. Every other wait, such as a later check or a download that begins on screen, starts now, and so
+ * does a wait that began with the project's own open on the stage, whose pill keeps the open's start.
  *
  * @param active - Whether the stage waits for the model's files now.
+ * @param isOpenBound - Whether a wait that starts now may be one the open waited for; `false` for a project open.
  * @returns The current wait's start, in milliseconds on the wait clock.
  */
-function useModelFilesWaitStart(active: boolean): number {
+export function useStageWaitStart(active: boolean, isOpenBound = true): number {
   const clock = useWaitClockSource();
   const { projectId } = useProject();
   const isOpenWait = useSelector(useSessions(), (state) => {
     const availability = state.context.status[projectId]?.availability;
     return availability === 'pending' || availability === 'slow';
   });
-  const startNow = (): number => clock.now() - (isOpenWait ? indicatorDelayMilliseconds : 0);
+  const startNow = (): number => clock.now() - (isOpenBound && isOpenWait ? indicatorDelayMilliseconds : 0);
   const [tracked, setTracked] = useState<TrackedFilesWait>(() => ({
     active,
     startedAt: startNow(),
@@ -150,86 +151,8 @@ function useModelFilesWaitStart(active: boolean): number {
   return current.startedAt;
 }
 
-/**
- * The viewer stage's status for the model's files: the status pill, "Checking model files" or "Downloading model
- * files" with its percent, from 1,000 ms (UI Policy § 6). A check that outlasts its patience reads "Still checking
- * model files" with "Try again", which checks the files again (T5); the patience is the session's (`slow`, A14),
- * counted on its clock from when the check began, so the pill adds no clock of its own. It is rendered for the stage's
- * whole life, so a shown pill keeps its minimum after the files arrive. The open's route announcement speaks for it,
- * so it is not live. Mount it once the stage has waited for its files: it reads the project's session.
- *
- * The stage's other status (`children`, the build status) shares the pill's cell and stays mounted: it gives way from
- * the frame the pill reveals in and while the pill holds, on the same CSS delays, so a check too short to show the pill
- * never hides it. A failed download drops the pill at once: the stage's failure overlay says it.
- *
- * @param props - The wait the stage is in, or `undefined` once the files are here, and the status it shares a cell with.
- * @returns The status slot's wait content.
- */
-export function ModelFilesStageStatus({
-  wait,
-  children,
-}: {
-  readonly wait: ModelFilesWait | undefined;
-  readonly children?: React.ReactNode;
-}): React.JSX.Element {
-  const isSlow = useFileCheckSlow();
-  const facet = useLargeObjects();
-  const isActive = wait === 'filesChecking' || wait === 'files';
-  const startedAt = useModelFilesWaitStart(isActive);
-  /* The same timing the pill reads: pure, from the wait's start and end, so no clock or timer is added. */
-  const { timing } = useWaitClock({ active: isActive, startedAt });
-  /* A shown pill keeps its words while it holds its minimum after the wait. */
-  const [heldWait, setHeldWait] = useState(wait);
-  if (isActive && wait !== heldWait) {
-    setHeldWait(wait);
-  }
-  const shownWait = isActive ? wait : heldWait;
-  const isDownloading = shownWait === 'files';
-  const isSlowCheck = wait === 'filesChecking' && isSlow;
-  const progress =
-    isDownloading && facet !== undefined && facet.totalBytes > 0
-      ? Math.min(1, facet.bytes / facet.totalBytes)
-      : undefined;
-  const label = isDownloading
-    ? 'Downloading model files'
-    : isSlowCheck
-      ? 'Still checking model files'
-      : 'Checking model files';
-  const concealStyle: (React.CSSProperties & Record<'--wait-slow-delay', string>) | undefined =
-    timing.state === 'waiting' ? { '--wait-slow-delay': timing.revealDelay } : undefined;
-  return (
-    <div className='group/viewer-wait grid justify-items-center *:[grid-area:1/1]'>
-      <div data-slot='model-files-status' className='flex items-center justify-center gap-1.5'>
-        {wait === 'filesFailed' ? null : (
-          <WaitIndicator
-            active={isActive}
-            variant='pill'
-            live={false}
-            startedAt={startedAt}
-            label={label}
-            progress={progress}
-          />
-        )}
-        {isSlowCheck ? <ModelFilesRetry /> : null}
-      </div>
-      {children === undefined ? null : (
-        /* `wait-until-slow` conceals at its delay, set here to the pill's reveal. */
-        <div
-          className={cn(
-            'group-has-[[data-slot=wait-indicator][data-state=holding]]/viewer-wait:invisible',
-            concealStyle === undefined ? undefined : 'wait-until-slow',
-          )}
-          style={concealStyle}
-        >
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** "Try again" for the model's files: checks them again and resumes their download (T5). */
-function ModelFilesRetry(): React.JSX.Element {
+export function ModelFilesRetry(): React.JSX.Element {
   const client = useRevisionClient();
   return (
     <Button
@@ -264,7 +187,7 @@ export const modelFilesFailure: ViewerStageStatus = {
  */
 function ModelCheckPlaceholder(): React.JSX.Element {
   const isSlow = useFileCheckSlow();
-  const startedAt = useModelFilesWaitStart(true);
+  const startedAt = useStageWaitStart(true);
   return (
     <div
       className='flex size-full items-center justify-center gap-1.5 p-6'
@@ -334,21 +257,17 @@ export const projectFilesCopy = (
   return messages.failed;
 };
 
-function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailability }): React.JSX.Element {
+/**
+ * Try again for an open that could not go on: authorise the remote again, pull now, or connect it, whichever the remote
+ * needs.
+ *
+ * @returns The retry.
+ */
+export function useProjectOpenRetry(): () => void {
   const { connectRemote, syncNow } = useRevisionCommands();
-  const status = useRevisionStatus();
-  const remote = status?.remote;
+  const remote = useRevisionStatus()?.remote;
   const client = useRevisionClient();
-  const location = useLocation();
-  const parameters = new URLSearchParams(location.search);
-  parameters.set('workbench', 'revisions');
-  const detailsUrl = `${location.pathname}?${parameters.toString()}`;
-  const reason = remote?.reason ?? status?.sync.reason;
-  const needsDetails =
-    state === 'account' ||
-    status?.sync.state === 'conflicted' ||
-    (reason !== undefined && reason !== 'unknown' && reason !== 'offline');
-  const retry = (): void => {
+  return (): void => {
     if (remote?.phase === 'reconnectRequired') {
       client?.send({ command: 'authorizeRemote' });
     } else if (remote?.phase === 'connected') {
@@ -357,7 +276,56 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
       void connectRemote('tau');
     }
   };
-  const isFailure = state === 'failed' || state === 'offline' || state === 'account';
+}
+
+/**
+ * What the person can do about an open that could not go on: "Open History" where the failure needs a decision or a
+ * sign-in, otherwise "Try again".
+ *
+ * @param props - The project's failed availability.
+ * @returns The action.
+ */
+export function ProjectFilesAction({
+  state,
+}: {
+  readonly state: Extract<ProjectAvailability, 'offline' | 'failed' | 'account'>;
+}): React.JSX.Element {
+  const status = useRevisionStatus();
+  const retry = useProjectOpenRetry();
+  const location = useLocation();
+  const parameters = new URLSearchParams(location.search);
+  parameters.set('workbench', 'revisions');
+  const detailsUrl = `${location.pathname}?${parameters.toString()}`;
+  const reason = status?.remote.reason ?? status?.sync.reason;
+  const needsDetails =
+    state === 'account' ||
+    status?.sync.state === 'conflicted' ||
+    (reason !== undefined && reason !== 'unknown' && reason !== 'offline');
+  return needsDetails ? (
+    <Button asChild variant='outline' size='sm'>
+      <Link to={detailsUrl}>Open History</Link>
+    </Button>
+  ) : (
+    <Button variant='outline' size='sm' onClick={retry}>
+      Try again
+    </Button>
+  );
+}
+
+/**
+ * Whether the project's availability is an open that could not go on.
+ *
+ * @param state - The project's availability.
+ * @returns `true` offline, after a failure, or for an account that may not open the project.
+ */
+export const isProjectFilesFailure = (
+  state: ModelAvailability,
+): state is Extract<ProjectAvailability, 'offline' | 'failed' | 'account'> =>
+  state === 'failed' || state === 'offline' || state === 'account';
+
+function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailability }): React.JSX.Element {
+  const status = useRevisionStatus();
+  const isFailure = isProjectFilesFailure(state);
   const [title, description] = projectFilesCopy(state, status);
   return (
     <div
@@ -377,15 +345,7 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
         <p className='text-sm font-medium'>{title}</p>
         <p className='max-w-64 text-xs text-muted-foreground'>{description}</p>
       </div>
-      {isFailure && needsDetails ? (
-        <Button asChild variant='outline' size='sm'>
-          <Link to={detailsUrl}>Open History</Link>
-        </Button>
-      ) : isFailure ? (
-        <Button variant='outline' size='sm' onClick={retry}>
-          Try again
-        </Button>
-      ) : null}
+      {isFailure ? <ProjectFilesAction state={state} /> : null}
     </div>
   );
 }

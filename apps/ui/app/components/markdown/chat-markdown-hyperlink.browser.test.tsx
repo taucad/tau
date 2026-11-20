@@ -7,7 +7,7 @@ import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 import type { ProjectContextValue } from '@taucad/ui-core/contexts/project-context';
 import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
-import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
+import { MarkdownViewerChat } from '@taucad/editor-ui/components/markdown/markdown-viewer-chat';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -26,12 +26,13 @@ const project: ProjectContextValue = {
   projectId: 'project-1',
   projectRef: { send: vi.fn() },
   editorRef: { send: mocks.send },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
 };
 mocks.getEntry.mockImplementation(async (path: string) => (path === 'src/main.cs' ? { type: 'file' } : undefined));
-const fileManager: FileManagerContextValue = {
+const fileManager = mock<FileManagerContextValue>({
   whenServicesReady: async () => ({ treeService: mock<FileTreeService>({ getEntry: mocks.getEntry }) }),
   writeFile: vi.fn(),
-};
+});
 
 function renderInProject(markdown: string): void {
   render(

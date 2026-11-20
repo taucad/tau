@@ -51,6 +51,7 @@
     "./components/markdown/markdown-hyperlink": "./src/components/markdown/markdown-hyperlink.tsx",
     "./components/markdown/markdown-sanitize": "./src/components/markdown/markdown-sanitize.ts",
     "./components/markdown/markdown-viewer": "./src/components/markdown/markdown-viewer.tsx",
+    "./components/markdown/markdown-viewer-chat": "./src/components/markdown/markdown-viewer-chat.tsx",
     "./components/markdown/rehype-at-references": "./src/components/markdown/rehype-at-references.ts",
     "./components/ui/collapsible-code-block": "./src/components/ui/collapsible-code-block.tsx",
     "./lib/bundled-types-lazy": "./src/lib/bundled-types-lazy.ts",

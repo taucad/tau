@@ -1,16 +1,11 @@
 import { StrictMode } from 'react';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Root } from 'hast';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-import {
-  createChatStreamingFadePlugin,
-  getStreamingArrivalStart,
-} from '@taucad/editor-ui/components/markdown/chat-streaming-fade';
-
-vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ isHighContrast: false, theme: 'light' }) }));
+import { createChatStreamingFadePlugin, getStreamingArrivalStart } from '#components/markdown/chat-streaming-fade.js';
 
 const fadingText = (container: HTMLElement): string[] =>
   [...container.querySelectorAll<HTMLElement>('[data-chat-streaming-fade]')].map((node) => node.textContent);

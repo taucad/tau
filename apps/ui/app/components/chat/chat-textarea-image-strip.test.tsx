@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render as renderBare, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import type { DraftAttachment } from '@taucad/chat-ui/hooks/draft.machine';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
@@ -19,10 +23,15 @@ const pdf: DraftAttachment = storedRef({
 
 // Every stored file reads back as bytes of its declared size, named by its path.
 const readFile = vi.fn(async (path: string) => new Uint8Array(path.endsWith('.pdf') ? 3 * 1024 * 1024 : 4));
-const fileManager = { recordFiles: { readFile } };
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => fileManager,
-}));
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({ readFile }),
+});
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 beforeEach(() => {
   let created = 0;

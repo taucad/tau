@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render as renderBare, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type {
@@ -254,6 +258,15 @@ vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
   const { useFileManager } = await import('#hooks/use-file-manager.js');
   return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
 });
+
+/* The chat's questions read the shared file-manager context. */
+const fileManager = mock<FileManagerContextValue>();
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),

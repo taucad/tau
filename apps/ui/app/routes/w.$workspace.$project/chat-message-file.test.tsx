@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render as renderBare, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileUIPart } from 'ai';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 
@@ -13,10 +17,15 @@ const readFile = vi.fn(async (path: string) => {
   }
   throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 });
-const fileManager = { recordFiles: { readFile } };
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => fileManager,
-}));
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({ readFile }),
+});
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 const imagePart = (filename: string, index: number): FileUIPart => ({
   type: 'file',

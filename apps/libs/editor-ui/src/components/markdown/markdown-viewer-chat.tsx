@@ -2,19 +2,13 @@ import { memo, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import type { Components, ControlsConfig, StreamdownProps } from 'streamdown';
 import { cn } from '@taucad/ui/utils/cn';
-import { defaultMarkdownControls, MarkdownViewer } from '@taucad/editor-ui/components/markdown/markdown-viewer';
-import { rehypeAtReferences } from '@taucad/editor-ui/components/markdown/rehype-at-references';
-import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
+import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
+import { AtReferenceChip } from '@taucad/files-ui/components/chat/at-reference-chip';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
 import { escapeDollarInvocations } from '@taucad/chat-ui/utils/at-reference.utils';
-import {
-  ChatStreamingBlock,
-  ChatStreamingFadeProvider,
-} from '@taucad/editor-ui/components/markdown/chat-streaming-block';
-import {
-  ChatMarkdownHyperlink,
-  rehypeChatFileLinks,
-} from '@taucad/editor-ui/components/markdown/chat-markdown-hyperlink';
+import { ChatStreamingBlock, ChatStreamingFadeProvider } from '#components/markdown/chat-streaming-block.js';
+import { ChatMarkdownHyperlink, rehypeChatFileLinks } from '#components/markdown/chat-markdown-hyperlink.js';
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
 

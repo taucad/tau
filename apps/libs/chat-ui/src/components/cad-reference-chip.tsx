@@ -1,9 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { useSelector } from '@xstate/react';
 import { cadReferenceTokenLabel } from '@taucad/chat/references';
 import type { CadReferenceTokenTarget } from '@taucad/chat/references';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
-import { useProject } from '#hooks/use-project.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 
 /** Model-interaction units of a source file are keyed `file:<entryPath>` (`model-interaction.machine.ts`). */
 const unitIdOf = (path: string): string => `file:${path}`;
@@ -14,7 +14,7 @@ const unitIdOf = (path: string): string => `file:${path}`;
  * Selection is transient, so nothing reaches the workbench records.
  */
 export function CadReferenceChip({ target }: { readonly target: CadReferenceTokenTarget }): React.JSX.Element {
-  const modelInteractionRef = useProject({ enableNoContext: true })?.modelInteractionRef;
+  const modelInteractionRef = useContext(ProjectContext)?.modelInteractionRef;
   const unitId = unitIdOf(target.path);
   const isShown = useSelector(
     modelInteractionRef,

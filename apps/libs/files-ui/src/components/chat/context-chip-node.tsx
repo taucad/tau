@@ -3,14 +3,14 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import type { Editor } from '@tiptap/core';
 import type { ReactNodeViewProps } from '@tiptap/react';
 import { ReactNodeViewRenderer, NodeViewWrapper, useEditorState } from '@tiptap/react';
-import { FileLink } from '@taucad/files-ui/components/files/file-link';
+import { FileLink } from '#components/files/file-link.js';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import type { ChipType } from '@taucad/chat-ui/components/context-chip';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useOptionalFileServices } from '#hooks/use-file-services.js';
 
 /** Whether a referenced file or folder is gone: asked once the tree is ready, and again whenever it changes. */
 function usePathMissing(path: string | undefined): boolean {
-  const treeService = useOptionalFileManager()?.treeService;
+  const treeService = useOptionalFileServices()?.treeService;
   const [isMissing, setIsMissing] = useState(false);
   useEffect(() => {
     if (!treeService || !path) {

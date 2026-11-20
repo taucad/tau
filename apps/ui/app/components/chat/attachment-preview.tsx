@@ -4,8 +4,12 @@ import { chatAttachmentsPath } from '@taucad/chat-ui/db/attachment-store';
 import { composerRecordPaths, recordAttachmentsPath } from '@taucad/chat-ui/db/composer-record-store';
 import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import {
+  attachmentAbsentLabel,
+  attachmentDownloadName,
+  useAttachmentSource,
+} from '@taucad/chat-ui/hooks/use-attachment-source';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 /** The directories one project chat's attachment references resolve against. */

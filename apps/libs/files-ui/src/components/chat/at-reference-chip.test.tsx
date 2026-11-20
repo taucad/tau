@@ -13,19 +13,12 @@ const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: TooltipProv
 type FileFileEntry = Extract<FileEntry, { type: 'file' }>;
 type DirectoryFileEntry = Extract<FileEntry, { type: 'dir' }>;
 
-vi.mock('@taucad/files-ui/components/files/file-link', () => ({
+vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children, path }: { children: React.ReactNode; path: string }) => (
     <a data-testid='file-link' data-path={path}>
       {children}
     </a>
   ),
-}));
-
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    editorRef: { send: vi.fn() },
-    projectId: 'test-project',
-  }),
 }));
 
 function createEntry(path: string, partial: Partial<FileEntry> = {}): FileEntry {

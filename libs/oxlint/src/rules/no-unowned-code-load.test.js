@@ -22,6 +22,11 @@ describe('no-unowned-code-load', () => {
           code: `${owner}const module = await load(async () => import('#components/cad-preview.js'));`,
         },
         {
+          name: 'an import() the owner loads, naming the exports used so the rest can be dropped',
+          filename: page,
+          code: `${owner}const { CadPreview } = await load(async () => import('#components/cad-preview.js').then((loaded) => ({ CadPreview: loaded.CadPreview })));`,
+        },
+        {
           name: 'an optional import() the owner loads',
           filename: page,
           code: `${owner}const module = await load(async () => import('posthog-js'), { optional: true });`,
@@ -83,6 +88,12 @@ describe('no-unowned-code-load', () => {
         },
       ],
       invalid: [
+        {
+          name: 'a then() the owner does not hold',
+          filename: page,
+          code: "const preview = await import('./x.js').then((loaded) => loaded.X);",
+          errors: [{ messageId: 'unownedImport' }],
+        },
         {
           name: 'a bare import()',
           filename: page,

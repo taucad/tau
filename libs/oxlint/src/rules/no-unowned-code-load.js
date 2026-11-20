@@ -42,7 +42,7 @@ export const noUnownedCodeLoadRule = {
     },
     messages: {
       unownedImport:
-        "Load code through the owner: `load(async () => import('…'))` from `#lib/code-loading.js` (with `{ optional: true }` for code the caller can do without). A failed load stays failed for the life of the page; the owner hands it to the recovery, which reloads or offers the reload.",
+        "Load code through the owner: `load(async () => import('…'))` from `#lib/code-loading.js` (with `{ optional: true }` for code the caller can do without; name the exports used with `import('…').then((loaded) => ({ X: loaded.X }))` so the bundler can drop the rest). A failed load stays failed for the life of the page; the owner hands it to the recovery, which reloads or offers the reload.",
       reactLazy:
         "Use `lazy` from `#lib/lazy-component.js`, the owner's, not React's: its factory loads through the owner, and optional code declares a `fallback` instead of failing its panel.",
     },
@@ -88,11 +88,23 @@ export const noUnownedCodeLoadRule = {
         }
       },
       ImportExpression(node) {
-        const arrow = node.parent;
+        /* `import(…).then((loaded) => ({ … }))` names the exports used, so the bundler can still drop the rest:
+           an import whose namespace escapes into `load` keeps every export. */
+        const then = node.parent;
+        const picked =
+          then?.type === 'MemberExpression' &&
+          then.object === node &&
+          then.property.type === 'Identifier' &&
+          then.property.name === 'then' &&
+          then.parent?.type === 'CallExpression' &&
+          then.parent.callee === then
+            ? then.parent
+            : node;
+        const arrow = picked.parent;
         const call = arrow?.parent;
         const isOwned =
           arrow?.type === 'ArrowFunctionExpression' &&
-          arrow.body === node &&
+          arrow.body === picked &&
           arrow.params.length === 0 &&
           call?.type === 'CallExpression' &&
           call.arguments[0] === arrow &&

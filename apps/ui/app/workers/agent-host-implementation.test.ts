@@ -23,37 +23,32 @@ describe('createImplementationLoader', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('forgets a warm load that failed, so the first use loads again and can succeed', async () => {
+  it('keeps a warm load that failed, since this worker can never load the module again (FP10)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      const load = vi
-        .fn<() => Promise<string>>()
-        .mockRejectedValueOnce(new Error('network'))
-        .mockResolvedValueOnce('impl');
+      const failure = new TypeError('Failed to fetch dynamically imported module: /assets/agent-host.impl-1.js');
+      const load = vi.fn<() => Promise<string>>().mockRejectedValueOnce(failure).mockResolvedValueOnce('impl');
       const loader = createImplementationLoader(load);
 
       loader.warm();
       /* The failed warm is settled without an unhandled rejection. */
       await vi.waitFor(() => {
-        expect(load).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith('[agent-host worker] early implementation load failed', failure);
       });
-      await Promise.resolve();
-      await expect(loader.get()).resolves.toBe('impl');
-      expect(load).toHaveBeenCalledTimes(2);
-      /* The early failure nobody waited on is logged, not silent. */
-      expect(warn).toHaveBeenCalledWith('[agent-host worker] early implementation load failed', expect.any(Error));
+      await expect(loader.get()).rejects.toBe(failure);
+      expect(load).toHaveBeenCalledOnce();
     } finally {
       warn.mockRestore();
     }
   });
 
-  it('reports a failed use to its caller, and the next use loads again', async () => {
+  it('reports a failed load to every use, and never loads again in the same worker', async () => {
     const failure = new Error('load failed');
     const load = vi.fn<() => Promise<string>>().mockRejectedValueOnce(failure).mockResolvedValueOnce('impl');
     const loader = createImplementationLoader(load);
 
     await expect(loader.get()).rejects.toBe(failure);
-    await expect(loader.get()).resolves.toBe('impl');
-    expect(load).toHaveBeenCalledTimes(2);
+    await expect(loader.get()).rejects.toBe(failure);
+    expect(load).toHaveBeenCalledOnce();
   });
 });

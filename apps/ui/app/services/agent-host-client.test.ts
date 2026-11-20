@@ -157,6 +157,11 @@ class FakeResidentWorker {
     }
   }
 
+  /** A bare Worker `error` event, with neither message nor error: the worker's script did not load (FP10). */
+  public raiseBareError(): void {
+    this.errorListener?.(new Event('error') as ErrorEvent);
+  }
+
   /** A Worker `error` event: an uncaught exception in a worker that is still running (D-088). */
   public raiseError(message = 'uncaught'): void {
     this.errorListener?.({ message } as ErrorEvent);
@@ -969,6 +974,63 @@ describe('resident worker death', () => {
     await expect(cancelRun(client, 'chat-thaw', 'run-1')).resolves.toMatchObject({ status: 'applied' });
     expect(worker.terminate).not.toHaveBeenCalled();
     expect(createWorker).toHaveBeenCalledOnce();
+    await client.close();
+  });
+});
+
+/* PL7 staging defects FP10: a worker whose own code failed to load can never load it again, so the page replaces it with
+ * a new worker (a new realm) instead of asking the same worker again; past the bound the failure is the card's. */
+describe('a resident worker whose code failed to load', () => {
+  it('should provide again in a new worker, never in the one whose import failed', async () => {
+    const failed = new FakeResidentWorker();
+    failed.failNextProvide = 'WORKER_LOAD_FAILED';
+    const replacement = new FakeResidentWorker();
+    const workers = [failed, replacement];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(startRun(client, 'chat-load', 'run-1', 'Build.')).resolves.toMatchObject({ status: 'applied' });
+
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(failed.terminate).toHaveBeenCalled();
+    expect(requestsNamed(failed, 'provide')).toHaveLength(1);
+    expect(requestsNamed(replacement, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+
+  it('should retire a worker whose script did not load at once, on its bare error event', async () => {
+    const failed = new FakeResidentWorker();
+    const replacement = new FakeResidentWorker();
+    const workers = [failed, replacement];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    await startRun(client, 'chat-script', 'run-1', 'Build.');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    failed.raiseBareError();
+
+    expect(failed.terminate).toHaveBeenCalled();
+    await expect(cancelRun(client, 'chat-script', 'run-1')).resolves.toMatchObject({ status: 'applied' });
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    await client.close();
+  });
+
+  it('should stop replacing at the bound and report the code, which the chat shows with Reload', async () => {
+    const workers = Array.from({ length: 4 }, () => {
+      const worker = new FakeResidentWorker();
+      worker.failNextProvide = 'WORKER_LOAD_FAILED';
+      return worker;
+    });
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(startRun(client, 'chat-bound', 'run-1', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+
+    expect(createWorker).toHaveBeenCalledTimes(3);
     await client.close();
   });
 });

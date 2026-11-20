@@ -3,7 +3,7 @@ import { effectiveGizmoStyle, effectivePreset } from '@taucad/preferences';
 import type { PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import type { CameraInput } from '@taucad/viewer/graphics/three/controls/camera-wheel-router';
 import type { GizmoStyleId } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-styles';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 
 /** What the project viewer passes `CadViewer` for the person's navigation; empty keeps today's bindings. */
@@ -50,7 +50,7 @@ export const resolveViewerCameraInput = ({
  * @returns The props for `CadViewer`.
  */
 export const useViewerCameraInput = (): ViewerCameraInputProps => {
-  const enabled = useFeature('viewerControls');
+  const enabled = useFeatureState('viewerControls') === 'on';
   const { profile, viewer } = usePersonRecord();
   return useMemo(() => resolveViewerCameraInput({ enabled, profile, viewer }), [enabled, profile, viewer]);
 };

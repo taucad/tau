@@ -13,16 +13,35 @@
  *  3. otherwise the registry default.
  * A flag with `requires` is then off whenever the flag it names is off.
  *
- * Usage (non-React):
- *   import { isFeatureEnabled } from '#flags/feature-flags.js';
- *   if (isFeatureEnabled('tauDebug')) { … }
+ * Three-valued state: a PostHog-backed flag (and one that `requires` it) is `unknown` until the remote source has
+ * answered or no answer will come (`readRemoteFlagStatus`). Such a flag has no boolean reader, so "not known yet" can
+ * never be read as "off": read it with `readFeatureState` (or `useFeatureState`) and decide what `unknown` means at
+ * the call site, or wait with `whenFeatureKnown`. A redirect, a persisted write or a one-shot decision must not act on
+ * `unknown`.
  *
- * For React components prefer the `useFeature` hook instead.
+ * Usage (non-React):
+ *   import { isFeatureEnabled, readFeatureState } from '#flags/feature-flags.js';
+ *   if (isFeatureEnabled('tauDebug')) { … }
+ *   if (readFeatureState('onboarding') === 'on') { … }
+ *
+ * For React components prefer the `useFeature` / `useFeatureState` hooks instead.
  */
 
-import type { FeatureFlagName, FeatureFlags, FlagDefinition } from '#flags/flag.constants.js';
+import type {
+  FeatureFlagName,
+  FeatureFlags,
+  FeatureFlagState,
+  FlagDefinition,
+  LocalFeatureFlagName,
+  LocalFeatureFlags,
+} from '#flags/flag.constants.js';
 import type { RemoteFlagValues } from '#flags/remote-flags.js';
-import { isSeededFlagSourceAllowed, readRemoteFlagValues } from '#flags/remote-flags.js';
+import {
+  isSeededFlagSourceAllowed,
+  readRemoteFlagStatus,
+  readRemoteFlagValues,
+  subscribeRemoteFlags,
+} from '#flags/remote-flags.js';
 import {
   featureFlagsSchema,
   featureFlagDefaults,
@@ -123,16 +142,62 @@ function getFlags(storage?: MinimalReadStorage): FeatureFlags {
 }
 
 /**
- * Check whether a single feature flag is enabled.
+ * Check whether a single local feature flag is enabled. A PostHog-backed flag (`RemoteFeatureFlagName`) is not
+ * accepted: its value may not be known yet, so read it with {@link readFeatureState}.
  */
-export function isFeatureEnabled(flag: FeatureFlagName, storage?: MinimalReadStorage): boolean {
+export function isFeatureEnabled(flag: LocalFeatureFlagName, storage?: MinimalReadStorage): boolean {
   return getFlags(storage)[flag];
 }
 
 /**
- * Return the full resolved flag map.
+ * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived. A PostHog-backed
+ * flag is `unknown` while the remote source is `pending`, and a flag that `requires` an unknown flag is `unknown` too.
+ *
+ * @param flag - The flag.
+ * @returns Its state.
  */
-export function getAllFlags(storage?: MinimalReadStorage): FeatureFlags {
+export function readFeatureState(flag: FeatureFlagName): FeatureFlagState {
+  const { posthogKey, requires }: FlagDefinition = flagRegistry[flag];
+  if (
+    (posthogKey !== undefined && readRemoteFlagStatus() === 'pending') ||
+    (requires !== undefined && readFeatureState(requires as FeatureFlagName) === 'unknown')
+  ) {
+    return 'unknown';
+  }
+  return getFlags()[flag] ? 'on' : 'off';
+}
+
+/**
+ * Wait until a flag is known, for a decision that cannot be taken again later (a one-shot write).
+ *
+ * @param flag - The flag.
+ * @returns Whether it is on, once it is `on` or `off`; at once when it already is.
+ */
+export async function whenFeatureKnown(flag: FeatureFlagName): Promise<boolean> {
+  return new Promise((resolve) => {
+    let unsubscribe: (() => void) | undefined;
+    const settle = (): boolean => {
+      const state = readFeatureState(flag);
+      if (state === 'unknown') {
+        return false;
+      }
+      unsubscribe?.();
+      resolve(state === 'on');
+      return true;
+    };
+    if (!settle()) {
+      unsubscribe = subscribeRemoteFlags(() => {
+        settle();
+      });
+    }
+  });
+}
+
+/**
+ * Return the resolved values of the local flags. The PostHog-backed flags are left out of the type: read them with
+ * {@link readFeatureState}.
+ */
+export function getAllFlags(storage?: MinimalReadStorage): LocalFeatureFlags {
   return getFlags(storage);
 }
 
@@ -161,5 +226,5 @@ export const flagProbeGlobal = '__tauFeatureFlags';
 
 /* Undeployed debug builds only (the e2e suites and local development), and only in a document. */
 if (isSeededFlagSourceAllowed && typeof document !== 'undefined') {
-  Object.defineProperty(globalThis, flagProbeGlobal, { configurable: true, value: () => getAllFlags() });
+  Object.defineProperty(globalThis, flagProbeGlobal, { configurable: true, value: () => getFlags() });
 }

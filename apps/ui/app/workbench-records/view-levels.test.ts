@@ -6,7 +6,7 @@ import { viewExceptions } from '#workbench-records/view-exceptions.js';
 /* The flag source, mocked: `viewerControls` and the listeners a flag change reaches. */
 const flags = vi.hoisted(() => ({ viewerControls: false, listeners: new Set<() => void>() }));
 vi.mock('#flags/feature-flags.js', () => ({
-  isFeatureEnabled: (flag: string) => flag === 'viewerControls' && flags.viewerControls,
+  readFeatureState: (flag: string) => (flag === 'viewerControls' && flags.viewerControls ? 'on' : 'off'),
 }));
 vi.mock('#flags/use-feature.js', () => ({
   subscribeFeatureFlags: (listener: () => void) => {

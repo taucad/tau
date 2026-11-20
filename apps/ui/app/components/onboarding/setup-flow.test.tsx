@@ -8,6 +8,7 @@ import type { LanguageId } from '@taucad/preferences';
 const flags = vi.hoisted(() => ({ onboarding: true, viewerControls: true, partsWarehouse: false }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: keyof typeof flags) => flags[flag],
+  useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
 }));
 const kernels = vi.hoisted(() => ({
   host: 'browser' as 'browser' | 'desktop',

@@ -26,7 +26,7 @@ import type { LengthUnit, ViewFieldPath, ViewFieldValues, WorkbenchView } from '
 import type { ViewerViewFields } from '@taucad/viewer/cad/viewer-view-fields';
 import type { PersonalViewDefaults } from '@taucad/preferences';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
@@ -197,7 +197,7 @@ export const useViewFieldCommands = (): ViewFieldCommands => {
 export const useViewerViewFieldCommands = (view: ViewFieldTarget | undefined): ViewerViewFields | undefined => {
   const commands = useViewFieldCommands();
   const { projectId, viewRecords } = useProject();
-  const viewerControls = useFeature('viewerControls');
+  const viewerControls = useFeatureState('viewerControls') === 'on';
   const telemetry = useOnboardingTelemetry();
   const viewId = view?.viewId;
   const entryPath = view?.entryPath;

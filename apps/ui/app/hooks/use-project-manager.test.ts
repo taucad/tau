@@ -4,6 +4,7 @@ import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
+import { disconnectRemoteFlags } from '#flags/remote-flags.js';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -685,6 +686,14 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
   attachmentFiles.set(`/.tau/composers/new-project/attachments/${hash}.${extension}`, bytes);
   return storedRef({ hash, mediaType, ...(filename === undefined ? {} : { filename }) });
 };
+
+/*
+ * No analytics boundary runs here, so the PostHog-backed flags would stay unknown for the whole file and every
+ * create would read the listing for the first-project tour. Settle them as a host without analytics does.
+ */
+beforeEach(() => {
+  disconnectRemoteFlags();
+});
 
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {

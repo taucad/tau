@@ -204,9 +204,6 @@ export type FeatureFlags = z.infer<typeof featureFlagsSchema>;
 /** The resolved values of the {@link LocalFeatureFlagName} flags: what a boolean reader may show. */
 export type LocalFeatureFlags = Readonly<Pick<FeatureFlags, LocalFeatureFlagName>>;
 
-/** Every flag's {@link FeatureFlagState}. */
-export type FeatureFlagStates = Readonly<Record<FeatureFlagName, FeatureFlagState>>;
-
 /**
  * Resolved defaults (all flags at their default values).
  * Useful as a fallback when storage is unavailable.

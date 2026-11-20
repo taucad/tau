@@ -31,12 +31,11 @@ import type {
   FeatureFlagName,
   FeatureFlags,
   FeatureFlagState,
-  FeatureFlagStates,
   FlagDefinition,
   LocalFeatureFlagName,
   LocalFeatureFlags,
 } from '#flags/flag.constants.js';
-import type { RemoteFlagStatus, RemoteFlagValues } from '#flags/remote-flags.js';
+import type { RemoteFlagValues } from '#flags/remote-flags.js';
 import {
   isSeededFlagSourceAllowed,
   readRemoteFlagStatus,
@@ -151,61 +150,21 @@ export function isFeatureEnabled(flag: LocalFeatureFlagName, storage?: MinimalRe
 }
 
 /**
- * Each flag's three-valued state from its resolved value and the remote source's status: a PostHog-backed flag is
- * `unknown` while the source is `pending`, and a flag that `requires` an unknown flag is `unknown` too.
- *
- * @param flags - The resolved values ({@link resolveFlags}).
- * @param status - The remote source's status.
- * @returns Every flag's state.
- */
-export function resolveFlagStates(flags: FeatureFlags, status: RemoteFlagStatus): FeatureFlagStates {
-  const states: Partial<Record<FeatureFlagName, FeatureFlagState>> = {};
-  const stateOf = (name: FeatureFlagName): FeatureFlagState => {
-    const known = states[name];
-    if (known !== undefined) {
-      return known;
-    }
-    const { posthogKey, requires }: FlagDefinition = flagRegistry[name];
-    const state: FeatureFlagState =
-      (posthogKey !== undefined && status === 'pending') ||
-      (requires !== undefined && stateOf(requires as FeatureFlagName) === 'unknown')
-        ? 'unknown'
-        : flags[name]
-          ? 'on'
-          : 'off';
-    states[name] = state;
-    return state;
-  };
-  for (const name of featureFlagNames) {
-    stateOf(name);
-  }
-  return states as FeatureFlagStates;
-}
-
-let cachedStates: { flags: FeatureFlags; status: RemoteFlagStatus; states: FeatureFlagStates } | undefined;
-
-/**
- * Every flag's state now, outside React. Stable while neither the values nor the remote status change.
- *
- * @returns Every flag's state.
- */
-export function readFeatureStates(): FeatureFlagStates {
-  const flags = getFlags();
-  const status = readRemoteFlagStatus();
-  if (cachedStates?.flags !== flags || cachedStates.status !== status) {
-    cachedStates = { flags, status, states: resolveFlagStates(flags, status) };
-  }
-  return cachedStates.states;
-}
-
-/**
- * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived.
+ * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived. A PostHog-backed
+ * flag is `unknown` while the remote source is `pending`, and a flag that `requires` an unknown flag is `unknown` too.
  *
  * @param flag - The flag.
  * @returns Its state.
  */
 export function readFeatureState(flag: FeatureFlagName): FeatureFlagState {
-  return readFeatureStates()[flag];
+  const { posthogKey, requires }: FlagDefinition = flagRegistry[flag];
+  if (
+    (posthogKey !== undefined && readRemoteFlagStatus() === 'pending') ||
+    (requires !== undefined && readFeatureState(requires as FeatureFlagName) === 'unknown')
+  ) {
+    return 'unknown';
+  }
+  return getFlags()[flag] ? 'on' : 'off';
 }
 
 /**

@@ -20,33 +20,24 @@ import type {
   FeatureFlagName,
   FeatureFlags,
   FeatureFlagState,
-  FeatureFlagStates,
   LocalFeatureFlagName,
   LocalFeatureFlags,
 } from '#flags/flag.constants.js';
-import { featureFlagDefaults, featureFlagNames } from '#flags/flag.constants.js';
-import { getAllFlags, readFeatureStates, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
+import { featureFlagDefaults } from '#flags/flag.constants.js';
+import { getAllFlags, readFeatureState, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
 import { subscribeRemoteFlags } from '#flags/remote-flags.js';
 
 type FlagStore = {
   subscribe(listener: () => void): () => void;
   getSnapshot(): LocalFeatureFlags;
   getServerSnapshot(): LocalFeatureFlags;
-  getStates(): FeatureFlagStates;
-  getServerStates(): FeatureFlagStates;
 };
 
 const flagTopic = new Topic<void>({ name: 'feature-flags' });
 
-/** Nothing is known before the client has its own values: the server render and hydration. */
-const unknownFlagStates: FeatureFlagStates = Object.fromEntries(
-  featureFlagNames.map((name) => [name, 'unknown']),
-) as Record<FeatureFlagName, FeatureFlagState>;
-
 const defaultLocalFlags: LocalFeatureFlags = featureFlagDefaults satisfies FeatureFlags;
 
 let snapshot = getAllFlags();
-let states = readFeatureStates();
 
 const flagStore: FlagStore = {
   subscribe(listener) {
@@ -58,18 +49,14 @@ const flagStore: FlagStore = {
   getServerSnapshot() {
     return defaultLocalFlags;
   },
-  getStates() {
-    return states;
-  },
-  getServerStates() {
-    return unknownFlagStates;
-  },
 };
+
+/** Nothing is known before the client has its own values: the server render and hydration. */
+const getServerFlagState = (): FeatureFlagState => 'unknown';
 
 function refreshSnapshot(): void {
   resetFlagCache();
   snapshot = getAllFlags();
-  states = readFeatureStates();
   flagTopic.emit();
 }
 
@@ -103,7 +90,7 @@ export function useFeature(flag: LocalFeatureFlagName): boolean {
  * @returns Its state.
  */
 export function useFeatureState(flag: FeatureFlagName): FeatureFlagState {
-  return useSyncExternalStore(flagStore.subscribe, flagStore.getStates, flagStore.getServerStates)[flag];
+  return useSyncExternalStore(flagStore.subscribe, () => readFeatureState(flag), getServerFlagState);
 }
 
 /**

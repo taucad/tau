@@ -161,6 +161,18 @@ describe('isCachedOnFirstUse', () => {
   });
 });
 
+describe('the deployment ask passes through (adaptive app deployment mode W7)', () => {
+  it.each([`https://api.tau.new/v1/deployment`, `${origin}/v1/deployment`])(
+    'should neither cache nor answer %s, so the answer is always the network one',
+    (url) => {
+      expect(isCachedOnFirstUse({ url, method: 'GET' }, origin)).toBe(false);
+      expect(
+        navigationCandidate({ url, method: 'GET', mode: 'cors', cache: 'no-store' }, origin, isPrecached),
+      ).toBeUndefined();
+    },
+  );
+});
+
 describe('installMessage', () => {
   it('should report a completed install, a quota failure and any other failure', () => {
     expect(installMessage()).toStrictEqual({ type: serviceWorkerMessageType, status: 'ready' });

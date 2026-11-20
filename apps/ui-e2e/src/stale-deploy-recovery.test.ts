@@ -266,3 +266,141 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     expect(live.documents).toStrictEqual(['previous', 'next']);
   }, 120_000);
 });
+
+/*
+ * PL7 staging defects FP9 (rows 9 and 11 of its red-first table): one build, the file present, one transient failure.
+ * A code load that failed once can never succeed again in the same page, since the browser keeps a failed module, and
+ * every module that failed with it, for the realm's life; the only general recovery is a new realm. So a failure on a
+ * build the server still runs reloads an untouched page into that build, and optional code degrades where it failed.
+ * The server drops the connection of one request after its response has begun (`failNext`), as a network change on
+ * wake or a dead connection does; a missing file would not catch it. The TAU-UI-6 rows above are the control: a chunk
+ * a replaced build no longer serves.
+ */
+describe('a code load that fails once on the build the server still runs (FP9)', () => {
+  let browser: Browser | undefined;
+  let deploys: Deploys | undefined;
+  let server: DeployServer | undefined;
+  let context: BrowserContext | undefined;
+
+  beforeAll(async () => {
+    deploys = await prepareDeploys('transient');
+    browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
+  }, 120_000);
+
+  afterEach(async () => {
+    await context?.close();
+    await server?.close();
+    context = undefined;
+    server = undefined;
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+    await deploys?.remove();
+  });
+
+  /** A fresh context on a server whose previous deploy stays live: no deploy happens in these rows. */
+  const open = async (): Promise<{ readonly page: Page; readonly live: DeployServer; readonly failures: string[] }> => {
+    if (browser === undefined || deploys === undefined) {
+      expect.fail('the builds and browser did not start');
+    }
+    const live = await startDeployServer(
+      deploys.builds,
+      { shells: deploys.shells, workers: deploys.workers.scripts },
+      { hold: false },
+    );
+    server = live;
+    context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    const failures: string[] = [];
+    page.on('console', (message) => {
+      if (/dynamically imported module|Importing a module script failed/u.test(message.text())) {
+        failures.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      if (/dynamically imported module/u.test(error.message)) {
+        failures.push(error.message);
+      }
+    });
+    page.on('requestfailed', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/assets/')) {
+        failures.push(`${request.url()} ${request.failure()?.errorText ?? ''}`);
+      }
+    });
+    return { page, live, failures };
+  };
+
+  const buildIdOf = async (page: Page): Promise<string | undefined> =>
+    page.evaluate(() => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID);
+
+  it('should reload an untouched page into the live build once when a lazy chunk it needs fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const chunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
+    // A module import's own request (`script`), not a page's idle prefetch of the same file.
+    const failed = live.failNext(chunk, { dest: 'script' });
+
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await failed;
+
+    // One new realm on the same build: the second document is the same deploy's.
+    try {
+      await expect.poll(() => live.documents.length, { timeout: 30_000 }).toBe(2);
+    } catch (error) {
+      throw new Error(
+        `No reload into the live build after the failed chunk (documents ${JSON.stringify(live.documents)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    expect(live.documents).toStrictEqual(['previous', 'previous']);
+    expect(await buildIdOf(page)).toBe(String(deploys?.previousBuildId));
+    // The new page mounts the palette items once idle, so its own request for the chunk may follow the load.
+    await expect.poll(() => live.requestCount(chunk), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+  }, 120_000);
+
+  /**
+   * Start a chat from Home's composer, as the production report did (`/w/home/new-project?chat=…`): the chat panel
+   * mounts its activity row, whose spinner loads its own chunk.
+   */
+  const startChatFromHome = async (page: Page, origin: string): Promise<void> => {
+    await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+    await page
+      .getByRole('button', { name: 'Continue without' })
+      .click({ timeout: 5000 })
+      .catch(() => undefined);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).first();
+    await composer.click();
+    await page.keyboard.type('Make a cube');
+    await page.keyboard.press('Enter');
+    await page.waitForURL(/\/w\/home\/new-project\?chat=/u, { timeout: 30_000 });
+  };
+
+  it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const spinnerChunk = /^\/assets\/metal-morph-spinner-(?!service-)[\w-]+\.js$/u;
+    // The import's own request: Home's idle prefetch of the project tier (`empty`) may ask for the chunk first.
+    const failed = live.failNext(spinnerChunk, { dest: 'script' });
+
+    await startChatFromHome(page, live.origin);
+    await failed;
+    await page.waitForTimeout(3000);
+
+    // The spinner is optional code: it degrades to the flat spinner instead of taking the chat panel down (D20).
+    expect(
+      await page.getByRole('heading', { name: 'Chat Unavailable' }).count(),
+      `module load errors: ${JSON.stringify(failures)}`,
+    ).toBe(0);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).last();
+    await composer.waitFor({ timeout: 10_000 });
+    await composer.click();
+    await page.keyboard.type('Still here');
+    expect(await composer.textContent()).toContain('Still here');
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+    // The page was worked on, so it never reloads by itself for code it can do without.
+    expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
+});

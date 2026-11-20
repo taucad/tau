@@ -177,6 +177,8 @@
 \* DC-10 chat-ui slice 1 (2026-11-19): `chat-message-queue.machine.ts` moves unchanged to `@taucad/chat-ui`, and
 \* `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` import it, the draft
 \* machine and the chat SDK loader from there; only paths moved. No action or verdict changes.
+\* PL7 staging defects FP9 (2026-11-20): `chat-textarea.tsx` loads the headless capture service through the
+\* code-loading owner (`loadCode`); delivery, persistence and the queue are untouched. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

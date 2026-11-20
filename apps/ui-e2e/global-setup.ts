@@ -25,6 +25,11 @@ const viteClientUrl = new URL('/@vite/client', testBaseURL);
  * production because a snapshot is ~650 MB per run.
  */
 const snapshotBuild = process.env['TAU_E2E_UI_SNAPSHOT'] === 'true';
+/**
+ * Serve another build directory of `apps/ui` in place (`build-adaptive`, adaptive app deployment mode W7), through the
+ * same production server as a snapshot. Unset serves `apps/ui/build` with `server.ts`.
+ */
+const uiBuildDirectory = process.env['TAU_E2E_UI_BUILD_DIRECTORY'];
 
 const isReady = async (): Promise<boolean> => {
   try {
@@ -108,7 +113,10 @@ export const setup = async (): Promise<() => Promise<void> | void> => {
   const snapshot = !development && snapshotBuild ? await snapshotUiBuild(uiRoot) : undefined;
   if (snapshot) {
     environment['TAU_E2E_UI_BUILD_ROOT'] = resolve(snapshot, 'build');
+  } else if (!development && uiBuildDirectory !== undefined) {
+    environment['TAU_E2E_UI_BUILD_ROOT'] = resolve(uiRoot, uiBuildDirectory);
   }
+  const productionServer = snapshot !== undefined || (!development && uiBuildDirectory !== undefined);
 
   const server = development
     ? spawn('pnpm', ['exec', 'react-router', 'dev', '--port', testPort, '--strictPort'], {
@@ -122,7 +130,7 @@ export const setup = async (): Promise<() => Promise<void> | void> => {
           '--env-file-if-exists=.env',
           '--import',
           '@oxc-node/core/register',
-          snapshot ? resolve(import.meta.dirname, 'production-server.ts') : 'server.ts',
+          productionServer ? resolve(import.meta.dirname, 'production-server.ts') : 'server.ts',
         ],
         { cwd: uiRoot, env: environment, stdio: 'inherit' },
       );

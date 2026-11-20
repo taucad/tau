@@ -5,6 +5,7 @@
  * composer's prewarm reach the same import, so the SDK loads once per page.
  */
 import type { chatSdk } from '#services/chat-sdk.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The deferred AI SDK surface. @public */
 export type ChatSdk = typeof chatSdk;
@@ -20,7 +21,7 @@ let pending: Promise<ChatSdk> | undefined;
 
 const importChatSdk = async (): Promise<ChatSdk> => {
   try {
-    const module = await import('#services/chat-sdk.js');
+    const module = await loadCode(async () => import('#services/chat-sdk.js'));
     loaded = module.chatSdk;
     return module.chatSdk;
   } catch (error) {

@@ -254,7 +254,7 @@ catalog:
   oxc-transform-react: 0.148.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
-  replicad: npm:@taulabs/replicad@1.2.0-beta.2
+  replicad: npm:@taulabs/replicad@1.2.1-beta.0
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
@@ -400,8 +400,6 @@ catalog:
   workbox-core: 7.4.1
   workbox-expiration: 7.4.1
   workbox-precaching: 7.4.1
-  workbox-routing: 7.4.1
-  workbox-strategies: 7.4.1
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

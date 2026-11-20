@@ -8,18 +8,22 @@ Cut from `apps/ui/app`. The modules here are the part of the chat domain that re
 
 One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` routes, components and hooks, and the UI feature libraries cut from it (`project-workspace`, …).
 
-| Subpath                         | Contents                                                                                                                                                                                |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./components/<name>`           | Chat tool cards, labels and text, activity groups, context chips, message surface, queue view, typed-question field, composer skeleton and styling, paste handling                      |
-| `./components/tiptap/<name>`    | Composer editor, context and slash-command suggestions, drop handling, submit-on-enter, fuzzy matching                                                                                  |
-| `./chat-clients/<name>`         | `turn-intent`; `_internal/*` browser-placement transport and snapshot context (app chat clients only)                                                                                   |
-| `./services/<name>`             | `agent-host-event-projection`, `agent-host-transport`, `daemon-agent-host-client`, `rpc-ledger`; `chat-sdk-loader` and the `chat-sdk` it loads by dynamic import; `chat-composer-trays` |
-| `./db/<name>`                   | `attachment-store`, `composer-record-store`, `chat-message-queue-store`, `chat-placements`                                                                                              |
-| `./utils/<name>`                | Chat errors and error cards, attachments and attachment refusals, at-references, chat execution and new-chat execution, recency, model groups, activity cues, tool-output summaries     |
-| `./hooks/<name>`                | Name-generator agent configs; the `draft` and `chat-persistence` machines; `composer-record` (actor and hook); the composer-record and draft-image error toasts                         |
-| `./machines/<name>`             | `chat-message-queue`, `composer-record` and `chat-mode` machines                                                                                                                        |
-| `./types/chat-sidebar.types`    | Sidebar activity types                                                                                                                                                                  |
-| `./utils/attachment.test-utils` | Test-only attachment fixtures for app suites                                                                                                                                            |
+| Subpath                         | Contents                                                                                                                                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./components/<name>`           | Chat tool cards, labels and text, activity groups, context chips, the `@cad[…]` reference chip, message surface, queue view, typed-question field, composer skeleton and styling, paste handling                        |
+| `./components/tiptap/<name>`    | Composer editor, context and slash-command suggestions, drop handling, submit-on-enter, fuzzy matching                                                                                                                  |
+| `./chat-clients/<name>`         | `turn-intent`; `_internal/*` browser-placement transport and snapshot context (app chat clients only)                                                                                                                   |
+| `./services/<name>`             | `agent-host-event-projection`, `agent-host-transport`, `daemon-agent-host-client`, `rpc-ledger`; `chat-sdk-loader` and the `chat-sdk` it loads by dynamic import; `chat-composer-trays`                                 |
+| `./db/<name>`                   | `attachment-store`, `composer-record-store`, `chat-message-queue-store`, `chat-placements`                                                                                                                              |
+| `./utils/<name>`                | Chat errors and error cards, attachments and attachment refusals, at-references, chat execution and new-chat execution, recency, model groups, activity cues, tool-output summaries                                     |
+| `./hooks/<name>`                | Name-generator agent configs; the `draft` and `chat-persistence` machines; `composer-record` (actor and hook); the composer-record and draft-image error toasts; `use-attachment-source` (a file part's renderable URL) |
+| `./machines/<name>`             | `chat-message-queue`, `composer-record` and `chat-mode` machines                                                                                                                                                        |
+| `./types/chat-sidebar.types`    | Sidebar activity types                                                                                                                                                                                                  |
+| `./utils/attachment.test-utils` | Test-only attachment fixtures for app suites                                                                                                                                                                            |
+
+## Shared contexts
+
+`components/cad-reference-chip` reads the model-interaction actor from `ProjectContext` (`@taucad/ui-core/contexts/project-context`), and `hooks/use-attachment-source` reads `recordFiles` from `FileManagerContext` (`@taucad/ui-core/contexts/file-manager-context`). Each context types only the members its readers use; the app's providers fill them. Outside a provider the chip stays plain and a referenced attachment is absent. Their suites render inside the providers.
 
 ## Formal model
 

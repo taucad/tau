@@ -8,7 +8,6 @@ import { Box } from 'manifold-3d';
 import { BRepAdaptor_CompCurve } from 'replicad-opencascadejs';
 import { BRepAdaptor_Curve } from 'replicad-opencascadejs';
 import { BRepExtrema_DistShapeShape } from 'replicad-opencascadejs';
-import { default as default_2 } from 'opentype.js';
 import { Geom2d_Curve } from 'replicad-opencascadejs';
 import { Geom2dAdaptor_Curve } from 'replicad-opencascadejs';
 import { Geom_Surface } from 'replicad-opencascadejs';
@@ -28,6 +27,7 @@ import { Manifold } from 'manifold-3d';
 import { ManifoldToplevel } from 'manifold-3d';
 import { Mesh } from 'manifold-3d';
 import { OpenCascadeInstance } from 'replicad-opencascadejs';
+import * as opentype_2 from 'opentype.js';
 import { TDocStd_Document } from 'replicad-opencascadejs';
 import { TopAbs_ShapeEnum } from 'replicad-opencascadejs';
 import { TopoDS_Compound } from 'replicad-opencascadejs';
@@ -67,6 +67,9 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
     /**
      * Builds a new shape out of the two, fused, shapes
      *
+     * Same-domain faces and edges are merged by default. Set
+     * `options.simplify` to `false` to skip this topology cleanup.
+     *
      * @category Shape Modifications
      */
     fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;
@@ -78,7 +81,10 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
      */
     fuseAll(others: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
     /**
-     * Builds a new shape by removing the tool tape from this shape
+     * Builds a new shape by removing the tool shape from this shape
+     *
+     * Same-domain faces and edges are merged by default. Set
+     * `options.simplify` to `false` to skip this topology cleanup.
      *
      * @category Shape Modifications
      */
@@ -92,6 +98,9 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
     cutAll(tools: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
     /**
      * Builds a new shape by intersecting this shape and another
+     *
+     * Same-domain faces and edges are merged by default. Set
+     * `options.simplify` to `false` to skip this topology cleanup.
      *
      * @category Shape Modifications
      */
@@ -436,6 +445,14 @@ declare namespace boolean2D {
 
 export declare interface BooleanOperationOptions {
     optimisation?: "none" | "commonFace" | "sameFace";
+    /**
+     * Merge same-domain faces and edges after the Boolean operation.
+     * This cleans up topology; it does not simplify a mesh. Set to `false` to
+     * skip this cleanup, which can change downstream face and edge selection.
+     *
+     * @default true
+     */
+    simplify?: boolean;
 }
 
 declare namespace booleanOperations {
@@ -617,6 +634,15 @@ export declare class CompoundSketch implements SketchInterface {
     get innerSketches(): Sketch[];
     get wires(): AnyShape;
     face(): Face;
+    /**
+     * Extrudes this sketch up to a limiting face, returning only the new solid.
+     * The face is not modified or consumed. The sketch's default direction is
+     * used unless overridden; the reverse direction is tried if needed.
+     * The finite, trimmed limiting face must fully cap the extrusion once
+     * without crossing the profile. Use a trimmed face for closed surfaces.
+     * The sketch is consumed on success, but retained on failure.
+     */
+    extrudeUntil(limitingFace: Face, { extrusionDirection }?: ExtrudeUntilOptions): Shape3D;
     extrude(extrusionDistance: number, { extrusionDirection, extrusionProfile, twistAngle, origin, }?: {
         extrusionDirection?: Point;
         extrusionProfile?: ExtrusionProfile;
@@ -627,7 +653,7 @@ export declare class CompoundSketch implements SketchInterface {
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
      */
-    revolve(revolutionAxis?: Point, { origin, angle }?: {
+    revolve(revolutionAxis?: Point | AxisName, { origin, angle }?: {
         origin?: Point;
         angle?: number;
     }): Shape3D;
@@ -1236,6 +1262,35 @@ export declare function exportSTEP(shapes?: ShapeConfig[], { unit, modelUnit }?:
     modelUnit?: SupportedUnit;
 }): Blob;
 
+/**
+ * Builds only the extrusion from explicit geometry and direction. No face
+ * selection or sketch ownership rules are applied here. None of the inputs
+ * are consumed. The finite, trimmed limiting face must fully cap the sweep once
+ * and must not cross the profile. The supplied direction is preferred; its
+ * reverse is tried when it cannot reach a complete cap.
+ */
+export declare const extrudeFaceUntil: typeof extrudeUntilModule.extrudeFaceUntil;
+
+/**
+ * Builds only the extrusion from explicit geometry and direction. No face
+ * selection or sketch ownership rules are applied here. None of the inputs
+ * are consumed. The finite, trimmed limiting face must fully cap the sweep once
+ * and must not cross the profile. The supplied direction is preferred; its
+ * reverse is tried when it cannot reach a complete cap.
+ */
+declare function extrudeFaceUntil_2(profile: Face, target: Face, extrusionDirection: Point): Shape3D;
+
+declare namespace extrudeUntilModule {
+    export {
+        extrudeFaceUntil_2 as extrudeFaceUntil
+    }
+}
+
+export declare interface ExtrudeUntilOptions {
+    /** Defaults to the sketch's direction; its reverse is tried if needed. */
+    extrusionDirection?: Point;
+}
+
 export declare interface ExtrusionProfile {
     profile?: "s-curve" | "linear";
     endFactor?: number;
@@ -1830,7 +1885,7 @@ export declare interface GenericSweepConfig {
 
 declare type GenericTopo = TopologyMap[TopoEntity];
 
-export declare const getFont: (fontFamily?: string) => default_2.Font;
+export declare const getFont: (fontFamily?: string) => opentype_2.Font;
 
 export declare const getManifold: () => ManifoldToplevel;
 
@@ -1919,7 +1974,7 @@ export declare class LinearPhysicalProperties extends PhysicalProperties {
  *
  * The font should be in TTF
  */
-export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<default_2.Font>;
+export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<opentype_2.Font>;
 
 /**
  * @deprecated Use {@link ocScope}, which also skips values that were already
@@ -2626,6 +2681,34 @@ export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> 
     scale(scale: number, center?: Point): this;
     get edges(): Edge[];
     get faces(): Face[];
+    /**
+     * Finds a unique edge using a finder function, which receives a fresh
+     * EdgeFinder and this shape. Throws if there is not exactly one match.
+     *
+     * @category Finders
+     */
+    findEdge(this: AnyShape, finderFcn: FinderFunction<EdgeFinder, AnyShape>): Edge;
+    /**
+     * Finds all matching edges using a finder function, which receives a fresh
+     * EdgeFinder and this shape.
+     *
+     * @category Finders
+     */
+    findEdges(this: AnyShape, finderFcn: FinderFunction<EdgeFinder, AnyShape>): Edge[];
+    /**
+     * Finds a unique face using a finder function, which receives a fresh
+     * FaceFinder and this shape. Throws if there is not exactly one match.
+     *
+     * @category Finders
+     */
+    findFace(this: AnyShape, finderFcn: FinderFunction<FaceFinder, AnyShape>): Face;
+    /**
+     * Finds all matching faces using a finder function, which receives a fresh
+     * FaceFinder and this shape.
+     *
+     * @category Finders
+     */
+    findFaces(this: AnyShape, finderFcn: FinderFunction<FaceFinder, AnyShape>): Face[];
     get solids(): Solid[];
     get wires(): Wire[];
     get boundingBox(): BoundingBox;
@@ -2805,10 +2888,19 @@ export declare class Sketch implements SketchInterface {
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
      */
-    revolve(revolutionAxis?: Point, { origin, angle }?: {
+    revolve(revolutionAxis?: Point | AxisName, { origin, angle }?: {
         origin?: Point;
         angle?: number;
     }): Shape3D;
+    /**
+     * Extrudes this sketch up to a limiting face, returning only the new solid.
+     * The face is not modified or consumed. The sketch's default direction is
+     * used unless overridden; the reverse direction is tried if needed.
+     * The finite, trimmed limiting face must fully cap the extrusion once
+     * without crossing the profile. Use a trimmed face for closed surfaces.
+     * The sketch is consumed on success, like `extrude`, but retained on failure.
+     */
+    extrudeUntil(limitingFace: Face, { extrusionDirection }?: ExtrudeUntilOptions): Shape3D;
     /** Extrudes the sketch to a certain distance.(along the default direction
      * and origin of the sketch).
      *
@@ -2951,6 +3043,12 @@ export declare class Sketches {
     constructor(sketches: Array<Sketch | CompoundSketch>);
     wires(): AnyShape;
     faces(): AnyShape;
+    /**
+     * Extrudes each sketch up to the same limiting face, returning only the
+     * extrusions. The face is not consumed. Each sketch uses its default
+     * direction unless overridden and is consumed when its extrusion succeeds.
+     */
+    extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
     /** Extrudes the sketch to a certain distance.(along the default direction
      * and origin of the sketch).
      *
@@ -2971,7 +3069,7 @@ export declare class Sketches {
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
      */
-    revolve(revolutionAxis?: Point, config?: {
+    revolve(revolutionAxis?: Point | AxisName, config?: {
         origin?: Point;
         angle?: number;
     }): Shape3D;
@@ -3016,10 +3114,17 @@ export declare interface SketchInterface {
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
      */
-    revolve(revolutionAxis?: Point, config?: {
+    revolve(revolutionAxis?: Point | AxisName, config?: {
         origin?: Point;
         angle?: number;
     }): Shape3D;
+    /**
+     * Extrudes the sketch up to a limiting face, returning only the extrusion.
+     * The face is not consumed. The sketch uses its default extrusion direction
+     * unless overridden and is consumed on success. The finite limiting face
+     * must fully cap the extrusion once without crossing the profile.
+     */
+    extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
     /**
      * Extrudes the sketch to a certain distance.(along the default direction
      * and origin of the sketch).

@@ -44,12 +44,13 @@ describe('extractTypescriptApi over replicad', () => {
   });
 
   it('emits one entry per exported name, with no duplicates', () => {
-    // 236 is what `checker.getExportsOfModule` reports for replicad 1.2's
-    // bundle (1.2.0-beta.1 added `ocScope`, `withOcScope` and `OcScope`); a
+    // 238 is what `checker.getExportsOfModule` reports for replicad 1.2's
+    // bundle (1.2.0-beta.1 added `ocScope`, `withOcScope` and `OcScope`;
+    // 1.2.1-beta.0 adds `extrudeFaceUntil` and `ExtrudeUntilOptions`); a
     // syntactic count would add 16 bare `declare` statements that the module
     // never exports.
-    expect(corpus.entries).toHaveLength(236);
-    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(236);
+    expect(corpus.entries).toHaveLength(238);
+    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(238);
     expect(duplicateNames(corpus.entries)).toStrictEqual([]);
   });
 

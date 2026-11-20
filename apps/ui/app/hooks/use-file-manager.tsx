@@ -1,5 +1,6 @@
 import { observeHomeProjectSaves } from '@taucad/files-ui/filesystem/observe-home-project-saves';
 import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
@@ -7,7 +8,6 @@ import { machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import {
-  createContext,
   useContext,
   useMemo,
   useCallback,
@@ -79,6 +79,7 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Wait for a file manager's content and tree services, up to the ready bound.
@@ -210,6 +211,7 @@ export type WorkspaceFacade = {
   restoreWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>;
 };
 
+/** What a file-manager provider gives its subtree; the shared `FileManagerContext` types only what library components use. */
 type FileManagerContextType = {
   fileManagerRef: FileManagerRef;
   backendType: FileSystemBackend | undefined;
@@ -407,8 +409,6 @@ type FileManagerContextType = {
   /** Opaque, fully writable filesystem rooted at this provider's project. */
   runtimeFileSystem: RuntimeFileSystem;
 };
-
-const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
 
 /** The file-manager host's ref, outside a runtime `undefined` (a component test that renders a gate alone). */
 function useOptionalFileManagerHost() {
@@ -1165,7 +1165,10 @@ function FileManagerScope({
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const { createFileSystemBridgeProxy } = await loadCode(async () => {
+        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        return { createFileSystemBridgeProxy };
+      });
       // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
       const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;
@@ -1600,7 +1603,7 @@ function FileManagerScope({
 }
 
 export function useFileManager(): FileManagerContextType {
-  const context = useContext(FileManagerContext);
+  const context = useContext(FileManagerContext) as FileManagerContextType | undefined;
   if (context === undefined) {
     throw new Error('useFileManager must be used within a FileManagerProvider');
   }
@@ -1611,10 +1614,10 @@ export function useFileManager(): FileManagerContextType {
 /**
  * Non-throwing variant of `useFileManager`. Returns `undefined` when called
  * outside a `FileManagerProvider` instead of throwing. Used by components
- * that optionally read from the file manager context (e.g. `FileSelector`).
+ * that optionally read from the file manager context.
  */
 export function useOptionalFileManager(): FileManagerContextType | undefined {
-  return useContext(FileManagerContext);
+  return useContext(FileManagerContext) as FileManagerContextType | undefined;
 }
 
 /**

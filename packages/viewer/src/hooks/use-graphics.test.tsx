@@ -9,6 +9,8 @@ import {
   GraphicsProvider,
   useCameraRig,
   useGraphicsCamera,
+  useOptionalGraphics,
+  useOptionalGraphicsSelector,
   useRenderFrame,
   useRenderFrameRetarget,
   useSetRenderFrame,
@@ -392,5 +394,59 @@ describe('GraphicsProvider camera rig ownership', () => {
       metersPerRenderUnit: 1,
     });
     expect(retargeted).toContainEqual(next);
+  });
+});
+
+describe('GraphicsProvider before the view has a graphics actor', () => {
+  function OptionalProbe({
+    onRead,
+  }: {
+    readonly onRead: (read: { graphicsRef: unknown; enableGrid: boolean | undefined }) => void;
+  }): undefined {
+    const graphicsRef = useOptionalGraphics();
+    const enableGrid = useOptionalGraphicsSelector((state) => state.context.enableGrid, undefined);
+    onRead({ graphicsRef, enableGrid });
+    return undefined;
+  }
+
+  it('should present nothing until the actor arrives, then present it to the same content', () => {
+    const reads: Array<{ graphicsRef: unknown; enableGrid: boolean | undefined }> = [];
+    const onRead = (read: { graphicsRef: unknown; enableGrid: boolean | undefined }): void => {
+      reads.push(read);
+    };
+    const mounts = vi.fn();
+    function Content(): React.JSX.Element {
+      useLayoutEffect(() => {
+        mounts();
+      }, []);
+      return <OptionalProbe onRead={onRead} />;
+    }
+    const view = render(
+      <GraphicsProvider graphicsRef={undefined}>
+        <Content />
+      </GraphicsProvider>,
+    );
+    expect(reads.at(-1)).toEqual({ graphicsRef: undefined, enableGrid: undefined });
+
+    const graphicsActor = createGraphicsActor();
+    view.rerender(
+      <GraphicsProvider graphicsRef={graphicsActor}>
+        <Content />
+      </GraphicsProvider>,
+    );
+    expect(reads.at(-1)).toEqual({
+      graphicsRef: graphicsActor,
+      enableGrid: graphicsActor.getSnapshot().context.enableGrid,
+    });
+    /* The content under the provider is the same element throughout. */
+    expect(mounts).toHaveBeenCalledOnce();
+  });
+
+  it('should keep the graphics hooks that need the actor refusing to run without one', () => {
+    expect(() =>
+      renderHook(() => useCameraRig(), {
+        wrapper: ({ children }) => <GraphicsProvider graphicsRef={undefined}>{children}</GraphicsProvider>,
+      }),
+    ).toThrow('useCameraRig must be used within a GraphicsProvider');
   });
 });

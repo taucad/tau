@@ -106,7 +106,7 @@ const scripted = <Module,>(importer: () => Promise<Module>) => {
 describe('cloud loader', () => {
   it('should retry a rejected import once on its own, then wait for the person, reporting once (T-BA10)', async () => {
     const importer = vi.fn(async (): Promise<{ ok: boolean }> => {
-      throw new TypeError('Failed to fetch dynamically imported module');
+      throw new RangeError('The Cloud chunk threw while it evaluated');
     });
     const { loader, reported, recovered } = scripted(importer);
     loader.load();
@@ -125,6 +125,24 @@ describe('cloud loader', () => {
       expect(loader.state()).toEqual({ status: 'loaded', module: { ok: true } });
     });
     expect(reported).toHaveLength(1);
+  });
+
+  it('should never import again a chunk the browser failed to load, which this page keeps failed (FP9)', async () => {
+    const failure = new TypeError('Failed to fetch dynamically imported module');
+    const importer = vi.fn(async (): Promise<{ ok: boolean }> => {
+      throw failure;
+    });
+    const { loader, reported, recovered } = scripted(importer);
+    loader.load();
+    await waitFor(() => {
+      expect(loader.state()).toEqual({ status: 'failed', retryable: false });
+    });
+    loader.retry();
+
+    expect(importer).toHaveBeenCalledOnce();
+    expect(reported).toEqual([failure]);
+    // The stale-build recovery alone decides: reload the page into the live build, or offer it.
+    expect(recovered).toEqual([failure]);
   });
 
   it('should give up on an import that never settles at the deadline, twice, then fail (T-BA25, I15)', async () => {

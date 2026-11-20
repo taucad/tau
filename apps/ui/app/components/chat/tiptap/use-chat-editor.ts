@@ -22,7 +22,7 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ChipType } from '@taucad/chat-ui/components/context-chip';
 import { buildPastedContent, invocationTokenRegex } from '@taucad/chat-ui/utils/at-reference.utils';
 import type { PastedContentSegment } from '@taucad/chat-ui/utils/at-reference.utils';
-import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
+import { ContextChipNode } from '@taucad/files-ui/components/chat/context-chip-node';
 import { SubmitOnEnter } from '@taucad/chat-ui/components/tiptap/submit-on-enter';
 import { ChatInputDropHandler } from '@taucad/chat-ui/components/tiptap/chat-input-drop-handler';
 import { ContextMention } from '@taucad/chat-ui/components/tiptap/context-suggestion';

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ constrained: false, replay: [] as boolean[] }));
 
-vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => 'accepted' }));
+vi.mock('#hooks/use-privacy-choices.js', () => ({ useCookieConsent: () => 'accepted' }));
 vi.mock('#lib/web-posthog.lib.js', () => ({ webPosthogOptions: () => ({}) }));
 vi.mock('@taucad/ui-core/lib/device-memory-class', () => ({ isMemoryConstrainedDevice: () => state.constrained }));
 vi.mock('#providers/posthog-analytics-provider.js', () => ({

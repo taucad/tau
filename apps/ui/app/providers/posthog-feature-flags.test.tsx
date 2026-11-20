@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ consent: 'declined' as 'unknown' | 'accepted' | 'declined' }));
 
-vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => state.consent }));
+vi.mock('#hooks/use-privacy-choices.js', () => ({ useCookieConsent: () => state.consent }));
 vi.mock('#environment.config.js', () => ({
   ENV: { POSTHOG_CLIENT_KEY: 'phc_test_key', POSTHOG_UI_HOST: 'https://posthog.example.invalid' },
 }));

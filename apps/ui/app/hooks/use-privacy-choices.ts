@@ -1,3 +1,10 @@
+/*
+ * The visitor's cookie consent (`useCookieConsent`). The module is not named after it: its chunk is in the interactive
+ * tier, and a URL containing `-cookie-consent-` matches EasyList Cookie List's `-cookie-consent-$~script`, which a
+ * content blocker applies to every request for it but a page's script load, including the service worker's (Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`, FP6). `use-privacy-choices` matches no rule of the six
+ * lists checked there.
+ */
 import { useSyncExternalStore } from 'react';
 import { consentChannelName, consentCookieName } from '@taucad/consent';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';

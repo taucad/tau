@@ -75,7 +75,6 @@
     "@base-ui/react": "catalog:",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.3",
-    "@taucad/chat": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/workbench-panes": "workspace:*",

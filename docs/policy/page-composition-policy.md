@@ -383,7 +383,7 @@ Serve web and desktop from the same route module unless `apps/ui/desktop/app/rou
 
 Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`@taucad/ui-kit/icons/svg-icon`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
 
-**Enforced by**: `svg-icon.tsx` fails typecheck when a kernel or model family has no mark; otherwise default.
+**Enforced by**: `svg-icon.tsx` fails typecheck when a kernel has no mark, and `chat-ui`'s `model-family-icon.test-d.ts` when a model family has none; otherwise default.
 
 ## Enforcement
 

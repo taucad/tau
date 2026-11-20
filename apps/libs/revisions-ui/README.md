@@ -55,7 +55,7 @@ The app makes one `createRevisionRefRemoval` over `RevisionRefRemovalServices` i
 - `routes/…/revision-ref-removal`: the binding of the ref removal to the API origin (`#environment.config`), at the same path because the branches suite mocks it.
 - `machines/file-manager.worker.revisions`: `lib/build-target`, `db/indexeddb-storage` and `observability/report-to-api`.
 - `runtime/session-revisions`: the app's `use-revision-status`, `use-cloud-projects` and `use-project-availability`, `lib/revision-actor`, `lib/tau-cloud-intent`, the file-manager and chat-session machines and the chat session store.
-- `workers/agent-host-revisions`: the `history` tool's client in the agent-host worker, composed only by `workers/agent-host.impl`. It imports only packages and this library, but it is the agent host's, and moving it would make this library depend on `@taucad/chat` for one worker-side client.
+- `workers/agent-host-revisions`: the agent host's adapter for the `history` tool, composed only by `workers/agent-host.impl`. It implements `RpcRevisionsClient`, a port of the agent-tool protocol in `@taucad/chat`, over this library's worker protocol. An adapter between the agent protocol and the revisions domain belongs with the agent host, not in a domain library, so it stays beside `agent-host.impl`.
 - `machines/revision-load-telemetry`: `observability/report-to-api`.
 - `components/revision-actor-identity`: `lib/auth-client`.
 - `machines/revisions-opfs.browser.test.ts` and its fixture worker: a Playwright browser suite under the app's browser config.

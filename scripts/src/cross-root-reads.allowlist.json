@@ -1133,5 +1133,10 @@
     "file": "packages/agent-host/src/log/chat-ledger.differential.test.ts",
     "target": "out/test-results/formal/packages/agent-host/lean",
     "reason": "lists the fresh-differential corpus directory this test writes, to clear the files no other part writes"
+  },
+  {
+    "file": "apps/ui/deployment-ceiling.test.ts",
+    "target": "apps/libs/desktop-services-host/src/zoo-close-errors.ts",
+    "reason": "holds main's Zoo close-code sentences equal to the web app's neutral ones; the desktop cannot import UI source (adaptive app deployment mode D3, D11)"
   }
 ]

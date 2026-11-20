@@ -46,6 +46,7 @@ import {
   buildKillSwitchWorker,
   buildRoot,
   createReturningVisitor,
+  killSwitchPageScript,
   prepareDeploys,
   readBootState,
   readPreFixWorker,
@@ -349,6 +350,8 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     await expect
       .poll(async () => readBootState(page), { timeout: bootDeadline + 10_000, interval: 500 })
       .toMatchObject({ mounted: false, stripShown: true });
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
     live.deploy();
     // The first load after the deploy may still be the stalled worker's; its update check fetches the retiring worker.
     await page.reload({ waitUntil: 'commit' });

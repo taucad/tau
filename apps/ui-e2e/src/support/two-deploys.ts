@@ -627,6 +627,28 @@ export const readPreFixWorker = (without: readonly string[] = []): string => {
   return `${script.slice(0, at)}${JSON.stringify(entries)}${script.slice(at + point.length)}`;
 };
 
+/**
+ * A page script that makes the ordinary build's pages behave as a kill switch build's (`use-pwa.ts`): they register
+ * nothing and only ask an existing registration to check for an update. The suites serve the kill switch as a worker
+ * script on the ordinary build, whose pages would otherwise register `/service-worker.js` again after load; a
+ * registration that a page re-registers while its retiring worker unregisters can be revived with the retiring worker
+ * already active, and then never unregisters (observed once in 11 runs of row 6, 2026-11-20). Add it to the context
+ * when the kill switch deploy goes live.
+ */
+export const killSwitchPageScript = `(() => {
+  const container = globalThis.navigator.serviceWorker;
+  if (container === undefined) return;
+  Object.defineProperty(container, 'register', {
+    configurable: true,
+    value: async () => {
+      const registration = await container.getRegistration();
+      if (registration === undefined) throw new TypeError('A kill switch build registers no service worker.');
+      await registration.update().catch(() => undefined);
+      return registration;
+    },
+  });
+})();`;
+
 /** `apps/ui/scripts/build-service-worker.ts`'s build, as far as the suites call it. */
 type BuildServiceWorker = (options: {
   readonly buildDirectory: string;

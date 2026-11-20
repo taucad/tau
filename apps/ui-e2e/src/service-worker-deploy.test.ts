@@ -10,8 +10,8 @@
  *   installed worker. The first open after the deploy is the last one the old worker answers and fetches the retiring
  *   worker, which activates once the old worker is idle (here, when that project page unloads); from the next page load
  *   the browser holds no worker cache and no registration, and documents are the network's, cross-origin isolated. The
- *   next deploy's pages here are the ordinary build's and register again after load; the retiring worker unregisters
- *   again, so the end state holds (a kill switch build's pages register nothing, `offline-shell.test.tsx`).
+ *   next deploy's pages here are the ordinary build's, made to register nothing as a kill switch build's do
+ *   (`killSwitchPageScript`, `offline-shell.test.tsx`).
  * - The retired `/usage` worker (`/offline-shell-worker.js`, scope `/`, ui@0.3.0 and earlier): every PL7 build ships
  *   the retiring worker at its URL. After one deploy of an ordinary build the registration holds the web app's worker
  *   and none of the retired worker's caches; after one of a kill switch build there is no registration at all.
@@ -30,6 +30,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   buildKillSwitchWorker,
+  killSwitchPageScript,
   prepareDeploys,
   projectShellUrl,
   startDeployServer,
@@ -252,6 +253,8 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
     expect(installed?.registered).toBe(true);
     expect(installed?.caches).toEqual(expect.arrayContaining([expect.stringMatching(/^tau-precache-/u)]));
 
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
     live.deploy();
 
     // The last open the old worker answers: its update check installs the retiring worker, which asks to activate at
@@ -373,6 +376,8 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   it('should leave no registration from the retired /usage worker under the kill switch', async () => {
     const { page, live } = await openWithLegacyWorker({ worker: killSwitchWorker, retiredWorker: killSwitchWorker });
 
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
     live.deploy();
 
     const state = await reloadUntil(

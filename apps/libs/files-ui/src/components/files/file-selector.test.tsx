@@ -287,14 +287,15 @@ describe('FileSelector (context auto-wiring)', () => {
     const { useOptionalFileServices } = await import('#hooks/use-file-services.js');
     const error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     const listDirectory = vi.fn().mockRejectedValue(error);
-    vi.mocked(useOptionalFileServices).mockReturnValue({
-      treeService: {
-        listDirectory,
-        listDirectorySync: vi.fn().mockReturnValue(undefined),
-        subscribePath: vi.fn().mockReturnValue(() => undefined),
-        observeDirectory: observeListing(listDirectory),
-      },
-    } as unknown as ReturnType<typeof useOptionalFileServices>);
+    const treeService = mock<FileTreeService>({
+      listDirectory,
+      listDirectorySync: vi.fn().mockReturnValue(undefined),
+      subscribePath: vi.fn().mockReturnValue(() => undefined),
+      observeDirectory: observeListing(listDirectory),
+    });
+    vi.mocked(useOptionalFileServices).mockReturnValue(
+      mock<NonNullable<ReturnType<typeof useOptionalFileServices>>>({ treeService }),
+    );
 
     render(<FileSelector selectedFile={undefined} onSelect={vi.fn()} />);
 
@@ -310,10 +311,7 @@ describe('FileSelector (context auto-wiring)', () => {
 
   it('should preserve full breadcrumb path when drilling down after navigating up', async () => {
     const { useOptionalFileServices } = await import('#hooks/use-file-services.js');
-    const listingSnapshot = new Map<
-      string,
-      Array<{ name: string; path: string; isFolder: boolean; size: number; mtimeMs: number }>
-    >();
+    const listingSnapshot = new Map<string, ListedDirectoryEntry[]>();
 
     const mockNodesForPath = (path: string) => {
       if (path === '') {
@@ -333,27 +331,25 @@ describe('FileSelector (context auto-wiring)', () => {
 
     const listDirectory = vi.fn().mockImplementation(async (path: string) => {
       const nodes = mockNodesForPath(path);
-      const rows = nodes.map((n) => ({
-        name: n.name,
-        path: path ? `${path}/${n.name}` : n.name,
-        isFolder: 'children' in n,
-        size: 0,
-        mtimeMs: 0,
-      }));
+      const rows = nodes.map((n): ListedDirectoryEntry => {
+        const row = { name: n.name, path: path ? `${path}/${n.name}` : n.name, size: 0, mtimeMs: 0 };
+        return 'children' in n ? { ...row, isFolder: true } : { ...row, isFolder: false };
+      });
       listingSnapshot.set(path, rows);
       return rows;
     });
 
     const listDirectorySync = vi.fn((path: string) => listingSnapshot.get(path));
 
-    vi.mocked(useOptionalFileServices).mockReturnValue({
-      treeService: {
-        listDirectory,
-        listDirectorySync,
-        subscribePath: vi.fn().mockReturnValue(() => undefined),
-        observeDirectory: observeListing(listDirectory),
-      },
-    } as unknown as ReturnType<typeof useOptionalFileServices>);
+    const treeService = mock<FileTreeService>({
+      listDirectory,
+      listDirectorySync,
+      subscribePath: vi.fn().mockReturnValue(() => undefined),
+      observeDirectory: observeListing(listDirectory),
+    });
+    vi.mocked(useOptionalFileServices).mockReturnValue(
+      mock<NonNullable<ReturnType<typeof useOptionalFileServices>>>({ treeService }),
+    );
 
     render(<FileSelector selectedFile='public/kcl-samples/ball-bearing/main.kcl' onSelect={vi.fn()} />);
 

@@ -1,15 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {
-  activateRetirement,
   deleteOrphanWorkerCaches,
   isPreFixWorkerCache,
   isRetiredWorkerCache,
   isWorkerCache,
   workerCacheNamePattern,
-  retireServiceWorker,
-  workboxExpirationDatabase,
-} from '#offline/service-worker-retire.js';
+} from '#offline/pwa-caches.js';
+import { activateRetirement, retireServiceWorker, workboxExpirationDatabase } from '#offline/service-worker-retire.js';
 import type { RetiringWorkerScope } from '#offline/service-worker-retire.js';
 
 /** A worker global whose calls are recorded in order. */

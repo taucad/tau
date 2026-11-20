@@ -56,7 +56,7 @@ import {
 } from '#offline/service-worker-store.js';
 import { assetCacheName, cachePrefix, precacheNamePart, stateCacheName } from '#offline/pwa-messages.js';
 import { buildIdentityPath } from '#lib/build-identity.js';
-import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/service-worker-retire.js';
+import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/pwa-caches.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** A `FetchEvent`, which the DOM library does not declare. */

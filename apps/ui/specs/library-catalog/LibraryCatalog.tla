@@ -140,6 +140,8 @@
 \* PL7 staging defects FP9 (2026-11-20): `project-library-commands.ts` loads the settled chat-log lease through the
 \* code-loading owner (`loadCode`), which hands a failed load to the page's recovery; the import and every command keep
 \* their order. No action or correspondence changes.
+\* Auto-bring on sign-in removed (2026-11-20): `project-library-commands.ts` stops naming that setting in two
+\* comments; comments only. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

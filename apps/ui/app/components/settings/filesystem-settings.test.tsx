@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '@taucad/files-ui/filesystem/handle-store';
@@ -127,8 +126,6 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
 }));
 
 /* The self-host build gates nothing; the Free row closes the gate the cloud build reads. */
-const plan = vi.hoisted(() => ({ isResolved: true, canSyncFiles: true }));
-vi.mock('#cloud/commercial-features.js', () => ({ useCommercialFeatures: () => plan }));
 
 vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
@@ -320,52 +317,13 @@ describe('FileSystemSettings workspace disconnect', () => {
   });
 });
 
-/** D20: materialize on sign-in is off by default and names one workspace when on. */
+/** Auto-bring on sign-in was removed: it cloned cloud projects under their cloud id into a second root (R9). */
 describe('FileSystemSettings cloud projects', () => {
-  const workspace = {
-    workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
-    name: 'Parts',
-    lastConnectedAt: 0,
-    slug: 'parts',
-  } satisfies Workspace;
-
-  beforeEach(async () => {
-    Object.assign(plan, { isResolved: true, canSyncFiles: true });
-    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
-    materializeOnSignIn.set(undefined);
+  it('should not offer a setting that brings cloud projects onto this device', async () => {
     stubEstimate(async () => ({ usage: 0, quota: 0 }));
-    mockListWorkspaces.mockResolvedValue([workspace]);
-    mockGetWorkspace.mockResolvedValue(undefined);
-  });
-
-  it('should leave materialize on sign-in off by default', async () => {
     render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    expect(await screen.findByRole('combobox', { name: 'Cloud projects' })).toHaveTextContent('Off');
-  });
-
-  it('should remember the one workspace that receives cloud projects', async () => {
-    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
-    render(<FileSystemSettings />, { wrapper: TooltipProvider });
-
-    const select = await screen.findByRole('combobox', { name: 'Cloud projects' });
-    await screen.findAllByText('Parts');
-    Element.prototype.scrollIntoView = vi.fn();
-    select.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(await screen.findByRole('option', { name: 'Parts' })).toBeInTheDocument();
-    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-
-    expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-    expect(screen.getByRole('combobox', { name: 'Cloud projects' })).toHaveTextContent('Parts');
-  });
-
-  it('should not offer the setting on a plan without backup', async () => {
-    Object.assign(plan, { canSyncFiles: false });
-    render(<FileSystemSettings />, { wrapper: TooltipProvider });
-
-    await screen.findAllByText('Parts');
-    expect(screen.queryByRole('combobox', { name: 'Cloud projects' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Browser storage')).toBeInTheDocument();
     expect(screen.queryByText('Cloud projects')).not.toBeInTheDocument();
   });
 });

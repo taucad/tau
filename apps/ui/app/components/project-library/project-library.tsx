@@ -85,13 +85,7 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
-import {
-  CloudProjectCard,
-  OnTauCloudMark,
-  isCloudOnly,
-  toLibraryRows,
-  useMaterializeCloudProjects,
-} from '#routes/projects_/cloud-projects.js';
+import { CloudProjectCard, OnTauCloudMark, isCloudOnly, toLibraryRows } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
@@ -349,13 +343,6 @@ export function ProjectLibrary({
     void retryCloudListing();
   }, [retryCloudListing]);
   const openCloudProject = useOpenCloudProject();
-  useMaterializeCloudProjects({
-    cloud: cloudProjects,
-    isSettled: isCloudSettled,
-    isFetching: isCloudFetching,
-    held: heldProjects,
-    isLoading,
-  });
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {

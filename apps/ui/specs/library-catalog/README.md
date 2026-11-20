@@ -109,3 +109,5 @@ node tools/formal/src/cli.ts check --tier nightly apps/ui  # the nightly configu
 The Tau Cloud naming audit re-pinned the drift after `project-library-commands.ts` reworded a refusal sentence; no action changed.
 
 PL7 staging defects FP9 re-pinned the drift after `project-library-commands.ts` began loading its chat-log lease module through the code-loading owner (`loadCode`); no action changed.
+
+Removing auto-bring on sign-in re-pinned the drift after `project-library-commands.ts` stopped naming that setting in two comments; no action changed.

@@ -138,25 +138,21 @@ describe('WorkspaceConnections', () => {
   it('should omit desktop Home from manageable workspaces and location options', async () => {
     const home = { ...workspace, workspaceId: 'wsp_home', name: 'Home', path: state.homeRoot() };
     state.listWorkspaces.mockResolvedValue([home, workspace]);
-    const onWorkspacesChange = vi.fn();
-    render(<WorkspaceConnections onWorkspacesChange={onWorkspacesChange} />);
+    render(<WorkspaceConnections />);
 
     expect(await screen.findByRole('button', { name: 'Disconnect workspace' })).toBeEnabled();
     expect(screen.getByText('Tau Workspace')).toBeInTheDocument();
     expect(screen.queryByText('Home', { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
-    expect(onWorkspacesChange).toHaveBeenLastCalledWith([workspace]);
   });
 
   it.each(['desktop', 'web'])('should retain a regular workspace named Home on %s', async (target) => {
     vi.stubEnv('TAU_TARGET', target);
     const namedHome = { ...workspace, name: 'Home', path: target === 'desktop' ? workspace.path : undefined };
     state.listWorkspaces.mockResolvedValue([namedHome]);
-    const onWorkspacesChange = vi.fn();
-    render(<WorkspaceConnections onWorkspacesChange={onWorkspacesChange} />);
+    render(<WorkspaceConnections />);
 
     expect(await screen.findByText('Home', { exact: true })).toBeInTheDocument();
-    expect(onWorkspacesChange).toHaveBeenLastCalledWith([namedHome]);
     if (target === 'web') {
       expect(state.homeRoot).not.toHaveBeenCalled();
     }

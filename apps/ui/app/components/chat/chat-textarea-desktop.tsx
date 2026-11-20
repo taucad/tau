@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom';
 import { queuedSendStatus } from '#components/hand-off/hand-off.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor, JSONContent } from '@tiptap/core';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';

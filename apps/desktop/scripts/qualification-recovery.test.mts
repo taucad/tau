@@ -12,6 +12,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 /* oxlint-disable no-restricted-imports -- Exercise the installed runner's own scenario module. */
+import { buildIdentity } from '../src/main/boot-health.js';
+import { desktopHostBuildOf } from '../src/shared/desktop-host-build.js';
 import {
   assertBaselineShipsAutoInstall,
   assertRecoveryReceipts,
@@ -44,9 +46,12 @@ const at = (seconds: number, text: string): string =>
 const startedAfter = (seconds: number): string =>
   at(seconds, line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'));
 const launchOf = (version: string, pid: number): string => line('main.ready', { packaged: true, version, pid });
+/** The build the app records in its ledger: packaging's 12-hex short commit (`host-build.json`), never the full one. */
+const buildOf = (version: string, sourceCommit: string): string =>
+  buildIdentity({ version, sourceCommit: desktopHostBuildOf(() => sourceCommit), packaged: true });
 const ledgerOf = (version: string, sourceCommit: string, stage: string) => ({
   schemaVersion: 1,
-  build: `${version}+${sourceCommit}+packaged`,
+  build: buildOf(version, sourceCommit),
   unhealthyCount: 0,
   last: { launchId: 'launch', mode: 'normal', stage, deadlinePassed: false },
 });
@@ -249,7 +254,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
           started: true,
           furthestStage: 'window-loaded',
         },
-        b: { pid: 5200, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
+        b: { pid: 5200, build: `${b.version}+${'b'.repeat(12)}+packaged`, stage: 'home-ready' },
       });
     },
   ],
@@ -381,7 +386,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
           autoInstall: { fromBuild: 'x', targetVersion: b.version },
         }),
         {
-          build: `${a.version}+${a.sourceCommit}+packaged`,
+          build: buildOf(a.version, a.sourceCommit),
           unhealthyCount: 0,
           last: { mode: 'normal', stage: 'updater-started', deadlinePassed: false },
           autoInstall: { targetVersion: b.version },
@@ -433,7 +438,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
             started: true,
             furthestStage: 'window-loaded',
           },
-          b: { pid: 2, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
+          b: { pid: 2, build: buildOf(b.version, b.sourceCommit), stage: 'home-ready' },
           installed: { executableSha256: 'c'.repeat(64), asarSha256: 'd'.repeat(64) },
         },
         logs: 'https://github.com/taucad/tau/actions/runs/1',

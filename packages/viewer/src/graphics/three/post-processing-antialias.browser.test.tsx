@@ -2114,7 +2114,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
     };
     const fixture = (index: number, width: number, generation: number): ReactNode => (
       <div key={generation} style={{ width, height: (width * 2880) / 5120 }}>
-        <GraphicsProvider graphicsRef={actors[index]!}>
+        <GraphicsProvider graphicsRef={actors[index]}>
           <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
             <ambientLight intensity={2} />
             <mesh position={[0, 0, -0.7]}>

@@ -23,6 +23,10 @@
 import { open, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+/* oxlint-disable no-restricted-imports -- B's ledger identity must be derived exactly as the app derives it. */
+import { buildIdentity } from '../src/main/boot-health.js';
+import { desktopHostBuildOf } from '../src/shared/desktop-host-build.js';
+/* oxlint-enable no-restricted-imports */
 
 export type QualificationScenario = 'chain' | 'recovery';
 
@@ -423,7 +427,12 @@ export const assessRecovery = (input: {
     throw new Error('The profile has no boot-health ledger');
   }
   const ledger = z.object({ build: z.string(), last: z.object({ stage: z.string() }).optional() }).parse(input.ledger);
-  const build = `${b.version}+${b.sourceCommit}+packaged`;
+  /* The app records packaging's 12-hex short commit (`host-build.json`), not the release's full source commit. */
+  const build = buildIdentity({
+    version: b.version,
+    sourceCommit: desktopHostBuildOf(() => b.sourceCommit),
+    packaged: true,
+  });
   if (ledger.build !== build) {
     throw new Error(`The boot-health ledger belongs to ${ledger.build}, not ${build}`);
   }

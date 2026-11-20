@@ -4,7 +4,7 @@ import { PageHeader } from '#components/layout/page-header.js';
 import { useId, useMemo } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { ImportViewer } from '#routes/import.$/import-viewer.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { isMainFileCandidate } from '#routes/import.$/import.utils.js';

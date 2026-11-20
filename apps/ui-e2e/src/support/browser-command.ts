@@ -2316,6 +2316,69 @@ export const uiDelayTargetRequests: BrowserCommand<[pattern: string, millisecond
   });
 };
 
+/** The deployment answers an adaptive-build row can give (adaptive app deployment mode W7). */
+type DeploymentAnswerStub = 'funded' | 'unfunded';
+
+const deploymentAnswerBodies: Record<DeploymentAnswerStub, unknown> = {
+  funded: { version: 1, edition: 'cloud', billing: { funded: true, environment: 'development' }, maxAgeSeconds: 300 },
+  unfunded: { version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 },
+};
+
+/**
+ * Answer the page's `GET /v1/deployment` as a funded or an unfunded API does, for every page of the target context,
+ * whatever else answers the API origin. Hold it first with `uiDelayTargetRequests` (registered after this) to make the
+ * ask wait, or never call this to leave it to the API, or to the refusal of an absent one.
+ */
+export const uiRouteDeploymentAnswer: BrowserCommand<[answer: DeploymentAnswerStub]> = async (
+  commandContext,
+  answer,
+) => {
+  const { context } = sessionFor(commandContext);
+  await context.route(/\/v1\/deployment(?:\?|$)/u, async (route, request) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': request.headers()['origin'] ?? new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+        vary: 'origin',
+      },
+      body: JSON.stringify(deploymentAnswerBodies[answer]),
+    });
+  });
+};
+
+/** Whether this run serves the adaptive web build (`ui-e2e:test:e2e:adaptive` sets the directory). */
+export const uiIsAdaptiveTier: BrowserCommand<[], boolean> = () =>
+  process.env['TAU_E2E_UI_BUILD_DIRECTORY'] === 'build-adaptive';
+
+/** Refuse every request of the target context whose URL matches `pattern`, as a missing file refuses it. */
+export const uiFailTargetRequests: BrowserCommand<[pattern: string]> = async (commandContext, pattern) => {
+  const { context } = sessionFor(commandContext);
+  await context.route(new RegExp(pattern, 'u'), async (route) => {
+    await route.abort('failed');
+  });
+};
+
+/**
+ * The served build's Cloud chunk files (`cloud-surfaces.lazy.tsx` and only it), as URL paths, read from the build's
+ * module-id manifest: `TAU_E2E_UI_BUILD_DIRECTORY` under `apps/ui`, else `build`.
+ */
+export const uiCloudChunkPaths: BrowserCommand<[], readonly string[]> = async () => {
+  const directory = process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build';
+  const manifest = JSON.parse(
+    await readFile(resolve(import.meta.dirname, '../../../ui', directory, 'client-module-ids.json'), 'utf8'),
+  ) as {
+    readonly chunks: ReadonlyArray<{
+      readonly fileName: string;
+      readonly modules: ReadonlyArray<{ readonly id: string }>;
+    }>;
+  };
+  return manifest.chunks
+    .filter((chunk) => chunk.modules.some((module) => module.id.endsWith('app/cloud/cloud-surfaces.lazy.tsx')))
+    .map((chunk) => `/${chunk.fileName}`);
+};
+
 /** Lets every request `uiDelayTargetRequests(pattern, 'until-released')` holds go on, and the later ones through. */
 export const uiReleaseTargetRequests: BrowserCommand = async (commandContext) => {
   const gate = targetRequestGates.get(sessionFor(commandContext).context);
@@ -4014,6 +4077,10 @@ export const uiBrowserCommands = {
   uiReadTauVertexOperations,
   uiDelayTargetRequests,
   uiReleaseTargetRequests,
+  uiRouteDeploymentAnswer,
+  uiFailTargetRequests,
+  uiCloudChunkPaths,
+  uiIsAdaptiveTier,
   uiReadDelayedTargetRequests,
   uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,

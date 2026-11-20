@@ -58,7 +58,7 @@ vi.mock('@taucad/ui/components/combobox-responsive', () => ({
     </>
   ),
 }));
-vi.mock('#components/files/viewer-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/viewer-link', () => ({
   ViewerLink: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 vi.mock('@taucad/ui/components/tooltip', () => ({

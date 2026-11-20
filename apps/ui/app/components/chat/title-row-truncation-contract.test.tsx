@@ -10,8 +10,8 @@ import {
 } from '@taucad/chat-ui/components/chat-tool-card';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
-import { FileLink } from '#components/files/file-link.js';
-import { ViewerLink } from '#components/files/viewer-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
+import { ViewerLink } from '@taucad/files-ui/components/files/viewer-link';
 
 // ChatToolCard transitively calls `useCookie`, which expects a react-router
 // data router for `useRouteLoaderData`. Stub the cookie hook so these contract

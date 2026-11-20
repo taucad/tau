@@ -9,7 +9,7 @@ import { useFileTreeEntry } from '@taucad/files-ui/hooks/use-file-tree';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';

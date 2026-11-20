@@ -50,6 +50,35 @@ const rolledView = {
   up: [-0.2, 0, -1],
 } as const;
 
+/** A view turned on its side: its up is the world X axis, across the world up. */
+const sidewaysView = {
+  ...cameraView,
+  up: [1, 0, 0],
+} as const;
+
+/** A rolled view looking straight down the world up: at the pole, where no upright up exists. */
+const poleView = {
+  ...cameraView,
+  direction: [0, 0, 1],
+  up: [1, 0, 0],
+} as const;
+
+/** A rolled view just off the pole, as far as the view cube tilts a top view off it. */
+const nearPoleView = {
+  ...cameraView,
+  direction: [0.0011, 0, 1],
+  up: [0, 1, 0],
+} as const;
+
+type SeedView = Readonly<{
+  frameId: string;
+  target: readonly [number, number, number];
+  direction: readonly [number, number, number];
+  up: readonly [number, number, number];
+  verticalSpan: number;
+  perspectiveZoom: number;
+}>;
+
 const viewers: Viewer[] = [];
 
 afterEach(() => {
@@ -63,7 +92,7 @@ afterEach(() => {
 const mountViewer = (
   orbitStyle: OrbitStyle,
   projection: 'perspective' | 'orthographic' = 'perspective',
-  view: typeof cameraView | typeof rolledView = cameraView,
+  view: SeedView = cameraView,
 ): Viewer => {
   const graphics = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
@@ -149,6 +178,24 @@ const readView = (viewer: Viewer): Readonly<{ direction: Vector3; up: Vector3 }>
   const { view } = viewer.graphics.getSnapshot().context.cameraRef.getSnapshot().context;
   return { direction: new Vector3(...view.direction), up: new Vector3(...view.up) };
 };
+
+/** The source of the camera's last change. */
+const lastSource = (viewer: Viewer): string =>
+  viewer.graphics.getSnapshot().context.cameraRef.getSnapshot().context.lastChange.source;
+
+/** A saved view record's pose, adopted by the camera as the view-record binding adopts one. */
+const adoptSavedView = (viewer: Viewer, view: SeedView): void => {
+  viewer.graphics.getSnapshot().context.cameraRef.send({
+    type: 'adoptPersistedPose',
+    requestId: 'saved-view',
+    pose: { target: view.target, direction: view.direction, up: view.up, verticalSpan: view.verticalSpan },
+  });
+  viewer.settle();
+};
+
+const unit = (vector: readonly [number, number, number]): Vector3 => new Vector3(...vector).normalize();
+
+const isFiniteVector = (vector: Vector3): boolean => vector.toArray().every((value) => Number.isFinite(value));
 
 /**
  * One vertical drag from the canvas centre, `steps` moves of `step` pixels, reading the view after each move.
@@ -278,5 +325,86 @@ describe('orbit style in the browser (TA5)', () => {
     expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(-0.5);
     expect(readView(viewer).up.angleTo(restored.up)).toBeGreaterThan(0.5);
     expect(largestStep(directions)).toBeLessThan(0.2);
+  });
+
+  /*
+   * Roll ruling E: Turntable has no roll. A rolled view a reload restores, or a saved view the camera adopts, is
+   * straightened as switching to Turntable straightens one: the view direction stays and the up is the world up again.
+   */
+  it.each([
+    ['upside down', rolledView],
+    ['on its side', sidewaysView],
+  ])('straightens a view restored %s in Turntable, and the next drag turns about the world up', (_, view) => {
+    const viewer = mountViewer('turntable', 'perspective', view);
+    const restored = readView(viewer);
+    expect(restored.direction.angleTo(unit(view.direction))).toBeLessThan(1e-9);
+    expect(restored.up.toArray()).toEqual([0, 0, 1]);
+    // An automatic change, as the restore was: the view record never saves it (I7).
+    expect(lastSource(viewer)).toBe('persisted');
+
+    const directions = verticalDrag(viewer);
+    expect(poles(directions)).toEqual({ top: true, bottom: false });
+    expect(directions.at(-1)!.angleTo(directions.at(-2)!)).toBeLessThan(1e-6);
+    expect(roll(viewer)).toBeLessThan(1e-6);
+    expect(readView(viewer).up.dot(worldUp)).toBeGreaterThan(0);
+  });
+
+  it('straightens a rolled saved view adopted in Turntable, as an automatic change', () => {
+    const viewer = mountViewer('turntable');
+    adoptSavedView(viewer, sidewaysView);
+    const adopted = readView(viewer);
+    expect(adopted.direction.angleTo(unit(sidewaysView.direction))).toBeLessThan(1e-9);
+    expect(adopted.up.toArray()).toEqual([0, 0, 1]);
+    expect(lastSource(viewer)).toBe('persisted');
+    const after = poles(verticalDrag(viewer, { steps: 96 }));
+    expect(after.top && after.bottom).toBe(false);
+  });
+
+  /*
+   * Only Turntable is straightened, by name: Free orbit keeps every roll, and so does any style that is not Turntable
+   * (an id the adapter does not know, standing for a later style).
+   */
+  it.each([['free' as OrbitStyle], ['trackball' as unknown as OrbitStyle]])(
+    'keeps the roll of a view restored or adopted in the %s orbit style',
+    (orbitStyle) => {
+      const restored = mountViewer(orbitStyle, 'perspective', sidewaysView);
+      expect(readView(restored).up.angleTo(unit(sidewaysView.up))).toBeLessThan(1e-9);
+      expect(lastSource(restored)).not.toBe('persisted');
+
+      const adopted = mountViewer(orbitStyle);
+      adoptSavedView(adopted, sidewaysView);
+      expect(readView(adopted).up.angleTo(unit(sidewaysView.up))).toBeLessThan(1e-9);
+      expect(lastSource(adopted)).toBe('persisted');
+      const { revision } = adopted.graphics.getSnapshot().context.cameraRef.getSnapshot().context.lastChange;
+      adopted.settle();
+      expect(adopted.graphics.getSnapshot().context.cameraRef.getSnapshot().context.lastChange.revision).toBe(revision);
+    },
+  );
+
+  it('keeps a rolled view straight down the world up in Turntable, and drags on from it without a jump', () => {
+    // At the pole the world up is parallel to the view: the camera keeps the roll, as `setUpDirection` does there.
+    const viewer = mountViewer('turntable', 'perspective', poleView);
+    const restored = readView(viewer);
+    expect(restored.direction.angleTo(unit(poleView.direction))).toBeLessThan(1e-9);
+    expect(restored.up.angleTo(unit(poleView.up))).toBeLessThan(1e-9);
+
+    const directions = verticalDrag(viewer, { steps: 10, step: -12 });
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
+    expect(isFiniteVector(readView(viewer).up)).toBe(true);
+    expect(largestStep(directions)).toBeLessThan(0.2);
+  });
+
+  it('straightens a rolled view just off the pole in Turntable without a jump', () => {
+    const viewer = mountViewer('turntable', 'perspective', nearPoleView);
+    const restored = readView(viewer);
+    expect(restored.direction.angleTo(unit(nearPoleView.direction))).toBeLessThan(1e-9);
+    expect(restored.up.toArray()).toEqual([0, 0, 1]);
+
+    const directions = verticalDrag(viewer, { steps: 10, step: -12 });
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
+    expect(largestStep(directions)).toBeLessThan(0.2);
+    // The drag left the pole about the world up: the view is upright.
+    expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);
+    expect(roll(viewer)).toBeLessThan(1e-6);
   });
 });

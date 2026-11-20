@@ -36,6 +36,8 @@
     "./constants/search-parameter.constants": "./src/constants/search-parameter.constants.ts",
     "./constants/sidebar.constants": "./src/constants/sidebar.constants.ts",
     "./constants/workspace-directory-copy.constants": "./src/constants/workspace-directory-copy.constants.ts",
+    "./contexts/file-manager-context": "./src/contexts/file-manager-context.tsx",
+    "./contexts/project-context": "./src/contexts/project-context.tsx",
     "./filesystem/workspace-errors": "./src/filesystem/workspace-errors.ts",
     "./lib/activity-breadcrumbs": "./src/lib/activity-breadcrumbs.ts",
     "./lib/api-request-id": "./src/lib/api-request-id.ts",

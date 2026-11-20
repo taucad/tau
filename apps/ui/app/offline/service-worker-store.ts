@@ -193,8 +193,15 @@ export const createWorkerStore = (
     if (!response.ok || response.redirected) {
       return false;
     }
-    // A quota error rejects here and fails the install.
-    await cache.put(key, response);
+    try {
+      await cache.put(key, response);
+    } catch (error) {
+      // Only a quota error fails the install; any other write failure (a body cut off mid-read) leaves the entry out.
+      if (isQuotaError(error)) {
+        throw error;
+      }
+      return false;
+    }
     return true;
   };
 

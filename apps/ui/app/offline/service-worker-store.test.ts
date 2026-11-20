@@ -107,6 +107,25 @@ describe('createWorkerStore', () => {
     await expect(store.install()).rejects.toMatchObject({ name: 'QuotaExceededError' });
   });
 
+  it('should leave out an entry whose write fails for any other reason, and complete the install', async () => {
+    const caches = createCaches();
+    const precache = await caches.open(precacheCacheName);
+    const put = precache.put.bind(precache);
+    vi.spyOn(precache, 'put').mockImplementation(async (request, response) => {
+      if (typeof request === 'string' && request.includes('/assets/project-B.js')) {
+        throw new TypeError('The body was cut off mid-read');
+      }
+      await put(request, response);
+    });
+    vi.spyOn(caches, 'open').mockResolvedValue(precache);
+    const store = createWorkerStore({ caches, fetch: async (input) => ok(input) }, manifest);
+
+    await expect(store.install()).resolves.toStrictEqual({
+      failed: ['/assets/project-B.js'],
+      incomplete: [projectDocument],
+    });
+  });
+
   it('should load its index from the caches at start', async () => {
     const caches = createCaches();
     const installer = createWorkerStore({ caches, fetch: async (input) => ok(input) }, manifest);

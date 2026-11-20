@@ -15,9 +15,15 @@ function FlatSpinner(): React.JSX.Element {
    the chat panel, nor reloads the page. */
 const MetalMorphSpinnerLazy = lazy<ComponentType<MetalMorphSpinnerProperties>>(
   async () => {
-    const module = await load(async () => import('#components/geometry/loader/metal-morph-spinner.js'), {
-      optional: true,
-    });
+    const module = await load(
+      async () =>
+        import('#components/geometry/loader/metal-morph-spinner.js').then((loaded) => ({
+          MetalMorphSpinner: loaded.MetalMorphSpinner,
+        })),
+      {
+        optional: true,
+      },
+    );
     return { default: module.MetalMorphSpinner };
   },
   { fallback: FlatSpinner },

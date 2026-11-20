@@ -63,7 +63,11 @@ export const createResizeImageActor = (
         throw new Error('The image is not a base64 data URL.');
       }
       const bytes = base64ToUint8Array(input.image.slice(header[0].length));
-      const { normalizeComposerImage } = await load(async () => import('#services/attachment-image.service.js'));
+      const { normalizeComposerImage } = await load(async () =>
+        import('#services/attachment-image.service.js').then((loaded) => ({
+          normalizeComposerImage: loaded.normalizeComposerImage,
+        })),
+      );
       const outcome = await normalizeComposerImage(bytes, {
         ...(dependencies.transcode === undefined ? {} : { transcode: dependencies.transcode }),
         loadTranscodeSources: dependencies.loadTranscodeSources ?? loadAttachmentTranscodeSources,

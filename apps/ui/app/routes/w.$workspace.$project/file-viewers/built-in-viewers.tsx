@@ -19,15 +19,25 @@ import { lazy } from '#lib/lazy-component.js';
  * pane's frame stay on the project route's interactive tier; a body draws inside the frame when it arrives.
  */
 const ChatEditorCodeViewer = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-editor-code-viewer.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-editor-code-viewer.js').then((loaded) => ({
+      ChatEditorCodeViewer: loaded.ChatEditorCodeViewer,
+    })),
+  );
   return { default: module.ChatEditorCodeViewer };
 });
 const ChatEditorMarkdownViewer = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js').then((loaded) => ({
+      ChatEditorMarkdownViewer: loaded.ChatEditorMarkdownViewer,
+    })),
+  );
   return { default: module.ChatEditorMarkdownViewer };
 });
 const PrinterViewer = lazy(async () => {
-  const module = await load(async () => import('#components/printer/printer-viewer.js'));
+  const module = await load(async () =>
+    import('#components/printer/printer-viewer.js').then((loaded) => ({ PrinterViewer: loaded.PrinterViewer })),
+  );
   return { default: module.PrinterViewer };
 });
 

@@ -176,7 +176,11 @@ type RowPresentation = FileProvenanceLabel & {
 const quickLookServices: QuickLookServices = {
   resolveKernelOptions: async (projectId, computeMode) => desktopKernelOptions(projectId, undefined, computeMode)(),
   async loadRuntimeObserver() {
-    const { observeRuntimeClient } = await load(async () => import('#telemetry/runtime-telemetry.js'));
+    const { observeRuntimeClient } = await load(async () =>
+      import('#telemetry/runtime-telemetry.js').then((loaded) => ({
+        observeRuntimeClient: loaded.observeRuntimeClient,
+      })),
+    );
     return (client) => observeRuntimeClient(client, 'quicklook');
   },
 };

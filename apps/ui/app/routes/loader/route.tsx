@@ -31,12 +31,20 @@ import { load } from '#lib/code-loading.js';
 import { lazy } from '#lib/lazy-component.js';
 
 const MetalMorphLoaderLazy = lazy(async () => {
-  const module = await load(async () => import('#components/geometry/loader/metal-morph-loader.js'));
+  const module = await load(async () =>
+    import('#components/geometry/loader/metal-morph-loader.js').then((loaded) => ({
+      MetalMorphLoader: loaded.MetalMorphLoader,
+    })),
+  );
   return { default: module.MetalMorphLoader };
 });
 
 const MetalMorphSpinnerLazy = lazy(async () => {
-  const module = await load(async () => import('#components/geometry/loader/metal-morph-spinner.js'));
+  const module = await load(async () =>
+    import('#components/geometry/loader/metal-morph-spinner.js').then((loaded) => ({
+      MetalMorphSpinner: loaded.MetalMorphSpinner,
+    })),
+  );
   return { default: module.MetalMorphSpinner };
 });
 

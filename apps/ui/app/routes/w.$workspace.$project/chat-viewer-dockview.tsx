@@ -88,7 +88,9 @@ const ChatViewer = lazy(async () => {
   // `tau.load.viewer.chunk`: how long the deferred viewer took to arrive, for the harness.
   const span = pageProjectOpenPerformance().begin('viewer.chunk');
   try {
-    const module = await load(async () => import('#routes/w.$workspace.$project/chat-viewer.js'));
+    const module = await load(async () =>
+      import('#routes/w.$workspace.$project/chat-viewer.js').then((loaded) => ({ ChatViewer: loaded.ChatViewer })),
+    );
     span.finish('ok');
     return { default: module.ChatViewer };
   } catch (error) {

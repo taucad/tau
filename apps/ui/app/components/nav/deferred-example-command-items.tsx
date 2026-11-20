@@ -5,7 +5,11 @@ import { lazy } from '#lib/lazy-component.js';
 // Every route mounts the palette items, so the example catalog loads on its own chunk instead of joining each route's
 // entry.
 const ExampleCommandPaletteItems = lazy(async () => {
-  const m = await load(async () => import('#components/nav/example-command-items.js'));
+  const m = await load(async () =>
+    import('#components/nav/example-command-items.js').then((loaded) => ({
+      ExampleCommandPaletteItems: loaded.ExampleCommandPaletteItems,
+    })),
+  );
   return { default: m.ExampleCommandPaletteItems };
 });
 

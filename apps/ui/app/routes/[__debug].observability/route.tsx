@@ -79,7 +79,9 @@ const navigateToTrigger = (trigger: string): void => {
 
 /** Exercise the browser restore owner on a disposable in-memory project, never a user's filesystem. */
 const triggerObservabilityRevisionFailure = async (status: (message: string) => void): Promise<void> => {
-  const { getRevisionClient } = await load(async () => import('#hooks/use-revision-status.js'));
+  const { getRevisionClient } = await load(async () =>
+    import('#hooks/use-revision-status.js').then((loaded) => ({ getRevisionClient: loaded.getRevisionClient })),
+  );
   const worker = new Worker(new URL('../../lib/observability-harness-revision.worker.ts', import.meta.url), {
     type: 'module',
   });

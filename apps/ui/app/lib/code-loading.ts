@@ -10,6 +10,9 @@
  * - `load(async () => import('…'))` hands a module load failure to the page's recovery (`stale-build-recovery`, which
  *   installs itself with {@link setCodeLoadFailureHandler}) and rejects with the same failure, so the caller still
  *   sees it. The recovery decides: reload, offer the reload, or call it genuine.
+ * - Where the caller uses some exports, name them: `load(async () => import('…').then((loaded) => ({ X: loaded.X })))`.
+ *   A namespace that escapes into `load` keeps every export in the bundle; one destructured inside the importer
+ *   lets the bundler drop the rest, as a bare `const { X } = await import('…')` did.
  * - `load(async () => import('…'), { optional: true })` is for code the caller can do without (decoration, analytics): the
  *   failure is the caller's, which degrades, and it never reloads the page.
  * - `lazy(factory, { fallback })` (`#lib/lazy-component`, kept apart so worker bundles never take React) renders `fallback` in place of optional code whose load failed, instead of failing

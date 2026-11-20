@@ -17,7 +17,11 @@ export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promi
 
 /** The default loader: the renderer module is imported only when a Terminal tab first draws. @public */
 export const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await load(async () => import('#components/terminal/terminal-renderer.js'));
+  const { createTerminalRenderer } = await load(async () =>
+    import('#components/terminal/terminal-renderer.js').then((loaded) => ({
+      createTerminalRenderer: loaded.createTerminalRenderer,
+    })),
+  );
   return createTerminalRenderer(options);
 };
 

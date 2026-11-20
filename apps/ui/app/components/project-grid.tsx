@@ -20,7 +20,11 @@ import { lazy } from '#lib/lazy-component.js';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
 const CommunityCardLivePreview = lazy(async () => {
-  const module = await load(async () => import('#components/community-card-live-preview.js'));
+  const module = await load(async () =>
+    import('#components/community-card-live-preview.js').then((loaded) => ({
+      CommunityCardLivePreview: loaded.CommunityCardLivePreview,
+    })),
+  );
   return { default: module.CommunityCardLivePreview };
 });
 

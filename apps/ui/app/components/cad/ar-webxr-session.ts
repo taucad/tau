@@ -118,7 +118,11 @@ export async function startWebXrAr({
   onStarted?.(presentation);
 
   try {
-    const { presentGlbInArSession } = await load(async () => import('#components/cad/ar-webxr-scene.js'));
+    const { presentGlbInArSession } = await load(async () =>
+      import('#components/cad/ar-webxr-scene.js').then((loaded) => ({
+        presentGlbInArSession: loaded.presentGlbInArSession,
+      })),
+    );
     const dispose = await presentGlbInArSession(session, glb, {
       onPlaced() {
         overlay.hint.textContent = movedHint;

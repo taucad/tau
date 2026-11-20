@@ -13,7 +13,11 @@ import { Topic } from '@taucad/events';
 import { load } from '#lib/code-loading.js';
 
 const importTranscodeSources = async (): Promise<readonly string[]> => {
-  const { attachmentTranscodeSources } = await load(async () => import('#runtime/attachment-transcode-sources.js'));
+  const { attachmentTranscodeSources } = await load(async () =>
+    import('#runtime/attachment-transcode-sources.js').then((loaded) => ({
+      attachmentTranscodeSources: loaded.attachmentTranscodeSources,
+    })),
+  );
   return attachmentTranscodeSources;
 };
 

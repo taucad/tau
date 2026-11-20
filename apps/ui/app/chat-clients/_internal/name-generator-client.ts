@@ -90,7 +90,12 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
   const generateFromParts = useCallback<GenerateNameFromParts>(
     async (parts, projectId) => {
       // Mounting the project manager does not need a naming transport.
-      const sdk = await load(async () => import('ai'));
+      const sdk = await load(async () =>
+        import('ai').then((loaded) => ({
+          DefaultChatTransport: loaded.DefaultChatTransport,
+          readUIMessageStream: loaded.readUIMessageStream,
+        })),
+      );
       const chatId = generatePrefixedId(idPrefix.chat);
       const messageId = generatePrefixedId(idPrefix.message);
       const userMessage: MyUIMessage = {

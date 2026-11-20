@@ -19,7 +19,9 @@ import { load } from '#lib/code-loading.js';
 import { lazy } from '#lib/lazy-component.js';
 
 const TourRuntime = lazy(async () => {
-  const module = await load(async () => import('#components/tour/tour-runtime.js'));
+  const module = await load(async () =>
+    import('#components/tour/tour-runtime.js').then((loaded) => ({ TourRuntime: loaded.TourRuntime })),
+  );
   return { default: module.TourRuntime };
 });
 

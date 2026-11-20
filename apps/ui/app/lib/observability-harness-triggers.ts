@@ -122,11 +122,19 @@ export const triggerObservabilityKernelTermination = async (status: (message: st
     { createUiRuntimeConfig },
     { ENV: environment },
   ] = await Promise.all([
-    load(async () => import('@taucad/runtime/client')),
-    load(async () => import('@taucad/runtime/transport/web')),
-    load(async () => import('@taucad/runtime/filesystem')),
-    load(async () => import('#runtime/ui-runtime.config.js')),
-    load(async () => import('#environment.config.js')),
+    load(async () =>
+      import('@taucad/runtime/client').then((loaded) => ({ createRuntimeClient: loaded.createRuntimeClient })),
+    ),
+    load(async () =>
+      import('@taucad/runtime/transport/web').then((loaded) => ({ webWorkerTransport: loaded.webWorkerTransport })),
+    ),
+    load(async () => import('@taucad/runtime/filesystem').then((loaded) => ({ fromMemoryFs: loaded.fromMemoryFs }))),
+    load(async () =>
+      import('#runtime/ui-runtime.config.js').then((loaded) => ({
+        createUiRuntimeConfig: loaded.createUiRuntimeConfig,
+      })),
+    ),
+    load(async () => import('#environment.config.js').then((loaded) => ({ ENV: loaded.ENV }))),
   ]);
   const worker = reportWorkerFailures(
     new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),

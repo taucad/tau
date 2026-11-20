@@ -87,7 +87,11 @@ function MountedCodeEditor({
       }
     };
     try {
-      const { acquireEditorLanguage } = await load(async () => import('#lib/editor-language-runtime.js'));
+      const { acquireEditorLanguage } = await load(async () =>
+        import('#lib/editor-language-runtime.js').then((loaded) => ({
+          acquireEditorLanguage: loaded.acquireEditorLanguage,
+        })),
+      );
       controller.signal.throwIfAborted();
       const lease = await acquireEditorLanguage({
         languageId: language,

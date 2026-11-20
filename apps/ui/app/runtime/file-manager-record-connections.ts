@@ -37,7 +37,11 @@ function recordConnectionsForIncarnation(
       owner = createRootedContentClient({
         open: async (root, consumer: RootedBridgeConsumer) => {
           await ready();
-          const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
+          const { createFileSystemBridgeProxy } = await load(async () =>
+            import('@taucad/fs-bridge').then((loaded) => ({
+              createFileSystemBridgeProxy: loaded.createFileSystemBridgeProxy,
+            })),
+          );
           const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
           try {
             await proxy.ready;

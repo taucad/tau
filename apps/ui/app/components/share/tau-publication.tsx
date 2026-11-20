@@ -17,7 +17,11 @@ import { load } from '#lib/code-loading.js';
 import { lazy } from '#lib/lazy-component.js';
 
 const SharedProjectWorkbench = lazy(async () => {
-  const module = await load(async () => import('#components/share/shared-project-workbench.js'));
+  const module = await load(async () =>
+    import('#components/share/shared-project-workbench.js').then((loaded) => ({
+      SharedProjectWorkbench: loaded.SharedProjectWorkbench,
+    })),
+  );
   return { default: module.SharedProjectWorkbench };
 });
 

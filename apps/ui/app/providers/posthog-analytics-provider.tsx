@@ -33,7 +33,9 @@ let sdk: PostHog | undefined;
 const loadSdk = async (): Promise<PostHog> => {
   if (sdk === undefined) {
     // Optional (PL7 FP9): a content blocker refuses analytics on every load, so a failure never reloads the page.
-    const module_ = await load(async () => import('posthog-js'), { optional: true });
+    const module_ = await load(async () => import('posthog-js').then((loaded) => ({ posthog: loaded.posthog })), {
+      optional: true,
+    });
     sdk = module_.posthog;
   }
   return sdk;

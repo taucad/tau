@@ -14,7 +14,9 @@ import { lazy } from '#lib/lazy-component.js';
 
 /* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
 const DebugProbes = lazy(async () => {
-  const module = await load(async () => import('#chat-clients/debug-probes.js'));
+  const module = await load(async () =>
+    import('#chat-clients/debug-probes.js').then((loaded) => ({ DebugProbes: loaded.DebugProbes })),
+  );
   return { default: module.DebugProbes };
 });
 

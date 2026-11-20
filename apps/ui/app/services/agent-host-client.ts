@@ -206,7 +206,9 @@ const watchSession = (signal: { listen: (listener: () => void) => unknown } | un
 /** The signed-in user, as the auth client reads the session; no user when there is none or it cannot be read. */
 const readSession = async (): Promise<SessionRead> => {
   try {
-    const { authClient } = await load(async () => import('#lib/auth-client.js'));
+    const { authClient } = await load(async () =>
+      import('#lib/auth-client.js').then((loaded) => ({ authClient: loaded.authClient })),
+    );
     watchSession(authClient.$store.atoms['$sessionSignal']);
     const { data, error } = await authClient.getSession();
     return { principal: data?.user.id, answered: error === null };

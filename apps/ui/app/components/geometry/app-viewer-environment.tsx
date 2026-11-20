@@ -15,7 +15,11 @@ import { load } from '#lib/code-loading.js';
 import { lazy } from '#lib/lazy-component.js';
 
 const SectionViewTestBridge = lazy(async () => {
-  const module = await load(async () => import('#components/geometry/debug/section-view-test-bridge.js'));
+  const module = await load(async () =>
+    import('#components/geometry/debug/section-view-test-bridge.js').then((loaded) => ({
+      SectionViewTestBridge: loaded.SectionViewTestBridge,
+    })),
+  );
   return { default: module.SectionViewTestBridge };
 });
 

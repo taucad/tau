@@ -174,7 +174,9 @@ export const useMachinesFacet = (): RuntimeTransportFacet<MachineClient> => {
     dial: async () => bridge.machines.connect(),
     connect: async (port) => {
       // Dynamic so the machine channel never enters the web bundle's eager graph.
-      const { connectMachineChannel } = await load(async () => import('@taucad/runtime/machine'));
+      const { connectMachineChannel } = await load(async () =>
+        import('@taucad/runtime/machine').then((loaded) => ({ connectMachineChannel: loaded.connectMachineChannel })),
+      );
       return connectMachineChannel(port);
     },
   });

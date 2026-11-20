@@ -142,7 +142,11 @@ export function useServiceWorker(): void {
       // async-iife: bootstrap -- registering must never block the view the visitor came for.
       void (async () => {
         try {
-          const { startServiceWorker } = await load(async () => import('#offline/pwa-registration.js'));
+          const { startServiceWorker } = await load(async () =>
+            import('#offline/pwa-registration.js').then((loaded) => ({
+              startServiceWorker: loaded.startServiceWorker,
+            })),
+          );
           if (!stopped) {
             stop = startServiceWorker({
               inWorkspace,

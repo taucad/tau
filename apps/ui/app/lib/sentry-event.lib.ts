@@ -29,7 +29,11 @@ let stackParserLoad: Promise<StackParser | undefined> | undefined;
 const importStackParser = async (): Promise<StackParser | undefined> => {
   try {
     // Optional (PL7 FP9): error reporting degrades to frames without a parser and never reloads the page.
-    const parserModule = await load(async () => import('#lib/sentry-stack-parser.js'), { optional: true });
+    const parserModule = await load(
+      async () =>
+        import('#lib/sentry-stack-parser.js').then((loaded) => ({ parseSentryStack: loaded.parseSentryStack })),
+      { optional: true },
+    );
     stackParser = parserModule.parseSentryStack;
     return stackParser;
   } catch {

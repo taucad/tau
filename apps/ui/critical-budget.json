@@ -17,7 +17,7 @@
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1239607,
+        "brotliBytes": 1240207,
         "requests": 228,
         "largestChunkBrotliBytes": 140852,
         "knownHeavy": {}

@@ -7,6 +7,7 @@ import {
   patchBrowserThreadStartup,
   patchBrowserThreadMemory,
   patchBrowserThreadMailbox,
+  patchBrowserThreadIds,
   bindBrowserThreadStartup,
   browserThreadModuleNames,
   patchBrowserThreadRuntime,
@@ -21,6 +22,11 @@ const source = `ENVIRONMENT_IS_WORKER = dotnet_replacements.ENVIRONMENT_IS_WORKE
 const bootstrapWorkerSource = 'Me&&async function(){(function(){const e=new MessageChannel';
 const bootstrapWorkerLoaded =
   'self.dispatchEvent(new MessageEvent("message",{data:{cmd:1,handlers:Fe.handlers,wasmMemory:Fe.wasmMemory,wasmModule:Fe.wasmModule}})),Fe}()';
+
+// The pinned runtime's three pthread id checks, minified as published: the ids arrive from wasm as signed i32.
+const pthreadChecks = `const Jc=[function(e){null!==un&&un.pthreadId==e||it(!1,"expected monoThreadInfo to be set already when registering")},
+  function(e,t){null!==un&&un.pthreadId==e||it(!1,"expected monoThreadInfo to be set already when attaching")},
+  function(e){e!==un.pthreadId&&it(!1,"expected pthread_id to match when un-registering")}];`;
 
 describe('pinned Mono worker startup staging', () => {
   it('should notify the owner locally and forward only other live pthreads', () => {
@@ -126,6 +132,43 @@ describe('pinned Mono worker startup staging', () => {
     }
   });
 
+  it('should match a pthread registered above 2 GiB against its unsigned id', () => {
+    const run = (code: string, pointer: number): void => {
+      const context = {
+        // Emscripten's pthread_self wrapper reports the struct pointer unsigned.
+        un: { pthreadId: pointer },
+        it: (ok: boolean, message: string) => {
+          if (!ok) {
+            throw new Error(message);
+          }
+        },
+        Jc: [] as Array<(pthreadId: number) => void>,
+      };
+      runInNewContext(`${code};this.Jc=Jc;`, context);
+      // The same pointer reaches a wasm import as a signed i32.
+      const signed = new Int32Array(new Uint32Array([pointer]).buffer)[0]!;
+      for (const callback of context.Jc) {
+        callback(signed);
+      }
+    };
+    const above = 0x9a_e1_00_08;
+    expect(() => {
+      run(pthreadChecks, above);
+    }).toThrow('expected monoThreadInfo to be set already when registering');
+    const patched = patchBrowserThreadIds(pthreadChecks);
+    for (const pointer of [above, 0x1_00_08]) {
+      expect(() => {
+        run(patched, pointer);
+      }).not.toThrow();
+    }
+    expect(() => {
+      run(patched.replace('un.pthreadId==e>>>0', 'un.pthreadId==1+(e>>>0)'), above);
+    }).toThrow();
+    for (const invalid of ['', pthreadChecks + pthreadChecks, patched]) {
+      expect(() => patchBrowserThreadIds(invalid)).toThrow('pthread registration checks changed');
+    }
+  });
+
   it('should let generated traces import the host shared-memory maximum', () => {
     const pages: number[] = [];
     const context = {
@@ -170,7 +213,7 @@ describe('pinned Mono worker startup staging', () => {
     const patched = patchBrowserThreadRuntime({
       bootstrap,
       native: mailbox,
-      runtime: 'this.appendULeb(256),this.appendULeb(32768)',
+      runtime: `this.appendULeb(256),this.appendULeb(32768)${pthreadChecks}`,
     });
     const names = [...patched.modules.keys()];
     expect(names).toHaveLength(2);
@@ -185,6 +228,7 @@ describe('pinned Mono worker startup staging', () => {
     expect(patched.bootstrap).toContain('holdEarlyMessage');
     expect(patched.modules.get(names[0]!)).toContain('ENVIRONMENT_IS_PTHREAD');
     expect(patched.modules.get(names[1]!)).toContain('appendULeb(65536)');
+    expect(patched.modules.get(names[1]!)).toContain('un.pthreadId==e>>>0');
     // An already corrected runtime is refused rather than corrected twice.
     expect(() =>
       patchBrowserThreadRuntime({

@@ -196,8 +196,8 @@ const navigationOffset = 24;
 
 /**
  * The cube's `ViewportGizmo` options for a style, an up axis and an orbit style. Turntable keeps the view upright
- * (`roll: false`, no roll arrows or roll keys); Tumble turns every click, side triangle and roll by the single shortest
- * rotation (`roll: 'free'`), roll ruling E. The side triangles, the roll arrows while the view may roll and Home are
+ * (`roll: false`, no roll arrows or roll keys); Free orbit turns every click, side triangle and roll by the single
+ * shortest rotation (`roll: 'free'`), roll ruling E. The side triangles, the roll arrows while the view may roll and Home are
  * the library's own navigation buttons.
  *
  * @param options - The cube's style, up axis, orbit style, placement container and size.
@@ -224,7 +224,7 @@ export const viewportGizmoOptions = ({
   up: upVectors[upDirection],
   // Every pose goes through the camera actor (TA1).
   controlled: true,
-  roll: orbitStyle === 'tumble' ? 'free' : false,
+  roll: orbitStyle === 'free' ? 'free' : false,
   navigation: { enabled: true },
   placement: placeTopRight ? 'top-right' : 'bottom-right',
   size,

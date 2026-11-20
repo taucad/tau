@@ -2251,6 +2251,7 @@
             // conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
               "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
+              "apps/libs/chat-ui/src/services/chat-sdk.ts",
               "apps/libs/editor-ui/src/components/code/code-editor-view.client.tsx",
               "apps/libs/editor-ui/src/components/code/editor-definition.ts",
               "apps/libs/editor-ui/src/components/code/editor-language-features.ts",
@@ -2301,7 +2302,6 @@
               "apps/ui/app/routes/w.$workspace.$project_.preview/",
               "apps/ui/app/runtime/ui-runtime.definition.ts",
               "apps/ui/app/runtime/usdz-runtime.definition.ts",
-              "apps/ui/app/services/chat-sdk.ts",
               "apps/ui/app/services/headless-capture.ts",
               "apps/ui/app/services/part-thumbnail-visual.ts",
               "apps/ui/app/workers/geospec-runner.impl.ts"

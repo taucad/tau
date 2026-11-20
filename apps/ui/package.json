@@ -112,7 +112,6 @@
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "better-auth": "catalog:",
-    "bowser": "catalog:",
     "camera-controls": "3.1.2",
     "class-variance-authority": "catalog:",
     "compression": "catalog:",

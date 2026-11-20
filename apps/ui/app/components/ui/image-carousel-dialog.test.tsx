@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import * as React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render as renderBare, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import type { ImageCarouselDialogItem } from '#components/ui/image-carousel-dialog.js';
@@ -8,10 +12,15 @@ import type { ImageCarouselDialogItem } from '#components/ui/image-carousel-dial
 const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
 const attachmentHash = 'c'.repeat(64);
 const readFile = vi.fn(async (_path: string) => new Uint8Array([137, 80, 78, 71]));
-const fileManager = { recordFiles: { readFile } };
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => fileManager,
-}));
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({ readFile }),
+});
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 type MockCarouselOptions = {
   readonly loop?: boolean;

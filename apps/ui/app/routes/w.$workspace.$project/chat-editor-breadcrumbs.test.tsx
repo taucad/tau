@@ -19,7 +19,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send } }),
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({
     children,
     initialPath,

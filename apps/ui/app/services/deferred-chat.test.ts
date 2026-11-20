@@ -6,8 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
 import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
-import { chatSdk } from '#services/chat-sdk.js';
-import type { ChatSdk } from '#services/chat-sdk-loader.js';
+import { chatSdk } from '@taucad/chat-ui/services/chat-sdk';
+import type { ChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { DeferredChat } from '#services/deferred-chat.js';
 
 type SdkChat = ReturnType<ChatSdk['createChatInstance']>;

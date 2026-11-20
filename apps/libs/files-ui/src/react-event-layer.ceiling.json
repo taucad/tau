@@ -1,3 +1,4 @@
 {
-  "apps/libs/files-ui/src/components/files/use-export-to-disk.ts": 1
+  "apps/libs/files-ui/src/components/files/use-export-to-disk.ts": 1,
+  "apps/libs/files-ui/src/hooks/use-chat-questions.ts": 1
 }

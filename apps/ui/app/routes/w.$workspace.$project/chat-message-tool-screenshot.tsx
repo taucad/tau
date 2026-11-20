@@ -11,7 +11,7 @@ import {
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { ViewerLink } from '#components/files/viewer-link.js';
+import { ViewerLink } from '@taucad/files-ui/components/files/viewer-link';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {

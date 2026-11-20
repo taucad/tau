@@ -241,9 +241,21 @@ const baseSections = [
       },
       {
         id: 'viewer-orbit-style',
-        label: 'Orbit',
+        label: 'Orbit style',
         description: 'Keep the view upright, or turn it freely over the top',
-        keywords: ['orbit', 'turntable', 'tumble', 'trackball', 'roll', 'rotate', 'upright', 'navigation'],
+        keywords: [
+          'orbit',
+          'turntable',
+          'free',
+          'trackball',
+          'arcball',
+          'tumble',
+          'constrained',
+          'roll',
+          'rotate',
+          'upright',
+          'navigation',
+        ],
       },
       {
         id: 'viewer-zoom-to-cursor',

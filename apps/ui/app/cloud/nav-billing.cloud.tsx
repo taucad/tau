@@ -11,13 +11,15 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { ProBadge } from '@taucad/billing-ui/components/tier-badge';
 import type { NavRoute } from '#constants/route.constants.js';
 
-export const billingNavRoutes: NavRoute[] = [
+const billingNavRoutes: NavRoute[] = [
   {
     title: 'Usage',
     url: '/usage',
     icon: ChartColumn,
   },
 ];
+
+export const useBillingNavRoutes = (): NavRoute[] => billingNavRoutes;
 
 export function NavBillingItem(): React.JSX.Element {
   const { tier, isResolved } = useEntitlements();

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+import type * as DataUsage from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 
 /* The meta block renders the model from the chat-scoped `Chat.activeExecution`
@@ -40,11 +41,16 @@ vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: () => [cookie.showCredits, vi.fn()],
 }));
 
-vi.mock('#cloud/cloud-enabled.js', () => ({
-  get tauCloudEnabled() {
-    return cloud.enabled;
-  },
-}));
+/* A build or mode without credits renders the caller's fallback in place of the receipts' total (W5). */
+vi.mock('#routes/w.$workspace.$project/chat-message-data-usage.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof DataUsage>();
+  const { ReceiptCreditsSummary } = actual;
+  return {
+    ...actual,
+    ReceiptCreditsSummary: (props: ComponentProps<typeof ReceiptCreditsSummary>): ReactNode =>
+      cloud.enabled ? <ReceiptCreditsSummary {...props} /> : props.fallback,
+  };
+});
 
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({

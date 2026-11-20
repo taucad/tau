@@ -101,6 +101,8 @@ const config: KnipConfig = {
     // Loaded by Nx plugin or build tooling, not direct imports
     '@typescript/native-preview',
     '@tailwindcss/typography',
+    // `apps/ui/app/styles/global.css` imports its styles and Tailwind scans its dist from the root node_modules
+    'streamdown',
   ],
 
   // Nx runs a target command from the workspace root (or a root-relative `cwd`), but knip's Nx

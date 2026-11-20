@@ -7,6 +7,7 @@ import { PlanCards as SharedPlanCards } from '@taucad/ui-kit/components/plan-car
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {
+  billingReturnPath,
   BillingCollectionUnavailable,
   BillingPaymentConflict,
   purchasesUnavailableMessage,
@@ -84,7 +85,7 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
     try {
       const action = await createSubscriptionAction(binding, {
         requestId: requestIdRef.current,
-        returnPath: `${globalThis.location.pathname}${globalThis.location.search}`,
+        returnPath: billingReturnPath(),
       });
       if (scopeRef.current.value !== startedGeneration) {
         return;

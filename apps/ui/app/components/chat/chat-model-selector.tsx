@@ -9,7 +9,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { groupModels } from '@taucad/chat-ui/utils/model-groups';
+import { cloudGroupModels } from '#cloud/cloud-model-groups.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -70,7 +70,7 @@ export const ChatModelSelector = memo(function ({
   );
 
   // Grouped as the agent sheet's model list: pinned, by maker, this computer.
-  const groupedModels = useMemo(() => groupModels<Model>(visibleModels, pinnedIds), [visibleModels, pinnedIds]);
+  const groupedModels = useMemo(() => cloudGroupModels<Model>(visibleModels, pinnedIds), [visibleModels, pinnedIds]);
 
   const handleSelectModel = useCallback(
     (item: string) => {

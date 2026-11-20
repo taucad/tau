@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
 import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
@@ -13,7 +13,7 @@ import type * as AiSdk from 'ai';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
+import type { DraftAttachmentModel } from '@taucad/chat-ui/hooks/draft.machine';
 import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';

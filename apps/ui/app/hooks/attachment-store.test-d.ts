@@ -6,8 +6,8 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import type { EventFrom } from 'xstate';
-import type { DraftAttachment, draftMachine } from '#hooks/draft.machine.js';
-import { buildDraftMessage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
+import { buildDraftMessage } from '@taucad/chat-ui/hooks/draft.machine';
 import type {
   AttachmentReference,
   StoredAttachment,

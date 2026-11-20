@@ -17,11 +17,12 @@ export const mousePresetIds = ['tau', 'right-orbit', 'middle-ctrl', 'middle-shif
 export type MousePresetId = (typeof mousePresetIds)[number];
 
 /**
- * The orbit styles: Turntable keeps the world up and stops at the poles; Tumble turns freely through them and rolls.
+ * The orbit styles: Turntable keeps the world up and stops at the poles; Free orbit turns freely through them and
+ * rolls.
  *
  * @public
  */
-export const orbitStyleIds = ['turntable', 'tumble'] as const;
+export const orbitStyleIds = ['turntable', 'free'] as const;
 
 /**
  * One of {@link orbitStyleIds}.
@@ -64,6 +65,21 @@ const dropRetiredViewDefaults = (value: unknown): unknown =>
     ? Object.fromEntries(Object.entries(value).filter(([key]) => !retiredViewDefaultKeys.has(key)))
     : value;
 
+/**
+ * Orbit styles an earlier build stored that no longer exist. `'tumble'` was renamed `'free'` without a migration: it is
+ * dropped on read, so the orbit style falls back to Turntable and the rest of the section survives.
+ */
+const retiredOrbitStyles: ReadonlySet<unknown> = new Set(['tumble']);
+
+const dropRetiredOrbitStyle = (value: unknown): unknown =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  'orbitStyle' in value &&
+  retiredOrbitStyles.has(value.orbitStyle)
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'orbitStyle'))
+    : value;
+
 const viewDefaultsShape = z.strictObject({
   fieldOfView: z.number().min(0).max(90).optional(),
   'display.gizmo': z.boolean().optional(),
@@ -83,18 +99,21 @@ const viewDefaultsSchema = z.preprocess(dropRetiredViewDefaults, viewDefaultsSha
  */
 export const viewerPreferencesSchema = z.strictObject({
   version: z.literal(1),
-  controls: z.strictObject({
-    /** Absent: follow the tool answer. */
-    preset: z.enum(mousePresetIds).optional(),
-    /** Absent: on. */
-    zoomToCursor: z.boolean().optional(),
-    /** Absent: off. */
-    orbitAboutCursor: z.boolean().optional(),
-    /** Absent: off. */
-    invertZoom: z.boolean().optional(),
-    /** Absent: Turntable. */
-    orbitStyle: z.enum(orbitStyleIds).optional(),
-  }),
+  controls: z.preprocess(
+    dropRetiredOrbitStyle,
+    z.strictObject({
+      /** Absent: follow the tool answer. */
+      preset: z.enum(mousePresetIds).optional(),
+      /** Absent: on. */
+      zoomToCursor: z.boolean().optional(),
+      /** Absent: off. */
+      orbitAboutCursor: z.boolean().optional(),
+      /** Absent: off. */
+      invertZoom: z.boolean().optional(),
+      /** Absent: Turntable. A retired `'tumble'` reads as absent. */
+      orbitStyle: z.enum(orbitStyleIds).optional(),
+    }),
+  ),
   gizmo: z.strictObject({
     /** Absent: follow the tool answer. */
     style: z.enum(gizmoStyleIds).optional(),

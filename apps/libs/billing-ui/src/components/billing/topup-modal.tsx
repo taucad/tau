@@ -13,6 +13,7 @@ import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import {
+  billingReturnPath,
   BillingCollectionUnavailable,
   BillingPaymentConflict,
   cancelPaymentAction,
@@ -48,7 +49,6 @@ const terminalStates: ReadonlySet<WirePaymentAction['state']> = new Set([
 /** The refund clause of the Terms; `apps/www/app/legal.server.ts` pins the `refunds` anchor. */
 const refundPolicyPage = 'terms#refunds';
 const settleIntervalMilliseconds = 2000;
-const returnPath = (): string => `${globalThis.location.pathname}${globalThis.location.search}`;
 /** Credits a purchase of this many cents adds, at the advertised rate; the review step shows the exact figure. */
 const creditsForCents = (cents: number): string =>
   Math.floor((cents * purchasedCreditsPerUsd) / 100).toLocaleString('en-US');
@@ -368,7 +368,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         requestId: requestIdRef.current,
         amountMinor: String(amountCents),
         method,
-        returnPath: returnPath(),
+        returnPath: billingReturnPath(),
       }),
     );
   };

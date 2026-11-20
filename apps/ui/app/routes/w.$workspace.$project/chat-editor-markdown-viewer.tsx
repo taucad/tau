@@ -1,4 +1,4 @@
-import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
+import { MarkdownViewerChat } from '@taucad/editor-ui/components/markdown/markdown-viewer-chat';
 import { ChatEditorCodeViewer } from '#routes/w.$workspace.$project/chat-editor-code-viewer.js';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 

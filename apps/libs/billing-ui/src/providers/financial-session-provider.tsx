@@ -4,6 +4,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import { purgeSavedUsage } from '#db/billing-snapshot-database.js';
+import { purgePendingPaymentActions } from '#lib/pending-payment-actions-purge.js';
 import type { SavedUsageScope } from '#db/billing-snapshot-database.js';
 
 export type FinancialSessionIdentity = {
@@ -84,6 +85,7 @@ export function FinancialSessionProvider({ children }: { readonly children: Reac
       abort.current = new AbortController();
       removeBillingState(queryClient);
       void purgeSavedUsage(keep);
+      purgePendingPaymentActions(keep);
     },
     [queryClient],
   );

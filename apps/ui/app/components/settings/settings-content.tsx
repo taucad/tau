@@ -13,7 +13,8 @@ import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { MachinesSettings } from '#components/settings/machines-settings.js';
-import { ViewerSettings } from '#components/settings/viewer/viewer-settings.js';
+import { ViewerSettings } from '@taucad/settings-ui/components/settings/viewer/viewer-settings';
+import { PersonSettingsHost } from '#components/settings/person-settings-host.js';
 import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { SettingsItem } from '@taucad/settings-ui/components/settings/settings-item';
 import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
@@ -76,7 +77,11 @@ function SectionContent({ section }: { readonly section: SettingsSection }): Rea
       return <DataControlsSettings />;
     }
     case 'viewer': {
-      return <ViewerSettings />;
+      return (
+        <PersonSettingsHost>
+          <ViewerSettings />
+        </PersonSettingsHost>
+      );
     }
     case 'compute': {
       return (

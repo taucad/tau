@@ -476,12 +476,6 @@ const baseSections = [
         description: 'View Home storage usage and available space',
         keywords: ['quota', 'disk'],
       },
-      {
-        id: 'tau-cloud-projects',
-        label: 'Cloud projects',
-        description: 'Choose where your cloud projects appear when you sign in',
-        keywords: ['sync', 'backup', 'download', 'materialize', 'sign in'],
-      },
     ],
   },
   {

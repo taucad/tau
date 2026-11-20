@@ -91,10 +91,8 @@ const childPath = (parent: string, name: string): string =>
 
 /** Workspace connections shared by Settings and desktop Manage locations. */
 export function WorkspaceConnections({
-  onWorkspacesChange,
   shouldGroupNotFound = false,
 }: {
-  readonly onWorkspacesChange?: (workspaces: Workspace[]) => void;
   /** Collapse rows whose folder is not found into one group below the others (D2, the Files page). */
   readonly shouldGroupNotFound?: boolean;
 }): React.JSX.Element | undefined {
@@ -143,11 +141,10 @@ export function WorkspaceConnections({
         }),
       );
       setRows(built);
-      onWorkspacesChange?.(workspaces);
     } finally {
       setIsLoading(false);
     }
-  }, [onWorkspacesChange]);
+  }, []);
 
   useEffect(() => {
     const reload = async (): Promise<void> => {

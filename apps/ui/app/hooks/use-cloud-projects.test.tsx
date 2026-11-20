@@ -61,8 +61,6 @@ const {
   backupByDefaultNotice,
   cloudOpenContinuationTestApi,
   fetchCloudProjects,
-  materializeOnSignIn,
-  materializedCloudProjects,
   nextTauCloudStep,
   useTauCloudEligibility,
   useTauCloudIntent,
@@ -261,34 +259,6 @@ describe('tauCloudIntent', () => {
     localStorage.setItem('tau:tau-cloud-intent:proj_aaaaaaaaaaaaaaaaaaaaa', 'always');
 
     expect(tauCloudIntent.get('proj_aaaaaaaaaaaaaaaaaaaaa')).toBeUndefined();
-  });
-});
-
-describe('materializeOnSignIn', () => {
-  it('should be off by default', () => {
-    expect(materializeOnSignIn.get()).toBeUndefined();
-  });
-
-  it('should keep the chosen workspace in storage', () => {
-    materializeOnSignIn.set({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-
-    expect(JSON.parse(localStorage.getItem('tau:materialize-cloud-projects') ?? 'null')).toEqual({
-      kind: 'workspace',
-      workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
-    });
-    materializeOnSignIn.set(undefined);
-    expect(localStorage.getItem('tau:materialize-cloud-projects')).toBeNull();
-  });
-});
-
-describe('materializedCloudProjects', () => {
-  it('should remember a project brought to this device, across a reload', () => {
-    expect(materializedCloudProjects.has('proj_aaaaaaaaaaaaaaaaaaaaa')).toBe(false);
-
-    materializedCloudProjects.add('proj_aaaaaaaaaaaaaaaaaaaaa');
-
-    expect(materializedCloudProjects.has('proj_aaaaaaaaaaaaaaaaaaaaa')).toBe(true);
-    expect(materializedCloudProjects.has('proj_bbbbbbbbbbbbbbbbbbbbb')).toBe(false);
   });
 });
 

@@ -32,6 +32,12 @@
  * Before the deadline the script only adds elements to a `WeakSet` as their load events fire; when the shell mounts
  * in time, the deadline removes the listeners and sends nothing.
  *
+ * **Under a service worker** (FP5 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`), Reload first
+ * unregisters the worker and deletes its caches, so the reload reaches the network as if no worker were there: a worker
+ * that stalls the page (D5) would otherwise answer the reload the same way. The reload happens after
+ * {@link bootReloadCleanupLimit} at the latest, whatever the cleanup does. Safe mode (`/?safe=1`) is never answered by
+ * the worker (`service-worker.ts`) and its page unregisters it (`use-pwa.ts`).
+ *
  * The desktop build emits neither: main owns its watchdog and the recovery window there.
  */
 import { bootGlobalName, bootStripId, safeModeHref } from '#lib/boot-signals.js';
@@ -81,6 +87,16 @@ const stallReport =
   `request:{url:o+location.pathname.replace(/\\/invitations\\/[^/]+/gi,'/invitations/[redacted]'),` +
   `headers:{'User-Agent':N.userAgent}}}))}catch(e){}};`;
 
+/**
+ * The web app's service worker caches (`isWorkerCache` in `offline/pwa-caches.ts`) as a regular expression's source, for
+ * Reload's cleanup. A literal, not an import: the desktop build carries this module and must carry no web worker
+ * surface (`check-desktop-payload.mts`). `boot-watchdog.test.ts` holds it to `isWorkerCache`. @public
+ */
+export const bootWorkerCachePattern = String.raw`^tau-(?:precache-|runtime-|offline-shell-|assets(?:-v\d+)?$)`;
+
+/** Longest wait for Reload's worker cleanup before reloading anyway. Milliseconds. @public */
+export const bootReloadCleanupLimit = 3000;
+
 /** The `data-boot-action` value of the strip's Reload button, which the script wires. @public */
 export const bootReloadAction = 'reload';
 
@@ -116,5 +132,10 @@ export const buildBootWatchdogScript = (): string | undefined =>
       `d.addEventListener('load',h,true);d.addEventListener('error',h,true);${stallReport}` +
       `const w=()=>{if(b.shellMounted){z();return}const s=d.getElementById(${JSON.stringify(bootStripId)});` +
       `if(!s){setTimeout(w,${bootStripRetry});return}const r=s.querySelector('[data-boot-action=${bootReloadAction}]');` +
-      `if(r)r.addEventListener('click',()=>{location.reload()});s.hidden=false;q();z()};setTimeout(w,${bootWatchdogDeadline})` +
+      `if(r)r.addEventListener('click',()=>{let l=0;const g=()=>{if(!l){l=1;location.reload()}};` +
+      `const n=navigator.serviceWorker;if(!n||!n.controller){g();return}setTimeout(g,${bootReloadCleanupLimit});` +
+      `const p=new RegExp(${JSON.stringify(bootWorkerCachePattern)});Promise.all([` +
+      `n.getRegistrations().then(a=>Promise.all(a.map(x=>x.unregister()))),` +
+      `caches.keys().then(k=>Promise.all(k.filter(c=>p.test(c)).map(c=>caches.delete(c))))]).then(g,g)});` +
+      `s.hidden=false;q();z()};setTimeout(w,${bootWatchdogDeadline})` +
       `}catch(e){}})()`;

@@ -19,6 +19,7 @@
  * | A navigation a class answers (`service-worker-routing.ts`), the class wholly stored | Its precached document, cache-first (shells) or network-first within 3 s (`/usage`) |
  * | The same, on a reload or while a newer worker installs or waits | Network-first within 3 s, the precached document as the fallback |
  * | Any other GET navigation, or a class not wholly stored | The browser's own navigation: the navigation preload response |
+ * | A safe-mode navigation (`?safe=1`) | None: the browser handles it (FP5) |
  * | A file the worker holds (precache, or cached on first use) | The cache |
  * | Any other request | None: the browser handles it. An `/assets/*` or `/csharp-language/*` file is then copied from the HTTP cache for offline use |
  *
@@ -41,6 +42,7 @@ import {
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
+  isSafeModeNavigation,
   navigationCandidate,
   navigationNetworkTimeout,
 } from '#offline/service-worker-routing.js';
@@ -136,12 +138,27 @@ let assets = new Set<string>();
 let complete = new Set<string>();
 let indexLoaded = false;
 
+/**
+ * Set once a cache the index counted on is gone: the page deleted it (safe mode, the watchdog's Reload, the orphan
+ * cleanup) or the kill switch did. From then on this worker writes no cache, so a deleted cache stays deleted while the
+ * pages it still controls finish loading (FP5).
+ */
+let storageCleared = false;
+
+/** A cache that exists, opened; never creates one. */
+const openExisting = async (cacheName: string): Promise<Cache | undefined> =>
+  (await scope.caches.has(cacheName)) ? scope.caches.open(cacheName) : undefined;
+
+/** A stored response, read without creating its cache. */
+const matchStored = async (cacheName: string, key: string): Promise<Response | undefined> =>
+  scope.caches.match(key, { cacheName });
+
 const loadIndex = async (): Promise<void> => {
-  const [precacheCache, assetCache] = await Promise.all([
-    scope.caches.open(precacheName),
-    scope.caches.open(assetCacheName),
+  const [precacheCache, assetCache] = await Promise.all([openExisting(precacheName), openExisting(assetCacheName)]);
+  [precached, assets] = await Promise.all([
+    readStoredUrls(precacheCache === undefined ? [] : [precacheCache]),
+    readStoredUrls(assetCache === undefined ? [] : [assetCache]),
   ]);
-  [precached, assets] = await Promise.all([readStoredUrls([precacheCache]), readStoredUrls([assetCache])]);
   complete = completeDocuments(classes, cacheKeyFor, precached);
   indexLoaded = true;
 };
@@ -245,8 +262,7 @@ const markServedFromCache = (response: Response): Response => {
 /** The precached document for a class, under its revisioned key. */
 const readPrecachedDocument = async (document: string): Promise<Response | undefined> => {
   const key = cacheKeyFor(document);
-  const cache = await scope.caches.open(precacheName);
-  const response = key === undefined ? undefined : await cache.match(key);
+  const response = key === undefined ? undefined : await matchStored(precacheName, key);
   return response === undefined ? undefined : markServedFromCache(response);
 };
 
@@ -328,13 +344,13 @@ const answerNavigationEvent = async (event: FetchEventLike): Promise<Response> =
 
 /** A response the index says the worker holds. */
 const answerFromCache = async (event: FetchEventLike, cacheName: string, key: string): Promise<Response> => {
-  const cache = await scope.caches.open(cacheName);
-  const response = await cache.match(key);
+  const response = await matchStored(cacheName, key);
   if (response !== undefined) {
     return response;
   }
   // Only when storage was cleared under the worker: the index is wrong. It is read again, and this one request goes to
   // the network as the browser would have sent it.
+  storageCleared = true;
   reloadIndex();
   return scope.fetch(event.request);
 };
@@ -353,8 +369,7 @@ const answerOfflineAfterIndex = async (event: FetchEventLike): Promise<Response>
   if (location === undefined) {
     return Response.error();
   }
-  const cache = await scope.caches.open(location.cacheName);
-  return (await cache.match(location.key)) ?? Response.error();
+  return (await matchStored(location.cacheName, location.key)) ?? Response.error();
 };
 
 /** URLs a copy is already waiting on, so repeated misses start one copy each. */
@@ -365,6 +380,12 @@ const keepForOffline = (event: FetchEventLike, url: string): void => {
   filling.add(url);
   const copy = async (): Promise<void> => {
     try {
+      if (!storageCleared && assets.size > 0 && !(await scope.caches.has(assetCacheName))) {
+        storageCleared = true;
+      }
+      if (storageCleared) {
+        return;
+      }
       const cache = await scope.caches.open(assetCacheName);
       await fillFromHttpCache({
         url,
@@ -400,6 +421,10 @@ scope.addEventListener('fetch', (event) => {
     return;
   }
   if (request.mode === 'navigate') {
+    if (isSafeModeNavigation(request.url)) {
+      // Safe mode is the way out of a page the worker cannot boot: never the worker's answer (FP5).
+      return;
+    }
     event.respondWith(answerNavigationEvent(event));
     return;
   }

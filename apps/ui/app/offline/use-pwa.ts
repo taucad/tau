@@ -21,6 +21,7 @@ import { useLocation } from 'react-router';
 import { Topic } from '@taucad/events';
 import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
@@ -64,6 +65,24 @@ export const checkForRetiringWorker = async (): Promise<void> => {
     await registration.update();
   } catch {
     // Offline or refused: the browser's next update check fetches the retiring worker.
+  }
+};
+
+/**
+ * Safe mode (`?safe=1`) under a worker: unregister every registration and delete the worker caches, so the next load
+ * reaches the network as if no worker were there (FP5). A page in safe mode registers nothing.
+ */
+export const leaveServiceWorker = async (): Promise<void> => {
+  try {
+    const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(async (registration) => registration.unregister()));
+    if ('caches' in globalThis) {
+      // Loaded here, off Home's critical tier: only a page in safe mode needs it.
+      const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
+      await deleteOrphanWorkerCaches(globalThis.caches);
+    }
+  } catch {
+    // Storage refused: the next safe-mode load tries again.
   }
 };
 
@@ -135,6 +154,11 @@ export function useServiceWorker(): void {
   const inWorkspace = isWorkspacePath(pathname);
   useEffect(() => {
     if (!('serviceWorker' in globalThis.navigator)) {
+      return;
+    }
+    if (isSafeModeRequested(globalThis.location.search)) {
+      // async-iife: bootstrap -- leaving the worker must never block safe mode's view.
+      void leaveServiceWorker();
       return;
     }
     if (isServiceWorkerRetiredBuild()) {

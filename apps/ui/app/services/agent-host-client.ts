@@ -585,6 +585,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const tabId = randomUuid();
   const projects = new Map<string, ProjectRegistration>();
   let current: Incarnation | undefined;
+  /** The agent host's last code load failure, kept for a use after the page took the worker's failures over (FP10). */
+  let lastCodeLoadFailure: unknown;
   const recovering = new Map<string, Promise<void>>();
   /* Each provide's host id once the provide is sent, by the provide's own promise (STO-25 SP6). */
   const postedHostIds = new WeakMap<Promise<string>, Promise<string | undefined>>();
@@ -632,6 +634,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       if (isBare || isWorkerCodeLoadFailure(thrown)) {
         live.codeLoadFailure ??=
           thrown ?? new AgentHostWorkerError('WORKER_LOAD_FAILED', 'The agent host worker did not load.');
+        lastCodeLoadFailure = live.codeLoadFailure;
         retire(live, 'WORKER_LOAD_FAILED');
         return;
       }
@@ -728,6 +731,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   };
 
   const incarnation = async (): Promise<Incarnation> => {
+    /* FP10: once the page's recovery has the agent host's code failures, no later use starts another worker past the
+     * bound; the card offers Reload. */
+    if (current === undefined && lastCodeLoadFailure !== undefined && !workerReplacement(agentHostWorkerName).replace) {
+      throw new AgentHostWorkerError(
+        'WORKER_LOAD_FAILED',
+        lastCodeLoadFailure instanceof Error ? lastCodeLoadFailure.message : 'The agent host worker did not load.',
+      );
+    }
     current ??= boot();
     const live = current;
     try {
@@ -1141,6 +1152,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
             throw error;
           }
           live.codeLoadFailure ??= error;
+          lastCodeLoadFailure = live.codeLoadFailure;
           retire(live, 'WORKER_LOAD_FAILED');
           const replacement = workerReplacement(agentHostWorkerName);
           replacements += 1;

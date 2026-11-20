@@ -1033,6 +1033,35 @@ describe('a resident worker whose code failed to load', () => {
     expect(createWorker).toHaveBeenCalledTimes(3);
     await client.close();
   });
+
+  it('should start no worker for a later use once the page took the failures over', async () => {
+    const recovery = await import('#lib/worker-realm-recovery.js');
+    const { WorkerCodeLoadError } = await import('@taucad/ui-core/lib/module-worker');
+    const workers = Array.from({ length: 4 }, () => {
+      const worker = new FakeResidentWorker();
+      worker.failNextProvide = 'WORKER_LOAD_FAILED';
+      return worker;
+    });
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    for (let index = 0; index < recovery.workerReplacementBound; index += 1) {
+      recovery.noteWorkerCodeLoadFailure(
+        new WorkerCodeLoadError('agent-host', new TypeError('Importing a module script failed.')),
+      );
+    }
+
+    await expect(startRun(client, 'chat-later', 'run-1', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+    await expect(startRun(client, 'chat-later', 'run-2', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+
+    expect(createWorker).toHaveBeenCalledOnce();
+    recovery.resetWorkerRealmRecovery();
+    await client.close();
+  });
 });
 
 /* RV1-F1, RH-R4, I31: a file-manager reconnect gives each open host fresh bridges; the host and its runs stay. */

@@ -290,6 +290,94 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
 }));
 
 /**
+ * Dependency direction between the UI app libraries (`apps/libs/*`, `scope:ui type:app-lib`, tagged
+ * `ui:<name>`), from docs/research/ui-app-lib-layering-blueprint.md. Four layers, the app above all of them:
+ * L0 foundation (`ui-core`, `ui-kit`), L1 features (the `*-ui` libraries), L2 composition
+ * (`project-workspace`; `chat-surfaces` and `project-library` join it in W4 and W5) and L3 agent-host adapters
+ * (`agent-host-ui`, W3). `layer:` tags leave the libraries of one layer unordered, so, as with the API
+ * libraries, each names the UI app libraries it may depend on. Every library may also depend on `ui:infra` (the
+ * file-system client, the language servers and the consent banner) and on `scope:shared` projects and packages.
+ * The two sideways L1 edges are declared: the revisions conflict editor is the editor, and settings is the
+ * billing pages' host shell. A `ui:unlayered` library belongs to another app (desktop, www) or only to the app
+ * itself, and no layered library may depend on one.
+ */
+export const uiLibraryDependencies = {
+  'ui-core': [],
+  'ui-kit': [],
+  'chat-ui': ['ui-core', 'ui-kit'],
+  'files-ui': ['ui-core', 'ui-kit'],
+  'editor-ui': ['ui-core'],
+  // Declared: the revisions conflict editor is the code editor.
+  'revisions-ui': ['editor-ui', 'ui-core'],
+  'publish-ui': ['ui-core', 'ui-kit'],
+  'settings-ui': ['ui-core', 'ui-kit'],
+  /*
+   * Declared: settings is the host shell of the billing pages. `billing-ui -> @taucad/chat` (`chat-message-usage`)
+   * is declared debt the operator keeps; the agent-protocol ban below applies to L0 only.
+   */
+  'billing-ui': ['settings-ui', 'ui-core', 'ui-kit'],
+  'project-workspace': ['ui-core', 'ui-kit'],
+  infra: ['infra', 'ui-core'],
+};
+
+/**
+ * Today's UI app library edges that the layering refuses, each with the blueprint work item that removes it.
+ * The list only shrinks: scripts/src/ui-layering-graph.test.ts fails when a listed edge is gone from the graph
+ * and when an edge outside the allowlist and this list appears.
+ */
+export const uiLibraryDependencyDebt = [
+  { source: 'editor-ui', target: 'chat-ui', work: 'W4' },
+  { source: 'editor-ui', target: 'files-ui', work: 'W4' },
+  { source: 'files-ui', target: 'chat-ui', work: 'W5' },
+  { source: 'files-ui', target: 'project-workspace', work: 'W5' },
+];
+
+const uiLibraryConstraints = Object.entries(uiLibraryDependencies).map(([name, dependencies]) => ({
+  sourceTag: `ui:${name}`,
+  onlyDependOnLibsWithTags: [
+    ...[
+      ...new Set([
+        ...dependencies,
+        ...uiLibraryDependencyDebt.filter(({ source }) => source === name).map(({ target }) => target),
+        'infra',
+      ]),
+    ].map((dependency) => `ui:${dependency}`),
+    'scope:shared',
+    ...unlayeredTargetTypes,
+  ],
+}));
+
+/**
+ * L0 carries no agent protocol: `ui-core` and `ui-kit` may not reach a `protocol:agent` project (`chat`,
+ * `agent-host`, `agent-tools`, `agent-observability`, `skills`), directly or transitively.
+ */
+const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
+  sourceTag: `ui:${name}`,
+  notDependOnLibsWithTags: ['protocol:agent'],
+}));
+
+/**
+ * The L0 files that import the agent protocol today, each with the work item that moves it out. They keep every
+ * other boundary constraint; scripts/src/ui-layering-graph.test.ts fails when one stops importing the protocol and
+ * when another L0 file starts.
+ */
+export const uiFoundationProtocolDebtFiles = [
+  { file: 'apps/libs/ui-core/src/lib/external-agent.ts', work: 'W2' },
+  { file: 'apps/libs/ui-core/src/lib/geospec-rpc-result.ts', work: 'W1' },
+  { file: 'apps/libs/ui-core/src/lib/large-object-guard.test.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/lib/large-object-guard.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/lib/tau-plugin-store-catalog.ts', work: 'W1' },
+  { file: 'apps/libs/ui-core/src/utils/run-auto-resume.ts', work: 'W2' },
+  { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.test.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/workers/agent-host-placement.test.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/workers/agent-host-placement.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.test.ts', work: 'W3' },
+  { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.ts', work: 'W3' },
+  { file: 'apps/libs/ui-kit/src/icons/svg-icon.tsx', work: 'W1' },
+];
+
+/**
  * Nx module boundaries. The options are shared so the runtime-e2e override can add its
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
@@ -396,6 +484,8 @@ const moduleBoundaryOptions = {
       onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
     },
     ...apiLibraryConstraints,
+    ...uiLibraryConstraints,
+    ...uiFoundationConstraints,
     /*
      * The shell split's libraries (shell split blueprint, graph pinning): the sandbox imports no workspace
      * project, the service only the sandbox and shared packages, the Terminal concern only the service and
@@ -674,6 +764,23 @@ const config = [
     plugins: { '@nx': nxEslintPlugin },
     rules: {
       '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
+    },
+  },
+
+  {
+    // The L0 agent-protocol debt (above): every other boundary constraint still applies to these files.
+    files: uiFoundationProtocolDebtFiles.map(({ file }) => file),
+    plugins: { '@nx': nxEslintPlugin },
+    rules: {
+      '@nx/enforce-module-boundaries': [
+        'error',
+        {
+          ...moduleBoundaryOptions,
+          depConstraints: moduleBoundaryOptions.depConstraints.filter(
+            (constraint) => !uiFoundationConstraints.includes(constraint),
+          ),
+        },
+      ],
     },
   },
 

@@ -45,6 +45,7 @@ export const workspaceTests = [
   'src/telemetry-vocabulary-contract.test.ts',
   'src/test-shard-dealer.test.ts',
   'src/tsgo-plugin-target.test.ts',
+  'src/ui-layering-graph.test.ts',
   'src/validate-cross-root-reads.test.ts',
   'src/validate-project-tags.test.ts',
   'src/validate-workflows.test.ts',

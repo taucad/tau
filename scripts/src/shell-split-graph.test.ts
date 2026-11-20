@@ -333,6 +333,7 @@ describe('shell split graph', () => {
       'scope:ui',
       'shell:terminal',
       'type:app-lib',
+      'ui:unlayered',
     ]);
     /* `sandbox` is a devDependency only: the conformance rows build the real provider through `@taucad/sandbox/shell`. */
     expect(

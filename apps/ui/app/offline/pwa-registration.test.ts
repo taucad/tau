@@ -2,9 +2,15 @@
 /* oxlint-disable typescript/no-restricted-types -- `ServiceWorkerRegistration.waiting` and `installing` are `null` when absent; the double models the platform. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { activateIfBuildMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 
-import { startServiceWorker, updateAction } from '#offline/pwa-registration.js';
+import {
+  failedInstallLimit,
+  failedInstallsKey,
+  recordInstallOutcome,
+  startServiceWorker,
+  updateAction,
+} from '#offline/pwa-registration.js';
 
 const skew = {
   verdict: 'unknown' as ServerVerdict,
@@ -36,7 +42,9 @@ const createRegistration = (): {
   waiting: { postMessage: ReturnType<typeof vi.fn> } | null;
   active: { scriptURL: string } | null;
   update: ReturnType<typeof vi.fn>;
+  unregister: ReturnType<typeof vi.fn>;
   installNewWorker: () => void;
+  failNewInstall: () => void;
 } => {
   const updateListeners: Array<() => void> = [];
   const state = {
@@ -45,7 +53,9 @@ const createRegistration = (): {
     installing: null as EventTarget | null,
   };
   const update = vi.fn().mockResolvedValue(undefined);
+  const unregister = vi.fn().mockResolvedValue(true);
   const registration = {
+    unregister,
     get waiting() {
       return state.waiting;
     },
@@ -77,8 +87,20 @@ const createRegistration = (): {
       state.active = value;
     },
     update,
+    unregister,
+    failNewInstall: () => {
+      // A worker whose install started and ended `redundant` without reaching `installed`.
+      const worker = Object.assign(new EventTarget(), { state: 'installing' as ServiceWorkerState });
+      state.installing = worker;
+      for (const listener of updateListeners) {
+        listener();
+      }
+      state.installing = null;
+      worker.state = 'redundant';
+      worker.dispatchEvent(new Event('statechange'));
+    },
     installNewWorker: () => {
-      const worker = new EventTarget();
+      const worker = Object.assign(new EventTarget(), { state: 'installed' as ServiceWorkerState });
       state.installing = worker;
       for (const listener of updateListeners) {
         listener();
@@ -91,8 +113,14 @@ const createRegistration = (): {
 };
 
 let current: ReturnType<typeof createRegistration>;
+let registered: boolean;
 const onInstallStatus = vi.fn();
 const register = vi.fn<(url: string) => Promise<ServiceWorkerRegistration>>();
+const cacheNames = new Set<string>();
+const cacheStorage = {
+  keys: vi.fn(async () => [...cacheNames]),
+  delete: vi.fn(async (name: string) => cacheNames.delete(name)),
+};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -100,12 +128,19 @@ beforeEach(() => {
   skew.listeners.clear();
   skew.queryLiveBuild.mockReset().mockResolvedValue(undefined);
   current = createRegistration();
-  register.mockReset().mockImplementation(async () => current.registration);
+  registered = true;
+  cacheNames.clear();
+  globalThis.localStorage.clear();
+  Object.defineProperty(globalThis, 'caches', { configurable: true, value: cacheStorage });
+  register.mockReset().mockImplementation(async () => {
+    registered = true;
+    return current.registration;
+  });
   Object.defineProperty(globalThis.navigator, 'serviceWorker', {
     configurable: true,
     value: {
       register,
-      getRegistration: async () => current.registration,
+      getRegistration: async () => (registered ? current.registration : undefined),
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     },
@@ -117,6 +152,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- removing the jsdom test double.
   delete (globalThis.navigator as { serviceWorker?: unknown }).serviceWorker;
+  // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- removing the jsdom test double.
+  delete (globalThis as { caches?: unknown }).caches;
 });
 
 describe('updateAction (ruling OD3)', () => {
@@ -213,5 +250,126 @@ describe('startServiceWorker', () => {
     setVerdict('replaced');
 
     expect(current.update).not.toHaveBeenCalled();
+  });
+
+  it('should ask a waiting worker to activate if it is of this page’s build while the verdict is live (FP3)', async () => {
+    const waiting = { postMessage: vi.fn() };
+    current.waiting = waiting;
+    skew.verdict = 'live';
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus, buildId: 1_795_000_000_000 });
+    await vi.runAllTimersAsync();
+    setVerdict('live');
+
+    expect(waiting.postMessage).toHaveBeenCalledExactlyOnceWith({
+      type: activateIfBuildMessageType,
+      buildId: 1_795_000_000_000,
+    });
+    stop();
+  });
+
+  it('should ask a newly installed worker the same once it waits', async () => {
+    skew.verdict = 'live';
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus, buildId: 42 });
+    await vi.runAllTimersAsync();
+
+    current.installNewWorker();
+
+    expect(current.waiting?.postMessage).toHaveBeenCalledExactlyOnceWith({
+      type: activateIfBuildMessageType,
+      buildId: 42,
+    });
+    stop();
+  });
+
+  it('should not ask when this page’s build is unknown', async () => {
+    const waiting = { postMessage: vi.fn() };
+    current.waiting = waiting;
+    skew.verdict = 'live';
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+
+    expect(waiting.postMessage).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('should delete the worker caches no registration owns before registering (FP3)', async () => {
+    registered = false;
+    for (const name of ['tau-assets', 'tau-precache-v3-http://localhost/', 'another-app']) {
+      cacheNames.add(name);
+    }
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+
+    expect([...cacheNames]).toStrictEqual(['another-app']);
+    expect(register).toHaveBeenCalledOnce();
+    expect(onInstallStatus).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('should keep the worker caches a registration owns', async () => {
+    cacheNames.add('tau-assets-v3');
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+
+    expect([...cacheNames]).toStrictEqual(['tau-assets-v3']);
+    stop();
+  });
+
+  it('should unregister and delete the worker caches after the limit of failed installs in a row (fleet rule)', async () => {
+    cacheNames.add('tau-precache-v3-http://localhost/');
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+
+    for (let failure = 1; failure < failedInstallLimit; failure += 1) {
+      current.failNewInstall();
+    }
+    await vi.runAllTimersAsync();
+    expect(current.unregister).not.toHaveBeenCalled();
+
+    current.failNewInstall();
+    await vi.runAllTimersAsync();
+    expect(current.unregister).toHaveBeenCalledOnce();
+    expect([...cacheNames]).toStrictEqual([]);
+    stop();
+  });
+
+  it('should count no failure for an update check that starts no install, nor for a completed one', async () => {
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+    current.failNewInstall();
+    current.installNewWorker();
+    for (let failure = 1; failure < failedInstallLimit; failure += 1) {
+      current.failNewInstall();
+    }
+    await vi.runAllTimersAsync();
+
+    expect(current.unregister).not.toHaveBeenCalled();
+    stop();
+  });
+});
+
+describe('recordInstallOutcome (fleet rule)', () => {
+  it('should count failed installs in a row across loads and reset on a completed one', () => {
+    const store = globalThis.localStorage;
+    expect(recordInstallOutcome(store, 'failed')).toBe(false);
+    expect(store.getItem(failedInstallsKey)).toBe('1');
+    expect(recordInstallOutcome(store, 'installed')).toBe(false);
+    expect(store.getItem(failedInstallsKey)).toBeNull();
+    const outcomes = Array.from({ length: failedInstallLimit }, () => recordInstallOutcome(store, 'failed'));
+    expect(outcomes.at(-1)).toBe(true);
+    expect(outcomes.slice(0, -1).every((outcome) => !outcome)).toBe(true);
+    expect(store.getItem(failedInstallsKey)).toBeNull();
+  });
+
+  it('should count nothing without storage, or when it throws', () => {
+    expect(recordInstallOutcome(undefined, 'failed')).toBe(false);
+    const throwing = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    };
+    expect(recordInstallOutcome(throwing, 'failed')).toBe(false);
   });
 });

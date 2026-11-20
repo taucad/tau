@@ -8,7 +8,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildServiceWorker, retiredServiceWorkerFile, serviceWorkerFile } from '#scripts/build-service-worker.js';
+import {
+  buildServiceWorker,
+  readDocumentBuildId,
+  retiredServiceWorkerFile,
+  serviceWorkerFile,
+} from '#scripts/build-service-worker.js';
 import { precacheListFile } from '#scripts/precache-list.js';
 
 type Listener = (event: { waitUntil(promise: Promise<unknown>): void }) => void;
@@ -84,5 +89,18 @@ describe('the kill switch build (PL7)', () => {
       'delete tau-offline-shell-3f9a2c1d',
       'unregister',
     ]);
+  });
+});
+
+describe('readDocumentBuildId (FP3)', () => {
+  it('should read the build id a prerendered document publishes, escaped or not', () => {
+    expect(readDocumentBuildId('<script>window.ENV = {"TAU_BUILD_ID":"1795134403351"}</script>')).toBe(
+      1_795_134_403_351,
+    );
+    expect(readDocumentBuildId(String.raw`window.__ctx = "{\"TAU_BUILD_ID\":\"42\"}"`)).toBe(42);
+  });
+
+  it('should answer 0 for a document that publishes none', () => {
+    expect(readDocumentBuildId('<!doctype html><title>Tau</title>')).toBe(0);
   });
 });

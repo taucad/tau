@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activatesWorker,
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
   workerClasses,
 } from '#offline/service-worker-routing.js';
-import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
 
 const origin = 'https://tau.new';
@@ -169,5 +170,25 @@ describe('installMessage', () => {
       status: 'failed',
       detail: 'Failed to fetch',
     });
+  });
+});
+
+describe('activatesWorker (FP3)', () => {
+  it('should activate on the update rule’s message whatever the build', () => {
+    expect(activatesWorker({ type: skipWaitingMessageType }, 0)).toBe(true);
+    expect(activatesWorker({ type: skipWaitingMessageType }, 7)).toBe(true);
+  });
+
+  it('should activate on an activate-if-build message only for this worker’s known build', () => {
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 7 }, 7)).toBe(true);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 6 }, 7)).toBe(false);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 0 }, 0)).toBe(false);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: '7' }, 7)).toBe(false);
+  });
+
+  it('should ignore anything else', () => {
+    for (const data of [undefined, null, 'SKIP_WAITING', { type: 'other' }]) {
+      expect(activatesWorker(data, 7)).toBe(false);
+    }
   });
 });

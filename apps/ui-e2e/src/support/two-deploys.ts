@@ -591,10 +591,13 @@ export const prepareDeploys = async (name: string, options: Readonly<{ rename?: 
     client === undefined ? sameClientRoots : { previous: clientRoot, next: nextClientRoot };
   await createNextDeploy({ nextServerRoot, previousBuildId, nextBuildId, rename });
   const shells = await readShells(previousBuildId, nextBuildId, clientRoots);
+  const workers = await readWorkers(shells, rename, clientRoots);
+  // The worker carries its deploy's build id (`build-service-worker.ts`, FP3): the next deploy's is the next build's.
+  workers.scripts.next = workers.scripts.next.replaceAll(String(previousBuildId), String(nextBuildId));
   return {
     builds: { previous: previousBuild, next: await importServerBuild(nextServerRoot) },
     shells,
-    workers: await readWorkers(shells, rename, clientRoots),
+    workers,
     clientRoots,
     renamed: client?.renamed ?? new Map(),
     previousBuildId,

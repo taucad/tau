@@ -48,6 +48,7 @@ import {
   createReturningVisitor,
   killSwitchPageScript,
   prepareDeploys,
+  projectShellUrl,
   readBootState,
   readPreFixWorker,
   startDeployServer,
@@ -171,6 +172,95 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     await page.goto(`${live.origin}${path}`, { waitUntil: 'networkidle' });
     await waitForControllingWorker(page);
     return { page, live };
+  };
+
+  /**
+   * Row 1's fault: every request for the chunk fails but the page's own script load, as the script-exempting blocker
+   * rule does (a `route` turns the HTTP cache off, which is what lets the worker's fetch reach it).
+   */
+  const blockAllButPageScript = async (chunk: string): Promise<void> => {
+    await context?.route(`**${chunk}`, async (route) => {
+      if (route.request().resourceType() === 'script' && route.request().serviceWorker() === null) {
+        await route.continue();
+        return;
+      }
+      await route.abort('blockedbyclient');
+    });
+  };
+
+  /** A pre-fix worker stalls Home under row 1's fault: the page is not mounted and the boot strip shows. */
+  const stallUnderPreFixWorker = async (
+    next: string,
+  ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly chunk: string }> => {
+    const { same } = requireDeploys();
+    const chunk = readBlockedChunk();
+    const { page, live } = await openUnderWorker(same, { previous: readPreFixWorker([chunk]), next });
+    await blockAllButPageScript(chunk);
+    await page.reload({ waitUntil: 'commit' });
+    await expect
+      .poll(async () => readBootState(page), { timeout: bootDeadline + 10_000, interval: 500 })
+      .toMatchObject({ mounted: false, stripShown: true });
+    return { page, live, chunk };
+  };
+
+  /** The registration's workers and the origin's caches, or `undefined` while the page is between documents. */
+  const readWorkerState = async (
+    page: Page,
+  ): Promise<
+    Readonly<{ registered: boolean; installing: boolean; waiting: boolean; caches: readonly string[] }> | undefined
+  > => {
+    try {
+      return await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        const names = await caches.keys();
+        return {
+          registered: registration !== undefined,
+          installing: registration?.installing !== null && registration?.installing !== undefined,
+          waiting: registration?.waiting !== null && registration?.waiting !== undefined,
+          caches: names.toSorted(),
+        };
+      });
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Where the next deploy's worker is: installed once a precache holds the next project shell's revision, then waiting
+   * or active. A cache-name-agnostic read, so it reads a pre-fix and a fixed worker alike.
+   */
+  const readNextWorker = async (
+    page: Page,
+    pair: Deploys,
+  ): Promise<'between documents' | 'not installed' | 'installing' | 'waiting' | 'active'> => {
+    const worker = await readWorkerState(page);
+    if (worker === undefined) {
+      return 'between documents';
+    }
+    const nextShell = `${projectShellUrl}?__WB_REVISION__=${pair.workers.shellRevisions.next}`;
+    const installed = await page
+      .evaluate(async (key) => {
+        for (const name of await caches.keys()) {
+          // oxlint-disable-next-line no-await-in-loop -- a handful of caches, read in order.
+          if (name.startsWith('tau-precache-')) {
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            const cache = await caches.open(name);
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            if ((await cache.match(key)) !== undefined) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }, nextShell)
+      .catch(() => false);
+    if (worker.installing) {
+      return 'installing';
+    }
+    if (!installed) {
+      return 'not installed';
+    }
+    return worker.waiting ? 'waiting' : 'active';
   };
 
   const waitForMount = async (page: Page): Promise<BootState> => {
@@ -332,24 +422,8 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
 
   it('row 6: should free a browser that a stalled worker holds with one deploy of the kill switch', async () => {
     const { same } = requireDeploys();
-    const chunk = readBlockedChunk();
-    const { page, live } = await openUnderWorker(same, {
-      // A worker from before FP1 (the fixed one never stalls the page): the stall to free is the pre-fix worker's.
-      previous: readPreFixWorker([chunk]),
-      next: killSwitchWorker,
-    });
-    // Row 1's fault: the page is stalled on the previous deploy, reload after reload.
-    await context?.route(`**${chunk}`, async (route) => {
-      if (route.request().resourceType() === 'script' && route.request().serviceWorker() === null) {
-        await route.continue();
-        return;
-      }
-      await route.abort('blockedbyclient');
-    });
-    await page.reload({ waitUntil: 'commit' });
-    await expect
-      .poll(async () => readBootState(page), { timeout: bootDeadline + 10_000, interval: 500 })
-      .toMatchObject({ mounted: false, stripShown: true });
+    // A worker from before FP1 (the fixed one never stalls the page): the stall to free is the pre-fix worker's.
+    const { page, live } = await stallUnderPreFixWorker(killSwitchWorker);
     // From here the live deploy is a kill switch build: its pages register nothing.
     await context?.addInitScript(killSwitchPageScript);
     live.deploy();
@@ -385,6 +459,76 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     await expect.poll(workerState, { timeout: 30_000, interval: 250 }).toStrictEqual({ registered: false, caches: [] });
     expect(failedAssets).toStrictEqual([]);
   }, 180_000);
+
+  describe('the update and fleet rule (FP3)', () => {
+    it('row 5: should mount Home by the second load after the fixed worker deploys over a stalled pre-fix worker, with no click', async () => {
+      const { same } = requireDeploys();
+      const { page, live } = await stallUnderPreFixWorker(same.workers.scripts.next);
+      live.deploy();
+      // The first load after the deploy is still the stalled worker's; the browser's update check installs the fixed
+      // worker, which activates over the pre-fix one by itself, since the stalled page runs none of its own code.
+      await page.reload({ waitUntil: 'commit' });
+      await expect.poll(async () => readNextWorker(page, same), { timeout: 60_000, interval: 500 }).toBe('active');
+      failedAssets = [];
+      await page.reload({ waitUntil: 'commit' });
+      const state = await waitForMount(page);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(same.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('should leave no worker waiting after a reload under the previous deploy’s worker (D6)', async () => {
+      const { same } = requireDeploys();
+      const { page, live } = await openUnderWorker(same, same.workers.scripts);
+      live.deploy();
+      // A reload asks the network first, so the page is on the live build under the previous build's worker.
+      await page.reload({ waitUntil: 'commit' });
+      const state = await waitForMount(page);
+      expect(state.buildId).toBe(String(same.nextBuildId));
+      // The next deploy's worker installs on the browser's update check; it must not be left waiting.
+      await expect.poll(async () => readNextWorker(page, same), { timeout: 60_000, interval: 500 }).toBe('active');
+    }, 180_000);
+
+    it('should keep the registration through offline reloads', async () => {
+      const { same } = requireDeploys();
+      const { page } = await openUnderWorker(same, same.workers.scripts);
+      await context?.setOffline(true);
+      /* oxlint-disable no-await-in-loop -- reloads in order. */
+      for (let reload = 0; reload < 3; reload += 1) {
+        await page.reload({ waitUntil: 'commit' });
+        await waitForMount(page);
+      }
+      /* oxlint-enable no-await-in-loop */
+      await page.waitForTimeout(2000);
+      expect(await readWorkerState(page)).toMatchObject({ registered: true, waiting: false });
+    }, 180_000);
+
+    it('should delete the worker caches no registration owns, such as the empty tau-assets a retired worker leaves', async () => {
+      const { same, browser: launched } = requireDeploys();
+      // No deploy serves a worker, so the page's registration fails and none owns the caches below.
+      const live = await startDeployServer(
+        same.builds,
+        { shells: same.shells, workers: { previous: '', next: '' } },
+        { hold: false },
+      );
+      server = live;
+      context = await launched.newContext();
+      await context.addCookies([{ name: 'tau-entry', value: 'app', url: live.origin }]);
+      const page = await context.newPage();
+      await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+      // On staging an in-flight fetch of the retired worker re-created an empty `tau-assets` after the kill switch had
+      // deleted every worker cache (Brain blueprint, "Not verified"); a pre-fix precache can be left the same way.
+      await page.evaluate(async () => {
+        await caches.open('tau-assets');
+        await caches.open('tau-precache-v2-orphan');
+        await caches.open('another-app');
+      });
+      await page.reload({ waitUntil: 'commit' });
+      await waitForMount(page);
+      await expect
+        .poll(async () => readWorkerState(page), { timeout: 30_000, interval: 250 })
+        .toMatchObject({ registered: false, caches: ['another-app'] });
+    }, 180_000);
+  });
 
   describe('when the precached shell names a route manifest the live deploy no longer serves (D4)', () => {
     /**

@@ -16,7 +16,7 @@
  * at the latest the second page load after the deploy is the live deploy's with no worker at all. One deploy of a
  * build without the switch restores the web app's worker.
  */
-import { assetCacheName, cachePrefix, retiredCachePrefix } from '#offline/pwa-messages.js';
+import { assetCacheName, cachePrefix, preFixAssetCacheName, retiredCachePrefix } from '#offline/pwa-messages.js';
 
 /** The IndexedDB database Workbox's expiration plugin keeps its timestamps in (`workbox-expiration`'s `CacheTimestampsModel`). */
 export const workboxExpirationDatabase = 'workbox-expiration';
@@ -51,7 +51,39 @@ export const isWorkerCache = (name: string): boolean =>
   name.startsWith(`${cachePrefix}-precache-`) ||
   name.startsWith(`${cachePrefix}-runtime-`) ||
   name === assetCacheName ||
+  name === preFixAssetCacheName ||
   isRetiredWorkerCache(name);
+
+/**
+ * Whether a Cache Storage cache is a pre-fix worker's (PL7 before FP3: Workbox's default `tau-precache-v2-<scope>`,
+ * `tau-runtime-<scope>` and the unversioned `tau-assets`). A fixed worker that finds one replaces a pre-fix worker, so
+ * it activates at once, and deletes them when it does.
+ *
+ * @param name - The cache name.
+ * @returns `true` for a pre-fix worker's cache.
+ */
+export const isPreFixWorkerCache = (name: string): boolean =>
+  name.startsWith(`${cachePrefix}-precache-v2-`) ||
+  name.startsWith(`${cachePrefix}-runtime-`) ||
+  name === preFixAssetCacheName;
+
+/** Cache Storage as {@link deleteOrphanWorkerCaches} uses it. */
+export type OrphanCacheStorage = Pick<CacheStorage, 'keys' | 'delete'>;
+
+/**
+ * Delete every worker cache when no worker is registered to own them: what a failed install, a retired worker's
+ * in-flight fetch finishing after its retirement, or a cleared registration leaves behind (D11, FP3). The page calls it
+ * only after it has found no registration.
+ *
+ * @param storage - The page's Cache Storage.
+ * @returns The cache names deleted.
+ */
+export const deleteOrphanWorkerCaches = async (storage: OrphanCacheStorage): Promise<readonly string[]> => {
+  const allNames = await storage.keys();
+  const names = allNames.filter((name) => isWorkerCache(name));
+  await Promise.all(names.map(async (name) => storage.delete(name)));
+  return names;
+};
 
 /**
  * On `install`: skip waiting, so activation never waits for the pages of the worker being replaced to close.

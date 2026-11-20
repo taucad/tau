@@ -41,6 +41,23 @@ export const serviceWorkerInjectionPoint = 'globalThis.__WB_MANIFEST';
  */
 export const precacheClassesInjectionPoint = 'globalThis.__TAU_PRECACHE_CLASSES';
 
+/**
+ * The expression the worker reads its deploy's build id from, replaced by the number its prerendered documents publish
+ * (`TAU_BUILD_ID`), or `0` when none does: a page on that build activates the worker at once (FP3).
+ */
+export const buildIdInjectionPoint = 'globalThis.__TAU_BUILD_ID';
+
+/**
+ * The build id a prerendered document publishes (`window.ENV.TAU_BUILD_ID`, JSON inside an inline script).
+ *
+ * @param html - The document.
+ * @returns The build id, or `0` when it publishes none.
+ */
+export const readDocumentBuildId = (html: string): number => {
+  const match = /TAU_BUILD_ID\\?":\\?"(\d+)/u.exec(html);
+  return match?.[1] === undefined ? 0 : Number(match[1]);
+};
+
 /** Where the worker is served from, relative to the client output. */
 export const serviceWorkerFile = 'service-worker.js';
 
@@ -144,12 +161,18 @@ export const buildServiceWorker = async (options: {
       throw new Error(`Service worker manifest injection: ${unexpected.join('; ') || `${String(count)} entries`}`);
     }
     const injected = readFileSync(resolvePath(serviceWorkerFile), 'utf8');
-    if (injected.split(precacheClassesInjectionPoint).length !== 2) {
-      throw new Error(`The service worker reads ${precacheClassesInjectionPoint} other than once`);
+    for (const point of [precacheClassesInjectionPoint, buildIdInjectionPoint]) {
+      if (injected.split(point).length !== 2) {
+        throw new Error(`The service worker reads ${point} other than once`);
+      }
     }
+    const buildId =
+      documents.map(({ document }) => readDocumentBuildId(build.readText(document.slice(1)) ?? '')).find(Boolean) ?? 0;
     writeFileSync(
       resolvePath(serviceWorkerFile),
-      injected.replace(precacheClassesInjectionPoint, () => JSON.stringify(closures)),
+      injected
+        .replace(precacheClassesInjectionPoint, () => JSON.stringify(closures))
+        .replace(buildIdInjectionPoint, () => String(buildId)),
     );
   } finally {
     rmSync(staging, { recursive: true, force: true });

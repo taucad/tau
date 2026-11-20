@@ -19,9 +19,10 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { Topic } from '@taucad/events';
-import { queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
+import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
+import { deleteOrphanWorkerCaches } from '#offline/service-worker-retire.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -45,12 +46,21 @@ export const isServiceWorkerRetiredBuild = (): boolean =>
   import.meta.env.PROD && import.meta.env.TAU_SERVICE_WORKER === 'retired' && !isDesktopTarget();
 
 /**
- * Ask an existing registration to fetch the retiring worker (kill switch). Never registers.
+ * Ask an existing registration to fetch the retiring worker (kill switch), or, with none left, delete the worker caches
+ * nothing owns. Never registers.
  */
-const checkForRetiringWorker = async (): Promise<void> => {
+export const checkForRetiringWorker = async (): Promise<void> => {
   try {
     const registration = await globalThis.navigator.serviceWorker.getRegistration();
-    await registration?.update();
+    if (registration === undefined) {
+      // Retired already: delete what no worker owns, such as the empty asset cache an in-flight fetch of the retired
+      // worker re-created after it deleted its caches (FP3).
+      if ('caches' in globalThis) {
+        await deleteOrphanWorkerCaches(globalThis.caches);
+      }
+      return;
+    }
+    await registration.update();
   } catch {
     // Offline or refused: the browser's next update check fetches the retiring worker.
   }
@@ -147,6 +157,7 @@ export function useServiceWorker(): void {
               inWorkspace,
               verdict: { readServerVerdict, subscribeServerVerdict, queryLiveBuild },
               onInstallStatus: setInstallStatus,
+              buildId,
             });
           }
         } catch {

@@ -240,7 +240,8 @@ describe('the web app’s service worker on a built app (PL7)', () => {
     const precached = stored.find((cache) => cache.name.startsWith('tau-precache-'));
     expect(precached?.urls.toSorted()).toStrictEqual(precache.map((entry) => entry.url).toSorted());
     expect(stored.map((cache) => cache.name).filter((name) => !name.startsWith('tau-precache-'))).toStrictEqual(
-      stored.some((cache) => cache.name === 'tau-assets') ? ['tau-assets'] : [],
+      // The asset cache carries the cache version since FP3 (`pwa-messages.ts`).
+      stored.some((cache) => cache.name === 'tau-assets-v3') ? ['tau-assets-v3'] : [],
     );
     const everything = stored.flatMap((cache) => cache.urls);
     expect(everything.filter((url) => /\.data|^\/api\/|^\/auth\/|^\/health\//u.test(url))).toStrictEqual([]);

@@ -42,11 +42,12 @@ const project: ProjectContextValue = {
   projectId: 'project-1',
   projectRef: { send: vi.fn() },
   editorRef: { send: mocks.send },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
 };
-const fileManager: FileManagerContextValue = {
+const fileManager = mock<FileManagerContextValue>({
   whenServicesReady: async () => ({ treeService: mock<FileTreeService>({ getEntry: mocks.getEntry }) }),
   writeFile: mocks.writeFile,
-};
+});
 
 function renderLink(href: string): void {
   render(

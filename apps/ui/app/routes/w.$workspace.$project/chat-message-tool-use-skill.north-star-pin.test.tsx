@@ -21,6 +21,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { mock } from 'vitest-mock-extended';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ToolInvocation } from '@taucad/chat';
@@ -28,6 +29,7 @@ import type { toolName } from '@taucad/chat/constants';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
+import type { ProjectContextValue } from '@taucad/ui-core/contexts/project-context';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
@@ -139,7 +141,12 @@ const composedRow = (path: string, type: 'dir' | 'file'): [string, FileEntry] =>
 ];
 
 /** The shared project context the skill's file links read, rather than `useProject`. */
-const project = { projectId: 'project-1', projectRef: { send: vi.fn() }, editorRef: { send: editorSend } };
+const project: ProjectContextValue = {
+  projectId: 'project-1',
+  projectRef: { send: vi.fn() },
+  editorRef: { send: editorSend },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
+};
 
 beforeEach(() => {
   editorSend.mockClear();

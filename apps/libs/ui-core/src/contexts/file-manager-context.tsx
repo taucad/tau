@@ -17,6 +17,19 @@ export type FileManagerContextValue = Readonly<{
     data: Uint8Array<ArrayBuffer>,
     options: Readonly<{ source: FileWriteSource }>,
   ) => Promise<void>;
+  /** Reads one file's bytes, by a path relative to the project root. */
+  readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Whether a path exists, relative to the project root. */
+  exists: (path: string) => Promise<boolean>;
+  /** The record stores' files, by absolute path, through the root that owns each path. */
+  recordFiles: Readonly<{
+    readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+    writeFile: (path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>;
+    exists: (path: string) => Promise<boolean>;
+    readdir: (path: string) => Promise<string[]>;
+    unlink: (path: string) => Promise<void>;
+    rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  }>;
 }>;
 
 /** The project's file manager, or `undefined` outside a file-manager provider. */

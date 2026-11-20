@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OpenRenderButton } from '#components/files/open-render-button.js';
@@ -12,6 +13,7 @@ const project: ProjectContextValue = {
   projectId: 'project-1',
   projectRef: { send: projectSend },
   editorRef: { send: vi.fn() },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
 };
 
 beforeEach(() => {

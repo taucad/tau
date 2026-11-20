@@ -405,6 +405,8 @@ let mockBuildSuperseded = false;
 const buildSkewListeners = new Set<() => void>();
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: 1,
+  // Read when `stale-build-recovery` loads, which the agent host client's worker replacement imports (FP10).
+  lookupBudget: 0,
   isBuildSuperseded: () => mockBuildSuperseded,
   subscribeBuildSkew: (listener: () => void) => {
     buildSkewListeners.add(listener);

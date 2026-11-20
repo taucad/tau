@@ -1036,7 +1036,7 @@ describe('a resident worker whose code failed to load', () => {
 
   it('should start no worker for a later use once the page took the failures over', async () => {
     const recovery = await import('#lib/worker-realm-recovery.js');
-    const { WorkerCodeLoadError } = await import('@taucad/ui-core/lib/module-worker');
+    const moduleWorker = await import('@taucad/ui-core/lib/worker-factory');
     const workers = Array.from({ length: 4 }, () => {
       const worker = new FakeResidentWorker();
       worker.failNextProvide = 'WORKER_LOAD_FAILED';
@@ -1047,7 +1047,7 @@ describe('a resident worker whose code failed to load', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     for (let index = 0; index < recovery.workerReplacementBound; index += 1) {
       recovery.noteWorkerCodeLoadFailure(
-        new WorkerCodeLoadError('agent-host', new TypeError('Importing a module script failed.')),
+        new moduleWorker.WorkerCodeLoadError('agent-host', new TypeError('Importing a module script failed.')),
       );
     }
 

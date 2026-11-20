@@ -90,6 +90,47 @@ const readDocumentReferences = (html: string): readonly string[] => {
   return references;
 };
 
+/** The text of each inline `<script>` (one with no `src`). */
+const readInlineScripts = (html: string): readonly string[] =>
+  [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu)]
+    .filter((match) => !/(?:^|\s)src=/iu.test(match[1] ?? ''))
+    .map((match) => match[2] ?? '');
+
+/**
+ * Module specifiers the document's inline scripts import, statically or dynamically: React Router names its route
+ * manifest (`/assets/manifest-<version>.js`) only so, never in an attribute, and a shell that boots offline needs it.
+ *
+ * @param html - The document.
+ * @returns Same-origin root-relative specifiers.
+ */
+export const readInlineModuleSpecifiers = (html: string): readonly string[] =>
+  readInlineScripts(html).flatMap((script) =>
+    [
+      ...script.matchAll(/\bimport\s*(?:[\w$*{}\s,]+\bfrom\s*)?["']([^"']+)["']/gu),
+      ...script.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/gu),
+    ]
+      .map((match) => match[1] ?? '')
+      .filter((specifier) => isSameOriginPath(specifier) && !isExcluded(specifier)),
+  );
+
+/**
+ * Every same-origin file a document names where a browser would load it: in a loading tag's attribute, or as a quoted
+ * root-relative path with an extension in an inline script's text (an import, a `fetch`). What `check-critical-budget.mts`
+ * holds against the precache list, so a file named in a way the collector does not read is caught at build time.
+ *
+ * @param html - The document.
+ * @returns Same-origin root-relative paths, query and fragment removed, sorted and unique.
+ */
+export const readNamedFiles = (html: string): readonly string[] => {
+  const inScripts = readInlineScripts(html).flatMap((script) =>
+    [...script.matchAll(/["'`](\/(?!\/)[\w./@-]+\.[a-z\d]+)(?:[?#][^"'`]*)?["'`]/giu)].map((match) => match[1] ?? ''),
+  );
+  const named = [...readDocumentReferences(html), ...inScripts]
+    .filter((reference) => isSameOriginPath(reference) && !isExcluded(reference))
+    .map((reference) => new URL(reference, 'https://tau.invalid').pathname);
+  return [...new Set(named)].toSorted((left, right) => left.localeCompare(right));
+};
+
 /** `url(/fonts/x.woff2)` references inside a stylesheet the document loads. */
 const readStylesheetReferences = (css: string): readonly string[] => {
   const references: string[] = [];
@@ -106,7 +147,9 @@ const readStylesheetReferences = (css: string): readonly string[] => {
  * Collect the files the worker precaches: each document, what it references, its class's interactive roots, and their
  * static closure.
  *
- * Seeded from each document's own `src`/`href` references and its class's interactive roots, then expanded through the
+ * Seeded from each document's own `src`/`href` references, the modules its inline scripts import (React Router's route
+ * manifest, which no attribute names and Vite's build manifest does not list, so it is kept as a leaf) and its class's
+ * interactive roots, then expanded through the
  * build manifest's **static** import graph (plus each chunk's stylesheets) because Vite does not emit a preload link
  * for every transitive chunk. Stylesheets contribute their `url()` references to the app's own unhashed files, which is
  * how the self-hosted fonts are reached. Hashed images and font fallbacks load when rendered and are cached on first use.
@@ -121,6 +164,8 @@ export const collectPrecacheFiles = (documents: readonly PrecacheDocument[], bui
   const fileToKey = new Map(Object.entries(build.manifest).map(([key, chunk]) => [`/${chunk.file}`, key]));
   const pending: string[] = [];
   const collected = new Set<string>();
+  /** Files an inline script imports: a leaf when the build manifest does not list it. */
+  const inlineImports = new Set<string>();
   for (const { document, roots } of documents) {
     const html = build.readText(document.slice(1));
     if (html === undefined) {
@@ -128,6 +173,10 @@ export const collectPrecacheFiles = (documents: readonly PrecacheDocument[], bui
     }
     collected.add(document);
     pending.push(...readDocumentReferences(html));
+    for (const specifier of readInlineModuleSpecifiers(html)) {
+      inlineImports.add(new URL(specifier, localOrigin).pathname);
+      pending.push(specifier);
+    }
     pending.push(...rootKeys(build.manifest, roots).map((key) => `/${build.manifest[key]?.file ?? key}`));
   }
 
@@ -158,7 +207,11 @@ export const collectPrecacheFiles = (documents: readonly PrecacheDocument[], bui
         ),
       );
     }
-    pending.push(...expandChunk(reference, fileToKey.get(reference), build));
+    const manifestKey = fileToKey.get(reference);
+    // A file only an inline script imports and the build manifest does not list (the route manifest) is a leaf.
+    if (manifestKey !== undefined || !inlineImports.has(reference)) {
+      pending.push(...expandChunk(reference, manifestKey, build));
+    }
   }
 
   return [...collected].toSorted((left, right) => left.localeCompare(right));

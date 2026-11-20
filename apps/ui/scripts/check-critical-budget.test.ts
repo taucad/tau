@@ -478,4 +478,26 @@ describe('findPrecacheProblems (PL7, shell invariant 8)', () => {
     ]);
     expect(killSwitch(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
   });
+
+  it('should require every file a shell names in markup or script text, the icon sprites aside (D4)', () => {
+    const named = new Map([
+      [
+        '/__shell/home/index.html',
+        ['/assets/entry.client-a.js', '/assets/manifest-db2a97cf.js', '/assets/sprite-BWGdUwqw.svg'],
+      ],
+    ]);
+    expect(
+      findPrecacheProblems({
+        entries: expected.map((url) => entry(url)),
+        expected,
+        closures,
+        workerClassIds: ['home'],
+        manifest,
+        moduleIds,
+        named,
+      }),
+    ).toEqual([
+      'precache: /__shell/home/index.html names /assets/manifest-db2a97cf.js, which the worker does not precache',
+    ]);
+  });
 });

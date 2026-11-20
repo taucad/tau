@@ -8,6 +8,9 @@
  * worker passes `onLoadFailure` and restarts within its own bound; for every other owner the failure goes to the
  * page's code-load recovery (FP9), since a new document is the realm that can load it.
  * `tau-lint/no-unowned-code-load` keeps every page-realm `new Worker` inside this factory.
+ *
+ * The file is not named `*-worker.ts`: that name marks a worker entry, and `check-server-output` fails a server build
+ * holding a `*-worker-<hash>.js` chunk, which this module, imported by server-rendered code, becomes.
  */
 
 import { reportCodeLoadFailure } from '#lib/code-loading.js';

@@ -16,7 +16,7 @@ import {
   triggerObservabilityKernelTermination,
 } from '#lib/observability-harness-triggers.js';
 import { load } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 export const meta: MetaFunction = () => [{ title: 'Observability harness · Tau' }];
 

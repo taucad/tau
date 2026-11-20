@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setCodeLoadFailureHandler } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 import { isWorkerLoadFailure } from '#workers/worker-load.js';
 
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: vi.fn(async () => undefined) }));

@@ -4,7 +4,7 @@ import { sha256Bytes } from '@taucad/utils/hash';
 import type { PrinterProgram } from '#components/printer/printer-program.js';
 import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 export type PrinterPreparationResult =
   | Readonly<{

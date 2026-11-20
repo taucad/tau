@@ -4,7 +4,7 @@ import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backen
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
 import { load } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
 

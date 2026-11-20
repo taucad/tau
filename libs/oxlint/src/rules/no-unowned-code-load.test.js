@@ -64,7 +64,7 @@ describe('no-unowned-code-load', () => {
         {
           name: 'a page worker made by the module-worker factory (FP10)',
           filename: page,
-          code: "import { createModuleWorker } from '#lib/module-worker.js';\nconst worker = createModuleWorker(() => new Worker(new URL('./a.worker.ts', import.meta.url), { type: 'module' }), { name: 'kernel' });",
+          code: "import { createModuleWorker } from '#lib/worker-factory.js';\nconst worker = createModuleWorker(() => new Worker(new URL('./a.worker.ts', import.meta.url), { type: 'module' }), { name: 'kernel' });",
         },
         {
           name: 'server code, which no page realm runs',

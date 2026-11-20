@@ -1,7 +1,7 @@
 import { mimeTypes } from '@taucad/types/constants';
 import type { usdzRuntime } from '#runtime/usdz-runtime.definition.js';
 import { load } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 /** A USDZ conversion that failed or returned something other than one USDZ file. */
 export class UsdzTranscodeError extends Error {}

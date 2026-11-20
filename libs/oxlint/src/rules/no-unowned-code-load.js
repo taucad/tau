@@ -8,18 +8,18 @@
  * around the owner would keep the failure, or retry it in place, where nothing can recover it.
  *
  * - Page realm: `import()` through `load` (`#lib/code-loading.js`), lazy components through `lazy`
- *   (`#lib/lazy-component.js`), never React's, and module workers through `createModuleWorker` (`#lib/module-worker.js`),
+ *   (`#lib/lazy-component.js`), never React's, and module workers through `createModuleWorker` (`#lib/worker-factory.js`),
  *   which reports a script that failed to load.
  * - Worker realm (`app/workers/` and every `*.worker.*`): `import()` through `loadInWorker` (`#workers/worker-load.js`),
  *   which reports `WORKER_LOAD_FAILED` so the page starts a new worker.
  */
 const PAGE_LOADER = { specifier: '#lib/code-loading.js', name: 'load' };
 const WORKER_LOADER = { specifier: '#workers/worker-load.js', name: 'loadInWorker' };
-const WORKER_FACTORY = { specifier: '#lib/module-worker.js', name: 'createModuleWorker' };
+const WORKER_FACTORY = { specifier: '#lib/worker-factory.js', name: 'createModuleWorker' };
 const OWNER_FILES = [
   'apps/ui/app/lib/code-loading.ts',
   'apps/ui/app/lib/lazy-component.ts',
-  'apps/ui/app/lib/module-worker.ts',
+  'apps/ui/app/lib/worker-factory.ts',
   'apps/ui/app/workers/worker-load.ts',
 ];
 
@@ -104,7 +104,7 @@ export const noUnownedCodeLoadRule = {
       unownedWorkerImport:
         "Load code inside a worker through `loadInWorker(async () => import('…'))` from `#workers/worker-load.js` (name the exports used with `import('…').then((loaded) => ({ X: loaded.X }))`): it reports `WORKER_LOAD_FAILED`, and the page starts a new worker, since this one keeps the failure.",
       unownedWorker:
-        "Create a module worker through `createModuleWorker(() => new Worker(new URL('…', import.meta.url), …), { name })` from `#lib/module-worker.js`, which reports its script failing to load.",
+        "Create a module worker through `createModuleWorker(() => new Worker(new URL('…', import.meta.url), …), { name })` from `#lib/worker-factory.js`, which reports its script failing to load.",
       reactLazy:
         "Use `lazy` from `#lib/lazy-component.js`, the owner's, not React's: its factory loads through the owner, and optional code declares a `fallback` instead of failing its panel.",
     },

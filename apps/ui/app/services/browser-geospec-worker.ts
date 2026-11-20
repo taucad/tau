@@ -1,4 +1,4 @@
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 /** Create the browser-only GeoSpec runner worker. Desktop aliases this module to a refusal. */
 export const createBrowserGeoSpecWorker = (): Worker =>
   createModuleWorker(

@@ -2,7 +2,7 @@ import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
 import { load } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 /** One canvas step: 2048 x 2048 RGBA is 16 MiB, the same step as one WebAssembly allocation. */
 const canvasPressureEdge = 2048;

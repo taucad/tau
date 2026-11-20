@@ -4,7 +4,7 @@ import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 /**
  * Mark a kernel worker's construction as `tau.load.kernel.worker` (progressive loading PL5): the worker script and

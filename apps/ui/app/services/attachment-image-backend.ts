@@ -1,6 +1,6 @@
 import type { AttachmentImageBackend } from '#services/attachment-image.service.js';
 import { load } from '#lib/code-loading.js';
-import { createModuleWorker } from '#lib/module-worker.js';
+import { createModuleWorker } from '#lib/worker-factory.js';
 
 /**
  * Browser conversion: a dedicated module worker running the raster-only attachment runtime. Everything is imported on

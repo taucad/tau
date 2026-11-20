@@ -3,8 +3,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runInNewContext } from 'node:vm';
+import { isWorkerCache } from '#offline/pwa-caches.js';
 import {
   bootReloadCleanupLimit,
+  bootWorkerCachePattern,
   bootWatchdogDeadline,
   bootWatchdogStripHtml,
   buildBootWatchdogScript,
@@ -222,5 +224,26 @@ describe('web boot watchdog Reload under a service worker (FP5)', () => {
 
     await advance(1);
     expect(calls).toStrictEqual(['reload']);
+  });
+
+  it('should match exactly the caches isWorkerCache owns', () => {
+    const pattern = new RegExp(bootWorkerCachePattern, 'u');
+    for (const name of [
+      'tau-precache-v2-https://tau.new/',
+      'tau-precache-v3-https://tau.new/',
+      'tau-runtime-https://tau.new/',
+      'tau-assets',
+      'tau-assets-v3',
+      'tau-state-v3',
+      'tau-offline-shell-3f9a2c1d0b7e',
+      'taunt',
+      'tau-billing',
+      'tau-assets-old',
+      'workbox-precache-v2',
+      'tau-offline',
+      'another-app-cache',
+    ]) {
+      expect(pattern.test(name), name).toBe(isWorkerCache(name));
+    }
   });
 });

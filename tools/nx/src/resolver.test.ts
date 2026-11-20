@@ -278,6 +278,44 @@ describe('validateTags()', () => {
   });
 });
 
+describe('validateTags() for the UI layering', () => {
+  it('allows one valid ui name on a UI app library and refuses it on every other project', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('ui-lib', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:chat-ui'], undefined),
+          project('unnamed-ui-lib', ['scope:ui', 'type:app-lib', 'layer:feature'], undefined),
+          project('unknown-ui-name', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:chat'], undefined),
+          project('two-ui-names', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:infra', 'ui:ui-kit'], undefined),
+          project('ui-app', ['scope:ui', 'type:app', 'ui:infra'], undefined),
+          project('shared-app-lib', ['scope:shared', 'type:app-lib', 'layer:util', 'ui:infra'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-ui-name: unknown tag "ui:chat" (ui: must be one of ui-core, ui-kit, chat-ui, files-ui, editor-ui, revisions-ui, publish-ui, settings-ui, billing-ui, project-workspace, infra, unlayered)',
+      'fixture/two-ui-names: expected exactly one ui: tag, found ui:infra, ui:ui-kit',
+      'fixture/ui-app: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',
+      'fixture/shared-app-lib: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',
+    ]);
+  });
+
+  it('allows the agent protocol tag on a library or package and refuses it elsewhere', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('protocol-lib', ['scope:shared', 'type:lib', 'protocol:agent'], undefined),
+          project('protocol-package', ['scope:shared', 'type:package', 'protocol:agent'], undefined),
+          project('unknown-protocol', ['scope:shared', 'type:lib', 'protocol:rpc'], undefined),
+          project('protocol-app-lib', ['scope:ui', 'type:app-lib', 'layer:util', 'protocol:agent'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-protocol: unknown tag "protocol:rpc" (protocol: must be one of agent)',
+      'fixture/protocol-app-lib: unexpected tag "protocol:agent" (protocol: is only for type:lib or type:package projects)',
+    ]);
+  });
+});
+
 describe('bundledLibraries()', () => {
   it("derives the runtime owner's six direct bundle candidates", () => {
     expect(bundledLibraries(live, 'runtime')).toEqual([

@@ -638,7 +638,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
         retire(live, 'WORKER_LOAD_FAILED');
         return;
       }
-      console.error('[agent-host] resident worker error', event.message);
+      console.error('[agent-host] resident worker error', message);
     });
     const live: Incarnation = {
       worker,

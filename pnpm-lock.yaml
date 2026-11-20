@@ -957,12 +957,6 @@ catalogs:
     workbox-precaching:
       specifier: 7.4.1
       version: 7.4.1
-    workbox-routing:
-      specifier: 7.4.1
-      version: 7.4.1
-    workbox-strategies:
-      specifier: 7.4.1
-      version: 7.4.1
     ws:
       specifier: ^8.22.0
       version: 8.22.0
@@ -1031,7 +1025,7 @@ overrides:
   nx@22.7.12>smol-toml: 1.9.1
   oxfmt@0.39.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
-  replicad: npm:@taulabs/replicad@1.2.0-beta.2
+  replicad: npm:@taulabs/replicad@1.2.1-beta.0
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
   sockjs@0.3.24>uuid: 11.1.1
   vitest: 4.1.11
@@ -1419,8 +1413,8 @@ importers:
         specifier: 'catalog:'
         version: 11.1.2
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
@@ -4559,8 +4553,8 @@ importers:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -5240,12 +5234,6 @@ importers:
         specifier: 'catalog:'
         version: 7.4.1
       workbox-precaching:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-routing:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-strategies:
         specifier: 'catalog:'
         version: 7.4.1
       xstate:
@@ -5958,8 +5946,8 @@ importers:
         specifier: 'catalog:'
         version: 0.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
@@ -7396,8 +7384,8 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
@@ -7458,8 +7446,8 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(playwright@1.64.0)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -8354,8 +8342,8 @@ importers:
         specifier: 'catalog:'
         version: 0.6.0(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.0-beta.2
-        version: '@taulabs/replicad@1.2.0-beta.2'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.0
+        version: '@taulabs/replicad@1.2.1-beta.0'
 
   packages/workbench:
     devDependencies:
@@ -16222,8 +16210,8 @@ packages:
   '@taulabs/replicad-opencascadejs@0.23.0-beta.3':
     resolution: {integrity: sha512-9GeLIgJjKHgKX0wJwtW0Bntqq56Mqd8OFQ16bQwg2KIARIb4RPB0e8oo+oW3kszLsRsTBOtN5FxrWkhhXahJ0A==}
 
-  '@taulabs/replicad@1.2.0-beta.2':
-    resolution: {integrity: sha512-GQq3pa8CSTt354ouCcD7fC+wXAjUMkVuOi9pMIZoY6+P6mT4UIm7/RGsvhkZfEA8t+1xGLTFZqRk0VX9PH0ssQ==}
+  '@taulabs/replicad@1.2.1-beta.0':
+    resolution: {integrity: sha512-GQBXvhmyhH1tD5mnMcGbF59CTQhFExwuHKapu6oeTdobJFRlnFs9ejvr/LPJCjKCbGDYTrowIaRGZaXAWPLpSg==}
 
   '@taulabs/three-viewport-gizmo@3.0.0-beta.4':
     resolution: {integrity: sha512-VsBdLBgucL/qVTeXTTc3pFUHW0LNXdI+xeq8UuGeFfHcVvpBhpHcV+LOYZyC+/i2QQzeCfiJw1JJ0KFfepOD4g==}
@@ -24438,9 +24426,8 @@ packages:
     resolution: {integrity: sha512-ur5UIdyw5Y7yEj9wLzhqXiy6GZ3Mwx0yGI+5sMn2r0N0v3cKJvUmFH5yPP+WXh9e0xfyzyJX95D8l088DNFj7A==}
     hasBin: true
 
-  opentype.js@1.3.4:
-    resolution: {integrity: sha512-d2JE9RP/6uagpQAVtJoF0pJJA/fgai89Cc50Yp0EJHk+eLp6QQ7gBoblsnubRULNY132I0J1QKMJ+JTbMqz4sw==}
-    engines: {node: '>= 8.0.0'}
+  opentype.js@2.0.0:
+    resolution: {integrity: sha512-kCyjv6xdDY1W/jLWZ/L3QhhTlKUqDZMQ5+Jdlw12b3dXkKNpYBqqlMMj0YDQPShWFTMwgZI1hG14kN3XUDSg/A==}
     hasBin: true
 
   optionator@0.9.4:
@@ -26859,9 +26846,6 @@ packages:
     resolution: {integrity: sha512-ZbmZM0JCihQN91dWnxoipT2KOEyHqEyfRXUyjuRhW8b/xnqPDoq4gWEVApTVa9db2wN8mmoikgFBbjh71+cGeQ==}
     engines: {node: '>=20'}
 
-  string.prototype.codepointat@0.2.1:
-    resolution: {integrity: sha512-2cBVCj6I4IOvEnjgO/hWqXjqBGsY+zwPmHl12Srk9IXSZ56Jwwmy+66XO5Iut/oQVR7t5ihYdLB0GMa4alEUcg==}
-
   string.prototype.matchall@4.1.0:
     resolution: {integrity: sha512-tHNHTxInrYLCga9O9YGxWA3G9/nnzQw8UGAyqGx3Ar1pSTTzIuM4woFSq4SowkXCjJIwq5sIiQvEfRI9tCH1qQ==}
     engines: {node: '>= 0.4'}
@@ -27288,9 +27272,6 @@ packages:
 
   tiny-async-pool@1.3.0:
     resolution: {integrity: sha512-01EAw5EDrcVrdgyCLgoSPvqznC0sVxDSVeiOz09FUpjh71G79VCqneOr+xvt7T1r76CF6ZZfPjHorN2+d+3mqA==}
-
-  tiny-inflate@1.0.3:
-    resolution: {integrity: sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw==}
 
   tiny-invariant@1.3.3:
     resolution: {integrity: sha512-+FbBPE1o9QAYvviau/qC5SE3caw21q3xkvWKBtja5vgqOWIHHJ3ioaq1VPfn/Szqctz2bU/oYeKd9/z5BL+PVg==}
@@ -37276,11 +37257,11 @@ snapshots:
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.3': {}
 
-  '@taulabs/replicad@1.2.0-beta.2':
+  '@taulabs/replicad@1.2.1-beta.0':
     dependencies:
       '@types/opentype.js': 1.3.10
       flatbush: 4.6.2
-      opentype.js: 1.3.4
+      opentype.js: 2.0.0
 
   '@taulabs/three-viewport-gizmo@3.0.0-beta.4(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
     dependencies:
@@ -47031,10 +47012,7 @@ snapshots:
 
   opener@1.5.2: {}
 
-  opentype.js@1.3.4:
-    dependencies:
-      string.prototype.codepointat: 0.2.1
-      tiny-inflate: 1.0.3
+  opentype.js@2.0.0: {}
 
   optionator@0.9.4:
     dependencies:
@@ -49936,8 +49914,6 @@ snapshots:
       get-east-asian-width: 1.7.0
       strip-ansi: 7.2.0
 
-  string.prototype.codepointat@0.2.1: {}
-
   string.prototype.matchall@4.1.0:
     dependencies:
       call-bind: 1.0.9
@@ -50393,8 +50369,6 @@ snapshots:
   tiny-async-pool@1.3.0:
     dependencies:
       semver: 5.7.2
-
-  tiny-inflate@1.0.3: {}
 
   tiny-invariant@1.3.3: {}
 

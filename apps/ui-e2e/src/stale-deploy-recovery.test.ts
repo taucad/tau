@@ -357,7 +357,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     expect(live.documents).toStrictEqual(['previous', 'previous']);
     expect(await buildIdOf(page)).toBe(String(deploys?.previousBuildId));
     // The new page mounts the palette items once idle, so its own request for the chunk may follow the load.
-    await expect.poll(() => live.requests(chunk), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => live.requestCount(chunk), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
   }, 120_000);
@@ -449,10 +449,10 @@ describe('a code load that fails once on the build the server still runs (FP9, F
 
     // A new worker, which loads the implementation: the failed one is never asked again.
     try {
-      await expect.poll(() => live.requests(agentWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => live.requestCount(agentWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
     } catch (error) {
       throw new Error(
-        `The page asked the failed worker again instead of starting another (agent host workers ${String(live.requests(agentWorkerScript))}, implementation requests ${String(live.requests(implementation))}); module load errors: ${JSON.stringify(failures)}`,
+        `The page asked the failed worker again instead of starting another (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); module load errors: ${JSON.stringify(failures)}`,
         { cause: error },
       );
     }
@@ -476,7 +476,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     } catch (error) {
       const shown = await page.locator('[data-decision="run-error"]').allInnerTexts();
       throw new Error(
-        `No load failure card (agent host workers ${String(live.requests(agentWorkerScript))}, implementation requests ${String(live.requests(implementation))}); run cards: ${JSON.stringify(shown)}`,
+        `No load failure card (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); run cards: ${JSON.stringify(shown)}`,
         { cause: error },
       );
     }
@@ -484,6 +484,6 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
     expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);
     // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
-    expect(live.requests(agentWorkerScript)).toBeGreaterThanOrEqual(3);
+    expect(live.requestCount(agentWorkerScript)).toBeGreaterThanOrEqual(3);
   }, 120_000);
 });

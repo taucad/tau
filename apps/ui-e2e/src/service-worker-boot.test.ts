@@ -77,7 +77,7 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
   let killSwitchWorker = '';
   let server: DeployServer | undefined;
   let context: BrowserContext | undefined;
-  let visitor: ReturningVisitor | undefined;
+  let visitor: ReturningVisitor<BrowserContext> | undefined;
   /** Every `/assets/*` request the page saw fail, as the console would show it. */
   let failedAssets: string[] = [];
 
@@ -411,7 +411,9 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
         { hold: false, retain: true },
       );
       server = live;
-      visitor = createReturningVisitor();
+      visitor = createReturningVisitor(async (profile) =>
+        chromium.launchPersistentContext(profile, { executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] }),
+      );
       await visitor.visit(async (page) => {
         await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
         await waitForControllingWorker(page);

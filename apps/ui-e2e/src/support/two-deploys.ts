@@ -29,14 +29,11 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { createRequestHandler } from '@react-router/express';
 import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
-import { chromium } from 'playwright';
-import type { BrowserContext, Page } from 'playwright';
 
 export type Deploy = 'previous' | 'next';
 export type ServerBuild = Parameters<typeof createRequestHandler>[0]['build'];
@@ -666,21 +663,46 @@ export const buildKillSwitchWorker = async (): Promise<string> => {
 };
 
 /**
+ * The page calls these helpers make, as a structural type: the harness never imports the browser driver, which stays in
+ * the suites that `scripts/src/vitest-browser-ownership.test.ts` admits (a Playwright `Page` satisfies it).
+ */
+export type HarnessPage = {
+  evaluate<R>(pageFunction: () => R | Promise<R>): Promise<R>;
+  waitForFunction(
+    pageFunction: () => unknown,
+    argument: undefined,
+    // oxlint-disable-next-line tau-lint/no-bare-time-identifier -- Playwright's own option name.
+    options: Readonly<{ timeout: number; polling: number }>,
+  ): Promise<unknown>;
+};
+
+/** A persistent browser context, as {@link createReturningVisitor} uses it (a Playwright `BrowserContext` satisfies it). */
+export type PersistentContext = {
+  close(): Promise<void>;
+  addCookies(cookies: Array<{ name: string; value: string; url: string }>): Promise<void>;
+  pages(): readonly unknown[];
+  newPage(): Promise<unknown>;
+};
+
+/** The page type of a {@link PersistentContext}. */
+export type PageOf<C extends PersistentContext> = Awaited<ReturnType<C['newPage']>>;
+
+/**
  * A returning visitor: one browser profile on disk, each visit a browser launched on it and closed after, so a visit's
  * first navigation is answered by whatever worker the profile holds, before any update check, with the HTTP cache on.
  */
-export type ReturningVisitor = Readonly<{
+export type ReturningVisitor<C extends PersistentContext> = Readonly<{
   /**
    * Launch the browser on the profile, run `visit` on its page and close the browser, unless `keepOpen`.
    *
    * @returns The context, when kept open (the caller closes it).
    */
   visit: <T>(
-    visit: (page: Page, context: BrowserContext) => Promise<T>,
+    visit: (page: PageOf<C>, context: C) => Promise<T>,
     options?: Readonly<{ keepOpen?: boolean }>,
   ) => Promise<T>;
   /** The context of a visit kept open, until closed. */
-  readonly open: () => BrowserContext | undefined;
+  readonly open: () => C | undefined;
   /** Closes any open visit and deletes the profile. */
   remove: () => Promise<void>;
 }>;
@@ -688,26 +710,26 @@ export type ReturningVisitor = Readonly<{
 /**
  * A returning visitor's profile.
  *
+ * @param launch - Launches the browser on a profile directory (the suite's `chromium.launchPersistentContext`).
  * @param cookies - Cookies each visit starts with (`tau-entry=app`), for an origin.
  * @returns The visitor.
  */
-export const createReturningVisitor = (
+export const createReturningVisitor = <C extends PersistentContext>(
+  launch: (profile: string) => Promise<C>,
   cookies: ReadonlyArray<Readonly<{ name: string; value: string; url: string }>> = [],
-): ReturningVisitor => {
+): ReturningVisitor<C> => {
   const profile = mkdtempSync(join(tmpdir(), 'tau-e2e-returning-visitor-'));
-  let open: BrowserContext | undefined;
+  let open: C | undefined;
   return {
     async visit(visit, options = {}) {
       await open?.close();
-      const context = await chromium.launchPersistentContext(profile, {
-        executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'],
-      });
+      const context = await launch(profile);
       open = context;
       try {
         if (cookies.length > 0) {
           await context.addCookies(cookies.map((cookie) => ({ ...cookie })));
         }
-        const page = context.pages()[0] ?? (await context.newPage());
+        const page = (context.pages()[0] ?? (await context.newPage())) as PageOf<C>;
         return await visit(page, context);
       } finally {
         if (options.keepOpen !== true) {
@@ -726,7 +748,7 @@ export const createReturningVisitor = (
 };
 
 /** Wait until a worker controls the page and is activated: its precache install has completed. */
-export const waitForControllingWorker = async (page: Page): Promise<void> => {
+export const waitForControllingWorker = async (page: HarnessPage): Promise<void> => {
   await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated', undefined, {
     timeout: 60_000,
     polling: 250,
@@ -742,7 +764,7 @@ export type BootState = Readonly<{ mounted: boolean; stripShown: boolean; buildI
  * @param page - The page.
  * @returns Its boot state.
  */
-export const readBootState = async (page: Page): Promise<BootState> => {
+export const readBootState = async (page: HarnessPage): Promise<BootState> => {
   try {
     return await page.evaluate(() => {
       const strip = document.querySelector<HTMLElement>('#tau-boot-strip');

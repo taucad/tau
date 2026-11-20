@@ -72,6 +72,7 @@ import {
   createNodeFsPortBroker,
   servicesUnavailableCode,
 } from '@taucad/files-ui/machines/file-manager-worker-node-port';
+import { loadInWorker } from '#workers/worker-load.js';
 
 /**
  * Handshake for the node filesystem backend (desktop only).
@@ -306,8 +307,8 @@ const installBundledTypes = async (): Promise<void> => {
     return;
   }
   const [{ kernelTypePackageMaps }, { authoringTypeMaps }] = await Promise.all([
-    import('@taucad/api-extractor/kernel-types'),
-    import('@taucad/api-extractor/authoring-types'),
+    loadInWorker(async () => import('@taucad/api-extractor/kernel-types')),
+    loadInWorker(async () => import('@taucad/api-extractor/authoring-types')),
   ]);
   const outcome = await ensureBundledTypesMount(
     fileService,

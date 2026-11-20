@@ -16,6 +16,7 @@
  */
 
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
+import { loadInWorker } from '#workers/worker-load.js';
 
 type WorkerScope = {
   addEventListener(type: 'message', listener: (event: MessageEvent<GeoSpecRunnerWorkerRequest>) => void): void;
@@ -39,7 +40,9 @@ workerScope.addEventListener('message', (event) => {
 });
 
 try {
-  ({ handleGeoSpecRunnerRequest: handleRequest } = await import('#workers/geospec-runner.impl.js'));
+  ({ handleGeoSpecRunnerRequest: handleRequest } = await loadInWorker(
+    async () => import('#workers/geospec-runner.impl.js'),
+  ));
 } catch (error) {
   const message = `GeoSpec worker failed to load: ${error instanceof Error ? error.message : String(error)}`;
   handleRequest = (request) => {

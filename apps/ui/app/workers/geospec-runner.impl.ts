@@ -44,6 +44,7 @@ import type {
   GeoSpecRunnerWorkerResponse,
   GeoSpecRunnerWorkerRunRequest,
 } from '#workers/geospec-runner.types.js';
+import { loadInWorker } from '#workers/worker-load.js';
 
 type WorkerScope = {
   postMessage(message: GeoSpecRunnerWorkerResponse): void;
@@ -282,7 +283,7 @@ function createDiscoveryFileSystem(proxy: ProjectFileSystemBridge): GeoSpecDisco
 }
 
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
-  const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const { createTransferredFileSystemBridgeProxy } = await loadInWorker(async () => import('@taucad/fs-bridge'));
   const proxy = createTransferredFileSystemBridgeProxy(port);
   await proxy.ready;
   return proxy;
@@ -418,9 +419,9 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
     }
     {
       const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
-        import('geospec-engine'),
-        import('geospec/runner/native'),
-        import('geospec/config'),
+        loadInWorker(async () => import('geospec-engine')),
+        loadInWorker(async () => import('geospec/runner/native')),
+        loadInWorker(async () => import('geospec/config')),
         // The session owns the client and terminates it on close; the exporter only borrows it.
         tauClientExporter({ client: runtimeClient }),
       ]);

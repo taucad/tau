@@ -1,5 +1,6 @@
 import type { AttachmentImageBackend } from '#services/attachment-image.service.js';
 import { load } from '#lib/code-loading.js';
+import { createModuleWorker } from '#lib/module-worker.js';
 
 /**
  * Browser conversion: a dedicated module worker running the raster-only attachment runtime. Everything is imported on
@@ -18,10 +19,14 @@ export const attachmentImageBackend: AttachmentImageBackend = {
     const client = createRuntimeClient({
       transport: webWorkerTransport({
         createWorker: () =>
-          new Worker(new URL('../runtime/attachment-image-runtime.worker.ts', import.meta.url), {
-            name: 'tau-attachment-image-worker',
-            type: 'module',
-          }),
+          createModuleWorker(
+            () =>
+              new Worker(new URL('../runtime/attachment-image-runtime.worker.ts', import.meta.url), {
+                name: 'tau-attachment-image-worker',
+                type: 'module',
+              }),
+            { name: 'attachment-image' },
+          ),
         fileSystem: fromMemoryFs(),
       }),
     });

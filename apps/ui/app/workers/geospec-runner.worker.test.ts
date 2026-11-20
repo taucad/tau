@@ -1477,8 +1477,11 @@ describe('geospec-runner.worker', () => {
 
     // Anything statically imported here evaluates before the entry can install
     // its message listener, so a failure in it is unreportable by construction.
-    expect(staticValueImports).toEqual([]);
-    expect(entry).toContain(`await import('#workers/geospec-runner.impl.js')`);
+    // The one exception is the worker-realm loader (PL7 FP10): dependency-free,
+    // bundled into this entry, it adds no load of its own that could fail.
+    expect(staticValueImports).toEqual(['#workers/worker-load.js']);
+    expect(entry).toContain(`await loadInWorker(`);
+    expect(entry).toContain(`import('#workers/geospec-runner.impl.js')`);
   });
 
   it('should keep the GeoSpec worker contract on one scoped filesystem port', async () => {

@@ -3,12 +3,25 @@
  */
 
 /**
- * The one owner of page-realm code loads (PL7 service worker staging defects blueprint, FP9). A realm keeps a failed
- * module for its life, so a failed load is recovered by a new realm, which the owner hands it to; a load made around
- * the owner would keep the failure, or retry it in place, where nothing can recover it.
+ * The one owner of each realm's code loads (PL7 service worker staging defects blueprint, FP9 and FP10). A realm keeps a
+ * failed module for its life, so a failed load is recovered by a new realm, which the owner hands it to; a load made
+ * around the owner would keep the failure, or retry it in place, where nothing can recover it.
+ *
+ * - Page realm: `import()` through `load` (`#lib/code-loading.js`), lazy components through `lazy`
+ *   (`#lib/lazy-component.js`), never React's, and module workers through `createModuleWorker` (`#lib/module-worker.js`),
+ *   which reports a script that failed to load.
+ * - Worker realm (`app/workers/` and every `*.worker.*`): `import()` through `loadInWorker` (`#workers/worker-load.js`),
+ *   which reports `WORKER_LOAD_FAILED` so the page starts a new worker.
  */
-const OWNER_SPECIFIER = '#lib/code-loading.js';
-const OWNER_FILES = ['apps/ui/app/lib/code-loading.ts', 'apps/ui/app/lib/lazy-component.ts'];
+const PAGE_LOADER = { specifier: '#lib/code-loading.js', name: 'load' };
+const WORKER_LOADER = { specifier: '#workers/worker-load.js', name: 'loadInWorker' };
+const WORKER_FACTORY = { specifier: '#lib/module-worker.js', name: 'createModuleWorker' };
+const OWNER_FILES = [
+  'apps/ui/app/lib/code-loading.ts',
+  'apps/ui/app/lib/lazy-component.ts',
+  'apps/ui/app/lib/module-worker.ts',
+  'apps/ui/app/workers/worker-load.ts',
+];
 
 /**
  * @param {string} filename
@@ -17,8 +30,7 @@ const OWNER_FILES = ['apps/ui/app/lib/code-loading.ts', 'apps/ui/app/lib/lazy-co
 const posix = (filename) => filename.replaceAll('\\', '/');
 
 /**
- * Files outside the page realm, or the owner itself: tests and test support, server modules, and worker realms (the
- * worker loader of FP10 owns those).
+ * Files no realm owner governs: the owners themselves, tests, fixtures and test support, and server modules.
  *
  * @param {string} path
  * @returns {boolean}
@@ -26,11 +38,37 @@ const posix = (filename) => filename.replaceAll('\\', '/');
 const isExempt = (path) =>
   OWNER_FILES.some((file) => path.endsWith(file)) ||
   /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(path) ||
+  /\.fixture\.[cm]?[jt]sx?$/u.test(path) ||
   path.endsWith('.test-d.ts') ||
   path.includes('/testing/') ||
-  /\.server\.[cm]?[jt]sx?$/u.test(path) ||
-  path.includes('apps/ui/app/workers/') ||
-  /\.worker\.[cm]?[jt]sx?$/u.test(path);
+  /\.server\.[cm]?[jt]sx?$/u.test(path);
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+const isWorkerRealm = (path) => path.includes('apps/ui/app/workers/') || /\.worker\.[cm]?[jt]sx?$/u.test(path);
+
+/**
+ * Whether a node is the whole body of a no-argument arrow passed first to a call of one of `owners`.
+ *
+ * @param {any} node
+ * @param {Set<string>} owners
+ * @returns {boolean}
+ */
+const isOwnedBy = (node, owners) => {
+  const arrow = node.parent;
+  const call = arrow?.parent;
+  return (
+    arrow?.type === 'ArrowFunctionExpression' &&
+    arrow.body === node &&
+    arrow.params.length === 0 &&
+    call?.type === 'CallExpression' &&
+    call.arguments[0] === arrow &&
+    call.callee.type === 'Identifier' &&
+    owners.has(call.callee.name)
+  );
+};
 
 /** @type {RuleModule} */
 export const noUnownedCodeLoadRule = {
@@ -38,11 +76,15 @@ export const noUnownedCodeLoadRule = {
     type: 'problem',
     docs: {
       description:
-        "Route every page-realm import() through the code-load owner's load() and every lazy component through its lazy() (PL7 FP9).",
+        "Route every page-realm import() through load(), lazy component through the owner's lazy() and module worker through createModuleWorker(), and every worker-realm import() through loadInWorker() (PL7 FP9, FP10).",
     },
     messages: {
       unownedImport:
         "Load code through the owner: `load(async () => import('…'))` from `#lib/code-loading.js` (with `{ optional: true }` for code the caller can do without). A failed load stays failed for the life of the page; the owner hands it to the recovery, which reloads or offers the reload.",
+      unownedWorkerImport:
+        "Load code inside a worker through `loadInWorker(async () => import('…'))` from `#workers/worker-load.js`: it reports `WORKER_LOAD_FAILED`, and the page starts a new worker, since this one keeps the failure.",
+      unownedWorker:
+        "Create a module worker through `createModuleWorker(() => new Worker(new URL('…', import.meta.url), …), { name })` from `#lib/module-worker.js`, which reports its script failing to load.",
       reactLazy:
         "Use `lazy` from `#lib/lazy-component.js`, the owner's, not React's: its factory loads through the owner, and optional code declares a `fallback` instead of failing its panel.",
     },
@@ -54,27 +96,40 @@ export const noUnownedCodeLoadRule = {
     if (!path.includes('apps/ui/app/') || isExempt(path)) {
       return {};
     }
-    /** Local names bound to the owner's `load`. */
+    const inWorker = isWorkerRealm(path);
+    const loader = inWorker ? WORKER_LOADER : PAGE_LOADER;
+    /** Local names bound to this realm's loader. */
     const ownerLoads = new Set();
+    /** Local names bound to the module-worker factory. */
+    const workerFactories = new Set();
     /** Local names bound to React's default or namespace import. */
     const reactNamespaces = new Set();
 
+    /**
+     * @param {any} node
+     * @param {{ specifier: string, name: string }} owner
+     * @param {Set<string>} into
+     */
+    const collect = (node, owner, into) => {
+      if (node.source.value !== owner.specifier) {
+        return;
+      }
+      for (const specifier of node.specifiers) {
+        if (
+          specifier.type === 'ImportSpecifier' &&
+          specifier.imported.type === 'Identifier' &&
+          specifier.imported.name === owner.name
+        ) {
+          into.add(specifier.local.name);
+        }
+      }
+    };
+
     return {
       ImportDeclaration(node) {
-        const source = node.source.value;
-        if (source === OWNER_SPECIFIER) {
-          for (const specifier of node.specifiers) {
-            if (
-              specifier.type === 'ImportSpecifier' &&
-              specifier.imported.type === 'Identifier' &&
-              specifier.imported.name === 'load'
-            ) {
-              ownerLoads.add(specifier.local.name);
-            }
-          }
-          return;
-        }
-        if (source !== 'react') {
+        collect(node, loader, ownerLoads);
+        collect(node, WORKER_FACTORY, workerFactories);
+        if (node.source.value !== 'react') {
           return;
         }
         for (const specifier of node.specifiers) {
@@ -88,18 +143,21 @@ export const noUnownedCodeLoadRule = {
         }
       },
       ImportExpression(node) {
-        const arrow = node.parent;
-        const call = arrow?.parent;
-        const isOwned =
-          arrow?.type === 'ArrowFunctionExpression' &&
-          arrow.body === node &&
-          arrow.params.length === 0 &&
-          call?.type === 'CallExpression' &&
-          call.arguments[0] === arrow &&
-          call.callee.type === 'Identifier' &&
-          ownerLoads.has(call.callee.name);
-        if (!isOwned) {
-          context.report({ node, messageId: 'unownedImport' });
+        if (!isOwnedBy(node, ownerLoads)) {
+          context.report({ node, messageId: inWorker ? 'unownedWorkerImport' : 'unownedImport' });
+        }
+      },
+      NewExpression(node) {
+        const [script] = node.arguments;
+        const isModuleWorker =
+          !inWorker &&
+          node.callee.type === 'Identifier' &&
+          node.callee.name === 'Worker' &&
+          script?.type === 'NewExpression' &&
+          script.callee.type === 'Identifier' &&
+          script.callee.name === 'URL';
+        if (isModuleWorker && !isOwnedBy(node, workerFactories)) {
+          context.report({ node, messageId: 'unownedWorker' });
         }
       },
       MemberExpression(node) {

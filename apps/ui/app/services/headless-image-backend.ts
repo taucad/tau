@@ -4,6 +4,7 @@ import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backen
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
 import { load } from '#lib/code-loading.js';
+import { createModuleWorker } from '#lib/module-worker.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
 
@@ -51,10 +52,14 @@ export const headlessImageBackend: HeadlessImageBackend = {
     const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({
         createWorker: () =>
-          new Worker(new URL('../runtime/image-runtime.worker.ts', import.meta.url), {
-            name: 'tau-headless-image-transcoder-worker',
-            type: 'module',
-          }),
+          createModuleWorker(
+            () =>
+              new Worker(new URL('../runtime/image-runtime.worker.ts', import.meta.url), {
+                name: 'tau-headless-image-transcoder-worker',
+                type: 'module',
+              }),
+            { name: 'image-transcoder' },
+          ),
         fileSystem: fromMemoryFs(),
       }),
     });

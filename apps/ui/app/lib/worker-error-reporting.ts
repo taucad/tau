@@ -11,7 +11,14 @@ export type ReportedWorker =
   | 'import-github'
   | 'printer'
   | 'kernel'
-  | 'observability-harness';
+  | 'observability-harness'
+  | 'object-store'
+  | 'geospec'
+  | 'converter'
+  | 'usdz-transcoder'
+  | 'attachment-image'
+  | 'kcl-lsp'
+  | 'image-transcoder';
 
 /** A worker failure seen on the main thread: an uncaught error inside it, or a message it could not deserialize. */
 export class WorkerFailure extends Error {

@@ -4,7 +4,7 @@ import { sha256Bytes } from '@taucad/utils/hash';
 import type { PrinterProgram } from '#components/printer/printer-program.js';
 import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
-import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { createModuleWorker } from '#lib/module-worker.js';
 
 export type PrinterPreparationResult =
   | Readonly<{
@@ -54,12 +54,13 @@ const createWorkerExecutor = (): ((request: Request) => Promise<PrinterPreparati
   return Object.assign(
     async (request: Request): Promise<PrinterPreparationResult> =>
       new Promise((resolve, reject) => {
-        residentWorker ??= reportWorkerFailures(
-          new Worker(new URL('printer-preparation.worker.ts', import.meta.url), {
-            type: 'module',
-            name: 'tau-printer-preparation',
-          }),
-          'printer',
+        residentWorker ??= createModuleWorker(
+          () =>
+            new Worker(new URL('printer-preparation.worker.ts', import.meta.url), {
+              type: 'module',
+              name: 'tau-printer-preparation',
+            }),
+          { name: 'printer' },
         );
         const worker = residentWorker;
         const finish = (): void => {
@@ -120,9 +121,9 @@ const hashSnapshot = async (bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal)
     return sha256Bytes(bytes);
   }
   return new Promise((resolve, reject) => {
-    const worker = reportWorkerFailures(
-      new Worker(new URL('printer-preparation.worker.ts', import.meta.url), { type: 'module' }),
-      'printer',
+    const worker = createModuleWorker(
+      () => new Worker(new URL('printer-preparation.worker.ts', import.meta.url), { type: 'module' }),
+      { name: 'printer' },
     );
     const finish = (): void => {
       signal.removeEventListener('abort', abort);

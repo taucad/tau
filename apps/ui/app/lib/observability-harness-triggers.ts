@@ -1,8 +1,8 @@
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
-import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import { load } from '#lib/code-loading.js';
+import { createModuleWorker } from '#lib/module-worker.js';
 
 /** One canvas step: 2048 x 2048 RGBA is 16 MiB, the same step as one WebAssembly allocation. */
 const canvasPressureEdge = 2048;
@@ -95,9 +95,9 @@ export const startObservabilityMemoryPressure = (status: (message: string) => vo
 
 /** A dedicated worker throws; do not substitute a main-thread capture for missing worker instrumentation. */
 export const triggerObservabilityWorkerError = (status: (message: string) => void): (() => void) => {
-  const worker = reportWorkerFailures(
-    new Worker(new URL('observability-harness.worker.ts', import.meta.url), { type: 'module' }),
-    'observability-harness',
+  const worker = createModuleWorker(
+    () => new Worker(new URL('observability-harness.worker.ts', import.meta.url), { type: 'module' }),
+    { name: 'observability-harness' },
   );
   worker.addEventListener(
     'error',
@@ -128,9 +128,9 @@ export const triggerObservabilityKernelTermination = async (status: (message: st
     load(async () => import('#runtime/ui-runtime.config.js')),
     load(async () => import('#environment.config.js')),
   ]);
-  const worker = reportWorkerFailures(
-    new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),
-    'kernel',
+  const worker = createModuleWorker(
+    () => new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),
+    { name: 'kernel' },
   );
   const client = createRuntimeClient<typeof runtime>({
     transport: webWorkerTransport({ createWorker: () => worker, fileSystem: fromMemoryFs() }),

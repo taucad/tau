@@ -7,7 +7,13 @@
  *
  * A load that failed is forgotten, warm or not: a load that failed before a use is retried by that use; a use waiting
  * on it reports its failure. An early failure nobody waited on is logged, never thrown.
+ *
+ * Except a module that failed to load (`WORKER_LOAD_FAILED`, PL7 blueprint FP10): this worker keeps that failure for
+ * its life, so the loader keeps it too and every later use reports it without loading again. The page answers it by
+ * starting a new worker.
  */
+
+import { isWorkerLoadFailure } from '#workers/worker-load.js';
 
 /** One module, loaded at most once at a time. */
 export type ImplementationLoader<Module> = Readonly<{
@@ -31,7 +37,8 @@ export const createImplementationLoader = <Module>(load: () => Promise<Module>):
     try {
       return await current;
     } catch (error) {
-      if (loading === current) {
+      // A module that failed to load stays failed in this worker: keep the failure rather than load again.
+      if (loading === current && !isWorkerLoadFailure(error)) {
         loading = undefined;
       }
       throw error;

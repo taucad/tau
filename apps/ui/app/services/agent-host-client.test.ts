@@ -1448,10 +1448,9 @@ describe('a resident worker whose implementation failed to load (FP10)', () => {
     }
     expect(recover).toHaveBeenCalledOnce();
 
-    await expect(startRun(client, 'chat-1', 'run-last', 'Build it.')).rejects.toMatchObject({
-      code: loadFailure,
-      message: expect.stringMatching(/Reload/u),
-    });
+    const last = startRun(client, 'chat-1', 'run-last', 'Build it.');
+    await expect(last).rejects.toMatchObject({ code: loadFailure });
+    await expect(last).rejects.toThrow(/Reload Tau/u);
     expect(createWorker).toHaveBeenCalledTimes(3);
     for (const worker of workers.slice(0, 3)) {
       expect(worker.terminate).toHaveBeenCalled();

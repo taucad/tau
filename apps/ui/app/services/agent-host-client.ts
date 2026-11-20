@@ -37,7 +37,8 @@ import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-tra
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 import { markDeviceViewFieldsSet } from '#workbench-records/view-fields-set.js';
-import { load } from '#lib/code-loading.js';
+import { load, reportCodeLoadFailure } from '#lib/code-loading.js';
+import { isWorkerLoadFailure, workerLoadFailedCode } from '#workers/worker-load.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */
 const telemetryContextOf = (
@@ -87,6 +88,16 @@ const workerLivenessTimeout = 3500;
  * and re-read them again.
  */
 const maxLivenessDoublings = 3;
+
+/**
+ * Workers in a row whose code failed to load before the page stops starting more and hands the failure to its
+ * code-load recovery, which reloads or offers the reload (PL7 blueprint FP10). A worker keeps a module that failed to
+ * load for its life, so each try is a new worker.
+ */
+export const maxWorkerLoadFailures = 3;
+
+/** Milliseconds the first new worker after a load failure waits; each further one waits twice as long. */
+export const workerLoadRetryDelay = 500;
 /** Milliseconds a worker must stay up for its retirement to count as a fresh failure rather than a repeat. */
 const livenessStrikeWindow = 60_000;
 
@@ -584,6 +595,8 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const recoveryWanted = new Set<string>();
   /* Consecutive retirements for missed keepalives; each one doubles the next worker's bound (D-UI-23). */
   let unresponsiveRetirements = 0;
+  /* Workers in a row whose code failed to load (FP10); a provide that opens a host resets it. */
+  let loadFailures = 0;
 
   const retire = (live: Incarnation, reason: string): void => {
     if (live.dead) {
@@ -603,6 +616,21 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     live.bridges.clear();
   };
 
+  /**
+   * A worker whose code failed to load keeps that failure for its life (FP10): retire it so the next use starts a new
+   * one, and past the bound hand the failure to the page's recovery instead.
+   */
+  const workerLoadFailed = (live: Incarnation, failure: unknown): void => {
+    if (live.dead) {
+      return;
+    }
+    retire(live, workerLoadFailedCode);
+    loadFailures += 1;
+    if (loadFailures === maxWorkerLoadFailures) {
+      reportCodeLoadFailure(failure);
+    }
+  };
+
   const boot = (): Incarnation => {
     const worker = createWorker();
     const { port1, port2 } = new MessageChannel();
@@ -617,6 +645,13 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     });
     worker.addEventListener('error', (event) => {
       console.error('[agent-host] resident worker error', event.message);
+      /* The script itself did not load: a plain event with nothing in it, never a running worker's uncaught error. */
+      if (!event.message) {
+        workerLoadFailed(
+          live,
+          new AgentHostWorkerError(workerLoadFailedCode, 'The agent host worker script failed to load.'),
+        );
+      }
     });
     const live: Incarnation = {
       worker,
@@ -709,6 +744,18 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   };
 
   const incarnation = async (): Promise<Incarnation> => {
+    if (current === undefined && loadFailures >= maxWorkerLoadFailures) {
+      throw new AgentHostWorkerError(
+        workerLoadFailedCode,
+        'The agent host could not load its code in a new worker. Reload Tau to try again.',
+      );
+    }
+    if (current === undefined && loadFailures > 0) {
+      const wait = workerLoadRetryDelay * 2 ** (loadFailures - 1);
+      await new Promise((resolve) => {
+        setTimeout(resolve, wait);
+      });
+    }
     current ??= boot();
     const live = current;
     try {
@@ -866,13 +913,18 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       if (answer.replaced !== undefined) {
         void retireIn(live, { projectId, hostId: answer.replaced }, options);
       }
+      loadFailures = 0;
       return hostId;
     } catch (error) {
       live.bridges.delete(hostId);
       dispose();
       revisionsPort?.close();
       placementPort.close();
-      throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+      const failure = toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+      if (isWorkerLoadFailure(failure)) {
+        workerLoadFailed(live, failure);
+      }
+      throw failure;
     }
   };
 

@@ -81,3 +81,13 @@ export const load = async <Module>(importer: () => Promise<Module>, options: Loa
     throw error;
   }
 };
+
+/**
+ * Hand a code-load failure the owner did not make itself to the page's recovery: a module worker whose script, or code
+ * inside it, failed to load once its owner has no new worker left to try (FP10).
+ *
+ * @param failure - The failure.
+ */
+export const reportCodeLoadFailure = (failure: unknown): void => {
+  failureHandler?.(failure);
+};

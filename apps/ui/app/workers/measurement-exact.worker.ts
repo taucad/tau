@@ -1,5 +1,6 @@
 import { queryDirectAp242MinimumDistance } from '@taucad/agent-tools/geospec';
 import { exactResponseFromNative } from './measurement-exact.response.js';
+import { loadInWorker } from '#workers/worker-load.js';
 
 export type ExactRequest = {
   readonly id: number;
@@ -27,7 +28,7 @@ type ExactEngine = Parameters<typeof queryDirectAp242MinimumDistance>[0]['engine
 export async function evaluateExactOccurrenceDistance(
   request: ExactRequest,
   initialize: () => Promise<ExactEngine> = async () => {
-    const native = await import('geospec-engine');
+    const native = await loadInWorker(async () => import('geospec-engine'));
     await native.initialize();
     return new native.Engine();
   },

@@ -5,6 +5,7 @@ import type {
   TypeScriptWorkerRequest,
   TypeScriptWorkerResponse,
 } from '#typescript-worker/protocol.js';
+import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
 
 export type TypeScriptWorkerClientOptions = Readonly<{
   openLanguageHostPort?: () => TauLanguageHostInit | undefined;
@@ -25,10 +26,14 @@ export class TypeScriptWorkerClient {
     this.onFatal = options.onFatal;
     this.worker =
       options.createWorker?.() ??
-      new Worker(new URL('worker.entry.ts', import.meta.url), {
-        type: 'module',
-        name: 'tau-typescript-service',
-      });
+      createModuleWorker(
+        () =>
+          new Worker(new URL('worker.entry.ts', import.meta.url), {
+            type: 'module',
+            name: 'tau-typescript-service',
+          }),
+        { name: 'typescript-language' },
+      );
     this.worker.addEventListener('message', this.onMessage);
     this.worker.addEventListener('error', this.onError);
     this.worker.addEventListener('messageerror', this.onMessageError);

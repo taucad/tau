@@ -7,14 +7,20 @@
  * failed to load failed for its life, so a raw `import()` or `React.lazy` that fails leaves its caller to retry in
  * place, which cannot succeed. Every dynamic `import()` in the web app's browser code is therefore the body of a
  * thunk passed to `loadCode` or `lazyCode` (`@taucad/ui-core/lib/code-loading`, `lazy-code`), which hand a failure to
- * the realm's recovery once; and React's `lazy` is called only by `lazyCode`.
+ * the realm's recovery once; React's `lazy` is called only by `lazyCode`; and every `new Worker(…)` is the body of a
+ * thunk passed to `createModuleWorker` (`@taucad/ui-core/lib/module-worker`, FP10), which replaces a worker whose code
+ * failed to load.
  */
 
 /** The owner's entrypoints: an `import()` is allowed only in a function passed straight to one of them. */
 const OWNER_CALLS = new Set(['loadCode', 'lazyCode']);
 
+/** The module-worker factory (FP10): `new Worker(…)` is allowed only in a function passed straight to it. */
+const WORKER_FACTORY_CALLS = new Set(['createModuleWorker']);
+
 /** The owner's own modules, which call `lazy` and the importer they are given. */
 const OWNER_FILES = [
+  /apps\/libs\/ui-core\/src\/lib\/module-worker\.ts$/u,
   /apps\/libs\/ui-core\/src\/lib\/code-loading\.ts$/u,
   /apps\/libs\/ui-core\/src\/lib\/lazy-code\.ts$/u,
 ];
@@ -47,17 +53,15 @@ const FUNCTION_TYPES = new Set(['ArrowFunctionExpression', 'FunctionExpression']
  * @param {any} node
  * @returns {boolean}
  */
-const isOwnerCall = (node) => {
+const isOwnerCall = (node, calls = OWNER_CALLS) => {
   if (node?.type !== 'CallExpression') {
     return false;
   }
   const { callee } = node;
   if (callee.type === 'Identifier') {
-    return OWNER_CALLS.has(callee.name);
+    return calls.has(callee.name);
   }
-  return (
-    callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && OWNER_CALLS.has(callee.property.name)
-  );
+  return callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && calls.has(callee.property.name);
 };
 
 /**
@@ -67,7 +71,7 @@ const isOwnerCall = (node) => {
  * @param {any} node
  * @returns {boolean}
  */
-const isOwned = (node) => {
+const isOwned = (node, calls = OWNER_CALLS) => {
   let current = node.parent;
   while (current !== undefined && current !== null && !FUNCTION_TYPES.has(current.type)) {
     if (current.type === 'FunctionDeclaration') {
@@ -79,7 +83,7 @@ const isOwned = (node) => {
     return false;
   }
   const call = current.parent;
-  return isOwnerCall(call) && call.arguments.includes(current);
+  return isOwnerCall(call, calls) && call.arguments.includes(current);
 };
 
 /** @type {RuleModule} */
@@ -93,6 +97,8 @@ export const codeLoadingOwnerRule = {
     messages: {
       rawImport:
         'Load this module through `loadCode(async () => import(…))` (`@taucad/ui-core/lib/code-loading`), or `lazyCode` for a component: the owner hands a failed load to the page’s recovery once, since this realm can never load it again (FP9).',
+      rawWorker:
+        "Start a module worker through `createModuleWorker(() => new Worker(new URL(…), { type: 'module' }), { name })` (`@taucad/ui-core/lib/module-worker`): a worker whose code failed to load is replaced by a new one, never asked again (FP10).",
       rawLazy:
         'Use `lazyCode` (`@taucad/ui-core/lib/lazy-code`) instead of `lazy`: `React.lazy` keeps its rejection, and the owner hands the failure to the page’s recovery, or degrades optional code to its `fallback` (FP9).',
     },
@@ -128,6 +134,13 @@ export const codeLoadingOwnerRule = {
       ImportExpression(node) {
         if (!isOwned(node)) {
           context.report({ node, messageId: 'rawImport' });
+        }
+      },
+      NewExpression(node) {
+        const { callee } = node;
+        const isWorker = callee.type === 'Identifier' && (callee.name === 'Worker' || callee.name === 'SharedWorker');
+        if (isWorker && !isOwned(node, WORKER_FACTORY_CALLS)) {
+          context.report({ node, messageId: 'rawWorker' });
         }
       },
       CallExpression(node) {

@@ -5,6 +5,7 @@ import type {
   EditorLanguageRequest as HostedEditorLanguageRequest,
 } from '@taucad/editor-ui/lib/editor-language-runtime';
 import { ENV } from '#environment.config.js';
+import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
 
 /** A code pane's request for semantic services; this build supplies the host. */
 export type EditorLanguageRequest = Omit<HostedEditorLanguageRequest, 'host'>;
@@ -20,7 +21,11 @@ const editorLanguageHost: EditorLanguageHost = {
     typeof tauCsharpLanguageAssets === 'undefined' ? undefined : (tauCsharpLanguageAssets ?? undefined),
   openscadAssets: () => (typeof tauOpenscadLanguageAssets === 'object' ? tauOpenscadLanguageAssets : undefined),
   createKclWorker: () =>
-    new Worker(new URL('kcl-language/lsp/kcl-lsp-worker.ts', import.meta.url), { type: 'module', name: 'kcl-lsp' }),
+    createModuleWorker(
+      () =>
+        new Worker(new URL('kcl-language/lsp/kcl-lsp-worker.ts', import.meta.url), { type: 'module', name: 'kcl-lsp' }),
+      { name: 'kcl-lsp' },
+    ),
 };
 
 /** Load semantic services only for a live code pane; syntax has its own readiness boundary. */

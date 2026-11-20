@@ -4,6 +4,7 @@ import type * as LSP from 'vscode-languageserver-protocol';
 import { serveLanguageFileSystemRequests } from '@taucad/lsp/language-fs-bridge';
 import type { ServeLanguageFileSystemOptions } from '@taucad/lsp/language-fs-bridge';
 import type { OpenscadLanguageAssets, OpenscadWorkerCommand, OpenscadWorkerEvent } from '#protocol.js';
+import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
 
 /** An LSP error response from the OpenSCAD server. */
 export class OpenscadLanguageError extends Error {
@@ -58,10 +59,14 @@ export class OpenscadLanguageClient {
     void observe(this.#ready.promise);
     this.#worker =
       options.createWorker?.() ??
-      new Worker(new URL('openscad-language.worker.ts', import.meta.url), {
-        type: 'module',
-        name: 'tau-openscad-language',
-      });
+      createModuleWorker(
+        () =>
+          new Worker(new URL('openscad-language.worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'tau-openscad-language',
+          }),
+        { name: 'openscad-language' },
+      );
     this.#worker.addEventListener('message', this.#onMessage);
     this.#worker.addEventListener('error', this.#onError);
     this.#worker.addEventListener('messageerror', this.#onError);

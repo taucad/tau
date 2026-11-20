@@ -4091,6 +4091,9 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -4147,6 +4150,9 @@ importers:
       '@taucad/lsp-fs':
         specifier: workspace:*
         version: link:../lsp-fs
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils

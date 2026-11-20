@@ -12,6 +12,7 @@ import { Topic } from '@taucad/events';
 import type { EditorDocument, TextChange } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { lspSnippetToCodeMirror } from '@taucad/ui-core/lib/lsp-completion-snippet';
+import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
 
 type JsonDiagnostic = Readonly<{
   from: number;
@@ -42,10 +43,14 @@ type OpenDocument = {
 };
 
 export class JsonBackend {
-  readonly #worker = new Worker(new URL('json-language.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'json-language',
-  });
+  readonly #worker = createModuleWorker(
+    () =>
+      new Worker(new URL('json-language.worker.ts', import.meta.url), {
+        type: 'module',
+        name: 'json-language',
+      }),
+    { name: 'json-language' },
+  );
   readonly #pending = new Map<number, PromiseWithResolvers<unknown>>();
   readonly #documents = new Map<EditorDocument, OpenDocument>();
   readonly #failures = new Topic<Error>({ name: 'JsonBackend.failures' });

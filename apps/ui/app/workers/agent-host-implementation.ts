@@ -5,47 +5,40 @@
  * the provide carries. The worker therefore starts the load as soon as the page connects (`warm`), so the module
  * arrives while the page is still opening the project, and the first provide only waits for what is left of it.
  *
- * A load that failed is forgotten, warm or not: a load that failed before a use is retried by that use; a use waiting
- * on it reports its failure. An early failure nobody waited on is logged, never thrown.
+ * A load that failed is kept, warm or not (PL7 staging defects FP10, D17): this worker's realm keeps the failed module,
+ * and every module that failed with it, so loading again here cannot succeed. The worker's `loadCode` has already told
+ * the page, which replaces the worker with a new one. Every use reports the failure; an early failure nobody waited on
+ * is logged, never thrown.
  */
 
-/** One module, loaded at most once at a time. */
+/** One module, loaded at most once. */
 export type ImplementationLoader<Module> = Readonly<{
-  /** Start the load now if nothing has; a failure before the next use is retried by it. Never throws. */
+  /** Start the load now if nothing has. Never throws. */
   warm: () => void;
-  /** The module: the load in flight or done, or a new one when none is or the last one failed. */
+  /** The module: the one load, in flight or settled; a failed load fails every use. */
   get: () => Promise<Module>;
 }>;
 
 /**
  * Load a module once, and let the load start before its first use.
  *
- * @param load - Loads the module; a rejection is the failure a use reports.
+ * @param load - Loads the module; a rejection is the failure every use reports.
  * @returns The loader.
  */
 export const createImplementationLoader = <Module>(load: () => Promise<Module>): ImplementationLoader<Module> => {
   let loading: Promise<Module> | undefined;
   const get = async (): Promise<Module> => {
-    const current = loading ?? load();
-    loading = current;
-    try {
-      return await current;
-    } catch (error) {
-      if (loading === current) {
-        loading = undefined;
-      }
-      throw error;
-    }
+    loading ??= load();
+    return loading;
   };
   return Object.freeze({
     warm: () => {
       if (loading === undefined) {
-        // async-iife: bootstrap -- an early load nobody waits on; its failure is the next use's to retry and report.
+        // async-iife: bootstrap -- an early load nobody waits on; a use waiting on it reports its failure.
         void (async (): Promise<void> => {
           try {
             await get();
           } catch (error) {
-            /* Forgotten by `get`: a later use loads again; a use already waiting reports this failure itself. */
             console.warn('[agent-host worker] early implementation load failed', error);
           }
         })();

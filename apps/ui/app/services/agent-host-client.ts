@@ -35,9 +35,11 @@ import {
 } from '#workers/agent-host.contract.js';
 import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-transport';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
-import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
+import { agentHostWorkerName, createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 import { markDeviceViewFieldsSet } from '#workbench-records/view-fields-set.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/module-worker';
+import { workerReplacement, workerReplacementBound } from '#lib/worker-realm-recovery.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */
 const telemetryContextOf = (
@@ -527,6 +529,8 @@ type Incarnation = {
   /** This worker's session read, shared by its provides until the session changes (R21). */
   session?: Readonly<{ changes: number; read: Promise<SessionRead> }> | undefined;
   dead: boolean;
+  /** The worker's code failed to load (FP10): this realm can never load it, so the next use starts a new worker. */
+  codeLoadFailure?: unknown;
 };
 
 /** What a project's clients last gave for it (how to open its bridges, and its defaults), and how many are open. */
@@ -618,7 +622,19 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       label: 'agent-host-main',
       livenessTimeout: workerLivenessTimeout * 2 ** Math.min(unresponsiveRetirements, maxLivenessDoublings),
     });
-    worker.addEventListener('error', (event) => {
+    worker.addEventListener('error', (event: Event) => {
+      const thrown: unknown = (event as Partial<ErrorEvent>).error;
+      const { message } = event as Partial<ErrorEvent>;
+      /* Its script failed to load (a bare `error` event, with neither message nor error), or `loadCode` inside it
+       * reported a failed import (FP10): the worker can never load that code again, so it is retired now and the next
+       * use starts a new one. An uncaught error in a running worker is only logged (D-088). */
+      const isBare = thrown === undefined && (message === undefined || message === '');
+      if (isBare || isWorkerCodeLoadFailure(thrown)) {
+        live.codeLoadFailure ??=
+          thrown ?? new AgentHostWorkerError('WORKER_LOAD_FAILED', 'The agent host worker did not load.');
+        retire(live, 'WORKER_LOAD_FAILED');
+        return;
+      }
       console.error('[agent-host] resident worker error', event.message);
     });
     const live: Incarnation = {
@@ -1040,6 +1056,44 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     await retireIn(live, { projectId, hostId }, options);
   };
 
+  /**
+   * One attempt to open a stream on the project's host in this worker: the port, or `undefined` when the worker
+   * answered `needs` (the host it named is gone) and the caller should provide again.
+   */
+  const connectIn = async (live: Incarnation, projectId: string): Promise<MessagePort | undefined> => {
+    const opening = openingIn(live, projectId);
+    /* Connect as soon as the provide is sent, not once it answered: the worker answers the connect only after that
+     * provide settled, from the host it opened, so the page waits one round trip instead of two (STO-25 SP6). */
+    const hostId = (await postedHostIds.get(opening)) ?? (await opening);
+    const { port1, port2 } = new MessageChannel();
+    const answer = await live.channel
+      .call('connect', { value: { projectId, hostId, port: port1 }, transferables: [port1] })
+      .catch(async (error: unknown) => {
+        port2.close();
+        /* A provide that failed is what this connect met: its error wins. */
+        await opening;
+        throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
+      });
+    if (answer.status !== 'connected') {
+      port2.close();
+    }
+    /* The provide answered before this connect did; a failed one is this connect's failure, as it always was. */
+    try {
+      await opening;
+    } catch (error) {
+      port2.close();
+      throw error;
+    }
+    if (answer.status === 'connected') {
+      return port2;
+    }
+    /* Forget only the incarnation this `needs` named: a newer one another client provided meanwhile stays. */
+    if (live.provided.get(projectId) === opening) {
+      live.provided.delete(projectId);
+    }
+    return undefined;
+  };
+
   return {
     acquire: (options) => {
       const { projectId } = options.authority;
@@ -1067,45 +1121,42 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       };
     },
     connect: async (projectId, closed = () => false) => {
-      for (let attempt = 0; ; attempt += 1) {
+      for (let attempt = 0, replacements = 0; ; attempt += 1) {
         /* A closed client provides nothing more: its late provide would replace the host another client runs on. */
         if (closed()) {
           throw new AgentHostWorkerError('PROJECT_HOST_UNAVAILABLE', `The client of project ${projectId} closed.`);
         }
         // oxlint-disable-next-line no-await-in-loop -- a worker that lost the host is given it again.
         const live = await incarnation();
-        const opening = openingIn(live, projectId);
-        /* Connect as soon as the provide is sent, not once it answered: the worker answers the connect only after that
-         * provide settled, from the host it opened, so the page waits one round trip instead of two (STO-25 SP6). */
-        // oxlint-disable-next-line no-await-in-loop -- see above.
-        const hostId = (await postedHostIds.get(opening)) ?? (await opening);
-        const { port1, port2 } = new MessageChannel();
-        // oxlint-disable-next-line no-await-in-loop -- see above.
-        const answer = await live.channel
-          .call('connect', { value: { projectId, hostId, port: port1 }, transferables: [port1] })
-          .catch(async (error: unknown) => {
-            port2.close();
-            /* A provide that failed is what this connect met: its error wins. */
-            await opening;
-            throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
-          });
-        if (answer.status !== 'connected') {
-          port2.close();
-        }
-        /* The provide answered before this connect did; a failed one is this connect's failure, as it always was. */
         try {
           // oxlint-disable-next-line no-await-in-loop -- see above.
-          await opening;
+          const port = await connectIn(live, projectId);
+          if (port !== undefined) {
+            return port;
+          }
         } catch (error) {
-          port2.close();
-          throw error;
-        }
-        if (answer.status === 'connected') {
-          return port2;
-        }
-        /* Forget only the incarnation this `needs` named: a newer one another client provided meanwhile stays. */
-        if (live.provided.get(projectId) === opening) {
-          live.provided.delete(projectId);
+          /* FP10: the worker's code failed to load. A new worker is a new realm, so it is replaced, within the page's
+           * bound and backoff; past them the page's own recovery has it, and the error, with its code, is the card's. */
+          if (live.codeLoadFailure === undefined && !isWorkerCodeLoadFailure(error)) {
+            throw error;
+          }
+          live.codeLoadFailure ??= error;
+          retire(live, 'WORKER_LOAD_FAILED');
+          const replacement = workerReplacement(agentHostWorkerName);
+          replacements += 1;
+          if (!replacement.replace || replacements >= workerReplacementBound) {
+            throw new AgentHostWorkerError(
+              'WORKER_LOAD_FAILED',
+              error instanceof Error ? error.message : 'The agent host worker did not load.',
+            );
+          }
+          if (replacement.replacementDelay > 0) {
+            // oxlint-disable-next-line no-await-in-loop -- the backoff before the next worker.
+            await new Promise((resolve) => {
+              setTimeout(resolve, replacement.replacementDelay);
+            });
+          }
+          continue;
         }
         if (attempt > 0) {
           throw new AgentHostWorkerError(

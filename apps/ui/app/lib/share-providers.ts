@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createShareArtifactWorkerCodec } from '@taucad/share/artifact-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
 import { directShareProvider, directShareProviderDescriptor } from '@taucad/share/direct';
 import { bitbucketShareProvider, bitbucketShareProviderDescriptor } from '@taucad/share/bitbucket';
 import { githubShareProvider, githubShareProviderDescriptor } from '@taucad/share/github';
@@ -257,7 +258,7 @@ type BrowserShareProviderContext = ShareProviderContext & {
 
 export const createBrowserShareProviderContext = (): BrowserShareProviderContext => {
   const archiveUrl = `${ENV.TAU_API_URL}/v1/repositories/archive`;
-  const artifactCodec = createShareArtifactWorkerCodec();
+  const artifactCodec = createShareArtifactWorkerCodec({ createModuleWorker });
   return {
     origin: shareOrigin(),
     archiveUrl,

@@ -21,7 +21,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { desktopE2EApiUrl, desktopE2ECompletedArtifact } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { composerOf, expectSignedIn, expectVisible } from '#support/scenario.js';
@@ -38,13 +38,61 @@ const launchTimeout = 120_000;
 /** What the proxy does with the deployment route; everything else passes through to the run's API. */
 type DeploymentRoute = 'pass' | 'unfunded' | 'blackhole';
 
+/**
+ * The payment routes the proxy answers itself for one account (the relaunch row): no real Checkout exists here, so
+ * the top-up is created as a hosted payment to open in the browser and is read back as fulfilled.
+ */
+type PaymentStubs = {
+  readonly ownerId: string;
+  readonly actionId: string;
+  /** `GET /v1/billing/payment-actions/<id>` reads, by action id. */
+  readonly reads: Map<string, number>;
+};
+
 type DeploymentProxy = {
   readonly url: string;
   route: DeploymentRoute;
   /** How many times the shell asked the deployment route. */
   asked: number;
+  payments: PaymentStubs | undefined;
   readonly close: () => Promise<void>;
 };
+
+const paymentActionPath = '/v1/billing/payment-actions';
+
+/** A manual top-up as the API reports it: opened in the browser, or fulfilled with its receipt. */
+const paymentAction = (stubs: PaymentStubs, state: 'redirect_required' | 'fulfilled'): string =>
+  JSON.stringify({
+    version: 'payment-action-v1',
+    actionId: stubs.actionId,
+    environment: 'development',
+    ownerId: stubs.ownerId,
+    subjectId: 'subject-desktop-relaunch',
+    purpose: 'manual_topup',
+    state,
+    frozen: {
+      offerId: 'offer-desktop-relaunch',
+      currency: 'usd',
+      principalMinor: '2500',
+      taxMinor: '0',
+      grossMinor: '2500',
+      maximumGrossMinor: '2500',
+      creditAtoms: '250000000',
+      paymentMethod: null,
+    },
+    redirectUrl: state === 'redirect_required' ? 'https://checkout.example.test/desktop-relaunch' : null,
+    attention: null,
+    receipt:
+      state === 'fulfilled'
+        ? {
+            receiptId: 'receipt-desktop-relaunch',
+            grantedCreditAtoms: '250000000',
+            revision: '1',
+            chargedPaymentMethod: null,
+          }
+        : null,
+    updatedAt: new Date().toISOString(),
+  });
 
 const unfundedAnswer = JSON.stringify({
   version: 1,
@@ -60,6 +108,7 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     url: '',
     route: 'pass',
     asked: 0,
+    payments: undefined,
     close: async () => undefined,
   };
   const forward = (incoming: IncomingMessage, outgoing: ServerResponse): void => {
@@ -82,8 +131,90 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     });
     incoming.pipe(upstream);
   };
+  const answerJson = (incoming: IncomingMessage, outgoing: ServerResponse, body: string): void => {
+    outgoing.writeHead(200, {
+      'content-type': 'application/json',
+      'access-control-allow-origin': incoming.headers.origin ?? '*',
+      'access-control-allow-credentials': 'true',
+      vary: 'origin',
+    });
+    outgoing.end(body);
+  };
+  /* The entitlements as the API reports them, with payment collection on and no saved card, so the dialog offers a
+   * hosted payment whatever this run's Stripe configuration is. */
+  const forwardEntitlements = (incoming: IncomingMessage, outgoing: ServerResponse): void => {
+    const upstream = httpRequest(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        method: incoming.method,
+        path: incoming.url,
+        headers: { ...incoming.headers, host: target.host, 'accept-encoding': 'identity' },
+      },
+      (answer) => {
+        const parts: Array<Uint8Array<ArrayBuffer>> = [];
+        answer.on('data', (part: Uint8Array<ArrayBuffer>) => parts.push(part));
+        answer.on('end', () => {
+          const headers = { ...answer.headers };
+          delete headers['content-length'];
+          let body = new TextDecoder().decode(Buffer.concat(parts));
+          if (answer.statusCode === 200) {
+            body = JSON.stringify({
+              ...(JSON.parse(body) as Record<string, unknown>),
+              paymentCollectionAvailable: true,
+              paymentMethod: null,
+            });
+          }
+          outgoing.writeHead(answer.statusCode ?? 502, headers);
+          outgoing.end(body);
+        });
+      },
+    );
+    upstream.on('error', () => {
+      outgoing.destroy();
+    });
+    incoming.pipe(upstream);
+  };
+  /** Answers a payment route itself while the stubs are on; `false` leaves the request to the API. */
+  const answerPayment = (incoming: IncomingMessage, outgoing: ServerResponse, url: URL): boolean => {
+    const stubs = proxy.payments;
+    if (stubs === undefined || incoming.method === 'OPTIONS') {
+      return false;
+    }
+    if (url.pathname === '/v1/billing/entitlements' && incoming.method === 'GET') {
+      forwardEntitlements(incoming, outgoing);
+      return true;
+    }
+    if (url.pathname === paymentActionPath && incoming.method === 'GET') {
+      answerJson(incoming, outgoing, '[]');
+      return true;
+    }
+    if (url.pathname === `${paymentActionPath}/topup` && incoming.method === 'POST') {
+      incoming.resume();
+      answerJson(incoming, outgoing, paymentAction(stubs, 'redirect_required'));
+      return true;
+    }
+    const read = new RegExp(`^${paymentActionPath}/([^/]+)$`, 'u').exec(url.pathname);
+    if (read?.[1] !== undefined && incoming.method === 'GET') {
+      const actionId = decodeURIComponent(read[1]);
+      stubs.reads.set(actionId, (stubs.reads.get(actionId) ?? 0) + 1);
+      if (actionId === stubs.actionId) {
+        answerJson(incoming, outgoing, paymentAction(stubs, 'fulfilled'));
+      } else {
+        outgoing.writeHead(404, { 'access-control-allow-origin': incoming.headers.origin ?? '*' });
+        outgoing.end();
+      }
+      return true;
+    }
+    return false;
+  };
   const server: Server = createServer((incoming, outgoing) => {
-    const path = new URL(incoming.url ?? '/', 'http://proxy').pathname;
+    const requestUrl = new URL(incoming.url ?? '/', 'http://proxy');
+    if (answerPayment(incoming, outgoing, requestUrl)) {
+      return;
+    }
+    const path = requestUrl.pathname;
     if (path !== deploymentPath || proxy.route === 'pass') {
       if (path === deploymentPath) {
         proxy.asked += 1;
@@ -160,6 +291,28 @@ const openUsage = async (session: DesktopSession): Promise<void> => {
 
 const usageHeading = (session: DesktopSession) => session.page.getByText('Tau usage', { exact: true });
 
+/** The desktop's stored pending payments (`@taucad/billing-ui/lib/pending-payment-actions`). */
+const pendingPaymentActionsKey = 'tau-pending-payment-actions';
+
+const readPendingActionIds = async (current: DesktopSession): Promise<string[]> =>
+  current.page.evaluate((key) => {
+    const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{ actionId: string }>;
+    return entries.map((entry) => entry.actionId);
+  }, pendingPaymentActionsKey);
+
+/** The signed-in account's user id, which the stubbed payment actions are owned by. */
+const sessionUserId = async (token: string): Promise<string> => {
+  const response = await fetch(`${desktopE2EApiUrl}/v1/auth/get-session`, {
+    headers: { authorization: `Bearer ${token}`, origin: desktopE2EFrontendUrl },
+  });
+  const body = (await response.json()) as { readonly user?: { readonly id?: string } } | undefined;
+  const id = body?.user?.id;
+  if (id === undefined) {
+    throw new Error(`The test account has no session (HTTP ${String(response.status)}).`);
+  }
+  return id;
+};
+
 /** The Cloud chunk's files in a renderer build, read from its emitted module graph. */
 const cloudChunkFiles = async (clientRoot: string): Promise<string[]> => {
   /* The graph is an emitted asset, so it sits under `assets/`. */
@@ -202,6 +355,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       session = undefined;
       proxy.route = 'pass';
       proxy.asked = 0;
+      proxy.payments = undefined;
     }
   });
 
@@ -212,11 +366,19 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
   });
 
   const launch = async (
-    options: { clientRoot?: string; args?: readonly string[]; signedIn?: boolean } = {},
+    options: {
+      clientRoot?: string;
+      args?: readonly string[];
+      signedIn?: boolean;
+      /** Relaunch over this profile and account instead of a new one. */
+      relaunch?: { readonly profileRoot: string; readonly token: string };
+      /** Keep the profile when the session closes, for a relaunch. */
+      preserveProfile?: boolean;
+    } = {},
   ): Promise<{ session: DesktopSession; email?: string; token?: string }> => {
-    let token = 'unused';
+    let token = options.relaunch?.token ?? 'unused';
     let email: string | undefined;
-    if (options.signedIn !== false) {
+    if (options.signedIn !== false && options.relaunch === undefined) {
       const account = tauTestAccount('adaptive');
       token = await seedTauTestUser(account);
       email = account.email;
@@ -225,6 +387,8 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     session = await launchDesktopApp({
       token,
       ...(options.args === undefined ? {} : { args: options.args }),
+      ...(options.relaunch === undefined ? {} : { profileRoot: options.relaunch.profileRoot }),
+      ...(options.preserveProfile === true ? { preserveProfile: true } : {}),
       env: {
         TAU_API_URL: proxy.url,
         TAU_DESKTOP_CLIENT_ROOT: options.clientRoot ?? adaptiveClientRoot,
@@ -232,6 +396,51 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     });
     return { session, ...(email === undefined ? {} : { email }), ...(token === 'unused' ? {} : { token }) };
   };
+
+  it('announces after a quit and relaunch a payment opened before it, once, and drops an id older than a day (D14)', async () => {
+    const { session: first, token } = await launch({ preserveProfile: true });
+    const ownerId = await sessionUserId(token!);
+    const stubs: PaymentStubs = { ownerId, actionId: `act_relaunch_${String(Date.now())}`, reads: new Map() };
+    proxy.payments = stubs;
+    await expectSignedIn(first.page);
+
+    /* Start a top-up: the app stores the action's id itself and opens the hosted payment in the browser. */
+    await first.page.goto('app://tau/?settings=billing', { waitUntil: 'load' });
+    await first.page.getByRole('button', { name: 'Add credits' }).last().click({ timeout: launchTimeout });
+    await first.page.getByRole('button', { name: /Continue to payment/u }).click({ timeout: launchTimeout });
+    await expect.poll(async () => readPendingActionIds(first), { timeout: 30_000 }).toContain(stubs.actionId);
+
+    /* An id opened 25 hours ago, beside it in the same record. */
+    const expiredId = 'act_relaunch_expired';
+    await first.page.evaluate(
+      ({ key, entry }) => {
+        const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown[];
+        localStorage.setItem(key, JSON.stringify([...entries, entry]));
+      },
+      {
+        key: pendingPaymentActionsKey,
+        entry: { actionId: expiredId, environment: 'development', ownerId, openedAt: Date.now() - 25 * 60 * 60 * 1000 },
+      },
+    );
+
+    /* A real quit, as a person quits: main's own shutdown, which writes the page's storage on the way out. */
+    const firstProcess = first.application.process();
+    await first.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => firstProcess.exitCode ?? firstProcess.signalCode, { timeout: 60_000 }).not.toBeNull();
+    const { profileRoot } = first;
+    await first.close();
+    session = undefined;
+    stubs.reads.clear();
+
+    const { session: second } = await launch({ relaunch: { profileRoot, token: token! } });
+    await expectVisible(second.page.getByText(/added to your balance/iu).first(), launchTimeout);
+    expect(stubs.reads.get(stubs.actionId) ?? 0).toBeGreaterThan(0);
+    /* Announced in an end state, so forgotten; the expired id was dropped without a read or an announcement. */
+    await expect.poll(async () => readPendingActionIds(second), { timeout: 30_000 }).toEqual([]);
+    expect(stubs.reads.get(expiredId)).toBeUndefined();
+  });
 
   it('shows the funded surfaces against a funded API, and /usage with the balance', async () => {
     const { session: current } = await launch();

@@ -109,8 +109,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
   const open = async (
     path = '/',
     hold = true,
-    retain = false,
-    resetOnce?: RegExp,
+    { retain = false, resetOnce }: { readonly retain?: boolean; readonly resetOnce?: RegExp } = {},
   ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
     if (browser === undefined || deploys === undefined) {
       expect.fail('the builds and browser did not start');
@@ -205,7 +204,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
    * navigation into a document load from the live deploy. The previous deploy's chunks are still served here, so
    * without it the router would render the destination on the previous build. */
   it('should load the next page from the new deploy once the server names it, as a push', async () => {
-    const { page, live } = await open('/', false, true);
+    const { page, live } = await open('/', false, { retain: true });
     await page.getByRole('main').waitFor({ timeout: 30_000 });
     const historyLength = await page.evaluate(() => globalThis.history.length);
 
@@ -224,7 +223,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
   }, 120_000);
 
   it('should load the next page from the new deploy once the server names it, keeping a replace', async () => {
-    const { page, live } = await open('/', false, true);
+    const { page, live } = await open('/', false, { retain: true });
     await page.getByRole('main').waitFor({ timeout: 30_000 });
     const historyLength = await page.evaluate(() => globalThis.history.length);
 
@@ -271,7 +270,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
    * load fails again for the life of the page, so the page needs a new realm: an untouched page reloads into the same
    * build once and mounts, where it used to keep the failure as genuine and leave a dead control. */
   it('should reload once into the same build when a lazy chunk fails once on the live build', async () => {
-    const { page, live } = await open('/', false, false, heldChunk);
+    const { page, live } = await open('/', false, { resetOnce: heldChunk });
 
     await expect.poll(() => live.documents, { timeout: 30_000 }).toStrictEqual(['previous', 'previous']);
     await page.getByRole('main').waitFor({ timeout: 30_000 });

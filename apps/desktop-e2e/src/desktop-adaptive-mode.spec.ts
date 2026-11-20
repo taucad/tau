@@ -162,8 +162,11 @@ const usageHeading = (session: DesktopSession) => session.page.getByText('Tau us
 
 /** The Cloud chunk's files in a renderer build, read from its emitted module graph. */
 const cloudChunkFiles = async (clientRoot: string): Promise<string[]> => {
-  const names = await readdir(clientRoot);
-  const graphs = names.filter((name) => /^tau-module-graph-.+\.json$/u.test(name));
+  /* The graph is an emitted asset, so it sits under `assets/`. */
+  const names = await readdir(clientRoot, { recursive: true });
+  const graphs = names.filter((name) =>
+    /(?:^|\/)tau-module-graph(?:-[\w-]+)?\.json$/u.test(name.replaceAll('\\', '/')),
+  );
   const files = new Set<string>();
   for (const graph of graphs) {
     // oxlint-disable-next-line no-await-in-loop -- one or two graph files.

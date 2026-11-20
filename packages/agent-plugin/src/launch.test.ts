@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -69,6 +69,10 @@ const baseEnvironment = (): NodeJS.ProcessEnv => {
   const environment: NodeJS.ProcessEnv = {};
   environment['PATH'] = process.env['PATH'];
   environment['HOME'] = process.env['HOME'];
+  /* Windows processes, `cmd.exe` and Node.js among them, need the system root a host always passes. */
+  if (process.platform === 'win32') {
+    environment['SystemRoot'] = process.env['SystemRoot'];
+  }
   return environment;
 };
 
@@ -79,7 +83,28 @@ const explicitEnvironment = (tauCli: string, base: NodeJS.ProcessEnv = process.e
   return environment;
 };
 
-describe.skipIf(process.platform === 'win32')('launch', () => {
+/**
+ * Write an executable stand-in that the current Node.js runs. Windows has no shebang, so there it is an
+ * npm-style `.cmd` shim beside a `.cjs` script, as `npm install -g` writes for `tau`, and the returned path
+ * names the shim.
+ *
+ * @param path - The executable's path, without an extension.
+ * @param source - CommonJS source; its arguments are `process.argv.slice(2)`.
+ * @returns The path to start.
+ */
+const writeExecutable = async (path: string, source: string): Promise<string> => {
+  await mkdir(dirname(path), { recursive: true });
+  if (process.platform === 'win32') {
+    await writeFile(`${path}.cjs`, source);
+    await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
+    return `${path}.cmd`;
+  }
+  await writeFile(path, `#!${process.execPath}\n${source}`);
+  await chmod(path, 0o755);
+  return path;
+};
+
+describe('launch', () => {
   let directory: string;
 
   /** An executable stand-in, run by the current Node.js, that answers `--version` as a Tau CLI does. */
@@ -89,10 +114,7 @@ describe.skipIf(process.platform === 'win32')('launch', () => {
     { version = '0.0.1-fake' }: { readonly version?: string } = {},
   ): Promise<string> => {
     const answer = `if (process.argv[2] === '--version') { process.stdout.write('${version}\\n'); process.exit(0); }`;
-    await mkdir(join(path, '..'), { recursive: true });
-    await writeFile(path, `#!${process.execPath}\n${answer}\n${body}\n`);
-    await chmod(path, 0o755);
-    return path;
+    return writeExecutable(path, `${answer}\n${body}\n`);
   };
   const fakeCli = async (body: string): Promise<string> => fakeExecutable(join(directory, 'tau'), body);
 

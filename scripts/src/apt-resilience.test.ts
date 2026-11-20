@@ -178,7 +178,12 @@ describe('apt installs in workflows and composite actions', () => {
       '"$GITHUB_ACTION_PATH/apt-install.sh"',
     );
     const source = read(`${actionDirectory}/apt-install.sh`);
-    for (const option of ['Acquire::Retries=5', 'Acquire::http::Timeout=', 'Acquire::https::Timeout=']) {
+    for (const option of [
+      'Acquire::Retries=5',
+      'Acquire::http::Timeout=',
+      'Acquire::https::Timeout=',
+      'timeout --kill-after=',
+    ]) {
       expect(source).toContain(option);
     }
   });
@@ -266,6 +271,33 @@ describe('apt-install.sh', () => {
     expect(sources()).toContain('URIs: http://archive.ubuntu.com/ubuntu/');
     expect(sources()).not.toContain('mirror+file:');
     expect(output).toContain('Switching apt sources from the Azure mirror');
+  });
+
+  it('should stop an apt-get call that stalls past its deadline and retry on the archive', () => {
+    // The first call hangs, as `apt-get update` did for 58 minutes in jobs 136044021730 and 136044058038.
+    stub(
+      'apt-get',
+      [
+        'echo "$*" >> "$STUB/apt.log"',
+        'count=$(( $(cat "$STUB/apt.count" 2>/dev/null || echo 0) + 1 ))',
+        'echo "$count" > "$STUB/apt.count"',
+        '[ "$count" -ne 1 ] || exec sleep 60',
+      ].join('\n'),
+    );
+    const started = Date.now();
+    const { status, output } = run(['socat'], [['APT_INSTALL_CALL_TIMEOUT_SECONDS', '1']]);
+    expect(status, output).toBe(0);
+    expect(Date.now() - started).toBeLessThan(30_000);
+    expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual(['update', 'update', 'install -y socat']);
+    expect(output).toContain('apt-get update did not finish within 1s');
+    expect(sources()).toContain('URIs: http://archive.ubuntu.com/ubuntu/');
+  });
+
+  it('should refuse a deadline that is not a positive whole number of seconds', () => {
+    const { status, output } = run(['socat'], [['APT_INSTALL_CALL_TIMEOUT_SECONDS', '0']]);
+    expect(status).toBe(1);
+    expect(output).toContain('APT_INSTALL_CALL_TIMEOUT_SECONDS must be a positive integer');
+    expect(calls()).toEqual([]);
   });
 
   it('should leave the sources alone when the first attempt succeeds', () => {

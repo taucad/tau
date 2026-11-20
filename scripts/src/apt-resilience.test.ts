@@ -242,6 +242,8 @@ describe('apt-install.sh', () => {
     );
     // `sudo` runs its command as is, so the stub apt-get on PATH is the one called.
     stub('sudo', 'exec "$@"');
+    // Logs each dpkg repair, so a test can see one ran before a retry.
+    stub('dpkg', 'echo "dpkg $*" >> "$STUB/apt.log"');
     // Fails its first $APT_FAILS calls (update or install alike), logging each.
     stub(
       'apt-get',
@@ -263,8 +265,11 @@ describe('apt-install.sh', () => {
     expect(status, output).toBe(0);
     expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual([
       'update',
+      'dpkg --configure -a',
       'update',
+      'dpkg --configure -a',
       'update',
+      'install -y --download-only socat ripgrep',
       'install -y socat ripgrep',
     ]);
     expect(calls()[0]).toContain('-o Acquire::Retries=5');
@@ -288,9 +293,42 @@ describe('apt-install.sh', () => {
     const { status, output } = run(['socat'], [['APT_INSTALL_CALL_TIMEOUT_SECONDS', '1']]);
     expect(status, output).toBe(0);
     expect(Date.now() - started).toBeLessThan(30_000);
-    expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual(['update', 'update', 'install -y socat']);
+    expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual([
+      'update',
+      'dpkg --configure -a',
+      'update',
+      'install -y --download-only socat',
+      'install -y socat',
+    ]);
     expect(output).toContain('apt-get update did not finish within 1s');
     expect(sources()).toContain('URIs: http://archive.ubuntu.com/ubuntu/');
+  });
+
+  it('should put the deadline on the download only, never on the install that runs dpkg', () => {
+    // Job 136328471853: a 108 kB/s download used the 300 s, the kill landed mid-unpack, and every retry then
+    // failed with "dpkg was interrupted". The download is the stopped step now, and the retry repairs dpkg first.
+    stub(
+      'apt-get',
+      [
+        'echo "$*" >> "$STUB/apt.log"',
+        'count=$(( $(cat "$STUB/apt.count" 2>/dev/null || echo 0) + 1 ))',
+        'echo "$count" > "$STUB/apt.count"',
+        '[ "$count" -ne 2 ] || exec sleep 60',
+        // The install that unpacks takes longer than the deadline, and must still finish.
+        'case "$*" in *--download-only*) ;; *" install "*) sleep 2 ;; esac',
+      ].join('\n'),
+    );
+    const { status, output } = run(['socat'], [['APT_INSTALL_CALL_TIMEOUT_SECONDS', '1']]);
+    expect(status, output).toBe(0);
+    expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual([
+      'update',
+      'install -y --download-only socat',
+      'dpkg --configure -a',
+      'update',
+      'install -y --download-only socat',
+      'install -y socat',
+    ]);
+    expect(output).toContain('apt-get install did not finish within 1s');
   });
 
   it('should refuse a deadline that is not a positive whole number of seconds', () => {
@@ -303,7 +341,7 @@ describe('apt-install.sh', () => {
   it('should leave the sources alone when the first attempt succeeds', () => {
     const { status } = run(['socat']);
     expect(status).toBe(0);
-    expect(calls()).toHaveLength(2);
+    expect(calls()).toHaveLength(3);
     expect(sources()).toContain('mirror+file:');
   });
 
@@ -317,6 +355,7 @@ describe('apt-install.sh', () => {
     );
     expect(status).not.toBe(0);
     expect(calls().filter((call) => call.endsWith(' update'))).toHaveLength(3);
+    expect(calls().filter((call) => call === 'dpkg --configure -a')).toHaveLength(2);
     expect(output).toContain('::error::apt-get update and install socat failed after 3 attempts');
   });
 
@@ -356,9 +395,12 @@ describe('apt-install.sh', () => {
       expect(status, output).toBe(0);
       expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual([
         'update',
+        'dpkg --configure -a',
+        'update',
+        'dpkg --configure -a',
         'update',
         'update',
-        'update',
+        'install -y --download-only --no-install-recommends libgbm1 libgstreamer1.0-0 libnss3',
         'install -y --no-install-recommends libgbm1 libgstreamer1.0-0 libnss3',
       ]);
       expect(readFileSync(join(sandbox, 'playwright.log'), 'utf8')).toBe(
@@ -370,7 +412,11 @@ describe('apt-install.sh', () => {
       playwright(none, none, { first: 0, later: 0 });
       const { status } = run(['xvfb'], env);
       expect(status).toBe(0);
-      expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual(['update', 'install -y xvfb']);
+      expect(calls().map((call) => call.replace(/^(?:-o \S+ )+/u, ''))).toEqual([
+        'update',
+        'install -y --download-only xvfb',
+        'install -y xvfb',
+      ]);
     });
 
     it('should fail when Playwright still reports packages missing after the install', () => {

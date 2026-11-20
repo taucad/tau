@@ -145,6 +145,7 @@ import type { QuickLookServices } from '@taucad/files-ui/filesystem/desktop-quic
 import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * What one row shows about where its bytes come from.
@@ -175,7 +176,10 @@ type RowPresentation = FileProvenanceLabel & {
 const quickLookServices: QuickLookServices = {
   resolveKernelOptions: async (projectId, computeMode) => desktopKernelOptions(projectId, undefined, computeMode)(),
   async loadRuntimeObserver() {
-    const { observeRuntimeClient } = await import('#telemetry/runtime-telemetry.js');
+    const { observeRuntimeClient } = await loadCode(async () => {
+      const { observeRuntimeClient } = await import('#telemetry/runtime-telemetry.js');
+      return { observeRuntimeClient };
+    });
     return (client) => observeRuntimeClient(client, 'quicklook');
   },
 };

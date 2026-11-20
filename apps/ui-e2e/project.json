@@ -94,7 +94,7 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. PL7 staging defects FP9 adds rows on one live build whose server drops one chunk's connection once (failNext): a chunk the page needs reloads an untouched page into the same build, and the chat panel's decorative spinner degrades instead of taking the panel down. They run in the merge queue, not behind the five-nightly ratchet (operator decision 7 of that blueprint): the fault is injected deterministically on a local server, each row waits on one bounded condition, and the pull request records 20 consecutive local runs. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",

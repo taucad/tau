@@ -1,4 +1,4 @@
-import { lazy, Suspense, useSyncExternalStore } from 'react';
+import { Suspense, useSyncExternalStore } from 'react';
 import type { ComponentType } from 'react';
 import type { DesktopPlatform } from '@taucad/ui-kit/icons/platform-logos';
 import type { DesktopAppNoticeCardProps } from '#components/desktop/desktop-app-notice-card.js';
@@ -6,19 +6,17 @@ import { useSidebarNoticeDismissal } from '#components/nav/sidebar-notices.js';
 import { isTauDesktopReleased } from '#lib/desktop-release.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { osClass } from '#telemetry/platform-class.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /*
  * Deferred tier (progressive loading policy): the card and the OS marks load only once this notice has decided to show
  * (a released build, a computer that runs Tau Desktop, not dismissed), which is never during SSR or hydration. A failed
- * load shows nothing: the offer is optional, and the next page load tries again.
+ * load shows nothing: the offer is optional code (FP9), and the next page load tries again.
  */
-const DesktopAppNoticeCard = lazy<ComponentType<DesktopAppNoticeCardProps>>(async () => {
-  try {
-    return await import('#components/desktop/desktop-app-notice-card.js');
-  } catch {
-    return { default: (): undefined => undefined };
-  }
-});
+const DesktopAppNoticeCard = lazyCode<ComponentType<DesktopAppNoticeCardProps>>(
+  async () => import('#components/desktop/desktop-app-notice-card.js'),
+  { fallback: (): undefined => undefined },
+);
 
 /** The per-device dismissal id. Renaming it shows the offer again on every device. */
 export const desktopAppNoticeId = 'desktop-app';

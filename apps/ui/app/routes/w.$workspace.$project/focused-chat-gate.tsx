@@ -1,6 +1,6 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -9,9 +9,10 @@ import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { ENV } from '#environment.config.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
-const DebugProbes = lazy(async () => {
+const DebugProbes = lazyCode(async () => {
   const module = await import('#chat-clients/debug-probes.js');
   return { default: module.DebugProbes };
 });

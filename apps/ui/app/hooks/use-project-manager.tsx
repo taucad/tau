@@ -18,6 +18,7 @@ import type { ProjectLibrary } from '#runtime/project-library.js';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The app's services, bound to its modules; the project-name client is a hook, so the provider adds it. */
 const projectManagerServices: Omit<ProjectManagerServices, 'generateProjectName'> = {
@@ -27,7 +28,10 @@ const projectManagerServices: Omit<ProjectManagerServices, 'generateProjectName'
     prepareFirstProjectTour({
       readProjectCount,
       async readAccount() {
-        const { authClient } = await import('#lib/auth-client.js');
+        const { authClient } = await loadCode(async () => {
+          const { authClient } = await import('#lib/auth-client.js');
+          return { authClient };
+        });
         const { data, error } = await authClient.getSession();
         if (error !== null) {
           throw new Error('The session could not be read');

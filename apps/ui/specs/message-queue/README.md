@@ -97,3 +97,5 @@ DC-10 files-ui slice 9 re-pinned the drift after `chat-session-store.ts` began i
 The adaptive app deployment mode C6 change re-pinned the drift after `chat-turn-host.tsx` began rebuilding `snapshot.kernel` from the plan read at admission; no action changed.
 
 DC-10 chat-ui slice 1 re-pinned the drift after `chat-message-queue.machine.ts` moved unchanged to `@taucad/chat-ui` and `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` began importing the moved chat modules from there; no action changed.
+
+PL7 staging defects FP9 re-pinned the drift after `chat-textarea.tsx` began loading the headless capture service through the code-loading owner (`loadCode`); no action changed.

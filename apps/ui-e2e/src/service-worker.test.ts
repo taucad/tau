@@ -198,9 +198,13 @@ describe('the web app’s service worker on a built app (PL7)', () => {
       const response = await fetchFromPage(path);
       expect(response.fromServiceWorker(), path).toBe(false);
     }
+    // A navigation is answered with the browser's own request (navigation preload, FP1 of Brain
+    // `research/pl7-service-worker-staging-defects-blueprint.md`), so it passes through the worker: what matters is
+    // that the answer is the network's, never a cached document.
     for (const path of ['/pricing', '/auth/sign-in']) {
       const response = await page.goto(`${origin()}${path}`);
-      expect(response?.fromServiceWorker(), path).toBe(false);
+      const headers = await response?.allHeaders();
+      expect(headers?.['server-timing'] ?? '', path).not.toContain('sw;desc=cache');
     }
     /* oxlint-enable no-await-in-loop */
     // `/` without the app preference is marketing: the network's answer, never the cached Home shell.

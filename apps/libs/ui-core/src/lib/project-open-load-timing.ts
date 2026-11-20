@@ -18,6 +18,7 @@
 import { pageProjectOpenEnvironment, pageProjectOpenPerformance } from '#lib/project-open-performance.js';
 import type { ProjectOpenPerformance, ProjectOpenPhase } from '#lib/project-open-performance.js';
 import type { ViewerLoadPhase, ViewerLoadSpan } from '@taucad/viewer/lib/viewer-load-timing';
+import { loadCode } from '#lib/code-loading.js';
 
 const viewerPhases: Readonly<Record<ViewerLoadPhase, ProjectOpenPhase>> = {
   'canvas.mount': 'viewer.mount',
@@ -97,7 +98,10 @@ export const installProjectOpenLoadTiming = (): boolean => {
   // async-iife: bootstrap -- the entry cannot await a diagnostic import.
   void (async (): Promise<void> => {
     try {
-      const { subscribeViewerLoadTiming } = await import('@taucad/viewer/lib/viewer-load-timing');
+      const { subscribeViewerLoadTiming } = await loadCode(async () => {
+        const { subscribeViewerLoadTiming } = await import('@taucad/viewer/lib/viewer-load-timing');
+        return { subscribeViewerLoadTiming };
+      });
       subscribeViewerLoadTiming((span) => {
         recordViewerLoadSpan(recorder, span);
       });

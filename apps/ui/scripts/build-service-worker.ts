@@ -10,7 +10,8 @@
  * worker asset enters it; `check-critical-budget.mts` holds that on the output (shell invariant 8).
  *
  * The worker source is bundled with Workbox's runtime modules (esbuild), and Google Workbox's `injectManifest`
- * (`workbox-build`) writes the list into it: documents and other unhashed files with a content revision, hashed
+ * (`workbox-build`) writes the list into it, and each answered class's closure beside it
+ * ({@link precacheClassesInjectionPoint}): documents and other unhashed files with a content revision, hashed
  * `/assets/*` files with none, so a later deploy step that rewrites a compiled chunk (Sentry debug ids) cannot make an
  * entry stale; no entry carries an `integrity`. The list is also written beside the client output
  * (`build/service-worker-precache.json`, never served) for the build checks and `verify-shipped-assets.mts`.
@@ -33,6 +34,12 @@ import type { WorkerRouteClass } from '../app/lib/route-classes.ts';
 
 /** The expression `app/offline/service-worker.ts` reads its precache list from, replaced by the list. */
 export const serviceWorkerInjectionPoint = 'globalThis.__WB_MANIFEST';
+
+/**
+ * The expression the worker reads each answered class's closure from, replaced by `{ document: [file, …] }`: the
+ * worker serves a class's document from its cache only while every file of that closure is stored (FP1).
+ */
+export const precacheClassesInjectionPoint = 'globalThis.__TAU_PRECACHE_CLASSES';
 
 /** Where the worker is served from, relative to the client output. */
 export const serviceWorkerFile = 'service-worker.js';
@@ -106,12 +113,16 @@ export const buildServiceWorker = async (options: {
     exists: (relativePath) => existsSync(resolvePath(relativePath)),
     manifest: JSON.parse(readFileSync(manifestPath, 'utf8')) as ViteManifest,
   };
-  const files = collectPrecacheFiles(
-    options.classes.map((workerClass) => ({
-      document: workerClass.document,
-      roots: workerClass.routeClass.interactive ?? [],
-    })),
-    build,
+  const documents = options.classes.map((workerClass) => ({
+    document: workerClass.document,
+    roots: workerClass.routeClass.interactive ?? [],
+  }));
+  const files = collectPrecacheFiles(documents, build);
+  const closures = Object.fromEntries(
+    documents.map((document) => [
+      document.document,
+      collectPrecacheFiles([document], build).filter((url) => url !== document.document),
+    ]),
   );
   const entries = precacheEntries(files, (relativePath) => Uint8Array.from(readFileSync(resolvePath(relativePath))));
 
@@ -132,6 +143,14 @@ export const buildServiceWorker = async (options: {
     if (unexpected.length > 0 || count !== entries.length) {
       throw new Error(`Service worker manifest injection: ${unexpected.join('; ') || `${String(count)} entries`}`);
     }
+    const injected = readFileSync(resolvePath(serviceWorkerFile), 'utf8');
+    if (injected.split(precacheClassesInjectionPoint).length !== 2) {
+      throw new Error(`The service worker reads ${precacheClassesInjectionPoint} other than once`);
+    }
+    writeFileSync(
+      resolvePath(serviceWorkerFile),
+      injected.replace(precacheClassesInjectionPoint, () => JSON.stringify(closures)),
+    );
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }

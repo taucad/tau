@@ -1,10 +1,13 @@
 # replicad — Interfaces
 
-26 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
   optimisation?: "none" | "commonFace" | "sameFace"
+
+  // Merge same-domain faces and edges after the Boolean operation
+  simplify?: boolean
 
 BSplineApproximationConfig: export declare interface BSplineApproximationConfig
 
@@ -95,6 +98,11 @@ DrawingInterface: export declare interface DrawingInterface
   // Formats the drawing as a list of SVG paths
   // DrawingInterface.toSVGPaths (method)
   toSVGPaths(): string[] | string[][];
+
+ExtrudeUntilOptions: export declare interface ExtrudeUntilOptions
+
+  // Defaults to the sketch's direction
+  extrusionDirection?: Point
 
 ExtrusionProfile: export declare interface ExtrusionProfile
 
@@ -483,10 +491,14 @@ SketchInterface: export declare interface SketchInterface
 
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults to the sketch origin)
   // SketchInterface.revolve (method)
-  revolve(revolutionAxis?: Point, config?: {
+  revolve(revolutionAxis?: Point | AxisName, config?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
+
+  // Extrudes the sketch up to a limiting face, returning only the extrusion
+  // SketchInterface.extrudeUntil (method)
+  extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
   // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).

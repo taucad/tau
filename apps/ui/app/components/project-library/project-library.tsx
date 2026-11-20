@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -93,12 +93,17 @@ import {
   useMaterializeCloudProjects,
 } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
-const ProjectCardLivePreview = lazy(async () => {
-  const module = await import('#components/project-card-live-preview.js');
-  return { default: module.ProjectCardLivePreview };
-});
+const ProjectCardLivePreview = lazyCode(
+  async () => {
+    const module = await import('#components/project-card-live-preview.js');
+    return { default: module.ProjectCardLivePreview };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 

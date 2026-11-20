@@ -12,6 +12,7 @@ import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } fr
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PaneSearchProvider, usePaneSearch } from '@taucad/ui/components/pane-search';
 import { CollapsibleCodeBlock } from '@taucad/editor-ui/components/ui/collapsible-code-block';
+import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
 import { reportUiError } from '#lib/error-reporting.js';
 import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -599,8 +600,16 @@ function FloatingPanelErrorContent({
 }: FloatingPanelErrorContentProps): React.JSX.Element {
   const errorMessage = error?.message;
   const errorStack = error?.stack;
+  /* Code that failed to load stays failed in this page (PL7 staging defects blueprint D17): rendering the panel again
+   * meets the same failure, so only Reload is offered, and the page's recovery has already decided whether to reload. */
+  const isCodeFailure = isCodeLoadFailure(error);
   const displayDescription =
-    description ?? (errorMessage ? undefined : 'An unexpected error occurred. Please try again.');
+    description ??
+    (isCodeFailure
+      ? 'Part of Tau did not finish loading. Reload to continue.'
+      : errorMessage
+        ? undefined
+        : 'An unexpected error occurred. Please try again.');
 
   return (
     <div className={cn('flex h-full flex-col items-center justify-center gap-4 p-6', className)}>
@@ -643,11 +652,13 @@ function FloatingPanelErrorContent({
 
       {/* Action Buttons */}
       <div className='flex flex-wrap items-center justify-center gap-2'>
-        <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
-          <RotateCcw className='size-4' />
-          Try Again
-        </Button>
-        <Button variant='outline' size='sm' className='gap-2' onClick={onReload}>
+        {isCodeFailure ? undefined : (
+          <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
+            <RotateCcw className='size-4' />
+            Try Again
+          </Button>
+        )}
+        <Button variant={isCodeFailure ? 'default' : 'outline'} size='sm' className='gap-2' onClick={onReload}>
           <RefreshCcw className='size-4' />
           Reload Page
         </Button>

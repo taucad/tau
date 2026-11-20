@@ -10,8 +10,8 @@
  *   installed worker. The first open after the deploy is the last one the old worker answers and fetches the retiring
  *   worker, which activates once the old worker is idle (here, when that project page unloads); from the next page load
  *   the browser holds no worker cache and no registration, and documents are the network's, cross-origin isolated. The
- *   next deploy's pages here are the ordinary build's and register again after load; the retiring worker unregisters
- *   again, so the end state holds (a kill switch build's pages register nothing, `offline-shell.test.tsx`).
+ *   next deploy's pages here are the ordinary build's, made to register nothing as a kill switch build's do
+ *   (`killSwitchPageScript`, `offline-shell.test.tsx`).
  * - The retired `/usage` worker (`/offline-shell-worker.js`, scope `/`, ui@0.3.0 and earlier): every PL7 build ships
  *   the retiring worker at its URL. After one deploy of an ordinary build the registration holds the web app's worker
  *   and none of the retired worker's caches; after one of a kill switch build there is no registration at all.
@@ -23,61 +23,24 @@
  * pinned revision.
  */
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
-import { prepareDeploys, projectShellUrl, startDeployServer } from './support/two-deploys.ts';
+import {
+  buildKillSwitchWorker,
+  killSwitchPageScript,
+  prepareDeploys,
+  projectShellUrl,
+  startDeployServer,
+  waitForControllingWorker,
+} from './support/two-deploys.ts';
 import type { Deploy, DeployServer, Deploys } from './support/two-deploys.ts';
 // oxlint-enable no-restricted-imports
 
-/** `apps/ui/scripts/build-service-worker.ts`'s build, as far as this suite calls it. */
-type BuildServiceWorker = (options: {
-  readonly buildDirectory: string;
-  readonly workerSourcePath: string;
-  readonly retiringWorkerSourcePath: string;
-  readonly classes: readonly unknown[];
-  readonly killSwitch: boolean;
-}) => Promise<unknown>;
-
-const uiRoot = resolve(import.meta.dirname, '../../ui');
-
-/** The retiring worker, as a kill switch build writes it to `/service-worker.js`. */
-const buildKillSwitchWorker = async (): Promise<string> => {
-  const { buildServiceWorker } = (await import(
-    pathToFileURL(join(uiRoot, 'scripts/build-service-worker.ts')).href
-  )) as { readonly buildServiceWorker: BuildServiceWorker };
-  const buildDirectory = mkdtempSync(join(tmpdir(), 'tau-e2e-kill-switch-'));
-  try {
-    mkdirSync(join(buildDirectory, 'client'));
-    await buildServiceWorker({
-      buildDirectory,
-      workerSourcePath: join(uiRoot, 'app/offline/service-worker-kill-switch.ts'),
-      retiringWorkerSourcePath: join(uiRoot, 'app/offline/service-worker-kill-switch.ts'),
-      classes: [],
-      killSwitch: true,
-    });
-    return readFileSync(join(buildDirectory, 'client/service-worker.js'), 'utf8');
-  } finally {
-    rmSync(buildDirectory, { recursive: true, force: true });
-  }
-};
-
 const readBuildIdOf = async (page: Page): Promise<string | undefined> =>
   page.evaluate(() => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID);
-
-/** Wait until a worker controls the page and is activated: its precache install has completed. */
-const waitForControllingWorker = async (page: Page): Promise<void> => {
-  await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated', undefined, {
-    timeout: 60_000,
-    polling: 250,
-  });
-};
 
 /** The worker's registration and caches, or `undefined` while the page is between documents. */
 const readWorkerState = async (
@@ -158,8 +121,16 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   /** A fresh browser context on a fresh pair of deploys, with the previous one live and its page loaded. */
   const open = async (
     path: string,
-    workers?: Readonly<Record<Deploy, string>>,
-    retiredWorkers?: Readonly<Record<Deploy, string>>,
+    {
+      workers,
+      retiredWorkers,
+      retain = false,
+    }: Readonly<{
+      workers?: Readonly<Record<Deploy, string>>;
+      retiredWorkers?: Readonly<Record<Deploy, string>>;
+      /** The live next deploy also serves the previous deploy's files (`retain-previous-assets.mts`). */
+      retain?: boolean;
+    }> = {},
   ): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
     if (browser === undefined || deploys === undefined) {
       expect.fail('the builds and browser did not start');
@@ -167,7 +138,7 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
     const live = await startDeployServer(
       deploys.builds,
       { shells: deploys.shells, workers: workers ?? deploys.workers.scripts, retiredWorkers },
-      { hold: false },
+      { hold: false, retain },
     );
     server = live;
     context = await browser.newContext();
@@ -177,14 +148,14 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   };
 
   /* The worker-controlled half of TAU-UI-6 (`stale-deploy-recovery.test.ts` runs without the worker). A page the
-   * worker controls navigates after a deploy it has not heard of to a route whose chunk its own deploy no longer
-   * serves. The worker asks again without the deploy cookie (`retryUnpinnedMiss`) and the live deploy still has the
-   * chunk (retained, or unchanged): the route renders on the build the page loaded, one deploy behind, with no error
-   * and no reload, as ruling OD3 allows until the server names the new build. Once it does, the root's client
-   * middleware (RR9) turns the next navigation into a document load from the new deploy. A live deploy without the
-   * chunk answers 404 unpinned too, which is the recovery path the other suite covers. */
+   * worker controls navigates after a deploy it has not heard of to a route whose chunk the live deploy still serves
+   * (retained, `retain-previous-assets.mts`). The worker does not hold it, so the page's own request fetches it: the
+   * route renders on the build the page loaded, one deploy behind, with no error and no reload, as ruling OD3 allows
+   * until the server names the new build. Once it does, the root's client middleware (RR9) turns the next navigation
+   * into a document load from the new deploy. A live deploy without the chunk answers 404, which is the recovery path
+   * the other suite covers (the worker never asks again on the page's behalf: FP1). */
   it('should render a route of a replaced build from the live deploy, then load the next page from it once named', async () => {
-    const { page, live } = await open('/');
+    const { page, live } = await open('/', { retain: true });
     await waitForControllingWorker(page);
 
     live.deploy();
@@ -275,14 +246,15 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
 
   it('should retire an installed worker with one deploy of the kill switch', async () => {
     const { page, live } = await open('/projects', {
-      previous: deploys?.workers.scripts.previous ?? '',
-      next: killSwitchWorker,
+      workers: { previous: deploys?.workers.scripts.previous ?? '', next: killSwitchWorker },
     });
     await waitForControllingWorker(page);
     const installed = await readWorkerState(page);
     expect(installed?.registered).toBe(true);
     expect(installed?.caches).toEqual(expect.arrayContaining([expect.stringMatching(/^tau-precache-/u)]));
 
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
     live.deploy();
 
     // The last open the old worker answers: its update check installs the retiring worker, which asks to activate at
@@ -328,11 +300,10 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   const openWithLegacyWorker = async (
     next: Readonly<{ worker: string; retiredWorker: string }>,
   ): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
-    const opened = await open(
-      '/projects',
-      { previous: '', next: next.worker },
-      { previous: legacyWorker, next: next.retiredWorker },
-    );
+    const opened = await open('/projects', {
+      workers: { previous: '', next: next.worker },
+      retiredWorkers: { previous: legacyWorker, next: next.retiredWorker },
+    });
     await opened.page.evaluate(async () => {
       await navigator.serviceWorker.register('/offline-shell-worker.js');
       await navigator.serviceWorker.ready;
@@ -405,6 +376,8 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
   it('should leave no registration from the retired /usage worker under the kill switch', async () => {
     const { page, live } = await openWithLegacyWorker({ worker: killSwitchWorker, retiredWorker: killSwitchWorker });
 
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
     live.deploy();
 
     const state = await reloadUntil(

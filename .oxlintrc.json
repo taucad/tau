@@ -17,6 +17,8 @@
     "**/agent/resources.js",
     "**/agent/resources.d.ts",
     "**/wasm/**",
+    // The PL7 service worker as shipped before FP1: minified build output kept verbatim for the boot suite.
+    "apps/ui-e2e/fixtures/service-worker/**",
     "**/out-tsc/**",
     "**/coverage/**",
     "**/.nx/**",
@@ -119,6 +121,9 @@
     "tau-lint/no-direct-indexeddb": "error",
     // Adaptive app deployment mode I8: a Cloud import() only through the one loader; no lazy() of Cloud code.
     "tau-lint/no-cloud-import-outside-loader": "error",
+    // PL7 staging defects FP9: every import() and React lazy() in the web app's browser code goes through the one
+    // code-loading owner (`loadCode`, `lazyCode`), which never retries a failed load in the realm that failed it.
+    "tau-lint/code-loading-owner": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",

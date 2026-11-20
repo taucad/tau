@@ -9,6 +9,7 @@ import { registerEditorView } from '@taucad/editor-ui/lib/editor-navigation-serv
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { Button } from '@taucad/ui/components/button';
 import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/editor-symbol-path.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 export function ChatEditorCodeViewer({
   paneId,
@@ -86,7 +87,10 @@ function MountedCodeEditor({
       }
     };
     try {
-      const { acquireEditorLanguage } = await import('#lib/editor-language-runtime.js');
+      const { acquireEditorLanguage } = await loadCode(async () => {
+        const { acquireEditorLanguage } = await import('#lib/editor-language-runtime.js');
+        return { acquireEditorLanguage };
+      });
       controller.signal.throwIfAborted();
       const lease = await acquireEditorLanguage({
         languageId: language,

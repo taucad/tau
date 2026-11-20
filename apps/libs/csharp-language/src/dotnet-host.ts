@@ -1,5 +1,6 @@
 import { csharpLanguageManifestSchema } from '#protocol.js';
 import type { CsharpLanguageAssets, CsharpLanguageManifest } from '#protocol.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The JSExport surface of Tau.CSharp.LanguageServer.Browser. */
 export type CsharpServerExports = Readonly<{
@@ -101,7 +102,7 @@ export const loadCsharpServer = async (options: LoadCsharpServerOptions): Promis
     download(fetcher, referencesUrl, options.signal),
     (
       options.importBootstrap ??
-      (async (url: string): Promise<unknown> => import(/* @vite-ignore */ url) as Promise<unknown>)
+      (async (url: string): Promise<unknown> => loadCode(async (): Promise<unknown> => import(/* @vite-ignore */ url)))
     )(new URL(manifest.bootstrap, base).href),
   ]);
   if (compressed.length !== referencesEntry.byteLength || (await sha256Hex(compressed)) !== referencesEntry.sha256) {

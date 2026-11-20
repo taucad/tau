@@ -18,6 +18,7 @@ import type { BrowserProjectHost, ResidentWorkerContext } from '#workers/agent-h
 import { createProjectHosts } from '#workers/agent-host-projects.js';
 import { createImplementationLoader } from '#workers/agent-host-implementation.js';
 import { randomUuid } from '@taucad/utils/id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type WorkerScope = {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -77,7 +78,7 @@ const capabilityOf = async (
 
 const loadImplementationModule = async () => {
   try {
-    return await import('./agent-host.impl.js');
+    return await loadCode(async () => import('./agent-host.impl.js'));
   } catch (error) {
     throw Object.assign(
       new Error(`Agent host worker failed to load: ${error instanceof Error ? error.message : String(error)}`),

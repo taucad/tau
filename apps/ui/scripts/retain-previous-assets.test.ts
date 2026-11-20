@@ -20,6 +20,7 @@ import {
   servedRuntimesIndexFileName,
 } from '#scripts/retain-previous-assets.mts';
 import type { ServedAsset, ServedAssetsIndex } from '#scripts/retain-previous-assets.mts';
+import { cachedShellAgeLimit } from '#offline/service-worker-routing.js';
 
 const integrityOf = (bytes: string | Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
@@ -726,5 +727,11 @@ describe('runtime index compatibility', () => {
 
     expect(result.runtimes.assets).toStrictEqual([]);
     expect(result.retained).toBe(1);
+  });
+});
+
+describe('the service worker’s cached shell age limit (FP2)', () => {
+  it('should stay two days inside the retention window, so a cached shell’s files are still served when it boots', () => {
+    expect(cachedShellAgeLimit).toBe(retentionWindow - 2 * 24 * 60 * 60_000);
   });
 });

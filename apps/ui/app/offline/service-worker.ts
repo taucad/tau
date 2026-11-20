@@ -17,7 +17,7 @@
  * | Request | Answer |
  * | --- | --- |
  * | A navigation a class answers (`service-worker-routing.ts`), the class wholly stored | Its precached document, cache-first (shells) or network-first within 3 s (`/usage`) |
- * | The same, on a reload or while a newer worker installs or waits | Network-first within 3 s, the precached document as the fallback |
+ * | The same, on a reload, while a newer worker installs or waits, or while the shells are out of bounds (older than 5 days, or below the server's `minBuildId`; FP2) | Network-first within 3 s, the precached document as the fallback |
  * | Any other GET navigation, or a class not wholly stored | The browser's own navigation: the navigation preload response |
  * | A safe-mode navigation (`?safe=1`) | None: the browser handles it (FP5) |
  * | A file the worker holds (precache, or cached on first use) | The cache |
@@ -43,6 +43,7 @@ import {
   installMessage,
   isCachedOnFirstUse,
   isSafeModeNavigation,
+  isShellInBounds,
   navigationCandidate,
   navigationNetworkTimeout,
 } from '#offline/service-worker-routing.js';
@@ -53,7 +54,8 @@ import {
   readStoredUrls,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import { assetCacheName, cachePrefix, precacheNamePart } from '#offline/pwa-messages.js';
+import { assetCacheName, cachePrefix, precacheNamePart, stateCacheName } from '#offline/pwa-messages.js';
+import { buildIdentityPath } from '#lib/build-identity.js';
 import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/service-worker-retire.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
@@ -172,7 +174,68 @@ const replacesPreFixWorker = async (): Promise<boolean> => {
   return names.some((name) => isPreFixWorkerCache(name));
 };
 
+/**
+ * The last build floor (`minBuildId`) the server reported on `/health/build`, kept in the worker's state cache so a
+ * cold start knows it without the network (FP2). `undefined` when the server reported none.
+ */
+let buildFloor: number | undefined;
+const buildFloorKey = '/__tau/build-floor';
+const readStoredFloor = async (): Promise<void> => {
+  if (!(await scope.caches.has(stateCacheName))) {
+    return;
+  }
+  const cache = await scope.caches.open(stateCacheName);
+  const stored = await cache.match(buildFloorKey);
+  const value = stored === undefined ? Number.NaN : Number(await stored.text());
+  buildFloor = Number.isSafeInteger(value) && value > 0 ? value : undefined;
+};
+/** The stored floor, read once per worker start by the first navigation; every later one awaits the same read. */
+let floorRead: Promise<undefined | void> | undefined;
+const readFloorOnce = async (): Promise<undefined | void> => {
+  floorRead ??= settle(readStoredFloor());
+  return floorRead;
+};
+
+/** Milliseconds between two asks of the server for its floor. */
+const floorRefreshInterval = 60_000;
+let floorAskedAt = Number.NEGATIVE_INFINITY;
+
+/**
+ * Ask `/health/build` for the server's floor in the background and keep it for the next navigation. The worker's own
+ * request, never one on a page's behalf: refused or offline, the last floor stays. The `worker` query marks it for the
+ * e2e harness's count of the page's build checks; the server ignores it.
+ */
+const refreshBuildFloor = async (): Promise<void> => {
+  if (Date.now() - floorAskedAt < floorRefreshInterval) {
+    return;
+  }
+  floorAskedAt = Date.now();
+  try {
+    const response = await scope.fetch(`${buildIdentityPath}?worker=1`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      return;
+    }
+    const { minBuildId } = (await response.json()) as { minBuildId?: unknown };
+    const floor =
+      typeof minBuildId === 'number' && Number.isSafeInteger(minBuildId) && minBuildId > 0 ? minBuildId : undefined;
+    buildFloor = floor;
+    // The state cache holds only the floor: with none reported it is not kept at all.
+    if (floor === undefined) {
+      await scope.caches.delete(stateCacheName);
+      return;
+    }
+    const cache = await scope.caches.open(stateCacheName);
+    await cache.put(buildFloorKey, new Response(String(floor)));
+  } catch {
+    // Offline or refused: the last floor stays.
+  }
+};
+
 scope.addEventListener('install', (event) => {
+  event.waitUntil(refreshBuildFloor());
   event.waitUntil(
     (async () => {
       // A pre-fix worker can stall the pages it controls, which then never run the page code that would activate a
@@ -306,11 +369,14 @@ const answerNavigationEvent = async (event: FetchEventLike): Promise<Response> =
   if (candidate === undefined) {
     return readNavigation(event);
   }
+  await readFloorOnce();
+  event.waitUntil(refreshBuildFloor());
   const answer = answerNavigation({
     candidate,
     request,
     tauEntry: candidate.workerClass.routeClass.id === 'home' ? await readTauEntry() : undefined,
     updatePending: scope.registration.installing !== null || scope.registration.waiting !== null,
+    shellInBounds: isShellInBounds({ buildId: workerBuildId, now: Date.now(), floor: buildFloor }),
   });
   if (answer.kind === 'network') {
     return readNavigation(event);

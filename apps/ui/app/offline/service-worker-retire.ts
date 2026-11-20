@@ -16,7 +16,13 @@
  * at the latest the second page load after the deploy is the live deploy's with no worker at all. One deploy of a
  * build without the switch restores the web app's worker.
  */
-import { assetCacheName, cachePrefix, preFixAssetCacheName, retiredCachePrefix } from '#offline/pwa-messages.js';
+import {
+  assetCacheName,
+  cachePrefix,
+  preFixAssetCacheName,
+  retiredCachePrefix,
+  stateCacheName,
+} from '#offline/pwa-messages.js';
 
 /** The IndexedDB database Workbox's expiration plugin keeps its timestamps in (`workbox-expiration`'s `CacheTimestampsModel`). */
 export const workboxExpirationDatabase = 'workbox-expiration';
@@ -43,7 +49,7 @@ export const isRetiredWorkerCache = (name: string): boolean => name.startsWith(r
  * {@link isWorkerCache} as a regular expression's source, for the boot watchdog's inline script (`boot-watchdog.ts`),
  * which cannot import it. `service-worker-retire.test.ts` holds the two to the same answers.
  */
-export const workerCacheNamePattern = `^${cachePrefix}-(?:precache-|runtime-|offline-shell-|assets(?:-v\\d+)?$)`;
+export const workerCacheNamePattern = `^${cachePrefix}-(?:precache-|runtime-|offline-shell-|assets(?:-v\\d+)?$|state-v\\d+$)`;
 
 /**
  * Whether a Cache Storage cache belongs to the web app's worker or the retired `/usage` worker, and so goes with the
@@ -58,6 +64,7 @@ export const isWorkerCache = (name: string): boolean =>
   name.startsWith(`${cachePrefix}-runtime-`) ||
   name === assetCacheName ||
   name === preFixAssetCacheName ||
+  name === stateCacheName ||
   isRetiredWorkerCache(name);
 
 /**

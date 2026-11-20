@@ -23,6 +23,9 @@ export const precacheNamePart = `precache-${cacheVersion}`;
 /** The runtime cache the worker fills with immutable files on first use (`service-worker-routing.ts`). */
 export const assetCacheName = `${cachePrefix}-assets-${cacheVersion}`;
 
+/** The worker's own small state: the last build floor (`minBuildId`) the server reported (FP2). */
+export const stateCacheName = `${cachePrefix}-state-${cacheVersion}`;
+
 /** The pre-fix worker's asset cache, which it filled on first use with a fetch of its own. */
 export const preFixAssetCacheName = `${cachePrefix}-assets`;
 

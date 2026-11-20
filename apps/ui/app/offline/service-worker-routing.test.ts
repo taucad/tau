@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   activatesWorker,
   answerNavigation,
+  cachedShellAgeLimit,
   installMessage,
   isCachedOnFirstUse,
   isSafeModeNavigation,
+  isShellInBounds,
   navigationCandidate,
   workerClasses,
 } from '#offline/service-worker-routing.js';
@@ -99,14 +101,26 @@ describe('navigationCandidate', () => {
 describe('answerNavigation', () => {
   const answer = (
     path: string,
-    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string }> = {},
+    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string; shellInBounds: boolean }> = {},
   ): ReturnType<typeof answerNavigation> =>
     answerNavigation({
       candidate: candidateFor(path),
       request: navigation(path, facts.cache === undefined ? {} : { cache: facts.cache }),
       tauEntry: facts.tauEntry,
       updatePending: facts.updatePending ?? false,
+      shellInBounds: facts.shellInBounds ?? true,
     });
+
+  it('should ask the network first for a cache-first class while its shells are out of bounds (FP2)', () => {
+    expect(answer('/w/home/bracket-v2', { shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: projectDocument,
+    });
+    expect(answer('/', { tauEntry: 'app', shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: homeDocument,
+    });
+  });
 
   it('should open a project from the precached shell, cache-first', () => {
     expect(answer('/w/home/bracket-v2')).toStrictEqual({ kind: 'cache-first', document: projectDocument });
@@ -205,5 +219,26 @@ describe('isSafeModeNavigation (FP5)', () => {
     for (const url of [`${origin}/`, `${origin}/?safe=0`, `${origin}/?unsafe=1`, 'not a url']) {
       expect(isSafeModeNavigation(url), url).toBe(false);
     }
+  });
+});
+
+describe('isShellInBounds (FP2)', () => {
+  const now = 1_800_000_000_000;
+
+  it('should hold a shell younger than the age limit with no floor reported', () => {
+    expect(isShellInBounds({ buildId: now - cachedShellAgeLimit + 1, now, floor: undefined })).toBe(true);
+  });
+
+  it('should not hold a shell at or past the age limit', () => {
+    expect(isShellInBounds({ buildId: now - cachedShellAgeLimit, now, floor: undefined })).toBe(false);
+  });
+
+  it('should not hold a shell below the floor the server reported, and hold one at it', () => {
+    expect(isShellInBounds({ buildId: now - 1000, now, floor: now - 999 })).toBe(false);
+    expect(isShellInBounds({ buildId: now - 1000, now, floor: now - 1000 })).toBe(true);
+  });
+
+  it('should not hold a shell of an unknown build', () => {
+    expect(isShellInBounds({ buildId: 0, now, floor: undefined })).toBe(false);
   });
 });

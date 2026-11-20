@@ -589,6 +589,84 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     }, 180_000);
   });
 
+  describe('bounded cache-first shells (FP2)', () => {
+    /** Days, in milliseconds, past the cached shell age limit (5 days) and inside asset retention (7 days). */
+    const sixDays = 6 * 24 * 60 * 60_000;
+
+    /**
+     * A returning visitor's two visits: the first installs the previous deploy's worker; the next deploy goes live; the
+     * second opens a project, and its first navigation is the installed worker's to answer.
+     */
+    const reopenAfterDeploy = async (
+      options: Readonly<{ previousWorker?: (script: string) => string; offline?: boolean }> = {},
+    ): Promise<{ readonly state: BootState; readonly fromCache: boolean; readonly fromWorker: boolean }> => {
+      const { same } = requireDeploys();
+      const previous = options.previousWorker?.(same.workers.scripts.previous) ?? same.workers.scripts.previous;
+      const live = await startDeployServer(
+        same.builds,
+        { shells: same.shells, workers: { previous, next: same.workers.scripts.next } },
+        { hold: false, retain: true },
+      );
+      server = live;
+      visitor = createReturningVisitor(async (profile) =>
+        chromium.launchPersistentContext(profile, { executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] }),
+      );
+      await visitor.visit(async (page) => {
+        await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+        await waitForControllingWorker(page);
+      });
+      live.deploy();
+      return visitor.visit(async (page, opened) => {
+        watch(page);
+        if (options.offline === true) {
+          await opened.setOffline(true);
+        }
+        const response = await page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' });
+        const headers = await response?.allHeaders();
+        const state = await waitForMount(page);
+        return {
+          state,
+          fromCache: (headers?.['server-timing'] ?? '').includes('sw;desc=cache'),
+          fromWorker: response?.fromServiceWorker() === true,
+        };
+      });
+    };
+
+    /** The previous deploy's worker as if its build were six days old: its build id is its build time. */
+    const agedWorker = (script: string): string =>
+      script.replaceAll(String(deploys?.previousBuildId), String(Date.now() - sixDays));
+
+    it('should open the cached shell of a build within the bounds, with no document request first', async () => {
+      const { state, fromCache } = await reopenAfterDeploy();
+      expect(fromCache).toBe(true);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(deploys?.previousBuildId) });
+    }, 180_000);
+
+    it('should open the live build when the cached shell is older than the age bound', async () => {
+      const { state, fromCache } = await reopenAfterDeploy({ previousWorker: agedWorker });
+      expect(fromCache).toBe(false);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(deploys?.nextBuildId) });
+    }, 180_000);
+
+    it('should open the live build when the cached shell is below the minBuildId the server reported', async () => {
+      // The operator's floor (`TAU_MIN_BUILD_ID`), read by both deploys' `/health/build` on every request.
+      process.env['TAU_MIN_BUILD_ID'] = String((deploys?.previousBuildId ?? 0) + 1);
+      try {
+        const { state, fromCache } = await reopenAfterDeploy();
+        expect(fromCache).toBe(false);
+        expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(deploys?.nextBuildId) });
+      } finally {
+        delete process.env['TAU_MIN_BUILD_ID'];
+      }
+    }, 180_000);
+
+    it('should open the cached shell offline whatever its age', async () => {
+      const { state, fromWorker } = await reopenAfterDeploy({ previousWorker: agedWorker, offline: true });
+      expect(fromWorker).toBe(true);
+      expect(state).toMatchObject({ mounted: true, stripShown: false });
+    }, 180_000);
+  });
+
   describe('when the precached shell names a route manifest the live deploy no longer serves (D4)', () => {
     /**
      * A returning visitor's two visits. The first installs the worker from a page outside a project workspace; between

@@ -79,6 +79,30 @@ export type NavigationAnswer =
   | Readonly<{ kind: 'network' }>
   | Readonly<{ kind: 'cache-first' | 'network-first'; document: string }>;
 
+/**
+ * How old a cached shell's build may be for the worker to serve it before the network online: the asset retention
+ * window (`retain-previous-assets.mts`, 7 days) less a 2-day margin, so a cached shell's files are still served when
+ * it boots (FP2 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`, the operator's ruling on OD3).
+ * `retain-previous-assets.test.ts` holds the two together.
+ */
+export const cachedShellAgeLimit = 5 * 24 * 60 * 60_000;
+
+/**
+ * Whether the worker may serve its cached shells online without asking the network first (FP2). Both bounds are
+ * checked without the network: the shell's build (a build id is its build time) is younger than
+ * {@link cachedShellAgeLimit}, and not below the last `minBuildId` the server reported (the oldest build it still
+ * serves assets for and supports). A missing floor holds; an unknown build id (`0`) does not.
+ *
+ * @param input - The worker's build id, the time now and the last floor the server reported.
+ * @returns `true` while the cached shells are in bounds.
+ */
+export const isShellInBounds = (
+  input: Readonly<{ buildId: number; now: number; floor: number | undefined }>,
+): boolean =>
+  input.buildId > 0 &&
+  input.now - input.buildId < cachedShellAgeLimit &&
+  (input.floor === undefined || input.buildId >= input.floor);
+
 /** Cache modes a navigation carries when the user asked for a fresh page (a reload). */
 const freshCacheModes = new Set(['reload', 'no-cache', 'no-store']);
 
@@ -86,7 +110,7 @@ const freshCacheModes = new Set(['reload', 'no-cache', 'no-store']);
  * How a candidate navigation is answered, from the facts read after the worker chose to respond.
  *
  * @param input - The candidate, the request, the `tau-entry` cookie (Home only) and whether a newer worker of this
- *   registration is installing or waiting.
+ *   registration is installing or waiting, and whether the cached shells are in bounds ({@link isShellInBounds}).
  * @returns `network` answers with the browser's own request; otherwise the document and the order to try.
  */
 export const answerNavigation = (
@@ -95,6 +119,8 @@ export const answerNavigation = (
     request: RequestFacts;
     tauEntry: string | undefined;
     updatePending: boolean;
+    /** Out of bounds, a cache-first class asks the network first within the 3 s bound (FP2). */
+    shellInBounds: boolean;
   }>,
 ): NavigationAnswer => {
   const { workerClass } = input.candidate;
@@ -105,7 +131,7 @@ export const answerNavigation = (
   if (workerClass.delivery === 'network-first') {
     return { kind: 'network-first', document: workerClass.document };
   }
-  if (input.updatePending || freshCacheModes.has(input.request.cache)) {
+  if (input.updatePending || !input.shellInBounds || freshCacheModes.has(input.request.cache)) {
     return { kind: 'network-first', document: workerClass.document };
   }
   return { kind: 'cache-first', document: workerClass.document };

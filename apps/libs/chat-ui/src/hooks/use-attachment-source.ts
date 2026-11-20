@@ -12,15 +12,15 @@
  * placeholder.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useContext, useEffect, useMemo, useState } from 'react';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import { createAttachmentStore } from '#db/attachment-store.js';
 import {
   attachmentFileName,
   attachmentReferenceOf,
   attachmentUrlPrefix,
   isSupportedAttachmentMediaType,
-} from '@taucad/chat-ui/utils/attachment.utils';
+} from '#utils/attachment.utils.js';
 
 /** What a consumer renders for one file part. */
 export type AttachmentSource =
@@ -144,7 +144,7 @@ export function useAttachmentSource(
   part: { readonly url: string; readonly mediaType: string },
 ): AttachmentSource {
   // Optional: a surface without a filesystem still renders `data:` parts, and shows references as absent.
-  const client = useOptionalFileManager()?.recordFiles;
+  const client = useContext(FileManagerContext)?.recordFiles;
   const [resolved, setResolved] = useState<
     { client: AttachmentReader; key: string; source: AttachmentSource } | undefined
   >(undefined);

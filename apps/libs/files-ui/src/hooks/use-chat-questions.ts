@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   answersPath,
   askStatus,
@@ -12,8 +12,9 @@ import {
   isQuestionAnswerValid,
 } from '@taucad/chat';
 import type { AnswersFile, Ask, AskAnswers, QuestionReply } from '@taucad/chat';
-import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
-import { useFileManager } from '#hooks/use-file-manager.js';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
+import { useFileContent } from '#hooks/use-file-content.js';
 
 /** The chat's questions and the person's answers, live from `.tau/chats/<chatId>/`. @public */
 export type ChatQuestions = {
@@ -26,6 +27,15 @@ export type ChatQuestions = {
   readonly answer: (askId: string, questionId: string, reply: QuestionReply) => Promise<void>;
   readonly hold: (askId: string) => Promise<void>;
   readonly decline: (askId: string) => Promise<void>;
+};
+
+/** The project's file manager; a chat's questions are read and answered only inside one. */
+const useQuestionFiles = (): FileManagerContextValue => {
+  const fileManager = useContext(FileManagerContext);
+  if (fileManager === undefined) {
+    throw new Error('useChatQuestions must be used within a FileManagerProvider');
+  }
+  return fileManager;
 };
 
 const decoder = new TextDecoder();
@@ -134,7 +144,7 @@ const lateAnswerMessage = (ask: Ask, questionId: string, reply: QuestionReply): 
  * @public
  */
 export function useChatQuestions(chatId: string, deliver: (text: string) => Promise<void>): ChatQuestions {
-  const { readFile, writeFile, exists } = useFileManager();
+  const { readFile, writeFile, exists } = useQuestionFiles();
   const questionsContent = useFileContent(questionsPath(chatId));
   const answersContent = useFileContent(answersPath(chatId));
   const legacyQuestionsContent = useFileContent(legacyQuestionsPath(chatId));

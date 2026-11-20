@@ -1,4 +1,6 @@
-import { renderHook, act } from '@testing-library/react';
+import { createElement } from 'react';
+import type { ReactNode } from 'react';
+import { renderHook as renderHookBare, act } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import {
@@ -9,21 +11,27 @@ import {
   parseAnswersFile,
   parseQuestionsFile,
 } from '@taucad/chat';
-import type { FileContentSelection } from '@taucad/files-ui/hooks/use-file-content';
-import type { useFileManager } from '#hooks/use-file-manager.js';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileContentSelection } from '#hooks/use-file-content.js';
 
 const files = new Map<string, string>();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const manager = mock<ReturnType<typeof useFileManager>>();
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => manager }));
-vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
+const manager = mock<FileManagerContextValue>();
+vi.mock('#hooks/use-file-content.js', () => ({
   useFileContent: (path: string) =>
     files.has(path)
       ? { ...mock<FileContentSelection>(), kind: 'text', content: encoder.encode(files.get(path)) }
       : mock<FileContentSelection>({ kind: 'loading' }),
 }));
 const { useChatQuestions } = await import('#hooks/use-chat-questions.js');
+
+function withFileManager({ children }: { readonly children: ReactNode }): ReactNode {
+  return createElement(FileManagerContext.Provider, { value: manager }, children);
+}
+
+const renderHook = <Result>(hook: () => Result) => renderHookBare(hook, { wrapper: withFileManager });
 const chatId = 'chat_answers';
 const legacyAskId = 'ask_legacy';
 const newLegacyAskId = 'ask_new_legacy';

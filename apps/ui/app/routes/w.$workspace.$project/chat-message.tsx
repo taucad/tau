@@ -28,7 +28,7 @@ import {
   findLastMeaningfulPartIndex,
   isActivityPartActive,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
-import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { AtReferenceChip } from '@taucad/files-ui/components/chat/at-reference-chip';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
@@ -86,7 +86,7 @@ import { useChatAttachmentDirectories } from '#components/chat/attachment-previe
 import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
-import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
+import { CadReferenceChip } from '@taucad/chat-ui/components/cad-reference-chip';
 
 function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], index: number): string {
   if (segment.type === 'atReference') {

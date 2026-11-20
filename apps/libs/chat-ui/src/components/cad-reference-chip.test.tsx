@@ -1,24 +1,33 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { render as renderBare, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createActor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
-import { CadReferenceChip } from '#components/chat/cad-reference-chip.js';
-
-const project = vi.hoisted((): { modelInteractionRef?: ActorRefFrom<typeof modelInteractionMachine> } => ({}));
-
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => project,
-}));
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
+import type { ProjectContextValue } from '@taucad/ui-core/contexts/project-context';
+import { CadReferenceChip } from '#components/cad-reference-chip.js';
 
 const modelInteraction = createActor(modelInteractionMachine, { input: {} }).start();
-project.modelInteractionRef = modelInteraction;
+const project: ProjectContextValue = {
+  projectId: 'project-1',
+  projectRef: { send: vi.fn() },
+  editorRef: { send: vi.fn() },
+  modelInteractionRef: modelInteraction,
+};
 
 /** The app mounts one TooltipProvider at its root; the chip carries a tooltip. */
-const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: TooltipProvider });
+function Wrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return (
+    <ProjectContext.Provider value={project}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </ProjectContext.Provider>
+  );
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: Wrapper });
 
 const capabilities = {
   canHide: true,

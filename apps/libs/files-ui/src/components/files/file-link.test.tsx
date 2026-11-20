@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FileProvenance } from '@taucad/types';
@@ -13,6 +14,7 @@ const project: ProjectContextValue = {
   projectId: 'project-1',
   projectRef: { send: vi.fn() },
   editorRef: { send: editorSend },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
 };
 
 function ProjectWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {

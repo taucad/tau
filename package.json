@@ -246,7 +246,6 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/culori": "^4.0.1",
     "@types/draco3dgltf": "^1.4.3",
-    "@types/hast": "^3.0.4",
     "@types/jsdom": "catalog:",
     "@types/mdx": "^2.0.14",
     "@types/node": "catalog:",

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
-import { attachmentAbsentLabel, useAttachmentSource } from '#hooks/use-attachment-source.js';
+import type { ReactNode } from 'react';
+import { act, render as renderBare, screen, waitFor } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
+import { useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentSource } from '#hooks/use-attachment-source.js';
-import { AttachmentFileChip } from '#components/chat/attachment-preview.js';
 
 const files = new Map<string, Uint8Array<ArrayBuffer>>();
 const readFile = vi.fn(async (path: string) => {
@@ -14,17 +17,21 @@ const readFile = vi.fn(async (path: string) => {
   return bytes;
 });
 
+const fileManagerWith = (read: FileManagerContextValue['recordFiles']['readFile']): FileManagerContextValue =>
+  mock<FileManagerContextValue>({ recordFiles: mock<FileManagerContextValue['recordFiles']>({ readFile: read }) });
+
 // One context value, as the real provider keeps one client for its lifetime.
-const fileManager = { recordFiles: { readFile } };
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => fileManager,
-}));
+let fileManager = fileManagerWith(readFile);
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 const directory = '/projects/p1/.tau/chats/c1/attachments';
 const imageHash = 'a'.repeat(64);
-const pdfHash = 'b'.repeat(64);
 const imagePart = { url: `attachments/${imageHash}.png`, mediaType: 'image/png' };
-const pdfPart = { url: `attachments/${pdfHash}.pdf`, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' };
 
 const createObjectURL = vi.fn((_blob: Blob) => `blob:object-${createObjectURL.mock.calls.length}`);
 const revokeObjectURL = vi.fn();
@@ -32,7 +39,6 @@ const revokeObjectURL = vi.fn();
 beforeEach(() => {
   files.clear();
   files.set(`${directory}/${imageHash}.png`, new Uint8Array([137, 80, 78, 71]));
-  files.set(`${directory}/${pdfHash}.pdf`, new Uint8Array(2048));
   readFile.mockClear();
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
@@ -86,11 +92,11 @@ describe('useAttachmentSource', () => {
   });
 
   it('should replace a same-path URL when the source capability changes', async () => {
-    const original = fileManager.recordFiles;
+    const original = fileManager;
     const view = render(<Probe id='source' part={imagePart} />);
     await screen.findByText('ready blob:object-1');
     const replacementRead = vi.fn(async () => new Uint8Array([1, 2]));
-    fileManager.recordFiles = { readFile: replacementRead };
+    fileManager = fileManagerWith(replacementRead);
     try {
       view.rerender(<Probe id='source' part={imagePart} />);
       await screen.findByText('ready blob:object-2');
@@ -98,7 +104,7 @@ describe('useAttachmentSource', () => {
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-1');
     } finally {
       view.unmount();
-      fileManager.recordFiles = original;
+      fileManager = original;
     }
   });
 
@@ -172,24 +178,5 @@ describe('useAttachmentSource', () => {
       expect(screen.getByTestId('missing')).toHaveTextContent('absent');
     });
     expect(createObjectURL).not.toHaveBeenCalled();
-  });
-
-  it('should resolve a PDF to a chip with its filename and size', async () => {
-    render(<AttachmentFileChip directory={directory} part={pdfPart} />);
-
-    const link = await screen.findByRole('link', { name: 'bracket-spec.pdf' });
-    expect(link).toHaveAttribute('href', 'blob:object-1');
-    expect(link).toHaveAttribute('download', 'bracket-spec.pdf');
-    expect(screen.getByText('PDF · 2.0 KB')).toBeInTheDocument();
-    expect(createObjectURL.mock.calls[0]![0].type).toBe('application/pdf');
-  });
-
-  it('should label a document whose bytes are not on this device', async () => {
-    files.clear();
-    render(<AttachmentFileChip directory={directory} part={pdfPart} />);
-
-    expect(await screen.findByText(attachmentAbsentLabel)).toBeInTheDocument();
-    expect(screen.getByText('bracket-spec.pdf')).toBeInTheDocument();
-    expect(screen.queryByRole('link')).toBeNull();
   });
 });

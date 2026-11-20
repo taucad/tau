@@ -17,9 +17,6 @@ const mocks = vi.hoisted(() => ({
   bridge: undefined as undefined | { generatedImages: { read: (path: string) => Promise<unknown> } },
 }));
 
-vi.mock('#hooks/use-theme.js', () => ({
-  useTheme: () => ({ isHighContrast: false, theme: 'light' }),
-}));
 vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => mocks.bridge,
   nodeHomeRoot: () => '/Users/tester/Tau/home',
@@ -51,11 +48,11 @@ const project: ProjectContextValue = {
   projectId: 'project-1',
   projectRef: { send: vi.fn() },
   editorRef: { send: mocks.send },
+  modelInteractionRef: mock<ProjectContextValue['modelInteractionRef']>(),
 };
-const fileManager: FileManagerContextValue = {
+const fileManager = mock<FileManagerContextValue>({
   whenServicesReady: async () => ({ treeService: mock<FileTreeService>({ getEntry: mocks.getEntry }) }),
-  writeFile: vi.fn(),
-};
+});
 
 function renderInProject(markdown: string): void {
   render(

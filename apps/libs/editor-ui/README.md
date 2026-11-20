@@ -37,6 +37,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/markdown/markdown-<name>`                                                   | Its parts: `hyperlink` (in-app and external links), `code` (inline code and collapsible fences), `sanitize` (`publicationRehypeSanitize`), `header-anchor` |
 | `./components/markdown/rehype-at-references`                                              | `@`-reference chips from chat text (`rehypeAtReferences`)                                                                                                  |
 | `./components/markdown/chat-markdown-hyperlink`                                           | Chat links to files (`ChatMarkdownHyperlink`, `rehypeChatFileLinks`): open a project file; import a desktop generated image first                          |
+| `./components/markdown/markdown-viewer-chat`                                              | The chat-sized Markdown renderer (`MarkdownViewerChat`): `@`-reference chips, chat file links and the streaming fade                                       |
 | `./components/markdown/chat-streaming-block`, `./components/markdown/chat-streaming-fade` | The fade on newly streamed chat prose                                                                                                                      |
 | `./components/ui/collapsible-code-block`                                                  | A code block that collapses past a line count, with copy                                                                                                   |
 | `./components/external-link`                                                              | A link that opens in a new tab, with its arrow                                                                                                             |
@@ -44,14 +45,14 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 
 The CodeMirror extension modules, `code-editor-view.client`, `editor-lint` and the `lib/<language>-language/` adapters are deferred leaves of `tau-lint/no-static-heavy-import`: the app reaches them only through dynamic imports, and `editor-language-runtime` imports each family only when a code pane asks for it.
 
-`chat-markdown-hyperlink` reads the open project from `ProjectContext` (`@taucad/ui-core/contexts/project-context`) and the file manager from `FileManagerContext` (`@taucad/ui-core/contexts/file-manager-context`). Each types only what library components use; the app's providers fill them, and its `useProject` and `useFileManager` hooks read them back as the app's types. Its suite renders inside both providers.
+`chat-markdown-hyperlink` reads the open project from `ProjectContext` (`@taucad/ui-core/contexts/project-context`) and the file manager from `FileManagerContext` (`@taucad/ui-core/contexts/file-manager-context`). Each types only what library components use; the app's providers fill them, and its `useProject` and `useFileManager` hooks read them back as the app's types. Its suite, and the link cases of `markdown-viewer-chat`'s, render inside both providers. `markdown-viewer-chat` renders files-ui's `at-reference-chip` for `@` references.
 
 The app supplies `EditorLanguageHost` from `apps/ui/app/lib/editor-language-runtime.ts`: the TypeScript acquisition mode, the staged C# and OpenSCAD server assets, and the KCL worker, which stays in the app because it loads `kcl.wasm` by a `?url` import. It imports the KCL codec and types through this library's subpaths.
 
 ## Still in the app
 
 - `components/code/code-surfaces.test.tsx`: the check that no app source pins a `CodeEditor` to a literal language. It reads `apps/ui/app`; the surface matrix is here.
-- `components/markdown/markdown-viewer-chat`: it renders the app's `at-reference-chip`, a chat component. `chat-streaming-fade.test.tsx` and `chat-markdown-hyperlink.browser.test.tsx` stay with it, since they render `MarkdownViewerChat`.
+- `components/markdown/chat-markdown-hyperlink.browser.test.tsx`: it runs in the app's Chromium lane (`workers/agent-host.vitest.browser.config.ts`); this library has no browser lane.
 - `code-editor.browser.test.tsx` and its browser config: `use-theme` and the app's Vite config.
 - `lib/editor-language-runtime` (the host binding over this library's runtime) and `lib/kcl-language/lsp/kcl-lsp-worker`: build defines, `#environment.config` and the `kcl.wasm?url` import.
 - `machines/editor.machine`, `hooks/use-editor-document-session` and `components/panes/editor-tab-context-menu`: the app runtime, the workbench records, `use-file-manager`, `use-project` and the revision client registry.

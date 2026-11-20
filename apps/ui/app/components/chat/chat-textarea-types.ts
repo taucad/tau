@@ -9,7 +9,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';

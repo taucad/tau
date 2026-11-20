@@ -91,9 +91,11 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
     async (parts, projectId) => {
       // Mounting the project manager does not need a naming transport.
       const sdk = await load(async () =>
-        import('ai').then((loaded) => ({
-          DefaultChatTransport: loaded.DefaultChatTransport,
-          readUIMessageStream: loaded.readUIMessageStream,
+        import('ai').then(({ DefaultChatTransport, readUIMessageStream }) => ({
+          /* eslint-disable @typescript-eslint/naming-convention -- The SDK's own export names, picked so the rest of it is dropped. */
+          DefaultChatTransport,
+          readUIMessageStream,
+          /* eslint-enable @typescript-eslint/naming-convention -- End the SDK's export names. */
         })),
       );
       const chatId = generatePrefixedId(idPrefix.chat);

@@ -276,13 +276,17 @@ const loadTerminalFont = async (fontFamily: string, fontSize: number): Promise<v
  */
 export const createTerminalRenderer = async (options: TerminalRendererOptions): Promise<TerminalRendererView> => {
   const aurigax = await load(async () =>
-    import('#components/terminal/aurigax-ghostty-web').then((loaded) => ({
-      SelectionManager: loaded.SelectionManager,
-      Terminal: loaded.Terminal,
-      Ghostty: loaded.Ghostty,
-      FitAddon: loaded.FitAddon,
-      SearchAddon: loaded.SearchAddon,
-    })),
+    import('#components/terminal/aurigax-ghostty-web').then(
+      ({ SelectionManager, Terminal, Ghostty, FitAddon, SearchAddon }) => ({
+        /* eslint-disable @typescript-eslint/naming-convention -- The ghostty-web export names, picked so the rest of it is dropped. */
+        SelectionManager,
+        Terminal,
+        Ghostty,
+        FitAddon,
+        SearchAddon,
+        /* eslint-enable @typescript-eslint/naming-convention -- End the ghostty-web export names. */
+      }),
+    ),
   );
   /* (1) The selection manager auto-scrolls while a drag is within 30 px of an edge, so a drag along the first rows
    * grows upward. Zero keeps auto-scroll for drags that leave the canvas, as xterm does. */

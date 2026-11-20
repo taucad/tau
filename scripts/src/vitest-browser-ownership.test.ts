@@ -180,6 +180,10 @@ describe('Vitest Browser test-runner ownership', () => {
       // across document loads, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/service-worker.test.ts',
       'apps/ui-e2e/src/service-worker-deploy.test.ts',
+      // The PL7 staging defects rows (FP0) serve two real builds with server-side faults and watch worker versions
+      // over the DevTools protocol; their harness opens a returning visitor's persistent profile.
+      'apps/ui-e2e/src/service-worker-skew.test.ts',
+      'apps/ui-e2e/src/support/two-deploys.ts',
       // The hosted staging observability gate owns isolated browser contexts and cross-document failure
       // scenarios, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/observability.staging.test.ts',

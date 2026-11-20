@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 999 packages, with the license each declares.
+The web and desktop apps include the following 996 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -1036,9 +1036,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [widest-line](https://github.com/sindresorhus/widest-line) | 6.0.0 | MIT |
 | [workbox-core](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
 | [workbox-expiration](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
-| [workbox-precaching](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
-| [workbox-routing](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
-| [workbox-strategies](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
 | [worker-factory](https://github.com/chrisguttandin/worker-factory) | 7.0.50 | MIT |
 | [worker-timers](https://github.com/chrisguttandin/worker-timers) | 8.0.34 | MIT |
 | [worker-timers-broker](https://github.com/chrisguttandin/worker-timers-broker) | 8.0.18 | MIT |

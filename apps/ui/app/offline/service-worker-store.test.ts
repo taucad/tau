@@ -3,17 +3,12 @@ import { assetCacheName } from '#offline/pwa-messages.js';
 import { cacheKeyOf, createWorkerStore, precacheCacheName } from '#offline/service-worker-store.js';
 import type { StoreManifest, StoreScope } from '#offline/service-worker-store.js';
 
+// Stands in for Workbox's expiration, whose IndexedDB the tests lack.
 vi.mock('workbox-expiration', () => ({
-  // oxlint-disable-next-line typescript/no-extraneous-class -- Stands in for Workbox's class, whose IndexedDB the tests lack.
-  CacheExpiration: class {
-    public async updateTimestamp(): Promise<void> {
-      return undefined;
-    }
-
-    public async expireEntries(): Promise<void> {
-      return undefined;
-    }
-  },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Workbox's own export name.
+  CacheExpiration: vi.fn(function () {
+    return { updateTimestamp: async () => undefined, expireEntries: async () => undefined };
+  }),
 }));
 
 const origin = 'https://tau.new';

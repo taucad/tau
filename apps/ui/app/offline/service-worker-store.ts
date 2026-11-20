@@ -90,14 +90,14 @@ const pathOf = (url: string): string => {
 const installConcurrency = 6;
 
 /** Timing of the copies from the HTTP cache, in milliseconds (`createWorkerStore`'s `timing` overrides it in tests). */
-export const keepTiming = {
+export const keepTiming: Readonly<{ copyDelay: number; flushInterval: number; giveUpAfter: number }> = {
   /** After the browser's own request, before its first copy is tried: the response must have landed. */
   copyDelay: 1000,
   /** The least time between two flushes of the pending copies. */
   flushInterval: 1000,
   /** How long a copy stays pending (a large file still downloading, or one the HTTP cache did not keep). */
   giveUpAfter: 60_000,
-} as const;
+};
 
 const sleep = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {

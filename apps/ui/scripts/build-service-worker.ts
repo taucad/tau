@@ -36,7 +36,7 @@ import type { WorkerRouteClass } from '../app/lib/route-classes.ts';
 export const serviceWorkerInjectionPoint = 'globalThis.__WB_MANIFEST';
 
 /** The expression `app/offline/service-worker.ts` reads each document class's closure from, replaced at bundling. */
-export const serviceWorkerClassesPoint = 'globalThis.__TAU_PRECACHE_CLASSES';
+const serviceWorkerClassesPoint = 'globalThis.__TAU_PRECACHE_CLASSES';
 
 /** Where the worker is served from, relative to the client output. */
 export const serviceWorkerFile = 'service-worker.js';

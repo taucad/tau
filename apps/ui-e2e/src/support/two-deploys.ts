@@ -14,24 +14,20 @@
  * Faults are injected at the server, never with Playwright's `route`, which turns the browser's HTTP cache off and so
  * makes every navigation one the worker answers network-first: per path, a request whose `Sec-Fetch-Dest` matches
  * (`empty` is every request a service worker makes) has its connection reset or is answered 404, every time or for the
- * next few. Every request is logged with its `Sec-Fetch-Dest` and `Sec-Fetch-Mode`. A returning visitor is a persistent
- * browser profile closed between visits ({@link createProfile}).
+ * next few. Every request is logged with its `Sec-Fetch-Dest` and `Sec-Fetch-Mode`.
  *
  * Shared by `stale-deploy-recovery.test.ts` and `service-worker-skew.test.ts` (merge-queue suite
  * `test:e2e:deploy-skew`), and `service-worker-deploy.test.ts` (nightly suite `test:e2e:service-worker`).
  */
 import { createHash } from 'node:crypto';
-import { cp, link, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, link, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
-import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { chromium } from 'playwright';
 import type { BrowserContext, Page } from 'playwright';
 import { createRequestHandler } from '@react-router/express';
 import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
@@ -548,43 +544,6 @@ export const prepareDeploys = async (name: string, options: { readonly renamed?:
     },
   };
 };
-
-/**
- * A returning visitor: one persistent browser profile, each visit a browser launched on it and closed after, so the next
- * visit's first navigation is answered by whatever worker the profile holds, before any update check.
- */
-export type Profile = Readonly<{
-  /** Launch the browser on the profile; the caller closes the context to end the visit. */
-  visit: () => Promise<BrowserContext>;
-  /** Delete the profile. */
-  remove: () => Promise<void>;
-}>;
-
-/**
- * Create a returning visitor's profile, with the `tau-entry=app` preference set for an origin when given, as for a
- * visitor whose `/` is Home.
- *
- * @param appEntryOrigin - The origin whose `tau-entry` cookie is set on every visit.
- * @returns The profile.
- */
-export const createProfile = async (appEntryOrigin?: string): Promise<Profile> => {
-  const directory = await mkdtemp(join(tmpdir(), 'tau-e2e-returning-visitor-'));
-  return {
-    visit: async () => {
-      const context = await chromium.launchPersistentContext(directory, {
-        executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'],
-      });
-      if (appEntryOrigin !== undefined) {
-        await context.addCookies([{ name: 'tau-entry', value: 'app', url: appEntryOrigin }]);
-      }
-      return context;
-    },
-    remove: async () => rm(directory, { recursive: true, force: true }),
-  };
-};
-
-/** The first page of a visit's context. */
-export const firstPage = async (context: BrowserContext): Promise<Page> => context.pages()[0] ?? context.newPage();
 
 /** Every service worker version the browser reported for a page's origin, by version id, with its last status. */
 export type WorkerVersions = Readonly<{

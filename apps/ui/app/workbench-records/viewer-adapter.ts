@@ -240,12 +240,6 @@ export type ViewerAdapterFacts = Readonly<{
    */
   admitsView: boolean;
   /**
-   * The project is still opening on this device, or could not (cloud open loading states, option C): each visible view
-   * gets its graphics, so its stage mounts once and says the open's wait, but no entry, geometry or demand until
-   * `admitsView`. Absent counts as `false`.
-   */
-  admitsStage?: boolean;
-  /**
    * The model may be shown as well (its files have settled): only then does a view get its geometry unit and its demand,
    * so the kernel never runs over files still being checked or downloaded (blueprint P-j).
    */
@@ -482,7 +476,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
 
     const admit = (panel: Panel): void => {
       const current = facts.get();
-      if (!(current.admitsView || current.admitsStage === true) || !isViewerPanelParameters(panel.params)) {
+      if (!current.admitsView || !isViewerPanelParameters(panel.params)) {
         return;
       }
       const viewId = panel.id;
@@ -499,10 +493,6 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       }
       if (!visible) {
         releaseDemand(viewId);
-        return;
-      }
-      /* A project still opening binds no entry: its main is the open's placeholder until the download lands. */
-      if (!current.admitsView) {
         return;
       }
       const entryPath =

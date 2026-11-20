@@ -897,9 +897,6 @@ export const ViewerDockview = memo(function ({
     (): ViewerAdapterFacts => ({
       /* The view is admitted once the project is on this device, and through a check of its model files (A15e). */
       admitsView: projectIsReady && (availability === 'ready' || isModelFilesWait(availability)),
-      /* The project is still opening here, or could not: the view's stage mounts and says so (cloud open loading
-         states, option C), with no entry or geometry until the project is here. */
-      admitsStage: projectIsReady,
       admitsGeometry: projectIsReady && availability === 'ready',
       mainEntryPath,
       viewRecords,

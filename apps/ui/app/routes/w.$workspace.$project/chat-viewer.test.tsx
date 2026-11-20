@@ -570,40 +570,70 @@ vi.mock('#components/cad/ar-button.js', () => ({
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
-vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
-  GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
-    mockCameraSeed = seed;
-    mockGraphicsProviderMounts += 1;
-    return <div>{children}</div>;
-  },
-  useGraphics: () => mockGraphicsActor,
-  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) => {
+vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
+  const { createContext, useContext } = await import('react');
+  /* The provider's graphics actor, `undefined` while the view has none yet, as the real provider presents it. */
+  const ProvidedGraphics = createContext<unknown>(undefined);
+  const useMockGraphicsSelector = (
+    selector: (state: { context: Record<string, unknown> }) => unknown,
+    isPresent = true,
+    fallback?: unknown,
+  ): unknown => {
     const selectSnapshot = () =>
-      selector({
-        context: {
-          enableSurfaces: true,
-          enableLines: true,
-          enableGizmo: true,
-          enableGrid: true,
-          enableAxes: true,
-          enableMatcap: false,
-          upDirection: 'z',
-          isSectionViewActive: mockAreToolsRunning,
-          isMeasureActive: mockAreToolsRunning,
-          measurements: [],
-          artifact: mockGraphicsProjection.artifact,
-          artifactKey: mockGraphicsProjection.artifactKey,
-          gltfPresentation: mockGltfPresentation,
-        },
-      });
+      isPresent
+        ? selector({
+            context: {
+              enableSurfaces: true,
+              enableLines: true,
+              enableGizmo: true,
+              enableGrid: true,
+              enableAxes: true,
+              enableMatcap: false,
+              upDirection: 'z',
+              isSectionViewActive: mockAreToolsRunning,
+              isMeasureActive: mockAreToolsRunning,
+              measurements: [],
+              artifact: mockGraphicsProjection.artifact,
+              artifactKey: mockGraphicsProjection.artifactKey,
+              gltfPresentation: mockGltfPresentation,
+            },
+          })
+        : fallback;
     return useSyncExternalStore(subscribeGraphics, selectSnapshot, selectSnapshot);
-  },
-  useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
-    selector({ context: createModelInteractionContext() }),
-  useKinematicsSelector: (
-    selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
-  ) => selector({ context: { unitsById: {}, revision: 0 } }),
-}));
+  };
+  return {
+    GraphicsProvider: ({
+      children,
+      seed,
+      graphicsRef,
+    }: {
+      children: React.ReactNode;
+      seed?: unknown;
+      graphicsRef: unknown;
+    }) => {
+      mockCameraSeed = seed;
+      mockGraphicsProviderMounts += 1;
+      return (
+        <div>
+          <ProvidedGraphics.Provider value={graphicsRef}>{children}</ProvidedGraphics.Provider>
+        </div>
+      );
+    },
+    useGraphics: () => mockGraphicsActor,
+    useOptionalGraphics: () => useContext(ProvidedGraphics),
+    useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
+      useMockGraphicsSelector(selector),
+    useOptionalGraphicsSelector: (
+      selector: (state: { context: Record<string, unknown> }) => unknown,
+      fallback: unknown,
+    ) => useMockGraphicsSelector(selector, useContext(ProvidedGraphics) !== undefined, fallback),
+    useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
+      selector({ context: createModelInteractionContext() }),
+    useKinematicsSelector: (
+      selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
+    ) => selector({ context: { unitsById: {}, revision: 0 } }),
+  };
+});
 
 const { ChatViewer } = await import('./chat-viewer.js');
 
@@ -2454,5 +2484,94 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
       expect.stringContaining('workbench=revisions') as string,
     );
     expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+  });
+
+  /* The view's graphics come only once the project is loaded here, which a cold open reaches after its waits start: the
+     stage says each wait without them, rather than "Initializing viewer…" (cloud open loading states, option C). */
+  describe('before the project is loaded and the view has its graphics', () => {
+    beforeEach(() => {
+      mockViewGraphics.delete('view-1');
+      mockGraphicsSend.mockClear();
+      mockConnectRemote.mockClear();
+    });
+
+    it.each([
+      { name: 'opening', status: opening, label: 'Opening project…' },
+      { name: 'downloading', status: downloading, label: 'Downloading files…' },
+      { name: 'preparing', status: preparing, label: 'Preparing files…' },
+    ] as const)('should lay out the stage with the $name pill from the first frame', ({ status, label }) => {
+      mockSyncStatus = status;
+      renderOpen();
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+      expect(pill()).toHaveTextContent(label);
+      expect(caption()).toBeInTheDocument();
+      expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
+      /* No canvas and no controls without graphics, and nothing sent to graphics that are not there. */
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Viewer controls' })).not.toBeInTheDocument();
+      expect(mockGraphicsSend).not.toHaveBeenCalled();
+    });
+
+    it('should say a failed open in the stage failure card with "Try again"', () => {
+      mockSyncStatus = { sync: { state: 'checking' }, remote: { phase: 'failed' } };
+      renderOpen();
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveAttribute('data-slot', 'viewer-failure');
+      expect(alert).toHaveTextContent('Couldn’t open this project');
+      fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+      expect(mockConnectRemote).toHaveBeenCalledOnce();
+    });
+
+    it('should keep the same stage when the graphics arrive part way through the open, and draw the canvas once it lands', () => {
+      mockSyncStatus = downloading;
+      renderOpen();
+      const stage = screen.getByTestId('chat-viewer-layout');
+
+      mockViewGraphics.set('view-1', mockGraphicsActor);
+      publishSyncStatus(preparing);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(pill()).toHaveTextContent('Preparing files…');
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      publishSyncStatus(landed);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    });
+
+    it('should keep the same stage, with no empty state or "Reopen renderer", when the open lands before the graphics', () => {
+      mockSyncStatus = downloading;
+      const view = renderOpen();
+      const stage = screen.getByTestId('chat-viewer-layout');
+
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      publishSyncStatus(landed);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      expect(screen.queryByText('File not found')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reopen renderer' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+
+      /* The project is loaded here: its view gets its graphics, and the stage draws the canvas. */
+      mockViewGraphics.set('view-1', mockGraphicsActor);
+      view.rerender(
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={{ ...mockPanelApi } as DockviewPanelApi} />,
+      );
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    });
+
+    it('should still show "Initializing viewer…" for a project that never waited while its graphics start', () => {
+      mockSyncStatus = landed;
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      renderOpen();
+      expect(screen.getByText('Initializing viewer…')).toBeInTheDocument();
+      expect(screen.queryByTestId('chat-viewer-layout')).not.toBeInTheDocument();
+    });
   });
 });

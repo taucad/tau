@@ -434,14 +434,13 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
-  /* A15e (D4): a file check admits the view, so the stage and its canvas stay; a project-level wait admits the view's
-     graphics only, so its stage says the open's wait (cloud open loading states, option C), and binds no entry. */
+  /* A15e (D4): a file check admits the view, so the stage and its canvas stay; a project-level wait admits nothing, not
+     even the view's graphics: its stage says the open's wait without them (cloud open loading states, option C). */
   it('binds the view through a check of the model files and not before the project is here', () => {
     fixture.availability = 'connecting';
     const view = render(<ViewerDockview profile='editor' />);
     expect(fixture.setViewEntryPath).not.toHaveBeenCalled();
-    expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createViewGraphics' }));
-    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createViewGraphics' }));
     view.unmount();
 
     fixture.availability = 'filesChecking';

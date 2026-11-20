@@ -35,7 +35,8 @@ import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-recor
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
-import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { GraphicsProvider, useOptionalGraphics, useOptionalGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { ViewCameraSeed } from '@taucad/viewer/graphics/graphics-camera';
 import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
@@ -399,6 +400,32 @@ function useViewerEntryAbsence({
   return { absence, renderedPath, followTarget };
 }
 
+/**
+ * What the view waits for before its entry is known, and whether it shows "Initializing viewer…" instead of its stage.
+ * While the project opens or the model's files are checked or downloaded, an entry the tree has not landed yet is not
+ * known to be absent: the stage and its last render stay, and the empty states wait for the files (A15e; UI Policy
+ * § 5). A view that has shown its stage for a wait keeps it, still waiting, until its graphics arrive, which they do
+ * only once the project is loaded here (cloud open loading states, option C), rather than swapping to "Initializing
+ * viewer…". Kept with React's "information from previous renders" pattern; no effect runs.
+ *
+ * @param wait - The view's wait, if any.
+ * @param hasGraphics - Whether the view has its graphics actor.
+ * @returns Whether the view's entry waits, and whether its graphics are starting for a view that never waited.
+ */
+function useViewerWaitStage(
+  wait: ViewerWait | undefined,
+  hasGraphics: boolean,
+): Readonly<{ isFilesWait: boolean; isGraphicsStarting: boolean }> {
+  const [hasWaitStage, setHasWaitStage] = useState(wait !== undefined);
+  if (wait !== undefined && !hasWaitStage) {
+    setHasWaitStage(true);
+  }
+  return {
+    isFilesWait: wait !== undefined || (hasWaitStage && !hasGraphics),
+    isGraphicsStarting: !hasGraphics && !hasWaitStage,
+  };
+}
+
 const ChatViewerContent = memo(function ({
   viewId,
   entryPath,
@@ -411,6 +438,7 @@ const ChatViewerContent = memo(function ({
   const viewCommands = useWorkbenchViewCommands();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
+  const { isFilesWait, isGraphicsStarting } = useViewerWaitStage(wait, graphicsActor !== undefined);
 
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
@@ -468,10 +496,6 @@ const ChatViewerContent = memo(function ({
   // 'orphaned' outcome via the discriminated FileContentResult contract.
   const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
-  /* While the project opens or the model's files are checked or downloaded, an entry the tree has not landed yet is not
-     known to be absent: the stage and its last render stay, and the empty states wait for the files (A15e; UI Policy
-     § 5). */
-  const isFilesWait = wait !== undefined;
   const { absence, renderedPath, followTarget } = useViewerEntryAbsence({
     entryPath,
     mainEntryPath,
@@ -581,8 +605,8 @@ const ChatViewerContent = memo(function ({
     }
   }, [followTarget, handleFileSelect]);
 
-  // If no graphics actor yet, render a placeholder
-  if (!graphicsActor) {
+  // If no graphics actor yet, and no wait to say on the stage, render a placeholder
+  if (isGraphicsStarting) {
     return (
       <div className='flex h-full items-center justify-center text-muted-foreground'>
         <span className='text-sm'>Initializing viewer…</span>
@@ -731,7 +755,9 @@ function GeometryStatus({ isEmpty = false }: { readonly isEmpty?: boolean }): Re
  * Inner content of a viewer panel with an active file.
  * Separated to avoid conditional hook usage in the parent.
  * CadProvider + GraphicsProvider are wrapped above this -- all descendants use
- * useCad()/useCadSelector() and useGraphics()/useGraphicsSelector().
+ * useCad()/useCadSelector() and useGraphics()/useGraphicsSelector(). The provider may have no graphics actor yet (a
+ * project still loading here): this content reads it as optional, and mounts the canvas and the controls, which need
+ * it, only once it arrives, so the stage keeps its identity throughout.
  */
 const ViewerContent = memo(function ({
   viewId,
@@ -746,6 +772,9 @@ const ViewerContent = memo(function ({
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
+  /* The view's graphics, `undefined` while its project is still loading here: the stage is laid out with the wait's
+     status and failure, and draws no canvas and no controls until they arrive (cloud open loading states, option C). */
+  const graphicsActor = useOptionalGraphics();
   // The editor's per-view controls write the view record; a shared session keeps changing the live owner only.
   /* The project is not on this device yet: no view record is written and no canvas takes a camera move, so nothing
      lands in its checkout before the open's own download does (cloud open loading states). */
@@ -753,8 +782,9 @@ const ViewerContent = memo(function ({
   const viewFields = useViewerViewFieldCommands(viewFieldTarget({ profile, viewId, entryPath, isProjectOpening }));
   const waitFailure = useViewerWaitFailure(wait);
   const cadRef = useCad();
-  // Lines this pane shows; the unit's default view computes edges only while some pane shows them.
-  const enableLines = useGraphicsSelector((state) => state.context.enableLines);
+  // Lines this pane shows; the unit's default view computes edges only while some pane shows them. A pane without its
+  // graphics yet shows none (`undefined`).
+  const enableLines = useOptionalGraphicsSelector((state) => state.context.enableLines, undefined);
   useEffect(() => {
     cadRef?.send({ type: 'setViewerEdges', viewerId: viewId, shown: enableLines });
   }, [cadRef, viewId, enableLines]);
@@ -807,7 +837,7 @@ const ViewerContent = memo(function ({
     options: viewOptions,
     instance: localForView && !localExpired ? localForView.instanceId : selectedState?.authoredInstance,
     blocked: localExpired,
-    edgesShown: enableLines,
+    edgesShown: enableLines === true,
   });
   const rendering =
     evaluation?.success && evaluation.views.length === 0
@@ -840,7 +870,8 @@ const ViewerContent = memo(function ({
   // are checked or downloaded the unit is not created yet (A15e): the overlay
   // waits, and the canvas stays mounted either way.
   // A view still to be bound (`''`) has no unit to reopen.
-  const isGeometryUnitClosed = !cadRef && wait === undefined && entryPath !== '';
+  // A view without its graphics yet is not admitted, so it has no unit to reopen either.
+  const isGeometryUnitClosed = !cadRef && wait === undefined && entryPath !== '' && graphicsActor !== undefined;
   const handleReopenRenderer = useCallback(() => {
     projectRef.send({
       type: 'createGeometryUnit',
@@ -851,8 +882,10 @@ const ViewerContent = memo(function ({
 
   // Bridge this pane's projection to its graphics owner. Other panes may show
   // different views of the same evaluated document without changing this one.
-  const graphicsActor = useGraphics();
   useEffect(() => {
+    if (!graphicsActor) {
+      return;
+    }
     if (emptyModel) {
       graphicsActor.send({ type: 'clearArtifact' });
       return;
@@ -874,14 +907,32 @@ const ViewerContent = memo(function ({
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference
   // on every emission, causing unnecessary re-renders.
-  const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
-  const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
+  const enableSurfaces = useOptionalGraphicsSelector(
+    (state) => state.context.enableSurfaces,
+    defaultGraphicsSettings.enableSurfaces,
+  );
+  const enableGizmo = useOptionalGraphicsSelector(
+    (state) => state.context.enableGizmo,
+    defaultGraphicsSettings.enableGizmo,
+  );
   // The person's preset, toggles and gizmo style, with `viewerControls` on; none with it off.
   const { cameraInput, gizmoStyle } = useViewerCameraInput();
-  const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
-  const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
-  const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
-  const upDirection = useGraphicsSelector((state) => state.context.upDirection);
+  const enableGrid = useOptionalGraphicsSelector(
+    (state) => state.context.enableGrid,
+    defaultGraphicsSettings.enableGrid,
+  );
+  const enableAxes = useOptionalGraphicsSelector(
+    (state) => state.context.enableAxes,
+    defaultGraphicsSettings.enableAxes,
+  );
+  const enableMatcap = useOptionalGraphicsSelector(
+    (state) => state.context.enableMatcap,
+    defaultGraphicsSettings.enableMatcap,
+  );
+  const upDirection = useOptionalGraphicsSelector(
+    (state) => state.context.upDirection,
+    defaultGraphicsSettings.upDirection,
+  );
   const partMenu = useViewerPartMenu({
     graphicsRef: graphicsActor,
     actions: useModelComponentMenuActions(),
@@ -901,10 +952,10 @@ const ViewerContent = memo(function ({
   );
   const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyViewerPreviewSnapshot, [thumbnails]);
   const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
-  const presentedArtifact = useGraphicsSelector((state) => state.context.artifact);
-  const presentedArtifactKey = useGraphicsSelector((state) => state.context.artifactKey);
-  const presentedSourceFile = useGraphicsSelector((state) => state.context.artifactSourceFile);
-  const presentedKey = useGraphicsSelector((state) => state.context.gltfPresentation.presentedKey);
+  const presentedArtifact = useOptionalGraphicsSelector((state) => state.context.artifact, undefined);
+  const presentedArtifactKey = useOptionalGraphicsSelector((state) => state.context.artifactKey, undefined);
+  const presentedSourceFile = useOptionalGraphicsSelector((state) => state.context.artifactSourceFile, undefined);
+  const presentedKey = useOptionalGraphicsSelector((state) => state.context.gltfPresentation.presentedKey, undefined);
   const viewerActionMenuData = partMenu.openMenuData;
   const viewerPart =
     viewerActionMenuData?.node.kind === 'part' && viewerActionMenuData.node.primitiveRefs?.length
@@ -1034,11 +1085,12 @@ const ViewerContent = memo(function ({
       graphicsRef={graphicsActor}
       regionId={`viewport-gizmo-container-${viewId}`}
       data-testid='chat-viewer-layout'
-      partMenu={partMenu}
+      partMenu={graphicsActor === undefined ? undefined : partMenu}
       decoratePartMenu={decoratePartMenu}
       isModelShown={!isGeometryUnitClosed && Boolean(artifact && presentedArtifact)}
       status={stageStatus(waitFailure, overlayFailureMessage)}
-      isWaiting={isRunningViewerWait(wait)}
+      /* The canvas is still to come once a wait ends before the project is loaded here and the graphics arrive. */
+      isWaiting={isRunningViewerWait(wait) || (wait === undefined && graphicsActor === undefined)}
       statusExtra={
         <>
           <StageWaitStatus wait={wait} />
@@ -1085,9 +1137,10 @@ const ViewerContent = memo(function ({
       }}
       /* The canvas stays while the unit is closed or not created yet, so a unit that follows the files (an entry other
          than main gets its unit only once they settle) draws into the same canvas (A15e; C11). While the project is
-         still opening the stage draws no canvas, so no camera move is written into a checkout not landed yet. */
+         still opening the stage draws no canvas, so no camera move is written into a checkout not landed yet; nor does it
+         before the view's graphics arrive. */
       renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) =>
-        isProjectOpening ? null : (
+        isProjectOpening || graphicsActor === undefined ? null : (
           <CadViewer
             enableZoom
             enablePan
@@ -1116,7 +1169,7 @@ const ViewerContent = memo(function ({
          with the view menus and the build status, and the issues list unfolds above its controls. Capability-gated mobile AR shares the controls row. In a pane narrower than the bar, the
          bar starts at the left edge, keeping the grid readout and Section in view. */
       controls={
-        profile === 'editor' ? (
+        graphicsActor === undefined ? undefined : profile === 'editor' ? (
           <ViewerIssues
             entryPath={entryPath}
             notice={

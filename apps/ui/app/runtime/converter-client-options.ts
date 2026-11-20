@@ -3,7 +3,7 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
 import type { converterRuntime, ConverterRuntimeClient } from '@taucad/converter/runtime';
 import { observeRuntimeClient } from '#telemetry/runtime-telemetry.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export const createConverterClient = async (): Promise<ConverterRuntimeClient> => {
   const client = createRuntimeClient<typeof converterRuntime>({

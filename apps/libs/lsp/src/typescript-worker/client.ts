@@ -5,7 +5,7 @@ import type {
   TypeScriptWorkerRequest,
   TypeScriptWorkerResponse,
 } from '#typescript-worker/protocol.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export type TypeScriptWorkerClientOptions = Readonly<{
   openLanguageHostPort?: () => TauLanguageHostInit | undefined;

@@ -1,5 +1,5 @@
-import type { WorkerCodeLoadError } from '@taucad/ui-core/lib/module-worker';
-import { setWorkerCodeLoadHandler } from '@taucad/ui-core/lib/module-worker';
+import type { WorkerCodeLoadError } from '@taucad/ui-core/lib/worker-factory';
+import { setWorkerCodeLoadHandler } from '@taucad/ui-core/lib/worker-factory';
 import { readServerVerdict } from '#filesystem/build-skew.js';
 import { recoverFromStaleBuild } from '#lib/stale-build-recovery.js';
 

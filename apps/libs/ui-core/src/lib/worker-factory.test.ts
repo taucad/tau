@@ -6,7 +6,7 @@ import {
   createModuleWorker,
   isWorkerCodeLoadFailure,
   setWorkerCodeLoadHandler,
-} from '#lib/module-worker.js';
+} from '#lib/worker-factory.js';
 
 /** The page's side of a worker, as the factory sees it: an event target. */
 class FakeWorker extends EventTarget {

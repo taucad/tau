@@ -5,7 +5,7 @@ import type { PrinterProgram } from '#components/printer/printer-program.js';
 import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export type PrinterPreparationResult =
   | Readonly<{

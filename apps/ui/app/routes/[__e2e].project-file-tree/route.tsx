@@ -10,7 +10,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** Same shape the project-creation-location fixture accepts: one OPFS directory name. */
 const validWorkspaceFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;

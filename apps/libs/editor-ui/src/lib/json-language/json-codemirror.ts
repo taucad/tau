@@ -12,7 +12,7 @@ import { Topic } from '@taucad/events';
 import type { EditorDocument, TextChange } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { lspSnippetToCodeMirror } from '@taucad/ui-core/lib/lsp-completion-snippet';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 type JsonDiagnostic = Readonly<{
   from: number;

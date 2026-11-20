@@ -1,4 +1,4 @@
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 const probeTimeout = 5000;
 
 /** Probe the worker-only OPFS sync-access API Tau relies on. */

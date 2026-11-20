@@ -61,7 +61,7 @@ export const isCodeLoadFailure = (error: unknown): boolean => {
 
 /**
  * The message a module worker's realm posts to the page when code it needs failed to load (PL7 staging defects
- * FP10): the page's module-worker factory (`@taucad/ui-core/lib/module-worker`) takes it off the worker's own channel
+ * FP10): the page's module-worker factory (`@taucad/ui-core/lib/worker-factory`) takes it off the worker's own channel
  * and replaces the worker, since that realm can never load the module again.
  */
 export const workerCodeLoadFailureType = 'tau/worker-code-load-failed';

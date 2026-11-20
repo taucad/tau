@@ -1,4 +1,4 @@
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 /**
  * Create the object-store worker. Vite bundles the worker only for the client: the server graph reaches this module
  * through the project library, and a `?worker` import there emitted the worker bundle into the server output (React

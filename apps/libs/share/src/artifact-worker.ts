@@ -52,7 +52,7 @@ export type ShareArtifactWorkerCodec = ShareArtifactCodec & {
 /** Options for {@link createShareArtifactWorkerCodec}. @public */
 export type ShareArtifactWorkerOptions = Readonly<{
   /**
-   * The app's module-worker factory (`@taucad/ui-core/lib/module-worker`, which this library cannot depend on): it
+   * The app's module-worker factory (`@taucad/ui-core/lib/worker-factory`, which this library cannot depend on): it
    * replaces a worker whose code failed to load. Without one the worker is constructed directly.
    */
   createModuleWorker?: (construct: () => Worker, options: Readonly<{ name: string }>) => Worker;

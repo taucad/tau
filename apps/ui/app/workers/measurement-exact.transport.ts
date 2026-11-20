@@ -1,5 +1,5 @@
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** Milliseconds a query may take before its worker is reset. */
 const queryTimeout = 120_000;

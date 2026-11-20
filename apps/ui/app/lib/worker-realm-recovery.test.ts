@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkerCodeLoadError } from '@taucad/ui-core/lib/module-worker';
+import { WorkerCodeLoadError } from '@taucad/ui-core/lib/worker-factory';
 
 const recover = vi.hoisted(() => ({ calls: [] as unknown[], verdict: 'live' as string }));
 vi.mock('#lib/stale-build-recovery.js', () => ({

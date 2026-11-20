@@ -10,7 +10,7 @@
 
 import { createInlineCompute, createSupervisedComputeWorker } from '@taucad/revisions';
 import type { ComputeCrashReport, ComputeWorker } from '@taucad/revisions';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /**
  * Build the compute the revision ports share.

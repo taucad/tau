@@ -38,7 +38,7 @@ import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-
 import { agentHostWorkerName, createBrowserAgentWorker } from '#services/browser-agent-worker.js';
 import { markDeviceViewFieldsSet } from '#workbench-records/view-fields-set.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
-import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/module-worker';
+import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import { workerReplacement, workerReplacementBound } from '#lib/worker-realm-recovery.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */

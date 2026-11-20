@@ -5,7 +5,7 @@ import type {
   EditorLanguageRequest as HostedEditorLanguageRequest,
 } from '@taucad/editor-ui/lib/editor-language-runtime';
 import { ENV } from '#environment.config.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** A code pane's request for semantic services; this build supplies the host. */
 export type EditorLanguageRequest = Omit<HostedEditorLanguageRequest, 'host'>;

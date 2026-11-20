@@ -1,4 +1,4 @@
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 /** Create the browser-only GeoSpec runner worker. Desktop aliases this module to a refusal. */
 export const createBrowserGeoSpecWorker = (): Worker =>
   createModuleWorker(

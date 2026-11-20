@@ -1,6 +1,6 @@
 import type { AttachmentImageBackend } from '#services/attachment-image.service.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /**
  * Browser conversion: a dedicated module worker running the raster-only attachment runtime. Everything is imported on

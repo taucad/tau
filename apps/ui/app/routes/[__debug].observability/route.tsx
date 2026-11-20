@@ -16,7 +16,7 @@ import {
   triggerObservabilityKernelTermination,
 } from '#lib/observability-harness-triggers.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export const meta: MetaFunction = () => [{ title: 'Observability harness · Tau' }];
 

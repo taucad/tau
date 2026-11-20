@@ -1,4 +1,4 @@
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
 /** The resident agent host worker's name in reports and in the page's replacement bound (FP10). */

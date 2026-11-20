@@ -8,7 +8,7 @@
  * place, which cannot succeed. Every dynamic `import()` in the web app's browser code is therefore the body of a
  * thunk passed to `loadCode` or `lazyCode` (`@taucad/ui-core/lib/code-loading`, `lazy-code`), which hand a failure to
  * the realm's recovery once; React's `lazy` is called only by `lazyCode`; and every `new Worker(…)` is the body of a
- * thunk passed to `createModuleWorker` (`@taucad/ui-core/lib/module-worker`, FP10), which replaces a worker whose code
+ * thunk passed to `createModuleWorker` (`@taucad/ui-core/lib/worker-factory`, FP10), which replaces a worker whose code
  * failed to load.
  */
 
@@ -20,7 +20,7 @@ const WORKER_FACTORY_CALLS = new Set(['createModuleWorker']);
 
 /** The owner's own modules, which call `lazy` and the importer they are given. */
 const OWNER_FILES = [
-  /apps\/libs\/ui-core\/src\/lib\/module-worker\.ts$/u,
+  /apps\/libs\/ui-core\/src\/lib\/worker-factory\.ts$/u,
   /apps\/libs\/ui-core\/src\/lib\/code-loading\.ts$/u,
   /apps\/libs\/ui-core\/src\/lib\/lazy-code\.ts$/u,
 ];
@@ -98,7 +98,7 @@ export const codeLoadingOwnerRule = {
       rawImport:
         'Load this module through `loadCode(async () => import(…))` (`@taucad/ui-core/lib/code-loading`), or `lazyCode` for a component: the owner hands a failed load to the page’s recovery once, since this realm can never load it again (FP9).',
       rawWorker:
-        "Start a module worker through `createModuleWorker(() => new Worker(new URL(…), { type: 'module' }), { name })` (`@taucad/ui-core/lib/module-worker`): a worker whose code failed to load is replaced by a new one, never asked again (FP10).",
+        "Start a module worker through `createModuleWorker(() => new Worker(new URL(…), { type: 'module' }), { name })` (`@taucad/ui-core/lib/worker-factory`): a worker whose code failed to load is replaced by a new one, never asked again (FP10).",
       rawLazy:
         'Use `lazyCode` (`@taucad/ui-core/lib/lazy-code`) instead of `lazy`: `React.lazy` keeps its rejection, and the owner hands the failure to the page’s recovery, or degrades optional code to its `fallback` (FP9).',
     },

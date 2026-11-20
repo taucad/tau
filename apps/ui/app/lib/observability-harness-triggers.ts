@@ -3,7 +3,7 @@ import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** One canvas step: 2048 x 2048 RGBA is 16 MiB, the same step as one WebAssembly allocation. */
 const canvasPressureEdge = 2048;

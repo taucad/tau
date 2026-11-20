@@ -4,7 +4,7 @@ import type * as LSP from 'vscode-languageserver-protocol';
 import { serveLanguageFileSystemRequests } from '@taucad/lsp/language-fs-bridge';
 import type { ServeLanguageFileSystemOptions } from '@taucad/lsp/language-fs-bridge';
 import type { CsharpLanguageAssets, CsharpWorkerCommand, CsharpWorkerEvent } from '#protocol.js';
-import { createModuleWorker } from '@taucad/ui-core/lib/module-worker';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** An LSP error response from the C# server. */
 export class CsharpLanguageError extends Error {

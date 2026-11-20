@@ -468,10 +468,18 @@ describe('a code load that fails once on the build the server still runs (FP9, F
 
     await startChatFromHome(page, live.origin);
 
-    await page
-      .getByText(/failed to load|did not finish loading/iu)
-      .first()
-      .waitFor({ timeout: 60_000 });
+    try {
+      await page
+        .getByText(/failed to load|did not finish loading/iu)
+        .first()
+        .waitFor({ timeout: 60_000 });
+    } catch (error) {
+      const shown = await page.locator('[data-decision="run-error"]').allInnerTexts();
+      throw new Error(
+        `No load failure card (agent host workers ${String(live.requests(agentWorkerScript))}, implementation requests ${String(live.requests(implementation))}); run cards: ${JSON.stringify(shown)}`,
+        { cause: error },
+      );
+    }
     await page.waitForTimeout(1000);
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
     expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);

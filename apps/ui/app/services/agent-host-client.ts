@@ -1145,9 +1145,12 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           const replacement = workerReplacement(agentHostWorkerName);
           replacements += 1;
           if (!replacement.replace || replacements >= workerReplacementBound) {
+            /* The worker's own report names the module that failed; the error this connect met may only be the
+             * channel the retired worker closed. */
+            const failure = live.codeLoadFailure instanceof Error ? live.codeLoadFailure : error;
             throw new AgentHostWorkerError(
               'WORKER_LOAD_FAILED',
-              error instanceof Error ? error.message : 'The agent host worker did not load.',
+              failure instanceof Error ? failure.message : 'The agent host worker did not load.',
             );
           }
           if (replacement.replacementDelay > 0) {

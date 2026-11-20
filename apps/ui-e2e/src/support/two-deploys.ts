@@ -586,6 +586,23 @@ export const createProfile = async (appEntryOrigin?: string): Promise<Profile> =
 /** The first page of a visit's context. */
 export const firstPage = async (context: BrowserContext): Promise<Page> => context.pages()[0] ?? context.newPage();
 
+/**
+ * The worker every deploy shipped before FP1 of the PL7 service worker staging defects blueprint (the build of
+ * origin/main 5e2048c5b, minified as deployed), with its precache list left as a placeholder: what a browser that has
+ * not loaded a page since still runs. A `.txt` fixture, so no linter or formatter rewrites the deployed bytes.
+ *
+ * @returns The worker, precaching this build's list.
+ */
+export const preFixWorker = async (): Promise<string> => {
+  const template = await readFile(resolve(import.meta.dirname, '../../fixtures/pre-fix-service-worker.js.txt'), 'utf8');
+  const entries = JSON.parse(await readFile(join(buildRoot, 'service-worker-precache.json'), 'utf8')) as unknown;
+  const placeholder = 'self.__TAU_PRE_FIX_PRECACHE__';
+  if (!template.includes(placeholder)) {
+    throw new Error('The pre-fix worker fixture has no precache placeholder.');
+  }
+  return template.replace(placeholder, JSON.stringify(entries));
+};
+
 /** Every service worker version the browser reported for a page's origin, by version id, with its last status. */
 export type WorkerVersions = Readonly<{
   /** The status of each version seen (`new`, `installing`, `installed`, `activating`, `activated`, `redundant`). */

@@ -26,6 +26,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   createProfile,
   firstPage,
+  preFixWorker,
   prepareDeploys,
   projectShellUrl,
   readBuildId,
@@ -327,5 +328,177 @@ describe('the web app’s service worker under deploy skew and request faults (P
     const { state, manifestFailed } = await returningVisitor(true);
     expect(state).toMatchObject({ mounted: true, stripShown: false });
     expect(manifestFailed).toStrictEqual([]);
+  }, 240_000);
+
+  /** Wait until the page's registration has no worker installing or waiting, and its active worker controls it. */
+  const settledOnOneWorker = async (page: Page): Promise<boolean> => {
+    try {
+      return await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        return (
+          registration?.installing === null &&
+          registration.waiting === null &&
+          registration.active?.state === 'activated' &&
+          navigator.serviceWorker.controller === registration.active
+        );
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Whether the page's registration has settled on one worker, in control, that reports `build` as the one it serves
+   * (only a worker built since FP3 answers).
+   */
+  const settledOnWorkerOf = async (page: Page, build: number | undefined): Promise<boolean> => {
+    if (!(await settledOnOneWorker(page))) {
+      return false;
+    }
+    try {
+      return await page.evaluate(
+        async (expected) =>
+          new Promise<boolean>((resolve) => {
+            const channel = new MessageChannel();
+            channel.port1.addEventListener('message', (event: MessageEvent) => {
+              resolve((event.data as { build?: unknown }).build === expected);
+            });
+            channel.port1.start();
+            navigator.serviceWorker.controller?.postMessage({ type: 'tau-service-worker-build' }, [channel.port2]);
+            setTimeout(() => {
+              resolve(false);
+            }, 2000);
+          }),
+        build,
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  /* D16, FP3: a browser holding a pre-fix worker in the staging stall (the request only the worker makes for a rebuilt
+   * boot chunk fails) is replaced by the fixed worker on its own: the stalled page never runs page code, so the fixed
+   * worker must activate without a page asking. By the second load after the deploy the page mounts, with no click. */
+  it('should mount Home by the second load after the fixed worker deploys over a pre-fix worker in the stall (D16)', async () => {
+    if (browser === undefined || deploys === undefined) {
+      expect.fail('the builds and browser did not start');
+    }
+    const live = await startDeployServer(
+      deploys.builds,
+      {
+        shells: deploys.shells,
+        workers: { previous: await preFixWorker(), next: deploys.workers.scripts.next },
+        clientRoots: deploys.clientRoots,
+      },
+      { hold: false, retain: true },
+    );
+    server = live;
+    context = await browser.newContext();
+    await context.addCookies([{ name: 'tau-entry', value: 'app', url: live.origin }]);
+    const page = await context.newPage();
+    watch(page);
+    await page.goto(`${live.origin}/`, { waitUntil: 'networkidle' });
+    await waitForControllingWorker(page);
+
+    live.inject({ path: rebuiltChunkUrl(), destination: 'empty', kind: 'reset' });
+    live.deploy();
+    // The first load after the deploy is the pre-fix worker's: it may stall. Its update check installs the fixed worker.
+    await page.reload({ waitUntil: 'commit' });
+    await expect
+      .poll(async () => settledOnWorkerOf(page, deploys.nextBuildId), { timeout: 60_000, interval: 500 })
+      .toBe(true);
+
+    failedAssets = [];
+    await page.reload({ waitUntil: 'commit' });
+    expect(await waitForMount(page)).toStrictEqual({
+      mounted: true,
+      stripShown: false,
+      buildId: String(deploys.nextBuildId),
+    });
+    expect(failedAssets).toStrictEqual([]);
+  }, 240_000);
+
+  /* D6, FP3: a page reloaded under the previous worker is the next build's document, so its verdict is `live`; the
+   * next worker, of the page's own build, activates instead of waiting for the life of the tab. */
+  it('should leave no worker waiting after a reload under the previous worker (D6)', async () => {
+    const { page, live } = await installPreviousWorker();
+    live.deploy();
+    await page.reload({ waitUntil: 'commit' });
+    const reloaded = await waitForMount(page);
+    expect(reloaded.buildId).toBe(String(deploys?.nextBuildId));
+    await expect
+      .poll(async () => settledOnWorkerOf(page, deploys?.nextBuildId), { timeout: 30_000, interval: 500 })
+      .toBe(true);
+  }, 180_000);
+
+  /* FP3: update checks that fail offline start no install, so they never count against the registration. */
+  it('should keep the registration through offline reloads', async () => {
+    const { page } = await installPreviousWorker('/projects');
+    await context?.setOffline(true);
+    try {
+      for (let reload = 0; reload < 5; reload += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- One reload at a time, as a visitor's.
+        await page.reload({ waitUntil: 'commit' }).catch(() => undefined);
+        // oxlint-disable-next-line no-await-in-loop -- As above: each load runs its update check before the next.
+        await page.waitForTimeout(1500);
+      }
+    } finally {
+      await context?.setOffline(false);
+    }
+    await page.reload({ waitUntil: 'networkidle' });
+    expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()) !== undefined)).toBe(true);
+  }, 180_000);
+
+  /* D2, FP3: a registration whose installs keep failing (here every install of the next deploy's worker is refused
+   * after its downloads, as a quota error would) is retired after a few, with its caches, instead of keeping a stale
+   * worker for good. */
+  it('should retire a registration whose installs keep failing (D2)', async () => {
+    if (browser === undefined || deploys === undefined) {
+      expect.fail('the builds and browser did not start');
+    }
+    const refusing = `self.addEventListener('install', (event) => {
+      event.waitUntil(new Promise((resolve, reject) => setTimeout(() => reject(new Error('install refused')), 12000)));
+    });`;
+    const live = await startDeployServer(
+      deploys.builds,
+      {
+        shells: deploys.shells,
+        workers: { previous: deploys.workers.scripts.previous, next: refusing },
+        clientRoots: deploys.clientRoots,
+      },
+      { hold: false, retain: true },
+    );
+    server = live;
+    context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+    await waitForControllingWorker(page);
+
+    live.deploy();
+    const retired = async (): Promise<boolean> => {
+      try {
+        return await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          const names = await caches.keys();
+          return registration === undefined && !names.some((name) => name.startsWith('tau-'));
+        });
+      } catch {
+        return false;
+      }
+    };
+    // Each open checks for the next worker, whose install is refused; the page counts each one it sees fail.
+    await expect
+      .poll(
+        async () => {
+          if (await retired()) {
+            return true;
+          }
+          await page.goto(`${live.origin}/projects`, { waitUntil: 'commit' }).catch(() => undefined);
+          await page.waitForTimeout(14_000);
+          return retired();
+        },
+        { timeout: 150_000, interval: 1000 },
+      )
+      .toBe(true);
   }, 240_000);
 });

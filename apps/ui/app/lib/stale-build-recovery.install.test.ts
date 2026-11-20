@@ -109,13 +109,13 @@ describe('installStaleBuildRecovery', () => {
     // Shown again: the decision lands, and a new failure is decided and tagged as usual.
     globalThis.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     await settle();
-    expect(readStaleBuildOutcome(held)).toBe('current');
+    expect(readStaleBuildOutcome(held)).toBe('transient');
     const later = new TypeError('Importing a module script failed.');
     const decided = recoverFromStaleBuild(later);
     const laterTag = classifyStaleBuildFailure(later);
     await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
-    await expect(decided).resolves.toBe('current');
-    await expect(laterTag).resolves.toBe('current');
+    await expect(decided).resolves.toBe('transient');
+    await expect(laterTag).resolves.toBe('transient');
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -139,13 +139,13 @@ describe('installStaleBuildRecovery', () => {
 
     setVisibility('visible');
     await settle();
-    expect(readStaleBuildOutcome(held)).toBe('current');
+    expect(readStaleBuildOutcome(held)).toBe('transient');
     const later = new TypeError('Importing a module script failed.');
     const decided = recoverFromStaleBuild(later);
     const laterTag = classifyStaleBuildFailure(later);
     await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
-    await expect(decided).resolves.toBe('current');
-    await expect(laterTag).resolves.toBe('current');
+    await expect(decided).resolves.toBe('transient');
+    await expect(laterTag).resolves.toBe('transient');
   });
 
   it('should treat a document that boots hidden as hidden from the start, so nothing waits for it to be shown', async () => {
@@ -189,7 +189,7 @@ describe('installStaleBuildRecovery', () => {
     globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: later }));
     const laterTag = classifyStaleBuildFailure(later);
     await settle();
-    await expect(laterTag).resolves.toBe('current');
+    await expect(laterTag).resolves.toBe('transient');
   });
 
   it("should hand a failure only Vite's preloader reported to the tracker at once while the page is hidden", async () => {
@@ -549,11 +549,13 @@ describe('installStaleBuildRecovery', () => {
       }),
     );
     const error = new TypeError('Importing a module script failed.');
+    // Worked on, so the live build's own failure is offered by its panel, never reloaded (D19).
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
 
     recoverFromCaughtError(error);
     await settle();
 
-    expect(readStaleBuildOutcome(error)).toBe('current');
+    expect(readStaleBuildOutcome(error)).toBe('transient');
     expect(reload).not.toHaveBeenCalled();
     expect(skew.isReloadOffered()).toBe(false);
   });

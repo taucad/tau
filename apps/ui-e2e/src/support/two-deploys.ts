@@ -117,10 +117,26 @@ const createNextDeploy = async (
 export const importServerBuild = async (root: string): Promise<ServerBuild> =>
   (await import(pathToFileURL(join(root, 'index.js')).href)) as ServerBuild;
 
+/**
+ * Drop the connection of the next `count` requests whose path matches, after the response has started (PL7 staging
+ * defects FP9, FP10): a transient failure of a file the deploy has, as a dropped connection or a network change on
+ * wake gives one, not a missing file. The browser does not retry a response it has begun to read, so exactly those
+ * requests fail; the next one is served.
+ *
+ * @param path - Matches the request path, query included.
+ * @param count - How many requests to fail; one by default.
+ * @returns Settles with the first failed path once the fault has fired.
+ */
+export type FailNext = (path: RegExp, count?: number) => Promise<string>;
+
 /** Two deploys behind one origin, switched by `deploy`. */
 export type DeployServer = {
   readonly origin: string;
   readonly documents: Deploy[];
+  /** Fail the next requests for a path, once each ({@link FailNext}). */
+  readonly failNext: FailNext;
+  /** How many requests for a path the server has seen, failed ones included. */
+  readonly requests: (path: RegExp) => number;
   /** How many `/health/build` answers the next deploy gave. */
   readonly buildChecks: () => number;
   readonly heldRequest: Promise<void>;
@@ -155,10 +171,33 @@ export const startDeployServer = async (
     next: createRequestHandler({ build: builds.next }),
   };
   const serveAsset = express.static(clientRoot, { immutable: true, maxAge: '1y' });
+  const faults: Array<{ readonly path: RegExp; remaining: number; readonly fired: (path: string) => void }> = [];
+  const seen: string[] = [];
 
   const app = express();
   app.disable('x-powered-by');
   app.use(coiMiddleware());
+  app.use((request: Request, response: Response, next) => {
+    seen.push(request.originalUrl);
+    const fault = faults.find(({ path, remaining }) => remaining > 0 && path.test(request.originalUrl));
+    if (fault === undefined) {
+      next();
+      return;
+    }
+    fault.remaining -= 1;
+    fault.fired(request.originalUrl);
+    // Headers and the start of a body, then the connection is reset: the body never completes, and a browser does not
+    // retry a response it has begun to read.
+    response.writeHead(200, {
+      'Content-Type': 'text/javascript',
+      'Content-Length': '65536',
+      'Cache-Control': 'no-store',
+    });
+    response.write('export const dropped = (');
+    setTimeout(() => {
+      response.socket?.resetAndDestroy();
+    }, 50);
+  });
   app.use('/assets', (request: Request, response: Response, next) => {
     // A request with no deploy cookie (the service worker's precache) reaches the live deploy.
     const cookie = request.headers.cookie ?? '';
@@ -231,6 +270,11 @@ export const startDeployServer = async (
   return {
     origin: `http://127.0.0.1:${String(port)}`,
     documents,
+    failNext: async (path, count = 1) =>
+      new Promise<string>((resolve) => {
+        faults.push({ path, remaining: count, fired: resolve });
+      }),
+    requests: (path) => seen.filter((url) => path.test(url)).length,
     buildChecks: () => buildChecks,
     heldRequest,
     deploy() {

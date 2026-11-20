@@ -19,6 +19,7 @@ import {
 } from '#lib/sentry.server.js';
 import { startDocumentTiming } from '#lib/server-timing.server.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
+import { parseDeploymentSeed } from '#cloud/deployment-seed.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
 export const streamTimeout = 5000;
@@ -125,9 +126,15 @@ export default function handleRequest(
       abort();
     }, streamTimeout + 1000);
 
-    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. */
+    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. W11:
+     * it starts from the root loader's deployment answer, as the client's does from the document's copy of it. */
+    const deploymentSeed = parseDeploymentSeed(
+      (routerContext.staticHandlerContext.loaderData as Readonly<Record<string, { deployment?: unknown } | undefined>>)[
+        'root'
+      ]?.deployment,
+    );
     const app = (
-      <AppRuntimeProvider runtime={createAppRuntime()}>
+      <AppRuntimeProvider runtime={createAppRuntime({ deploymentSeed })}>
         <ServerRouter context={routerContext} url={request.url} />
       </AppRuntimeProvider>
     );

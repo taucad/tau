@@ -124,7 +124,22 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
      * property of one page load and is never stored.
      */
     safeMode?: boolean;
+    /**
+     * The display mode the server rendered the document with, from its own ask (adaptive app deployment mode W11): the
+     * first snapshot, so the first client render matches the server's. An adaptive build only; ignored in safe mode.
+     */
+    deploymentSeed?: DeploymentModeSnapshot | undefined;
   }>;
+
+/**
+ * The runtime's first display mode: the server's answer the document was rendered with (W11), else the build's
+ * initial mode. A pinned build (no owner) keeps its pin, and safe mode shows no Cloud whatever the server answered.
+ */
+const firstDeploymentMode = (
+  hasOwner: boolean,
+  safeMode: boolean,
+  seed: DeploymentModeSnapshot | undefined,
+): DeploymentModeSnapshot => (hasOwner && !safeMode && seed !== undefined ? seed : initialDeploymentMode);
 
 /** The Home read of an idle runtime: it never settles, so the host stays `resolving`. */
 const neverReadHome = async (): Promise<HomeStorageBackend> => Promise.withResolvers<HomeStorageBackend>().promise;
@@ -401,6 +416,7 @@ export const createAppRuntime = ({
   idleFileManagers = false,
   queryClient = createRootQueryClient(),
   safeMode = false,
+  deploymentSeed,
   ...options
 }: AppRuntimeOptions = {}): AppRuntime => {
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
@@ -558,7 +574,7 @@ export const createAppRuntime = ({
       sessions: sessionsRegistryInput(),
       rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
       focusEpoch: focusComposition.epoch(),
-      deployment: initialDeploymentMode,
+      deployment: firstDeploymentMode(deploymentOwner !== undefined, safeMode, deploymentSeed),
       safeMode,
     },
   });

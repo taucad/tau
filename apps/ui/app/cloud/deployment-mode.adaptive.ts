@@ -6,8 +6,8 @@ import type { DeploymentOwnerLogic } from '#runtime/deployment.js';
 
 /**
  * The `adaptive` ceiling's display mode (adaptive app deployment mode charter D2, I13): `unknown` on the server and
- * in the first client render, then whatever the runtime's `deployment` child reports for the origin of
- * `TAU_API_URL`. This is the only module that reaches the owner, so neither pinned build contains it (I10).
+ * in the first client render unless the server rendered the document with its own answer (W11, `#cloud/deployment-seed`),
+ * then whatever the runtime's `deployment` child reports for the origin of `TAU_API_URL`. This is the only module that reaches the owner, so neither pinned build contains it (I10).
  */
 export const initialDeploymentMode: DeploymentModeSnapshot = { state: 'unknown', problem: 'pending' };
 

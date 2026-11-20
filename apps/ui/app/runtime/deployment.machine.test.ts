@@ -26,6 +26,7 @@ import {
   foldAskOutcome,
 } from '#runtime/deployment.machine.js';
 import type { DeploymentChangedReport, DeploymentRecord } from '#runtime/deployment.machine.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import {
   classifyDeploymentAnswer,
   createDeploymentOwner,
@@ -98,6 +99,7 @@ const harness = (
     safeMode?: boolean;
     visible?: boolean;
     now?: number;
+    seed?: DeploymentModeSnapshot;
   }> = {},
 ) => {
   const clock = new StepClock();
@@ -145,7 +147,12 @@ const harness = (
   const actor = createActor(logic, {
     clock,
     inspect: guard.inspect,
-    input: { parentRef: parent, safeMode: options.safeMode ?? false, visible: options.visible ?? true },
+    input: {
+      parentRef: parent,
+      safeMode: options.safeMode ?? false,
+      visible: options.visible ?? true,
+      ...(options.seed === undefined ? {} : { seed: options.seed }),
+    },
   });
   running.push(actor);
   const mode = () => actor.getSnapshot().context.mode;
@@ -221,6 +228,45 @@ describe('deployment: start', () => {
     await started(blocked);
     expect(blocked.mode()).toEqual({ state: 'unknown', problem: 'pending' });
     expect(blocked.actor.getSnapshot().context.fault).toBeUndefined();
+  });
+});
+
+describe('deployment: a server seed (W11)', () => {
+  const fundedRecord = {
+    [deploymentRecordKey(origin)]: recordOf({ state: 'funded', environment: 'staging', confirmedAt: start - day }),
+  };
+
+  it('should start from the seed over the record, tell nothing until the mode changes, and still ask once', async () => {
+    const seed: DeploymentModeSnapshot = { state: 'unfunded', basis: 'confirmed' };
+    const held = await started(harness({ stored: fundedRecord, seed }));
+    expect(held.mode()).toEqual(seed);
+    expect(held.reports).toEqual([]);
+    expect(held.state()).toBe('asking');
+    expect(held.requests).toHaveLength(1);
+    const h = await started(harness({ stored: fundedRecord, seed, replies: [funded('staging')] }));
+    expect(h.requests).toHaveLength(1);
+    expect(h.reports.map((report) => report.mode)).toEqual([
+      { state: 'funded', basis: 'confirmed', environment: 'staging' },
+    ]);
+  });
+
+  it('should keep a funded seed confirmed by the ask, and remember it after a failed one', async () => {
+    const seed: DeploymentModeSnapshot = { state: 'funded', basis: 'confirmed', environment: 'staging' };
+    const confirmed = await started(harness({ seed, replies: [funded('staging')] }));
+    expect(confirmed.mode()).toEqual(seed);
+    expect(confirmed.reports).toEqual([]);
+    const failed = await started(harness({ seed, replies: [new TypeError('Failed to fetch')] }));
+    expect(failed.mode()).toEqual({ state: 'funded', basis: 'remembered', environment: 'staging' });
+  });
+
+  it('should read a pending seed as none, and ignore any seed in safe mode (D10)', async () => {
+    const pending = await started(harness({ stored: fundedRecord, seed: { state: 'unknown', problem: 'pending' } }));
+    expect(pending.reports[0]?.mode).toEqual({ state: 'funded', basis: 'remembered', environment: 'staging' });
+    const safe = await started(
+      harness({ safeMode: true, seed: { state: 'funded', basis: 'confirmed', environment: 'staging' } }),
+    );
+    expect(safe.state()).toBe('idle');
+    expect(safe.mode()).toEqual({ state: 'unknown', problem: 'safe-mode' });
   });
 });
 

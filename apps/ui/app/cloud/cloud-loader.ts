@@ -30,6 +30,12 @@ export type CloudLoader<Module> = Readonly<{
   state: () => CloudLoadState<Module>;
   /** Start the load if it is idle; a no-op while loading, loaded or failed. */
   load: () => void;
+  /**
+   * Start the load now if it is idle, without waiting for the shell (W11: a server render, and the hydration of Cloud
+   * UI the server already rendered, need the module itself).
+   */
+  /** Settles once the load is `loaded` or `failed`: one promise per wait, so a render may suspend on it. */
+  preload: () => Promise<void>;
   /** The person's Retry: load again after a failure. */
   retry: () => void;
   subscribe: (listener: () => void) => () => void;
@@ -146,8 +152,35 @@ export const createCloudLoader = <Module>({
       }
     })();
   };
+  let waitingForSettle: Promise<void> | undefined;
+  const isSettled = (): boolean => state.status === 'loaded' || state.status === 'failed';
+  const settledAlready = Promise.resolve();
+  /* Not `async`: a render suspends on the returned promise, so each wait must hand out the same one. */
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- an async wrapper would make a new promise per call
+  const settled = (): Promise<void> => {
+    if (isSettled()) {
+      return settledAlready;
+    }
+    waitingForSettle ??= new Promise<void>((resolve) => {
+      const unsubscribe = changed.subscribe(() => {
+        if (isSettled()) {
+          unsubscribe();
+          waitingForSettle = undefined;
+          resolve();
+        }
+      });
+    });
+    return waitingForSettle;
+  };
   return {
     state: () => state,
+    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- the same promise per wait, as `settled`'s
+    preload: () => {
+      if (state.status === 'idle') {
+        start();
+      }
+      return settled();
+    },
     load: () => {
       if (state.status === 'idle' && !waiting) {
         waiting = true;

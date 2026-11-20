@@ -9,6 +9,7 @@ import { createAppRuntime, selectDeploymentMode } from '#runtime/app-runtime.js'
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { deploymentRecordKey } from '#runtime/deployment.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 
 vi.mock('#cloud/deployment-mode.js', async () => import('#cloud/deployment-mode.adaptive.js'));
 
@@ -25,7 +26,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const compose = (options: Readonly<{ safeMode?: boolean }> = {}) => {
+const compose = (options: Readonly<{ safeMode?: boolean; deploymentSeed?: DeploymentModeSnapshot }> = {}) => {
   const clock = new StepClock();
   clock.set(Date.UTC(2026, 10, 19));
   return createAppRuntime({
@@ -33,6 +34,7 @@ const compose = (options: Readonly<{ safeMode?: boolean }> = {}) => {
     environment: () => createFakeEnvironmentHost(),
     idleFileManagers: true,
     ...(options.safeMode === undefined ? {} : { safeMode: options.safeMode }),
+    ...(options.deploymentSeed === undefined ? {} : { deploymentSeed: options.deploymentSeed }),
   });
 };
 
@@ -90,5 +92,31 @@ describe('app runtime under the adaptive ceiling', () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({ state: 'unknown', problem: 'safe-mode' });
     runtime.stop();
+  });
+
+  it('should render the server seed before start on both sides, keep it over the record, and still ask (W11)', async () => {
+    const seed: DeploymentModeSnapshot = { state: 'funded', basis: 'confirmed', environment: 'staging' };
+    localStorage.setItem(
+      deploymentRecordKey(apiOrigin),
+      JSON.stringify({ version: 1, state: 'unfunded', confirmedAt: Date.UTC(2026, 10, 18) }),
+    );
+    const fetch = vi.fn(async () => Promise.withResolvers<Response>().promise);
+    vi.stubGlobal('fetch', fetch);
+    const runtime = compose({ deploymentSeed: seed });
+    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual(seed);
+    runtime.start();
+    await flush();
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual(seed);
+    runtime.stop();
+  });
+
+  it('should ignore the server seed in safe mode (D10)', () => {
+    const runtime = compose({
+      safeMode: true,
+      deploymentSeed: { state: 'funded', basis: 'confirmed', environment: 'staging' },
+    });
+    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({ state: 'unknown', problem: 'pending' });
   });
 });

@@ -80,7 +80,8 @@ export type AppRuntimeInput = Readonly<{
   focusEpoch?: number;
   /**
    * The display mode before `deployment` reports (adaptive app deployment mode charter I13): the pinned constant of a
-   * `cloud` or `self-host` build, `unknown` in an adaptive one. Unfunded and pinned by default.
+   * `cloud` or `self-host` build; in an adaptive one, the server's answer the document was rendered with (W11), else
+   * `unknown`. Unfunded and pinned by default.
    */
   deployment?: DeploymentModeSnapshot;
   /** This page load runs in safe mode (D0): `deployment` reads nothing and asks nothing (D10). */
@@ -197,7 +198,13 @@ export type DeploymentCommand =
   | Readonly<{ type: 'retry' }>;
 
 /** What the root hands `deployment` when it starts. @public */
-export type DeploymentChildInput = Readonly<{ parentRef: AnyActorRef; visible: boolean; safeMode: boolean }>;
+export type DeploymentChildInput = Readonly<{
+  parentRef: AnyActorRef;
+  visible: boolean;
+  safeMode: boolean;
+  /** The initial mode, which a server-rendered page took from the server's answer (W11); `pending` is none. */
+  seed: DeploymentModeSnapshot;
+}>;
 
 /**
  * The driver default of `deployment`: nothing asked, nothing reported. A pinned build keeps it, so its mode is the
@@ -328,6 +335,7 @@ export const appRuntimeMachine = setup({
         parentRef: self,
         visible: context.environment.visible ?? true,
         safeMode: context.safeMode,
+        seed: context.deployment,
       }),
       onError: keepFirstFault,
     },

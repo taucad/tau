@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { cloudStandInCommands } from '#support/cloud-stand-ins.js';
@@ -21,6 +21,9 @@ type AdaptiveCommands = {
   uiReleaseTargetRequests(): Promise<void>;
   uiStartObservedRequests(): Promise<void>;
   uiReadObservedRequests(settle?: boolean): Promise<readonly string[]>;
+  uiStartSeededServer(answer: 'funded' | 'unfunded' | 'blackholed'): Promise<string>;
+  uiStopSeededServers(): Promise<void>;
+  uiFetchDocument(url: string): Promise<{ status: number; html: string; milliseconds: number }>;
 };
 
 const commands = target.commands as unknown as AdaptiveCommands;
@@ -152,5 +155,95 @@ describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
     await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
     await commands.uiReleaseTargetRequests();
     await target.expectVisible(selectors.getByCss('[aria-label="Ask Tau to build anything..."]').first(), 30_000);
+  });
+});
+
+/** A function-rendered page: Home and the project route are static shells on the deployed site, and carry no seed. */
+const functionPage = '/w/acme/demo';
+const seedPattern = /window\.__tauDeploymentSeed = (\{[^<]*\})/u;
+
+const documentSeed = (html: string): unknown => {
+  const match = seedPattern.exec(html);
+  return match?.[1] === undefined ? undefined : (JSON.parse(match[1]) as unknown);
+};
+
+/** Record console errors and page errors from the first script on, for the hydration-parity check (T-BA14). */
+const recordPageErrors = async (): Promise<void> => {
+  await target.addInitScript(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { tauHydrationErrors: string[] }).tauHydrationErrors = seen;
+    const original = console.error.bind(console);
+    console.error = (...values: unknown[]) => {
+      seen.push(values.map(String).join(' '));
+      original(...values);
+    };
+    globalThis.addEventListener('error', (event) => {
+      seen.push(String(event.message));
+    });
+  });
+};
+
+const hydrationErrors = async (): Promise<readonly string[]> => {
+  const errors = await target.evaluate(
+    () => (globalThis as unknown as { tauHydrationErrors: string[] }).tauHydrationErrors,
+  );
+  return errors.filter((message) => /hydrat|did not match|#418|#423|#425/iu.test(message));
+};
+
+describe.skipIf(!adaptiveTier)('server-supplied first snapshot (W11, T-BA14 extended)', () => {
+  afterEach(async () => {
+    await commands.uiStopSeededServers();
+  });
+
+  test('renders a funded document with the funded snapshot, hydrates it without a mismatch and loads the Cloud chunk', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(page.status).toBe(200);
+    expect(documentSeed(page.html)).toEqual({ state: 'funded', basis: 'confirmed', environment: 'development' });
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    await target.delay(settleWindow);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('renders an unfunded document with the unfunded snapshot, hydrates it without a mismatch and loads no Cloud code', async () => {
+    const origin = await commands.uiStartSeededServer('unfunded');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(documentSeed(page.html)).toEqual({ state: 'unfunded', basis: 'confirmed' });
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await target.delay(settleWindow);
+    expect(await cloudChunkRequested(chunks)).toBe(false);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('renders within the server deadline with the route blackholed, with no snapshot, and the client resolves (I15)', async () => {
+    const origin = await commands.uiStartSeededServer('blackholed');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(page.status).toBe(200);
+    expect(page.milliseconds).toBeLessThan(5000);
+    expect(documentSeed(page.html)).toBeUndefined();
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await target.delay(settleWindow);
+    expect(await cloudChunkRequested(chunks)).toBe(false);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('carries no snapshot on a static-shell path such as Home', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}/`);
+    expect(page.status).toBe(200);
+    expect(documentSeed(page.html)).toBeUndefined();
   });
 });

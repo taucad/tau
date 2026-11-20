@@ -7,6 +7,8 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Component, useEffect } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
@@ -175,10 +177,99 @@ describe('cloud loader', () => {
   });
 });
 
+describe('cloud loader preload (W11)', () => {
+  it('should start at once, before home-ready, and hand out one promise per wait', async () => {
+    const { promise, resolve } = Promise.withResolvers<{ ok: boolean }>();
+    const importer = vi.fn(async () => promise);
+    const loader = createCloudLoader({ importer, report: () => undefined, recover: () => undefined });
+    const first = loader.preload();
+    expect(loader.preload()).toBe(first);
+    expect(importer).toHaveBeenCalledTimes(1);
+    resolve({ ok: true });
+    await first;
+    expect(loader.state()).toEqual({ status: 'loaded', module: { ok: true } });
+    await expect(loader.preload()).resolves.toBeUndefined();
+    expect(importer).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('cloud surface hydration (W11)', () => {
+  it('should keep the server-rendered Cloud markup through hydration until the chunk loads, with no mismatch', async () => {
+    const serverLoader = createCloudLoader({
+      importer: async () => ({ label: 'cloud' }),
+      report: () => undefined,
+      recover: () => undefined,
+    });
+    await serverLoader.preload();
+    const surface = (loader: CloudLoader<{ label: string }>): ReactNode => (
+      <div>
+        <CloudSurface loader={loader} enabled fallback='self-host' render={(module) => <b>{module.label}</b>} />
+      </div>
+    );
+    const markup = renderToString(surface(serverLoader));
+    expect(markup).toContain('<b>cloud</b>');
+
+    const { promise, resolve } = Promise.withResolvers<{ label: string }>();
+    const clientLoader = createCloudLoader({
+      importer: async () => promise,
+      report: () => undefined,
+      recover: () => undefined,
+    });
+    const container = document.createElement('div');
+    container.innerHTML = markup;
+    document.body.append(container);
+    const recoverable: unknown[] = [];
+    const root = await act(async () =>
+      hydrateRoot(container, surface(clientLoader), {
+        onRecoverableError: (error) => {
+          recoverable.push(error);
+        },
+      }),
+    );
+    expect(container.innerHTML).toContain('<b>cloud</b>');
+    expect(container.textContent).not.toContain('self-host');
+    await act(async () => {
+      resolve({ label: 'cloud' });
+      await promise;
+    });
+    expect(container.innerHTML).toContain('<b>cloud</b>');
+    expect(recoverable).toEqual([]);
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('should show the fallback, and wait for home-ready, when a client-rendered surface turns funded', async () => {
+    const importer = vi.fn(async () => ({ label: 'cloud' }));
+    const loader = createCloudLoader({ importer, report: () => undefined, recover: () => undefined });
+    const { container, rerender } = render(
+      <CloudSurface loader={loader} enabled={false} fallback='self-host' render={(module) => module.label} />,
+    );
+    rerender(<CloudSurface loader={loader} enabled fallback='self-host' render={(module) => module.label} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).toBe('self-host');
+    expect(importer).not.toHaveBeenCalled();
+    reportBootStage('shell-mounted');
+    reportBootStage('home-ready');
+    await waitFor(() => {
+      expect(container.textContent).toBe('cloud');
+    });
+  });
+});
+
 describe('cloud surface', () => {
   const loaded = <Module,>(module: Module): CloudLoader<Module> => {
     const state = { status: 'loaded', module } as const;
-    return { state: () => state, load: () => undefined, retry: () => undefined, subscribe: () => () => undefined };
+    return {
+      state: () => state,
+      load: () => undefined,
+      preload: async () => undefined,
+      retry: () => undefined,
+      subscribe: () => () => undefined,
+    };
   };
 
   it('should render the fallback while the mode is not funded or the chunk has not loaded, and never load then', () => {
@@ -187,6 +278,7 @@ describe('cloud surface', () => {
     const pending: CloudLoader<unknown> = {
       state: () => loading,
       load,
+      preload: async () => undefined,
       retry: () => undefined,
       subscribe: () => () => undefined,
     };

@@ -49,7 +49,9 @@ describe('app runtime: deployment', () => {
     /* I13: before start, the server and the first client render read the initial mode. */
     expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({ state: 'unknown', problem: 'pending' });
     runtime.start();
-    expect(child.inputs).toEqual([{ parentRef: runtime, visible: true, safeMode: true }]);
+    expect(child.inputs).toEqual([
+      { parentRef: runtime, visible: true, safeMode: true, seed: { state: 'unknown', problem: 'pending' } },
+    ]);
     expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({ state: 'unknown', problem: 'unreachable' });
 
     runtime.send({ type: 'visibilityChanged', visible: false });
@@ -89,6 +91,20 @@ describe('app runtime: deployment', () => {
     runtime.start();
     expect(applyTauEventContext<{ tags?: Record<string, string> }>({}).tags?.['deployment_mode']).toBe('funded/pinned');
     runtime.stop();
+  });
+
+  it('should keep a pinned build pinned whatever seed it is handed (W11)', () => {
+    const runtime = createAppRuntime({
+      clock: new StepClock(),
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+      deploymentSeed: { state: 'unfunded', basis: 'confirmed' },
+    });
+    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({
+      state: 'funded',
+      basis: 'pinned',
+      environment: undefined,
+    });
   });
 
   it('should describe each mode as one tag value', () => {

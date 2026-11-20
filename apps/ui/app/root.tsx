@@ -16,6 +16,9 @@ import { RootCommandPaletteItems } from '#root-command-items.js';
 import { DeferredExampleCommandPaletteItems } from '#components/nav/deferred-example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 import { prefetchModelCatalog, prefetchShellModelCatalog } from '#lib/model-catalog.server.js';
+import { readDeploymentSeed } from '#lib/deployment-seed.server.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { cloudSurfaces } from '#cloud/cloud-entries.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 import type { Route } from './+types/root.js';
 
@@ -64,12 +67,29 @@ export async function loader({ url, context }: Route.LoaderArgs) {
   /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document; a static shell
    * (PL3) carries the build's catalog, stamped so its bytes do not depend on the build's clock. */
   /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
+  const isStaticShell = isStaticShellPath(url.pathname);
   const queries = isOfflineShellPath(url.pathname)
     ? undefined
-    : timeModelCatalogRead(context, isStaticShellPath(url.pathname) ? prefetchShellModelCatalog : prefetchModelCatalog);
+    : timeModelCatalogRead(context, isStaticShell ? prefetchShellModelCatalog : prefetchModelCatalog);
+  const env = await getClientEnvironment();
+  /* W11: a server-rendered page starts from the server's own deployment answer, so funded Cloud UI is in the document.
+   * A prerendered or static shell is the same for every deployment and carries none, nor does a safe-mode page (D10);
+   * a failure, a timeout or no API origin is none, and the client resolves as before (I15). */
+  const isPrerender = process.env['IS_RR_BUILD_REQUEST'] === 'yes';
+  const [dehydrated, deployment] = await Promise.all([
+    queries,
+    isPrerender || isStaticShell || isOfflineShellPath(url.pathname) || isSafeModeRequested(url.search)
+      ? undefined
+      : readDeploymentSeed(env.TAU_API_URL),
+  ]);
+  if (deployment?.state === 'funded') {
+    /* The server renders funded Cloud UI from the loaded chunk; once per process, a failure renders the fallback. */
+    await cloudSurfaces.preload();
+  }
   return {
-    env: await getClientEnvironment(),
-    queries: await queries,
+    env,
+    queries: dehydrated,
+    ...(deployment === undefined ? {} : { deployment }),
   };
 }
 

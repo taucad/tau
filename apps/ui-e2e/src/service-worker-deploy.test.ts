@@ -23,61 +23,23 @@
  * pinned revision.
  */
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
-import { prepareDeploys, projectShellUrl, startDeployServer } from './support/two-deploys.ts';
+import {
+  buildKillSwitchWorker,
+  prepareDeploys,
+  projectShellUrl,
+  startDeployServer,
+  waitForControllingWorker,
+} from './support/two-deploys.ts';
 import type { Deploy, DeployServer, Deploys } from './support/two-deploys.ts';
 // oxlint-enable no-restricted-imports
 
-/** `apps/ui/scripts/build-service-worker.ts`'s build, as far as this suite calls it. */
-type BuildServiceWorker = (options: {
-  readonly buildDirectory: string;
-  readonly workerSourcePath: string;
-  readonly retiringWorkerSourcePath: string;
-  readonly classes: readonly unknown[];
-  readonly killSwitch: boolean;
-}) => Promise<unknown>;
-
-const uiRoot = resolve(import.meta.dirname, '../../ui');
-
-/** The retiring worker, as a kill switch build writes it to `/service-worker.js`. */
-const buildKillSwitchWorker = async (): Promise<string> => {
-  const { buildServiceWorker } = (await import(
-    pathToFileURL(join(uiRoot, 'scripts/build-service-worker.ts')).href
-  )) as { readonly buildServiceWorker: BuildServiceWorker };
-  const buildDirectory = mkdtempSync(join(tmpdir(), 'tau-e2e-kill-switch-'));
-  try {
-    mkdirSync(join(buildDirectory, 'client'));
-    await buildServiceWorker({
-      buildDirectory,
-      workerSourcePath: join(uiRoot, 'app/offline/service-worker-kill-switch.ts'),
-      retiringWorkerSourcePath: join(uiRoot, 'app/offline/service-worker-kill-switch.ts'),
-      classes: [],
-      killSwitch: true,
-    });
-    return readFileSync(join(buildDirectory, 'client/service-worker.js'), 'utf8');
-  } finally {
-    rmSync(buildDirectory, { recursive: true, force: true });
-  }
-};
-
 const readBuildIdOf = async (page: Page): Promise<string | undefined> =>
   page.evaluate(() => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID);
-
-/** Wait until a worker controls the page and is activated: its precache install has completed. */
-const waitForControllingWorker = async (page: Page): Promise<void> => {
-  await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated', undefined, {
-    timeout: 60_000,
-    polling: 250,
-  });
-};
 
 /** The worker's registration and caches, or `undefined` while the page is between documents. */
 const readWorkerState = async (

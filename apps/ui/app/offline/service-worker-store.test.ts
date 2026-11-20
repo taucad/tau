@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import {
   completeDocuments,
   fillFromHttpCache,
@@ -6,7 +7,7 @@ import {
   readStoredUrls,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import type { PrecacheItem } from '#offline/service-worker-store.js';
+import type { PrecacheItem, StoreCache } from '#offline/service-worker-store.js';
 
 const origin = 'https://tau.new';
 const shell = `${origin}/w/__shell/__shell/index.html`;
@@ -22,8 +23,11 @@ const cacheKeyFor = (url: string): string | undefined => items.find((item) => it
 
 describe('readStoredUrls', () => {
   it('should read every stored request’s URL from every cache', async () => {
-    const cache = (urls: readonly string[]): Pick<Cache, 'keys' | 'match' | 'put' | 'delete'> =>
-      ({ keys: async () => urls.map((url) => new Request(url)) }) as unknown as Cache;
+    const cache = (urls: readonly string[]): StoreCache => {
+      const stored = mock<StoreCache>();
+      stored.keys.mockResolvedValue(urls.map((url) => new Request(url)));
+      return stored;
+    };
     await expect(readStoredUrls([cache([shellKey]), cache([root])])).resolves.toStrictEqual(new Set([shellKey, root]));
   });
 });

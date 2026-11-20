@@ -382,9 +382,10 @@ export const startDeployServer = async (
     previous: createRequestHandler({ build: builds.previous }),
     next: createRequestHandler({ build: builds.next }),
   };
+  // Mounted under `/assets`, where Express strips that prefix from the URL: each is rooted at its deploy's `assets/`.
   const serveAsset = {
-    previous: express.static(roots.previous, { immutable: true, maxAge: '1y' }),
-    next: express.static(roots.next, { immutable: true, maxAge: '1y' }),
+    previous: express.static(join(roots.previous, 'assets'), { immutable: true, maxAge: '1y' }),
+    next: express.static(join(roots.next, 'assets'), { immutable: true, maxAge: '1y' }),
   };
   const serveFile = {
     previous: express.static(roots.previous, { maxAge: '1h' }),

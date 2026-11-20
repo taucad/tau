@@ -205,3 +205,26 @@ it('ignores navigation links in the useful server-rendered shell', () => {
   );
   expect(collect({ ...build, readText: (path) => linkedFiles.get(path) })).toEqual(collect(build));
 });
+
+it('collects the route manifest a shell’s inline module script imports, though Vite’s manifest does not list it', () => {
+  const shell = '/__shell/home/index.html';
+  const withManifest: ClientBuildView = {
+    ...build,
+    readText: (relativePath) =>
+      relativePath === shell.slice(1)
+        ? `<link rel="modulepreload" href="/assets/entry-aaa.js"/>
+           <script type="module" async="">import "/assets/manifest-0a1b2c3d.js";
+           import("/assets/entry-aaa.js");</script>`
+        : build.readText(relativePath),
+    exists: (relativePath) => relativePath === 'assets/manifest-0a1b2c3d.js' || build.exists(relativePath),
+  };
+
+  expect(collect(withManifest, [{ document: shell, roots: [] }])).toStrictEqual([
+    shell,
+    '/assets/app-bbb.css',
+    '/assets/entry-aaa.js',
+    '/assets/manifest-0a1b2c3d.js',
+    '/assets/shared-ddd.js',
+    '/fonts/GeistMono-Variable.woff2',
+  ]);
+});

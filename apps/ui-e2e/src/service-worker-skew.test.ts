@@ -24,6 +24,8 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
+  createProfile,
+  firstPage,
   prepareDeploys,
   projectShellUrl,
   readBuildId,
@@ -262,4 +264,68 @@ describe('the web app’s service worker under deploy skew and request faults (P
     expect(documentRequests.length).toBeGreaterThanOrEqual(4);
     expect(documentRequests.filter((request) => !request.endsWith(' navigate'))).toStrictEqual([]);
   }, 180_000);
+
+  /**
+   * A returning visitor (FP4, D4): the visit that installed the previous deploy's worker, then the profile closed, the
+   * next deploy live with no retention of the previous one's files, and the browser's HTTP cache emptied, as weeks of
+   * other browsing would. The next visit's first navigation is answered by the installed worker from its precache: the
+   * previous deploy's shell, which imports that deploy's route manifest (`/assets/manifest-<version>.js`).
+   */
+  const returningVisitor = async (
+    offline: boolean,
+  ): Promise<{ readonly state: BootState; readonly manifestFailed: readonly string[] }> => {
+    if (deploys === undefined) {
+      expect.fail('the builds did not start');
+    }
+    const live = await startDeployServer(
+      deploys.builds,
+      { shells: deploys.shells, workers: deploys.workers.scripts, clientRoots: deploys.clientRoots },
+      { hold: false, retain: false },
+    );
+    server = live;
+    const profile = await createProfile(live.origin);
+    try {
+      const first = await profile.visit();
+      const firstOpen = await firstPage(first);
+      await firstOpen.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+      await waitForControllingWorker(firstOpen);
+      await first.close();
+
+      live.deploy();
+
+      const second = await profile.visit();
+      context = second;
+      const page = await firstPage(second);
+      watch(page);
+      const session = await second.newCDPSession(page);
+      await session.send('Network.clearBrowserCache');
+      await session.detach();
+      if (offline) {
+        await second.setOffline(true);
+      }
+      const opened = await page.goto(`${live.origin}${projectPath}`, { waitUntil: 'commit' });
+      expect(opened?.fromServiceWorker()).toBe(true);
+      const state = await waitForMount(page).catch((error: unknown) => {
+        // Name what the page could not load, so a stall says why.
+        throw new Error(`not mounted; failed /assets/* requests: ${JSON.stringify(failedAssets)}`, { cause: error });
+      });
+      return { state, manifestFailed: failedAssets.filter((failure) => /\/assets\/manifest-/u.test(failure)) };
+    } finally {
+      await context?.close();
+      context = undefined;
+      await profile.remove();
+    }
+  };
+
+  it('should mount a project from a precached shell whose deploy has aged out of asset retention (D4)', async () => {
+    const { state, manifestFailed } = await returningVisitor(false);
+    expect(state).toMatchObject({ mounted: true, stripShown: false });
+    expect(manifestFailed).toStrictEqual([]);
+  }, 240_000);
+
+  it('should mount a project on its first controlled open offline (D4)', async () => {
+    const { state, manifestFailed } = await returningVisitor(true);
+    expect(state).toMatchObject({ mounted: true, stripShown: false });
+    expect(manifestFailed).toStrictEqual([]);
+  }, 240_000);
 });

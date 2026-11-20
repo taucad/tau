@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { webPosthogOptions } from '#lib/web-posthog.lib.js';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { PostHogAnalyticsProvider } from '#providers/posthog-analytics-provider.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';

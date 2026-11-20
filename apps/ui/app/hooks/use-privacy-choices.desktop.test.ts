@@ -2,7 +2,7 @@
 import * as Cookies from 'es-cookie';
 import { afterEach, describe, expect, it } from 'vitest';
 import { consentCookieName } from '@taucad/consent';
-import { useCookieConsent } from '#hooks/use-cookie-consent.desktop.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.desktop.js';
 
 afterEach(() => {
   Cookies.remove(consentCookieName);

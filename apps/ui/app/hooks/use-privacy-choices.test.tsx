@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import { createElement } from 'react';
 import { consentCookieName } from '@taucad/consent';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';
 
 const accepted = JSON.stringify({ status: 'accepted', version: 1 });

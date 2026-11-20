@@ -324,7 +324,7 @@ export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
   return (
     /apps\/ui\/app\/root\.tsx(?:\?|$)/u.test(path) ||
     /apps\/ui\/app\/components\/(?:cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(path) ||
-    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
+    /apps\/ui\/app\/(?:hooks\/use-privacy-choices|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
       path,
     ) ||
     /apps\/ui\/app\/(?:offline\/|routes\/legal(?:\.|\/)|routes\/_index\/(?:route|legacy-landing|marketing-landing)\.tsx(?:\?|$))/u.test(

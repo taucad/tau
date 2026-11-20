@@ -9,8 +9,9 @@
  * since the HTTP cache would answer the worker's fetch of any other before the server could fail it:
  *
  * - **Rows 1 and 3, a request only the worker makes fails** (D1). A content blocker's rule that exempts scripts
- *   (EasyList Cookie List, `-cookie-consent-$~script`) lets the page load `use-cookie-consent-<hash>.js` as a script and
- *   blocks the same URL fetched by a worker, whose requests carry `Sec-Fetch-Dest: empty`. Row 1 removes the chunk from
+ *   (EasyList Cookie List, `-cookie-consent-$~script`) let the page load `use-cookie-consent-<hash>.js` as a script and
+ *   blocked the same URL fetched by a worker, whose requests carry `Sec-Fetch-Dest: empty`. FP6 renamed that module
+ *   (`use-privacy-choices`); the rows fail the same chunk as a stand-in for any one a blocker refuses the worker. Row 1 removes the chunk from
  *   the earlier worker's precache, as for a worker from before the chunk joined the interactive tier; the page loaded
  *   the chunk before the worker took it, so its fault is a Playwright `route` (the row only reloads, which the worker
  *   answers network first anyway). Row 3 is two real builds, the next one with the chunk and everything naming it
@@ -61,7 +62,9 @@ import type { BootState, Deploy, DeployServer, Deploys, ReturningVisitor } from 
 const bootDeadline = 20_000;
 
 /** The interactive-tier chunk the script-exempting blocker rule matches. */
-const blockedChunk = /^\/assets\/use-cookie-consent-[\w-]+\.js$/u;
+// FP6 renamed the chunk the rule matched (now `use-privacy-choices`, which no known rule matches); the rows fail the same
+// interactive-tier chunk as a stand-in for any chunk a blocker refuses to the worker alone.
+const blockedChunk = /^\/assets\/use-privacy-choices-[\w-]+\.js$/u;
 
 /** A request the page's worker makes: it has no destination. */
 const workerOnly = ['empty'];
@@ -136,7 +139,7 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     const chunk = entries.find((entry) => blockedChunk.test(entry.url));
     if (chunk === undefined) {
       expect.fail(
-        'the build precaches no use-cookie-consent chunk: pick another interactive-tier chunk for these rows',
+        'the build precaches no use-privacy-choices chunk: pick another interactive-tier chunk for these rows',
       );
     }
     return chunk.url;

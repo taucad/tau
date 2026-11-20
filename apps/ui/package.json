@@ -142,8 +142,6 @@
     "workbox-core": "catalog:",
     "workbox-expiration": "catalog:",
     "workbox-precaching": "catalog:",
-    "workbox-routing": "catalog:",
-    "workbox-strategies": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"
   },

@@ -115,27 +115,22 @@ export const triggerObservabilityWorkerError = (status: (message: string) => voi
 
 /** Terminate the actual product kernel worker while a document evaluation is pending. */
 export const triggerObservabilityKernelTermination = async (status: (message: string) => void): Promise<void> => {
-  const [
-    { createRuntimeClient },
-    { webWorkerTransport },
-    { fromMemoryFs },
-    { createUiRuntimeConfig },
-    { ENV: environment },
-  ] = await Promise.all([
-    load(async () =>
-      import('@taucad/runtime/client').then((loaded) => ({ createRuntimeClient: loaded.createRuntimeClient })),
-    ),
-    load(async () =>
-      import('@taucad/runtime/transport/web').then((loaded) => ({ webWorkerTransport: loaded.webWorkerTransport })),
-    ),
-    load(async () => import('@taucad/runtime/filesystem').then((loaded) => ({ fromMemoryFs: loaded.fromMemoryFs }))),
-    load(async () =>
-      import('#runtime/ui-runtime.config.js').then((loaded) => ({
-        createUiRuntimeConfig: loaded.createUiRuntimeConfig,
-      })),
-    ),
-    load(async () => import('#environment.config.js').then((loaded) => ({ ENV: loaded.ENV }))),
-  ]);
+  const [{ createRuntimeClient }, { webWorkerTransport }, { fromMemoryFs }, { createUiRuntimeConfig }, environment] =
+    await Promise.all([
+      load(async () =>
+        import('@taucad/runtime/client').then((loaded) => ({ createRuntimeClient: loaded.createRuntimeClient })),
+      ),
+      load(async () =>
+        import('@taucad/runtime/transport/web').then((loaded) => ({ webWorkerTransport: loaded.webWorkerTransport })),
+      ),
+      load(async () => import('@taucad/runtime/filesystem').then((loaded) => ({ fromMemoryFs: loaded.fromMemoryFs }))),
+      load(async () =>
+        import('#runtime/ui-runtime.config.js').then((loaded) => ({
+          createUiRuntimeConfig: loaded.createUiRuntimeConfig,
+        })),
+      ),
+      load(async () => import('#environment.config.js').then(({ ENV }) => ENV)),
+    ]);
   const worker = createModuleWorker(
     () => new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),
     { name: 'kernel' },

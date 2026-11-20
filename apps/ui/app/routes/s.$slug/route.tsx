@@ -162,6 +162,23 @@ export const loader = async (arguments_: Route.LoaderArgs): Promise<unknown> => 
   });
 };
 
+/**
+ * The document's `Cache-Control` is the loader's when it chose one. React Router sends a loader's headers on the
+ * document only through this export, and `entry.server.tsx` sets its `private, no-cache` default only when no route
+ * chose. A cloud link's viewer payload and its lock screens (`private, no-store`, thrown with the lock response) must
+ * never be stored; a portable or builtin share sets nothing and keeps the default.
+ *
+ * @returns The parent's headers, with the loader's or the thrown response's `Cache-Control` when it set one.
+ */
+export const headers = ({ parentHeaders, loaderHeaders, errorHeaders }: Route.HeadersArgs): Headers => {
+  const documentHeaders = new Headers(parentHeaders);
+  const cacheControl = errorHeaders?.get('Cache-Control') ?? loaderHeaders.get('Cache-Control');
+  if (cacheControl !== null) {
+    documentHeaders.set('Cache-Control', cacheControl);
+  }
+  return documentHeaders;
+};
+
 export const meta: MetaFunction<typeof loader> = (arguments_) => {
   const loaderData = arguments_.loaderData as ShareRouteLoaderData | PublicationRouteLoaderData | undefined;
   if (loaderData && !('kind' in loaderData)) {

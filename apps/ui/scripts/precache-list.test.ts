@@ -3,7 +3,12 @@
  * output and fail the build when it cannot.
  */
 import { expect, it } from 'vitest';
-import { collectPrecacheFiles, precacheEntries } from '#scripts/precache-list.js';
+import {
+  collectPrecacheFiles,
+  precacheEntries,
+  readInlineModuleSpecifiers,
+  readNamedFiles,
+} from '#scripts/precache-list.js';
 import type { ClientBuildView, PrecacheDocument, ViteManifest } from '#scripts/precache-list.js';
 
 const usage: PrecacheDocument = { document: '/usage/index.html', roots: [] };
@@ -204,4 +209,36 @@ it('ignores navigation links in the useful server-rendered shell', () => {
     `${files.get('usage/index.html')}<a href="/projects">Projects</a><link rel="canonical" href="/usage"><a download href="/private/export">Export</a>`,
   );
   expect(collect({ ...build, readText: (path) => linkedFiles.get(path) })).toEqual(collect(build));
+});
+
+it('collects the route manifest a shell imports only from an inline script, as a leaf (D4)', () => {
+  const shell = `<!DOCTYPE html><html><head>
+      <link rel="modulepreload" href="/assets/entry-aaa.js"/>
+      <script>window.__reactRouterContext = {};</script>
+      <script type="module" async="">import "/assets/manifest-0123abcd.js";
+import * as route0 from "/assets/entry-aaa.js";
+import("/assets/shared-ddd.js");</script>
+      <script>Promise.all(["/assets/sprite-kkk.svg"].map((u)=>fetch(u)))</script>
+    </head><body><meta rel="icon" href="/favicon.ico"/></body></html>`;
+  const withManifest: ClientBuildView = {
+    ...build,
+    readText: (relativePath) => (relativePath === 'w/__shell/__shell/index.html' ? shell : files.get(relativePath)),
+    exists: (relativePath) => relativePath === 'assets/manifest-0123abcd.js' || files.has(relativePath),
+  };
+
+  expect(readInlineModuleSpecifiers(shell)).toStrictEqual([
+    '/assets/manifest-0123abcd.js',
+    '/assets/entry-aaa.js',
+    '/assets/shared-ddd.js',
+  ]);
+  expect(collect(withManifest, [{ document: '/w/__shell/__shell/index.html', roots: [] }])).toContain(
+    '/assets/manifest-0123abcd.js',
+  );
+  // What a browser would load from the document: loading tags and script text, never a `<meta>` or a page link.
+  expect(readNamedFiles(shell)).toStrictEqual([
+    '/assets/entry-aaa.js',
+    '/assets/manifest-0123abcd.js',
+    '/assets/shared-ddd.js',
+    '/assets/sprite-kkk.svg',
+  ]);
 });

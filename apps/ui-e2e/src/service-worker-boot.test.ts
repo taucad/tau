@@ -1,0 +1,498 @@
+/**
+ * The web app's service worker on the boot path (progressive loading PL7), red-first rows of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md` ("Red-first regression test", FP0), on two deploys of one
+ * built UI (`support/two-deploys.ts`) with the real worker, never `serviceWorkers: 'block'`.
+ *
+ * The rule under test: a worker may make the online app faster or available offline, and never make it fail where no
+ * worker would. Faults are injected on the server where a row needs the browser's HTTP cache on (a cache-first shell as
+ * a returning visitor gets it; a Playwright `route` turns that cache off, Finding 7g), and on a file no page has loaded,
+ * since the HTTP cache would answer the worker's fetch of any other before the server could fail it:
+ *
+ * - **Rows 1 and 3, a request only the worker makes fails** (D1). A content blocker's rule that exempts scripts
+ *   (EasyList Cookie List, `-cookie-consent-$~script`) lets the page load `use-cookie-consent-<hash>.js` as a script and
+ *   blocks the same URL fetched by a worker, whose requests carry `Sec-Fetch-Dest: empty`. Row 1 removes the chunk from
+ *   the earlier worker's precache, as for a worker from before the chunk joined the interactive tier; the page loaded
+ *   the chunk before the worker took it, so its fault is a Playwright `route` (the row only reloads, which the worker
+ *   answers network first anyway). Row 3 is two real builds, the next one with the chunk and everything naming it
+ *   renamed, and the server resets the worker's requests for the renamed chunk.
+ * - **Row 2, a precached shell names a file the live deploy no longer serves** (D4). The project shell imports React
+ *   Router's route manifest from an inline script; once the deploy that built the shell has aged out of asset
+ *   retention, the shell must still boot from what the worker holds.
+ * - **Row 4, the next worker's install cannot fetch one entry** (D2). The successor must still install.
+ * - **Row 6, the kill switch over a stalled worker**: one deploy of the retiring worker frees a browser that row 1's
+ *   fault stalls (the mitigation on staging; expected green before any fix).
+ * - **Row 7, the route manifest aged out, first controlled open offline** (D4).
+ * - **Row 8, a navigation stays a navigation** (D15): under the worker, the server sees the browser's own navigation,
+ *   never a request the worker re-issued. Chrome keeps `Sec-Fetch-Mode: navigate` on a navigation the worker passes to
+ *   `fetch`, but sends it as `Sec-Fetch-Dest: empty`.
+ *
+ * The page must mount within the boot watchdog's deadline (`boot-watchdog.ts`, 20 s), and online with no failed
+ * `/assets/*` request. Rows 1 and 3 have a control without the fault that passes on the same harness. Row 5 (a pre-fix
+ * worker, then the fix) lands with FP3, which it needs.
+ *
+ * Runs in the merge queue (`test:e2e:deploy-skew`) by operator decision 7 of the blueprint, outside the five-nightly
+ * ratchet. Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at a Chromium other than
+ * Playwright's pinned revision.
+ */
+// @vitest-environment node
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
+import { chromium } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+// oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
+import {
+  buildKillSwitchWorker,
+  buildRoot,
+  createReturningVisitor,
+  killSwitchPageScript,
+  prepareDeploys,
+  readBootState,
+  readPreFixWorker,
+  startDeployServer,
+  waitForControllingWorker,
+} from './support/two-deploys.ts';
+import type { BootState, Deploy, DeployServer, Deploys, ReturningVisitor } from './support/two-deploys.ts';
+// oxlint-enable no-restricted-imports
+
+/** `boot-watchdog.ts`'s deadline: a page that has not mounted its shell by then shows the strip. */
+const bootDeadline = 20_000;
+
+/** The interactive-tier chunk the script-exempting blocker rule matches. */
+const blockedChunk = /^\/assets\/use-cookie-consent-[\w-]+\.js$/u;
+
+/** A request the page's worker makes: it has no destination. */
+const workerOnly = ['empty'];
+
+// oxlint-disable-next-line typescript/no-restricted-types -- Workbox's precache wire value for "no revision".
+type PrecacheEntry = { readonly url: string; readonly revision: string | null };
+
+/** A route manifest only the previous deploy serves, which its project shell imports. */
+const previousOnlyManifest = '/assets/manifest-00000000.js';
+
+describe('the web app’s service worker on the boot path (PL7 staging stall)', () => {
+  let browser: Browser | undefined;
+  let deploys: Deploys | undefined;
+  let renamedDeploys: Deploys | undefined;
+  let killSwitchWorker = '';
+  let server: DeployServer | undefined;
+  let context: BrowserContext | undefined;
+  let visitor: ReturningVisitor<BrowserContext> | undefined;
+  /** Every `/assets/*` request the page saw fail, as the console would show it. */
+  let failedAssets: string[] = [];
+
+  beforeAll(async () => {
+    deploys = await prepareDeploys('service-worker-boot');
+    renamedDeploys = await prepareDeploys('service-worker-boot-renamed', { rename: blockedChunk });
+    killSwitchWorker = await buildKillSwitchWorker();
+    browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
+  }, 300_000);
+
+  afterEach(async () => {
+    await context?.close();
+    await visitor?.remove();
+    await server?.close();
+    context = undefined;
+    visitor = undefined;
+    server = undefined;
+    failedAssets = [];
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+    await deploys?.remove();
+    await renamedDeploys?.remove();
+  });
+
+  const watch = (page: Page): void => {
+    page.on('requestfailed', (request) => {
+      const { pathname } = new URL(request.url());
+      if (pathname.startsWith('/assets/')) {
+        failedAssets.push(`${pathname} ${request.failure()?.errorText ?? ''}`);
+      }
+    });
+    page.on('response', (response) => {
+      const { pathname } = new URL(response.url());
+      if (pathname.startsWith('/assets/') && response.status() >= 400) {
+        failedAssets.push(`${pathname} ${String(response.status())}`);
+      }
+    });
+  };
+
+  const requireDeploys = (): { readonly same: Deploys; readonly renamed: Deploys; readonly browser: Browser } => {
+    if (browser === undefined || deploys === undefined || renamedDeploys === undefined) {
+      expect.fail('the builds and browser did not start');
+    }
+    return { same: deploys, renamed: renamedDeploys, browser };
+  };
+
+  /** The blocked chunk's URL in the build's own precache list. */
+  const readBlockedChunk = (): string => {
+    const entries = JSON.parse(
+      readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8'),
+    ) as PrecacheEntry[];
+    const chunk = entries.find((entry) => blockedChunk.test(entry.url));
+    if (chunk === undefined) {
+      expect.fail(
+        'the build precaches no use-cookie-consent chunk: pick another interactive-tier chunk for these rows',
+      );
+    }
+    return chunk.url;
+  };
+
+  /** The build's worker without one precache entry: the worker of a deploy from before the chunk joined the tier. */
+  const withoutPrecacheEntry = (script: string, url: string): string => {
+    const entry = `{"revision":null,"url":"${url}"}`;
+    const without = script.includes(`${entry},`) ? script.replace(`${entry},`, '') : script.replace(`,${entry}`, '');
+    if (without === script) {
+      expect.fail(`the built worker does not precache ${url}`);
+    }
+    return without;
+  };
+
+  /** A fresh context on a fresh server, with the previous deploy live, its Home open and its worker in control. */
+  const openUnderWorker = async (
+    pair: Deploys,
+    workers: Readonly<Record<Deploy, string>>,
+    path = '/',
+  ): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
+    const { browser: launched } = requireDeploys();
+    const live = await startDeployServer(
+      pair.builds,
+      { shells: pair.shells, workers, clientRoots: pair.clientRoots },
+      { hold: false, retain: true },
+    );
+    server = live;
+    context = await launched.newContext();
+    await context.addCookies([{ name: 'tau-entry', value: 'app', url: live.origin }]);
+    const page = await context.newPage();
+    watch(page);
+    await page.goto(`${live.origin}${path}`, { waitUntil: 'networkidle' });
+    await waitForControllingWorker(page);
+    return { page, live };
+  };
+
+  const waitForMount = async (page: Page): Promise<BootState> => {
+    await expect
+      .poll(async () => readBootState(page), { timeout: bootDeadline, interval: 250 })
+      .toMatchObject({ mounted: true });
+    return readBootState(page);
+  };
+
+  const reloadAfterDeploy = async (page: Page, live: DeployServer, chunk: string | undefined): Promise<BootState> => {
+    live.deploy();
+    if (chunk !== undefined) {
+      live.inject({ path: chunk, destination: workerOnly, answer: 'reset' });
+    }
+    failedAssets = [];
+    await page.reload({ waitUntil: 'commit' });
+    return waitForMount(page);
+  };
+
+  describe('when a request only the worker makes fails (D1)', () => {
+    const openHomeUnderEarlierWorker = async (): Promise<{ readonly page: Page; readonly live: DeployServer }> => {
+      const { same } = requireDeploys();
+      return openUnderWorker(same, {
+        previous: withoutPrecacheEntry(same.workers.scripts.previous, readBlockedChunk()),
+        next: same.workers.scripts.next,
+      });
+    };
+
+    it('control: should mount Home on the live build after a reload under an earlier worker', async () => {
+      const { page, live } = await openHomeUnderEarlierWorker();
+      const state = await reloadAfterDeploy(page, live, undefined);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(deploys?.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('row 1: should mount Home on the live build when the worker’s own fetch of an interactive chunk fails', async () => {
+      const { page, live } = await openHomeUnderEarlierWorker();
+      // The page loaded the chunk before the worker took it, so the HTTP cache would answer the worker's fetch before
+      // the server could fail it. This row only reloads, which the worker answers network first whatever the cache, so
+      // the fault is the browser's own: Playwright fails every request for the chunk but the page's script load, as the
+      // blocker does (a `route` turns the HTTP cache off, which is what makes the worker's fetch reach it).
+      const chunk = readBlockedChunk();
+      await context?.route(`**${chunk}`, async (route) => {
+        if (route.request().resourceType() === 'script' && route.request().serviceWorker() === null) {
+          await route.continue();
+          return;
+        }
+        await route.abort('blockedbyclient');
+      });
+      const state = await reloadAfterDeploy(page, live, undefined);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(deploys?.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    const renamedChunk = (): string => {
+      const renamed = renamedDeploys?.renamed.get(readBlockedChunk());
+      if (renamed === undefined) {
+        expect.fail('the next deploy did not rename the blocked chunk');
+      }
+      return renamed;
+    };
+
+    it('control: should mount Home on the next real build after a reload under the previous build’s worker', async () => {
+      const { renamed } = requireDeploys();
+      const { page, live } = await openUnderWorker(renamed, renamed.workers.scripts);
+      const state = await reloadAfterDeploy(page, live, undefined);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(renamed.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+      expect(live.requests.some((request) => request.path === renamedChunk())).toBe(true);
+    }, 180_000);
+
+    it('row 3: should mount Home on the next real build when the worker’s own fetch of its renamed boot chunk fails', async () => {
+      const { renamed } = requireDeploys();
+      const { page, live } = await openUnderWorker(renamed, renamed.workers.scripts);
+      const state = await reloadAfterDeploy(page, live, renamedChunk());
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(renamed.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+  });
+
+  it('row 4: should install the next deploy’s worker when its fetch of one precache entry fails', async () => {
+    const { renamed } = requireDeploys();
+    const { page, live } = await openUnderWorker(renamed, renamed.workers.scripts, '/projects');
+    live.deploy();
+    // The next deploy's renamed chunk: no page has loaded it, so the install's fetch cannot come from the HTTP cache.
+    const chunk = renamed.renamed.get(readBlockedChunk()) ?? '';
+    live.inject({ path: chunk, destination: workerOnly, answer: 'reset' });
+    // The browser's update check, from the page that stays on the previous deploy.
+    const outcome = await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration === undefined) {
+        return 'no registration';
+      }
+      const settled = new Promise<string>((resolve) => {
+        registration.addEventListener('updatefound', () => {
+          const worker = registration.installing;
+          worker?.addEventListener('statechange', () => {
+            if (worker.state === 'redundant') {
+              resolve('redundant');
+            } else if (worker.state !== 'installing') {
+              resolve('installed');
+            }
+          });
+        });
+        setTimeout(() => {
+          resolve('still installing');
+        }, 60_000);
+      });
+      await registration.update().catch(() => undefined);
+      return settled;
+    });
+    expect(live.requests.some((request) => request.path === chunk && request.fault === 'reset')).toBe(true);
+    expect(outcome).toBe('installed');
+  }, 180_000);
+
+  it('FP1: should install without one file, mount Home online and offline, and never serve that class from cache', async () => {
+    const { same, browser: launched } = requireDeploys();
+    // A precached script the project shell preloads and Home's shell does not name.
+    const homeShell = readFileSync(join(buildRoot, 'client/__shell/home/index.html'), 'utf8');
+    const entries = JSON.parse(
+      readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8'),
+    ) as PrecacheEntry[];
+    const projectOnly = entries.find(
+      ({ url }) => url.endsWith('.js') && same.shells.previous.includes(`"${url}"`) && !homeShell.includes(url),
+    )?.url;
+    if (projectOnly === undefined) {
+      expect.fail('the project shell names no precached script Home’s does not');
+    }
+    const live = await startDeployServer(
+      same.builds,
+      { shells: same.shells, workers: same.workers.scripts },
+      {
+        hold: false,
+        retain: true,
+      },
+    );
+    server = live;
+    // Only the worker's requests for the file fail; no page asks for it here but a prefetch, which the fault fails too.
+    live.inject({ path: projectOnly, destination: workerOnly, answer: 'reset' });
+    context = await launched.newContext();
+    await context.addCookies([{ name: 'tau-entry', value: 'app', url: live.origin }]);
+    const page = await context.newPage();
+    await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+    await waitForControllingWorker(page);
+    expect(live.requests.some((request) => request.path === projectOnly && request.fault === 'reset')).toBe(true);
+
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await waitForMount(page);
+
+    await context.setOffline(true);
+    const homeOffline = await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    expect(homeOffline?.fromServiceWorker()).toBe(true);
+    await waitForMount(page);
+    // The project class is incomplete: its navigation is the network's, which is offline.
+    await expect(page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' })).rejects.toThrow(
+      /ERR_INTERNET_DISCONNECTED|ERR_FAILED/u,
+    );
+  }, 180_000);
+
+  it('FP1: should answer a stored file offline when the request itself restarts the worker', async () => {
+    const { same } = requireDeploys();
+    const { page } = await openUnderWorker(same, same.workers.scripts);
+    // A precached script Home's shell names: stored by the install, and loaded by this page.
+    const homeShell = readFileSync(join(buildRoot, 'client/__shell/home/index.html'), 'utf8');
+    const entries = JSON.parse(
+      readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8'),
+    ) as PrecacheEntry[];
+    const stored = entries.find(({ url }) => url.endsWith('.js') && homeShell.includes(`"${url}"`))?.url;
+    if (stored === undefined || context === undefined) {
+      expect.fail('Home’s shell names no precached script');
+    }
+    // Only the worker can answer: no HTTP cache copy, no network, and an idle worker that this request restarts, so
+    // its index is not loaded yet.
+    const session = await context.newCDPSession(page);
+    await session.send('Network.clearBrowserCache');
+    await session.send('ServiceWorker.enable');
+    await session.send('ServiceWorker.stopAllWorkers');
+    await context.setOffline(true);
+    const answer = await page.evaluate(async (url) => {
+      try {
+        const response = await fetch(url);
+        return response.status;
+      } catch (error) {
+        return String(error);
+      }
+    }, stored);
+    expect(answer).toBe(200);
+  }, 180_000);
+
+  it('row 6: should free a browser that a stalled worker holds with one deploy of the kill switch', async () => {
+    const { same } = requireDeploys();
+    const chunk = readBlockedChunk();
+    const { page, live } = await openUnderWorker(same, {
+      // A worker from before FP1 (the fixed one never stalls the page): the stall to free is the pre-fix worker's.
+      previous: readPreFixWorker([chunk]),
+      next: killSwitchWorker,
+    });
+    // Row 1's fault: the page is stalled on the previous deploy, reload after reload.
+    await context?.route(`**${chunk}`, async (route) => {
+      if (route.request().resourceType() === 'script' && route.request().serviceWorker() === null) {
+        await route.continue();
+        return;
+      }
+      await route.abort('blockedbyclient');
+    });
+    await page.reload({ waitUntil: 'commit' });
+    await expect
+      .poll(async () => readBootState(page), { timeout: bootDeadline + 10_000, interval: 500 })
+      .toMatchObject({ mounted: false, stripShown: true });
+    // From here the live deploy is a kill switch build: its pages register nothing.
+    await context?.addInitScript(killSwitchPageScript);
+    live.deploy();
+    // The first load after the deploy may still be the stalled worker's; its update check fetches the retiring worker.
+    await page.reload({ waitUntil: 'commit' });
+    const retiringFetched = async (): Promise<boolean> => {
+      try {
+        return await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          return registration === undefined || registration.waiting !== null;
+        });
+      } catch {
+        return false;
+      }
+    };
+    await expect.poll(retiringFetched, { timeout: 60_000, interval: 250 }).toBe(true);
+    // The second mounts, with no worker and no worker cache left.
+    failedAssets = [];
+    await page.reload({ waitUntil: 'commit' });
+    const state = await waitForMount(page);
+    expect(state.buildId).toBe(String(same.nextBuildId));
+    const workerState = async (): Promise<unknown> => {
+      try {
+        return await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          const names = await caches.keys();
+          return { registered: registration !== undefined, caches: names.filter((name) => name.startsWith('tau-')) };
+        });
+      } catch {
+        return undefined;
+      }
+    };
+    await expect.poll(workerState, { timeout: 30_000, interval: 250 }).toStrictEqual({ registered: false, caches: [] });
+    expect(failedAssets).toStrictEqual([]);
+  }, 180_000);
+
+  describe('when the precached shell names a route manifest the live deploy no longer serves (D4)', () => {
+    /**
+     * A returning visitor's two visits. The first installs the worker from a page outside a project workspace; between
+     * them the next deploy goes live and the previous deploy's route manifest leaves retention; the second opens a
+     * project, online or offline, and its first navigation is answered by the installed worker.
+     */
+    const visitTwice = async (
+      offline: boolean,
+    ): Promise<{ readonly state: BootState; readonly fromWorker: boolean }> => {
+      const { same } = requireDeploys();
+      const manifest = /import "(\/assets\/manifest-[\da-f]+\.js)"/u.exec(same.shells.previous)?.[1];
+      if (manifest === undefined) {
+        expect.fail('the prerendered project shell imports no route manifest');
+      }
+      const live = await startDeployServer(
+        same.builds,
+        {
+          shells: { previous: same.shells.previous.replaceAll(manifest, previousOnlyManifest), next: same.shells.next },
+          // The previous deploy's worker names the manifest wherever its build named it.
+          workers: {
+            previous: same.workers.scripts.previous.replaceAll(manifest, previousOnlyManifest),
+            next: same.workers.scripts.next,
+          },
+          previousOnly: { [previousOnlyManifest]: readFileSync(join(buildRoot, 'client', manifest.slice(1)), 'utf8') },
+        },
+        { hold: false, retain: true },
+      );
+      server = live;
+      visitor = createReturningVisitor(async (profile) =>
+        chromium.launchPersistentContext(profile, { executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] }),
+      );
+      await visitor.visit(async (page) => {
+        await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+        await waitForControllingWorker(page);
+      });
+      live.deploy();
+      return visitor.visit(async (page, opened) => {
+        watch(page);
+        if (offline) {
+          await opened.setOffline(true);
+        }
+        const response = await page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' });
+        const state = await waitForMount(page);
+        return { state, fromWorker: response?.fromServiceWorker() === true };
+      });
+    };
+
+    it('row 2: should mount a project online within the boot deadline with no failed file', async () => {
+      const { state } = await visitTwice(false);
+      expect(state.mounted).toBe(true);
+      expect(state.stripShown).toBe(false);
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('row 7: should mount a project on its first controlled open offline', async () => {
+      const { state, fromWorker } = await visitTwice(true);
+      expect(fromWorker).toBe(true);
+      expect(state.mounted).toBe(true);
+      expect(state.stripShown).toBe(false);
+    }, 180_000);
+  });
+
+  it('row 8: should let the browser’s own navigation reach the server under the worker', async () => {
+    const { same } = requireDeploys();
+    const { page, live } = await openUnderWorker(same, same.workers.scripts);
+    const from = live.requests.length;
+    // A reload of Home with the app entry (network first), and Home without it (passed to the network).
+    await page.reload({ waitUntil: 'commit' });
+    await waitForMount(page);
+    await context?.clearCookies({ name: 'tau-entry' });
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await page.waitForLoadState('domcontentloaded');
+    const documents = live.requests.slice(from).filter((request) => request.path === '/');
+    expect(documents.length).toBeGreaterThanOrEqual(2);
+    // Chrome keeps `navigate` as the mode of a navigation the worker re-issues, but not its destination (`empty`).
+    expect(documents.map(({ mode, destination }) => ({ mode, destination }))).toStrictEqual(
+      documents.map(() => ({ mode: 'navigate', destination: 'document' })),
+    );
+  }, 180_000);
+});

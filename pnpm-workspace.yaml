@@ -400,8 +400,6 @@ catalog:
   workbox-core: 7.4.1
   workbox-expiration: 7.4.1
   workbox-precaching: 7.4.1
-  workbox-routing: 7.4.1
-  workbox-strategies: 7.4.1
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

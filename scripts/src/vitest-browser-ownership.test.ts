@@ -180,6 +180,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // across document loads, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/service-worker.test.ts',
       'apps/ui-e2e/src/service-worker-deploy.test.ts',
+      // The same worker on the boot path: it also closes and reopens a persistent profile (a returning visitor) and
+      // fails the worker's own requests on the server. Its harness (support/two-deploys.ts) takes the driver from it.
+      'apps/ui-e2e/src/service-worker-boot.test.ts',
       // The hosted staging observability gate owns isolated browser contexts and cross-document failure
       // scenarios, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/observability.staging.test.ts',

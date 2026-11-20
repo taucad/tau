@@ -5,10 +5,9 @@
  * `adoptPersistedPose`, the camera presents the saved pose and the adapter's camera follow calls `gizmo.update()`.
  * The cube must then be named for the pose it shows, as a cube built at that pose is.
  *
- * 3.0.0-beta.4 keeps the default view's name (it rewrote the name only when the view moved onto or off a target), so
- * the second test runs as `it.fails`. The three-viewport-gizmo beta with the fix (fork commit "Derive the accessible
- * name from every pose the gizmo observes") makes it pass, which fails `it.fails`: the bump flips it to `it`. The first
- * test is a plain `it`, so a harness that stops building the cube cannot satisfy `it.fails`.
+ * Up to 3.0.0-beta.4 the gizmo kept the default view's name, because it rewrote the name only when the view moved onto
+ * or off a target. 3.0.0-beta.5 derives the name from every pose the gizmo observes. The first test guards the harness:
+ * it fails if the harness stops building the cube.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Raycaster, Scene } from 'three';
@@ -210,7 +209,7 @@ describe('view cube accessible name', () => {
     expect(savedPoseName()).not.toBe('Near Top Front Right');
   });
 
-  it.fails('should rename the cube for a saved pose a reload adopts after the cube is built', () => {
+  it('should rename the cube for a saved pose a reload adopts after the cube is built', () => {
     const expected = savedPoseName();
     const harness = createHarness();
     harness.attachCube();

@@ -15,16 +15,16 @@ import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SliderInput } from '@taucad/ui/components/slider-input';
 import { Switch } from '@taucad/ui/components/switch';
-import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
-import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
+import type { SettingId } from '#components/settings/settings-catalogue.js';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import {
   resetToTauDefault,
   viewDefaultCopy,
   viewDefaultsInfo,
-} from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
-import type { ViewDefaultLeaf } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
-import type { SectionWriteResult } from '#preferences/section-store.js';
-import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
+} from '#components/settings/viewer/viewer-settings-copy.js';
+import type { ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
+import { usePersonSettings } from '#components/settings/person-settings.js';
+import type { PersonSettingsWriteResult } from '#components/settings/person-settings.js';
 
 /** The rows in order, with their registry ids. */
 const rows = [
@@ -139,10 +139,10 @@ export function ViewDefaultsGroup({
   onWrite,
 }: {
   readonly viewer: ViewerPreferences;
-  readonly writeViewer: (patch: LeafPatch<ViewerPreferences>) => SectionWriteResult;
-  readonly onWrite: (result: SectionWriteResult) => void;
+  readonly writeViewer: (patch: LeafPatch<ViewerPreferences>) => PersonSettingsWriteResult;
+  readonly onWrite: (result: PersonSettingsWriteResult) => void;
 }): React.JSX.Element {
-  const telemetry = useOnboardingTelemetry();
+  const { telemetry } = usePersonSettings();
   const defaults = viewer.viewDefaults;
   const setLeaves = Object.keys(defaults).filter(
     (leaf) => defaults[leaf as ViewDefaultLeaf] !== undefined,

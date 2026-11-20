@@ -20,7 +20,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
+import { SettingsRow } from '#components/settings/settings-item.js';
 
 export type LinkedAccountProps = {
   account?: Account;

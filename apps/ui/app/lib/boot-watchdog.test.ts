@@ -165,8 +165,6 @@ describe('web boot watchdog Reload under a service worker (FP5)', () => {
           return true;
         },
       },
-      RegExp,
-      Promise,
     };
     runInNewContext(buildBootWatchdogScript() ?? '', context);
     const advance = async (milliseconds: number): Promise<void> => {

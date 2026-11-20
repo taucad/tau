@@ -15,6 +15,7 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
+import { disconnectRemoteFlags } from '#flags/remote-flags.js';
 import { mock } from 'vitest-mock-extended';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -396,6 +397,14 @@ const holdReplayAtResources = () => {
     },
   };
 };
+
+/*
+ * No analytics boundary runs here, so the PostHog-backed flags would stay unknown for the whole file and every
+ * create would read the listing for the first-project tour. Settle them as a host without analytics does.
+ */
+beforeEach(() => {
+  disconnectRemoteFlags();
+});
 
 describe('useProjectManager recovery (I8)', () => {
   beforeEach(() => {

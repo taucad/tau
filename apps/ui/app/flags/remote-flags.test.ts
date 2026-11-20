@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getAllFlags, isFeatureEnabled, resetFlagCache, resolveFlags } from '#flags/feature-flags.js';
+import { getAllFlags, readFeatureState, resetFlagCache, resolveFlags, whenFeatureKnown } from '#flags/feature-flags.js';
 import { featureFlagDefaults, featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
 import type { FlagDefinition } from '#flags/flag.constants.js';
 import type { RemoteFlagClient } from '#flags/remote-flags.js';
@@ -13,7 +13,7 @@ import {
   readRemoteFlagStatus,
   readRemoteFlagValues,
 } from '#flags/remote-flags.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 
 /** A PostHog client stand-in: `evaluate` plays a `/flags` response or a console override. */
 function createClient(initial?: Record<string, string | boolean>): RemoteFlagClient & {
@@ -79,13 +79,15 @@ describe('remote flag resolution', () => {
     // A client that is connected but has not loaded flags yet changes nothing.
     connectRemoteFlags(createClient());
     expect(readRemoteFlagValues()).toBeUndefined();
-    expect(isFeatureEnabled('onboarding')).toBe(false);
+    expect(resolveFlags().onboarding).toBe(false);
+    // ...but the flag is not known yet, so no reader can take that default for "off".
+    expect(readFeatureState('onboarding')).toBe('unknown');
   });
 
   it("prefers PostHog's evaluated value over the default once flags load", () => {
     connectRemoteFlags(createClient({ onboarding: true, 'viewer-controls': 'test-variant', unrelated: true }));
-    expect(isFeatureEnabled('onboarding')).toBe(true);
-    expect(isFeatureEnabled('viewerControls')).toBe(true);
+    expect(resolveFlags().onboarding).toBe(true);
+    expect(resolveFlags().viewerControls).toBe(true);
     expect(readRemoteFlagValues()).toStrictEqual({ onboarding: true, viewerControls: true });
   });
 
@@ -113,24 +115,24 @@ describe('remote flag resolution', () => {
   it('follows re-evaluations and console overrides live, without a cache reset', () => {
     const client = createClient({ onboarding: false });
     connectRemoteFlags(client);
-    expect(isFeatureEnabled('onboarding')).toBe(false);
+    expect(resolveFlags().onboarding).toBe(false);
     client.evaluate({ onboarding: true, 'onboarding-auto-open': true });
-    expect(isFeatureEnabled('onboarding')).toBe(true);
-    expect(isFeatureEnabled('onboardingAutoOpen')).toBe(true);
+    expect(resolveFlags().onboarding).toBe(true);
+    expect(resolveFlags().onboardingAutoOpen).toBe(true);
     client.evaluate({ onboarding: false, 'onboarding-auto-open': true });
-    expect(isFeatureEnabled('onboardingAutoOpen')).toBe(false);
+    expect(resolveFlags().onboardingAutoOpen).toBe(false);
   });
 
   it('returns every PostHog-backed flag to its default when analytics are withdrawn or declined', () => {
     const client = createClient({ onboarding: true, 'viewer-controls': true });
     connectRemoteFlags(client);
-    expect(isFeatureEnabled('onboarding')).toBe(true);
+    expect(resolveFlags().onboarding).toBe(true);
     disconnectRemoteFlags();
     expect(client.listenerCount()).toBe(0);
     expect(getAllFlags()).toStrictEqual(featureFlagDefaults);
     // Evaluations after the withdrawal are not followed.
     client.evaluate({ onboarding: true });
-    expect(isFeatureEnabled('onboarding')).toBe(false);
+    expect(resolveFlags().onboarding).toBe(false);
   });
 
   it('keeps defaults when the client throws while subscribing', () => {
@@ -198,21 +200,25 @@ describe('remote flag status', () => {
   });
 });
 
-describe('useFeature with PostHog-backed flags', () => {
-  it('re-renders when PostHog flags load, change and are withdrawn', () => {
+describe('useFeatureState with PostHog-backed flags', () => {
+  it('should re-render when PostHog flags load, change and are withdrawn', () => {
     const client = createClient();
     const render = vi.fn();
     const { result } = renderHook(() => {
       render();
-      return useFeature('onboarding');
+      return useFeatureState('onboarding');
     });
-    expect(result.current).toBe(false);
+    expect(result.current).toBe('off');
 
     act(() => {
       connectRemoteFlags(client);
+    });
+    expect(result.current).toBe('unknown');
+
+    act(() => {
       client.evaluate({ onboarding: true });
     });
-    expect(result.current).toBe(true);
+    expect(result.current).toBe('on');
 
     const renders = render.mock.calls.length;
     act(() => {
@@ -224,7 +230,7 @@ describe('useFeature with PostHog-backed flags', () => {
     act(() => {
       client.evaluate({ onboarding: false });
     });
-    expect(result.current).toBe(false);
+    expect(result.current).toBe('off');
 
     act(() => {
       client.evaluate({ onboarding: true });
@@ -232,16 +238,51 @@ describe('useFeature with PostHog-backed flags', () => {
     act(() => {
       disconnectRemoteFlags();
     });
-    expect(result.current).toBe(false);
+    expect(result.current).toBe('off');
+  });
+});
+
+describe('three-valued flag state', () => {
+  it('should keep a dependent flag unknown while the flag it requires is unknown', () => {
+    const client = createClient();
+    connectRemoteFlags(client);
+    expect(readFeatureState('onboardingAutoOpen')).toBe('unknown');
+    client.evaluate({ onboarding: false, 'onboarding-auto-open': true });
+    expect(readFeatureState('onboardingAutoOpen')).toBe('off');
+  });
+
+  it('should treat a failed flag load as known: the defaults are final', () => {
+    connectRemoteFlags({
+      onFeatureFlags(callback) {
+        callback([], {}, { errorsLoading: true });
+        return () => undefined;
+      },
+    });
+    expect(readFeatureState('onboarding')).toBe('off');
+  });
+
+  it('should keep local flags known whatever the remote status', () => {
+    connectRemoteFlags(createClient());
+    expect(readFeatureState('webGpu')).toBe('on');
+    expect(readFeatureState('machines')).not.toBe('unknown');
+  });
+
+  it('should resolve whenFeatureKnown once PostHog answers, and at once when already known', async () => {
+    const client = createClient();
+    connectRemoteFlags(client);
+    const known = whenFeatureKnown('onboarding');
+    client.evaluate({ onboarding: true });
+    await expect(known).resolves.toBe(true);
+    await expect(whenFeatureKnown('viewerControls')).resolves.toBe(false);
   });
 });
 
 describe('server rendering', () => {
-  it('renders the registry defaults even when PostHog has evaluated a flag on', () => {
+  it('should render every flag as unknown even when PostHog has evaluated a flag on', () => {
     connectRemoteFlags(createClient({ onboarding: true }));
     function onboardingProbe(): React.JSX.Element {
-      return createElement('span', undefined, useFeature('onboarding') ? 'on' : 'off');
+      return createElement('span', undefined, useFeatureState('onboarding'));
     }
-    expect(renderToString(createElement(onboardingProbe))).toBe('<span>off</span>');
+    expect(renderToString(createElement(onboardingProbe))).toBe('<span>unknown</span>');
   });
 });

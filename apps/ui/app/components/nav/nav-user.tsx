@@ -34,7 +34,7 @@ import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { pageOrigin, websiteOrigin } from '#lib/website-origin.js';
 import { CookiePreferencesDialog, CookiePreferencesMenuItem } from '#components/cookie-preferences.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
 import { setupHref } from '#components/onboarding/setup-entry.js';
 import { TourHelpMenuItem } from '#components/tour/tour-menu.js';
@@ -57,7 +57,7 @@ export function NavUser(): React.JSX.Element {
      boundary and made every route carrying it answer 500. The menu this decides mounts only once a
      pointer opens it, long after hydration has given the browser's own origin. */
   const isWebsiteHere = !isDesktopTarget() && website === pageOrigin();
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const helpItems = [
     /* Setup and its explainer, behind `onboarding`. */
     ...(isOnboardingEnabled

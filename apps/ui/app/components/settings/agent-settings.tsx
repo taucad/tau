@@ -12,7 +12,7 @@ import type { SetupAnswerNames } from '@taucad/settings-ui/components/settings/s
 import { PersonSettingsHost } from '#components/settings/person-settings-host.js';
 import { goalCopy, languageCopy, toolCopy } from '#components/onboarding/setup-copy.js';
 import { setupAnswersCopy } from '@taucad/settings-ui/components/settings/setup-answers-copy';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 
 /** Setup's names for each answer, so the Setup answers row reads as setup does. */
@@ -76,7 +76,7 @@ function SetupAnswersGroup(): React.JSX.Element {
 }
 
 export function AgentSettings(): React.JSX.Element {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const isFunded = useDeploymentMode().state === 'funded';
   const [showCredits, setShowCredits] = useCookie(cookieName.chatModelCost, true);
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);

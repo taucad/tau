@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 const flags = vi.hoisted(() => ({ onboarding: true, viewerControls: true }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: keyof typeof flags) => flags[flag] }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: keyof typeof flags) => flags[flag],
+  useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+}));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 const telemetry = vi.hoisted(() => ({
   tourStarted: vi.fn(),

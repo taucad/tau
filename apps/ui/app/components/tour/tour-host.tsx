@@ -12,7 +12,7 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import { TourAnchorProvider } from '#components/tour/tour-anchors.js';
 import { tourMenuIcons, useTourMenuItem } from '#components/tour/tour-menu.js';
 import { tourSession } from '#components/tour/tour-session.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
@@ -84,7 +84,7 @@ function TourPaletteItems(): undefined {
  * @returns The editor and the tour.
  */
 export function TourHost({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const { onboarding } = usePersonRecord();
   const { device } = useDeviceRecord();
   const session = useSyncExternalStore(tourSession.subscribe, tourSession.read, tourSession.readInitial);

@@ -5,7 +5,10 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
 const flags = vi.hoisted(() => ({ onboarding: true, viewerControls: true, partsWarehouse: false }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: keyof typeof flags) => flags[flag] }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: keyof typeof flags) => flags[flag],
+  useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+}));
 const host = vi.hoisted(() => ({ isDesktop: false }));
 vi.mock('#lib/build-target.js', () => ({ isDesktopTarget: () => host.isDesktop }));
 const connectWorkspace = vi.hoisted(() => vi.fn());

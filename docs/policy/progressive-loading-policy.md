@@ -164,12 +164,14 @@ A change to a class's delivery (a new class, a route moving between classes, a s
 
 ### 15. Load code through the one owner, and recover a failed load with a new realm
 
-A JavaScript realm keeps a module that failed to load, and one whose static dependency failed, for its whole life, and `React.lazy` keeps its rejection: asking again in the same page fails again. Route modules keep React Router's patched loader. Every other `import()` in the page realm goes through `load` from `apps/ui/app/lib/code-loading.ts`, and every lazy component through `lazy` from `apps/ui/app/lib/lazy-component.ts`. A failure of required code goes to the stale-build recovery: on a replaced build as before, and on the build the server still runs as a transient failure that reloads once into the same build under the same guard, budget and no-input window, else offers the reload; a failure that repeats after that reload is genuine. A panel whose code failed offers Reload, never an in-place Try again. Optional code (decoration, analytics, the error tracker) loads with `{ optional: true }`, never reloads the page, and a lazy component of it declares a `fallback` it degrades to. Worker realms are not covered here.
+A JavaScript realm keeps a module that failed to load, and one whose static dependency failed, for its whole life, and `React.lazy` keeps its rejection: asking again in the same page fails again. Route modules keep React Router's patched loader. Every other `import()` in the page realm goes through `load` from `apps/ui/app/lib/code-loading.ts`, and every lazy component through `lazy` from `apps/ui/app/lib/lazy-component.ts`. A failure of required code goes to the stale-build recovery: on a replaced build as before, and on the build the server still runs as a transient failure that reloads once into the same build under the same guard, budget and no-input window, else offers the reload; a failure that repeats after that reload is genuine. A panel whose code failed offers Reload, never an in-place Try again. Name the exports a load uses inside its importer (`.then((loaded) => ({ X: loaded.X }))`): a namespace that escapes into `load` keeps every export in the bundle, which grows the interactive tier (rule 7) and can pull execution modules into the desktop renderer. Optional code (decoration, analytics, the error tracker) loads with `{ optional: true }`, never reloads the page, and a lazy component of it declares a `fallback` it degrades to. Worker realms are not covered here.
 
 CORRECT:
 
 ```ts
-const module = await load(async () => import('#components/cad-preview.js'));
+const { CadPreview } = await load(async () =>
+  import('#components/cad-preview.js').then((loaded) => ({ CadPreview: loaded.CadPreview })),
+);
 const Spinner = lazy(async () => load(async () => import('./spinner.js'), { optional: true }), { fallback: Flat });
 ```
 

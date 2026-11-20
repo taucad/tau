@@ -76,6 +76,19 @@ export const navigationCandidate = (
   return { workerClass };
 };
 
+/** The query parameter of safe mode (`#lib/boot-signals` `safeModeParameter`; kept here so the worker bundles nothing more). */
+export const safeModeQueryParameter = 'safe';
+
+/**
+ * Whether a navigation is safe mode's (`/?safe=1`): recovery the worker must never stand in, so the browser's own
+ * request answers it (PL7 FP5, D5).
+ *
+ * @param url - The navigation's URL.
+ * @returns `true` for safe mode.
+ */
+export const isSafeModeNavigation = (url: string): boolean =>
+  new URL(url).searchParams.get(safeModeQueryParameter) === '1';
+
 /** How one navigation is answered. */
 export type NavigationAnswer =
   | Readonly<{ kind: 'network' }>

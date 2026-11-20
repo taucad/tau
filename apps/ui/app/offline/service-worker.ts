@@ -35,6 +35,7 @@ import {
   answerNavigation,
   answerSubresource,
   installMessage,
+  isSafeModeNavigation,
   navigationCandidate,
   navigationNetworkTimeout,
 } from '#offline/service-worker-routing.js';
@@ -248,7 +249,13 @@ scope.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.mode === 'navigate') {
     const preload = event.preloadResponse;
-    if (request.method !== 'GET' || preload === undefined || scope.registration.navigationPreload === undefined) {
+    if (
+      request.method !== 'GET' ||
+      preload === undefined ||
+      scope.registration.navigationPreload === undefined ||
+      isSafeModeNavigation(request.url)
+    ) {
+      // Safe mode is never answered by the worker, not even with the preload: it is the way out of a bad worker.
       return;
     }
     const candidate = navigationCandidate(request, scope.location.origin, store.isListed);

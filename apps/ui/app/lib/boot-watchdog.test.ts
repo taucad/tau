@@ -91,6 +91,46 @@ describe('web boot watchdog', () => {
     expect(strip().hidden).toBe(false);
   });
 
+  it('should unregister a controlling worker and delete only its caches when Reload is pressed (PL7 FP5)', async () => {
+    const order: string[] = [];
+    const unregister = vi.fn(async () => {
+      order.push('unregister');
+      return true;
+    });
+    Object.defineProperty(globalThis.navigator, 'serviceWorker', {
+      configurable: true,
+      value: { controller: {}, getRegistrations: async () => [{ unregister }] },
+    });
+    vi.stubGlobal('caches', {
+      keys: async () => ['tau-precache-v3', 'tau-assets', 'tau-offline-shell-1', 'tau-precache-v2-x', 'other'],
+      delete: async (name: string) => {
+        order.push(`delete ${name}`);
+        return true;
+      },
+    });
+    // Run in this realm, whose `caches` and `navigator` are the doubles; the strip's wiring is the same script.
+    document.body.innerHTML = bootWatchdogStripHtml;
+    // oxlint-disable-next-line no-new-func, typescript/no-unsafe-call -- Evaluates the inline script, as the page does.
+    new Function(buildBootWatchdogScript() ?? '')();
+    vi.advanceTimersByTime(20_000);
+
+    strip().querySelector('button')?.click();
+    // The jsdom page has no reload; what matters is that the worker and its caches are gone before it is asked for.
+    await vi.waitFor(() => {
+      expect(order).toHaveLength(5);
+    });
+    expect(order[0]).toBe('unregister');
+    expect(order.slice(1).toSorted()).toStrictEqual([
+      'delete tau-assets',
+      'delete tau-offline-shell-1',
+      'delete tau-precache-v2-x',
+      'delete tau-precache-v3',
+    ]);
+    // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- removing the jsdom test double.
+    delete (globalThis.navigator as { serviceWorker?: unknown }).serviceWorker;
+    vi.unstubAllGlobals();
+  });
+
   it('should emit no script on the desktop target', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
 

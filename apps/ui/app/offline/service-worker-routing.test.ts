@@ -4,11 +4,13 @@ import {
   answerSubresource,
   installMessage,
   isCachedOnFirstUse,
+  isSafeModeNavigation,
   navigationCandidate,
   readDocumentBuildId,
   workerClasses,
 } from '#offline/service-worker-routing.js';
 import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { safeModeHref } from '#lib/boot-signals.js';
 import type { NavigationCandidate, RequestFacts, StoreView } from '#offline/service-worker-routing.js';
 
 const origin = 'https://tau.new';
@@ -257,5 +259,14 @@ describe('readDocumentBuildId', () => {
     );
     expect(readDocumentBuildId(String.raw`enqueue("[\"TAU_BUILD_ID\":\"42\"]")`)).toBe(42);
     expect(readDocumentBuildId('<html></html>')).toBeUndefined();
+  });
+});
+
+describe('isSafeModeNavigation (FP5)', () => {
+  it('should recognise the safe-mode link the boot watchdog and the error document offer, and nothing else', () => {
+    expect(isSafeModeNavigation(new URL(safeModeHref, origin).toString())).toBe(true);
+    expect(isSafeModeNavigation(`${origin}/w/home/bracket-v2?safe=1`)).toBe(true);
+    expect(isSafeModeNavigation(`${origin}/?safe=0`)).toBe(false);
+    expect(isSafeModeNavigation(`${origin}/`)).toBe(false);
   });
 });

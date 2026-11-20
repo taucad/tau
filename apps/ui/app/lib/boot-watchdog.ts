@@ -8,10 +8,16 @@
  * reached the document. Neither depends on the bundle, so they still work when the bundle throws before hydration or
  * never loads.
  *
+ * Recovery before mount (PL7 service worker staging defects blueprint, FP5, D5): when a service worker controls the
+ * page, both first unregister it and delete its caches (the kill switch's cache set, `service-worker-retire.ts`), so
+ * the reload or the safe-mode page reaches the network with no worker in between: a worker that stalled this load
+ * would otherwise answer the next one the same way.
+ *
  * The desktop build emits neither: main owns its watchdog and the recovery window there.
  */
 import { bootGlobalName, bootStripId, safeModeHref } from '#lib/boot-signals.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { assetCacheName, cachePrefix, retiredCachePrefix } from '#offline/pwa-messages.js';
 
 /** How long the page may take to mount its shell before the strip is shown. Milliseconds. @public */
 export const bootWatchdogDeadline = 20_000;
@@ -21,6 +27,9 @@ const bootStripRetry = 1000;
 
 /** The `data-boot-action` value of the strip's Reload button, which the script wires. @public */
 export const bootReloadAction = 'reload';
+
+/** The worker's caches as one pattern: `service-worker-retire.ts` `isWorkerCache`, for a script without the bundle. */
+const workerCacheSource = `^(?:${cachePrefix}-precache-|${cachePrefix}-runtime-|${retiredCachePrefix})|^${assetCacheName}$`;
 
 /**
  * The strip's markup: hidden until the script reveals it. Inline styles only, so it renders even when no stylesheet
@@ -50,7 +59,14 @@ export const buildBootWatchdogScript = (): string | undefined =>
   isDesktopTarget()
     ? undefined
     : `(()=>{try{const b=globalThis.${bootGlobalName}=globalThis.${bootGlobalName}||{};` +
+      // Unregister a controlling worker and delete its caches, then go on whatever happened.
+      `const x=async()=>{try{const n=navigator.serviceWorker;if(!n||!n.controller)return;` +
+      `const g=await n.getRegistrations();await Promise.all(g.map((z)=>z.unregister()));` +
+      `const p=new RegExp(${JSON.stringify(workerCacheSource)});const k=await caches.keys();` +
+      `await Promise.all(k.filter((c)=>p.test(c)).map((c)=>caches.delete(c)))}catch(e){}};` +
       `const w=()=>{if(b.shellMounted)return;const s=document.getElementById(${JSON.stringify(bootStripId)});` +
       `if(!s){setTimeout(w,${bootStripRetry});return}const r=s.querySelector('[data-boot-action=${bootReloadAction}]');` +
-      `if(r)r.addEventListener('click',()=>{location.reload()});s.hidden=false};setTimeout(w,${bootWatchdogDeadline})` +
+      `if(r)r.addEventListener('click',async()=>{await x();location.reload()});` +
+      `const a=s.querySelector('a[href]');if(a)a.addEventListener('click',async(e)=>{e.preventDefault();await x();` +
+      `location.assign(a.href)});s.hidden=false};setTimeout(w,${bootWatchdogDeadline})` +
       `}catch(e){}})()`;

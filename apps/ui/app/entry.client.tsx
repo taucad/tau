@@ -25,6 +25,7 @@ import { ENV } from '#environment.config.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
 import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
+import { unregisterServiceWorker } from '#offline/service-worker-unregister.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -47,6 +48,13 @@ installStaleBuildRecovery();
 
 // TAU-UI-S: notice a deploy before the next click; the root's client middleware then loads the next page as a document.
 installLiveBuildChecks();
+
+/* PL7 FP5: safe mode removes the service worker and its caches, so the page that asked for it, and every load after,
+ * reaches the network with no worker in between. The worker itself never answers a `?safe=1` navigation. */
+if (isSafeModeRequested(globalThis.location.search)) {
+  // async-iife: bootstrap -- the page boots meanwhile; nothing waits on the worker being gone.
+  void unregisterServiceWorker();
+}
 
 /* D5: the app runtime, created here and held, not started; `AppRuntimeProvider` starts it once after hydration. A
  * hot update keeps the held one (`import.meta.hot.data`), so development never makes a second. */

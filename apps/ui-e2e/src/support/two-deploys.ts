@@ -117,17 +117,28 @@ const createNextDeploy = async (
 export const importServerBuild = async (root: string): Promise<ServerBuild> =>
   (await import(pathToFileURL(join(root, 'index.js')).href)) as ServerBuild;
 
+/** Which requests {@link FailNext} fails. */
+export type FailNextOptions = Readonly<{
+  /** How many requests to fail; one by default. */
+  count?: number;
+  /**
+   * Only requests with this `Sec-Fetch-Dest`: `script` for a module import, which leaves a page's idle prefetch of the
+   * same file (`empty`) alone. Any destination by default.
+   */
+  dest?: string;
+}>;
+
 /**
- * Drop the connection of the next `count` requests whose path matches, after the response has started (PL7 staging
- * defects FP9, FP10): a transient failure of a file the deploy has, as a dropped connection or a network change on
- * wake gives one, not a missing file. The browser does not retry a response it has begun to read, so exactly those
- * requests fail; the next one is served.
+ * Drop the connection of the next requests whose path matches, after the response has started (PL7 staging defects
+ * FP9, FP10): a transient failure of a file the deploy has, as a dropped connection or a network change on wake gives
+ * one, not a missing file. The browser does not retry a response it has begun to read, so exactly those requests
+ * fail; the next one is served.
  *
  * @param path - Matches the request path, query included.
- * @param count - How many requests to fail; one by default.
+ * @param options - How many requests, and of which destination.
  * @returns Settles with the first failed path once the fault has fired.
  */
-export type FailNext = (path: RegExp, count?: number) => Promise<string>;
+export type FailNext = (path: RegExp, options?: FailNextOptions) => Promise<string>;
 
 /** Two deploys behind one origin, switched by `deploy`. */
 export type DeployServer = {
@@ -171,7 +182,12 @@ export const startDeployServer = async (
     next: createRequestHandler({ build: builds.next }),
   };
   const serveAsset = express.static(clientRoot, { immutable: true, maxAge: '1y' });
-  const faults: Array<{ readonly path: RegExp; remaining: number; readonly fired: (path: string) => void }> = [];
+  const faults: Array<{
+    readonly path: RegExp;
+    readonly dest: string | undefined;
+    remaining: number;
+    readonly fired: (path: string) => void;
+  }> = [];
   const seen: string[] = [];
 
   const app = express();
@@ -179,7 +195,12 @@ export const startDeployServer = async (
   app.use(coiMiddleware());
   app.use((request: Request, response: Response, next) => {
     seen.push(request.originalUrl);
-    const fault = faults.find(({ path, remaining }) => remaining > 0 && path.test(request.originalUrl));
+    const fault = faults.find(
+      ({ path, dest, remaining }) =>
+        remaining > 0 &&
+        path.test(request.originalUrl) &&
+        (dest === undefined || request.headers['sec-fetch-dest'] === dest),
+    );
     if (fault === undefined) {
       next();
       return;
@@ -270,9 +291,9 @@ export const startDeployServer = async (
   return {
     origin: `http://127.0.0.1:${String(port)}`,
     documents,
-    failNext: async (path, count = 1) =>
+    failNext: async (path, { count = 1, dest } = {}) =>
       new Promise<string>((resolve) => {
-        faults.push({ path, remaining: count, fired: resolve });
+        faults.push({ path, dest, remaining: count, fired: resolve });
       }),
     requests: (path) => seen.filter((url) => path.test(url)).length,
     buildChecks: () => buildChecks,

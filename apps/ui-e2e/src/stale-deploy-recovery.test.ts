@@ -337,7 +337,8 @@ describe('a code load that fails once on the build the server still runs (FP9)',
   it('should reload an untouched page into the live build once when a lazy chunk it needs fails to load once', async () => {
     const { page, live, failures } = await open();
     const chunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
-    const failed = live.failNext(chunk);
+    // A module import's own request (`script`), not a page's idle prefetch of the same file.
+    const failed = live.failNext(chunk, { dest: 'script' });
 
     await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
     await failed;
@@ -381,7 +382,8 @@ describe('a code load that fails once on the build the server still runs (FP9)',
   it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
     const { page, live, failures } = await open();
     const spinnerChunk = /^\/assets\/metal-morph-spinner-(?!service-)[\w-]+\.js$/u;
-    const failed = live.failNext(spinnerChunk);
+    // The import's own request: Home's idle prefetch of the project tier (`empty`) may ask for the chunk first.
+    const failed = live.failNext(spinnerChunk, { dest: 'script' });
 
     await startChatFromHome(page, live.origin);
     await failed;

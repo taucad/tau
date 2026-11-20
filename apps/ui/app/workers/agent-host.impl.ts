@@ -738,12 +738,14 @@ const composeProjectHost = async (
   });
   // Lazy: the headless-image graph eagerly resolves the resvg wasm URL at
   // module load, which only the full app build serves.
-  const headlessImageModule = await loadInWorker(async () =>
-    import('#services/headless-image.service.js').then((loaded) => ({
-      HeadlessImageService: loaded.HeadlessImageService,
-    })),
+  const createImageService = await loadInWorker(async () =>
+    import('#services/headless-image.service.js').then(
+      ({ HeadlessImageService }) =>
+        () =>
+          new HeadlessImageService(),
+    ),
   );
-  const imageService = new headlessImageModule.HeadlessImageService();
+  const imageService = createImageService();
   opened(() => {
     imageService.dispose();
   });

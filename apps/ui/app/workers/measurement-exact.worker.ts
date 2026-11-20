@@ -29,10 +29,13 @@ export async function evaluateExactOccurrenceDistance(
   request: ExactRequest,
   initialize: () => Promise<ExactEngine> = async () => {
     const native = await loadInWorker(async () =>
-      import('geospec-engine').then((loaded) => ({ initialize: loaded.initialize, Engine: loaded.Engine })),
+      import('geospec-engine').then(({ initialize: initializeEngine, Engine }) => ({
+        initializeEngine,
+        createEngine: () => new Engine(),
+      })),
     );
-    await native.initialize();
-    return new native.Engine();
+    await native.initializeEngine();
+    return native.createEngine();
   },
 ): Promise<ExactResponse> {
   try {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/geometry-presentation-admission';
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime/types';
-import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
+import { buildViewerCaptureImageOptions, createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
@@ -150,13 +150,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
                   width: thumbnailWidth,
                   height: thumbnailHeight,
                   ...thumbnailLook,
-                  camera: {
-                    framing: 'bounds',
-                    direction: [0.6123724357, -0.6123724357, 0.5],
-                    up: [0, 0, 1],
-                    margin: 0.1,
-                    projection: { kind: 'perspective', verticalFieldOfView: 45 },
-                  },
+                  camera: createIsometricCaptureCamera(),
                   quality: thumbnailQuality,
                 },
               },

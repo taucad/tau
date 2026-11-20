@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 999 packages, with the license each declares.
+The web and desktop apps include the following 997 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -802,7 +802,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [open](https://github.com/sindresorhus/open) | 11.0.4 | MIT |
 | [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
-| [opentype.js](https://github.com/opentypejs/opentype.js) | 1.3.4 | MIT |
+| [opentype.js](https://github.com/opentypejs/opentype.js) | 2.0.0 | MIT |
 | [orderedmap](https://github.com/marijnh/orderedmap) | 2.1.1 | MIT |
 | [p-retry](https://github.com/sindresorhus/p-retry) | 4.6.2 | MIT |
 | [pako](https://github.com/nodeca/pako) | 1.0.11 | (MIT AND Zlib) |
@@ -949,7 +949,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [string-to-stream](https://github.com/feross/string-to-stream) | 1.1.1 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 7.2.0 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 8.3.0 | MIT |
-| [string.prototype.codepointat](https://github.com/mathiasbynens/String.prototype.codePointAt) | 0.2.1 | MIT |
 | [stringify-entities](https://github.com/wooorm/stringify-entities) | 4.0.4 | MIT |
 | [strip-ansi](https://github.com/chalk/strip-ansi) | 7.2.0 | MIT |
 | [strip-json-comments](https://github.com/sindresorhus/strip-json-comments) | 5.0.3 | MIT |
@@ -968,7 +967,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.9.16 | MIT |
 | [three-stdlib](https://github.com/pmndrs/three-stdlib) | 2.36.1 | MIT |
 | [throttleit](https://github.com/sindresorhus/throttleit) | 2.1.0 | MIT |
-| [tiny-inflate](https://github.com/devongovett/tiny-inflate) | 1.0.3 | MIT |
 | [tiny-invariant](https://github.com/alexreardon/tiny-invariant) | 1.3.3 | MIT |
 | [tiny-typed-emitter](https://github.com/binier/tiny-typed-emitter) | 2.1.0 | MIT |
 | [to-buffer](https://github.com/browserify/to-buffer) | 1.2.2 | MIT |

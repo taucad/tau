@@ -347,10 +347,12 @@ const linkFreshnessOf = (
  * publish). A Free plan's first publish names public as the default for a link it makes: private is not theirs to
  * choose, and a link made meanwhile (on another device) keeps its own setting. A first publish before the plan is
  * known shows no setting: private would be refused on the Free plan and public is not the person's to assume, so
- * they pick one before publishing.
+ * they pick one before publishing. A private pick the plan refuses once it answers is withdrawn, not dropped: the form
+ * again shows no setting and waits, so the person's private intent never publishes as public without their pick.
  *
  * @param args - The link (absent before the first publish), the person's pick, and what the plan allows.
- * @returns The draft's audience fields, the setting the form shows, and whether it waits for a pick.
+ * @returns The draft's audience fields, the setting the form shows, whether it waits for a pick, and whether the
+ *   plan withdrew the person's private pick.
  */
 const publishAudienceOf = (args: {
   readonly share: ProjectShare | undefined;
@@ -361,24 +363,38 @@ const publishAudienceOf = (args: {
   readonly audience: Pick<PublishDraft, 'visibility' | 'defaultVisibility'>;
   readonly effectiveVisibility: PublishVisibility | undefined;
   readonly isAwaitingAudience: boolean;
+  readonly isPrivateWithdrawn: boolean;
 } => {
   const { share, chosen, isPrivateAllowed, isPlanResolved } = args;
-  // A pick the plan no longer allows (the entitlements answered after it) is dropped rather than sent.
-  const picked = chosen === 'private' && !isPrivateAllowed ? undefined : chosen;
-  if (picked !== undefined) {
-    return { audience: { visibility: picked }, effectiveVisibility: picked, isAwaitingAudience: false };
+  // A private pick the plan no longer allows (the entitlements answered after it) is neither sent nor replaced.
+  if (chosen === 'private' && !isPrivateAllowed) {
+    return { audience: {}, effectiveVisibility: undefined, isAwaitingAudience: true, isPrivateWithdrawn: true };
+  }
+  if (chosen !== undefined) {
+    return {
+      audience: { visibility: chosen },
+      effectiveVisibility: chosen,
+      isAwaitingAudience: false,
+      isPrivateWithdrawn: false,
+    };
   }
   if (share === undefined && !isPlanResolved) {
-    return { audience: {}, effectiveVisibility: undefined, isAwaitingAudience: true };
+    return { audience: {}, effectiveVisibility: undefined, isAwaitingAudience: true, isPrivateWithdrawn: false };
   }
   if (!isPrivateAllowed) {
     return {
       audience: share === undefined ? { defaultVisibility: 'public' } : {},
       effectiveVisibility: 'public',
       isAwaitingAudience: false,
+      isPrivateWithdrawn: false,
     };
   }
-  return { audience: {}, effectiveVisibility: share?.visibility ?? 'private', isAwaitingAudience: false };
+  return {
+    audience: {},
+    effectiveVisibility: share?.visibility ?? 'private',
+    isAwaitingAudience: false,
+    isPrivateWithdrawn: false,
+  };
 };
 
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
@@ -1415,7 +1431,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     // Only people you invite needs the Pro plan to choose (T4/T5/AD11), but a link that is already private keeps
     // it after the plan lapses (T16), so its own setting stays on offer. Until the plan is known nothing is locked.
     const isPrivateAllowed = !isPrivateRefused || share?.visibility === 'private';
-    const { audience, effectiveVisibility, isAwaitingAudience } = publishAudienceOf({
+    const { audience, effectiveVisibility, isAwaitingAudience, isPrivateWithdrawn } = publishAudienceOf({
       share,
       chosen: chosenVisibility,
       isPrivateAllowed,
@@ -1480,6 +1496,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                   </Label>
                 </div>
               </RadioGroup>
+              {isPrivateWithdrawn ? (
+                <ShareNotice tone='info' role='status'>
+                  {privateLinkRefusal} Choose who can open the link.
+                </ShareNotice>
+              ) : null}
             </div>
 
             {busy ? (

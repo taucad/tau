@@ -18,13 +18,19 @@
  */
 import { bootGlobalName, bootStripId, safeModeHref } from '#lib/boot-signals.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { workerCacheNamePattern } from '#offline/pwa-caches.js';
 
 /** How long the page may take to mount its shell before the strip is shown. Milliseconds. @public */
 export const bootWatchdogDeadline = 20_000;
 
 /* A strip not yet in the document at the deadline (a body still streaming) is looked for again this often. */
 const bootStripRetry = 1000;
+
+/**
+ * The web app's service worker caches (`isWorkerCache` in `offline/pwa-caches.ts`) as a regular expression's source, for
+ * Reload's cleanup. A literal, not an import: the desktop build carries this module and must carry no web worker
+ * surface (`check-desktop-payload.mts`). `boot-watchdog.test.ts` holds it to `isWorkerCache`. @public
+ */
+export const bootWorkerCachePattern = String.raw`^tau-(?:precache-|runtime-|offline-shell-|assets(?:-v\d+)?$)`;
 
 /** Longest wait for Reload's worker cleanup before reloading anyway. Milliseconds. @public */
 export const bootReloadCleanupLimit = 3000;
@@ -64,7 +70,7 @@ export const buildBootWatchdogScript = (): string | undefined =>
       `if(!s){setTimeout(w,${bootStripRetry});return}const r=s.querySelector('[data-boot-action=${bootReloadAction}]');` +
       `if(r)r.addEventListener('click',()=>{let d=0;const g=()=>{if(!d){d=1;location.reload()}};` +
       `const n=navigator.serviceWorker;if(!n||!n.controller){g();return}setTimeout(g,${bootReloadCleanupLimit});` +
-      `const p=new RegExp(${JSON.stringify(workerCacheNamePattern)});Promise.all([` +
+      `const p=new RegExp(${JSON.stringify(bootWorkerCachePattern)});Promise.all([` +
       `n.getRegistrations().then(a=>Promise.all(a.map(x=>x.unregister()))),` +
       `caches.keys().then(k=>Promise.all(k.filter(c=>p.test(c)).map(c=>caches.delete(c))))]).then(g,g)});` +
       `s.hidden=false};setTimeout(w,${bootWatchdogDeadline})` +

@@ -5,7 +5,6 @@ import {
   isPreFixWorkerCache,
   isRetiredWorkerCache,
   isWorkerCache,
-  workerCacheNamePattern,
 } from '#offline/pwa-caches.js';
 import { activateRetirement, retireServiceWorker, workboxExpirationDatabase } from '#offline/service-worker-retire.js';
 import type { RetiringWorkerScope } from '#offline/service-worker-retire.js';
@@ -138,25 +137,5 @@ describe('the service worker kill switch (PL7)', () => {
 
     expect(deleted).toStrictEqual(['tau-assets', 'tau-precache-v3-https://tau.new/']);
     expect(calls).toStrictEqual(['delete tau-assets', 'delete tau-precache-v3-https://tau.new/']);
-  });
-
-  it('should give the boot watchdog a pattern that owns exactly the caches isWorkerCache owns (FP5)', () => {
-    const pattern = new RegExp(workerCacheNamePattern, 'u');
-    for (const name of [
-      'tau-precache-v2-https://tau.new/',
-      'tau-precache-v3-https://tau.new/',
-      'tau-runtime-https://tau.new/',
-      'tau-assets',
-      'tau-assets-v3',
-      'tau-offline-shell-3f9a2c1d0b7e',
-      'taunt',
-      'tau-billing',
-      'tau-assets-old',
-      'workbox-precache-v2',
-      'tau-offline',
-      'another-app-cache',
-    ]) {
-      expect(pattern.test(name), name).toBe(isWorkerCache(name));
-    }
   });
 });

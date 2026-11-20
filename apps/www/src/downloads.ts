@@ -117,26 +117,27 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
 
 /**
- * Builds offered before they pass installer qualification: the page lists each as a direct channel archive marked beta,
- * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG.
+ * Builds offered before they pass installer qualification: the page lists each as a direct channel file marked beta,
+ * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG. The Intel
+ * DMG is published beside the release outside the catalog (`desktop-intel-beta-dmg.yml`).
  */
 export const betaDownloads = {
-  macIntel: { file: 'Tau-macos-x64.zip', detail: 'Intel Mac · ZIP download' },
+  macIntel: { file: 'Tau-macos-x64.dmg', detail: 'Intel Mac · DMG installer' },
 };
 
 /**
- * @param platform - A platform offered as a beta archive.
- * @returns The production archive URL.
+ * @param platform - A platform offered as a beta file.
+ * @returns The channel's latest file URL.
  */
 export const betaDownloadHref = (platform: keyof typeof betaDownloads): string =>
   `${downloadsOrigin}/latest/${betaDownloads[platform].file}`;
 
 /**
- * @param platform - A platform offered as a beta archive.
+ * @param platform - A platform offered as a beta file.
  * @returns Label markup from checked-in icon and product constants only.
  */
 export const betaDownloadLabel = (platform: keyof typeof betaDownloads): string =>
-  `${desktopDownloads[platform].icon}<span>Download ZIP for ${macFileLabels[platform]}</span>`;
+  `${desktopDownloads[platform].icon}<span>Download DMG for ${macFileLabels[platform]}</span>`;
 
 /**
  * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names

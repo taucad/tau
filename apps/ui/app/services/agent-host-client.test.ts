@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { setCodeLoadFailureHandler } from '#lib/code-loading.js';
 import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { SourceLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
@@ -1396,4 +1397,65 @@ describe('the session read', () => {
     await first.close();
     await second.close();
   });
+});
+
+/* PL7 blueprint FP10 (D17, D18): a worker whose implementation failed to load keeps that failure for its life, so
+ * the page terminates it and starts a new one (bounded, with backoff), and after the bound hands the failure to the
+ * page's code-load recovery instead of starting more. */
+describe('a resident worker whose implementation failed to load (FP10)', () => {
+  afterEach(() => {
+    setCodeLoadFailureHandler(undefined);
+  });
+
+  const loadFailure = 'WORKER_LOAD_FAILED';
+
+  it('should start a new worker for the next use, which succeeds with no reload', async () => {
+    const broken = new FakeResidentWorker();
+    broken.failNextProvide = loadFailure;
+    const fresh = new FakeResidentWorker();
+    const workers = [broken, fresh];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const recover = vi.fn();
+    setCodeLoadFailureHandler(recover);
+    const client = createTestClient(createWorker);
+
+    await expect(startRun(client, 'chat-1', 'run-1', 'Build it.')).rejects.toMatchObject({ code: loadFailure });
+    expect(broken.terminate).toHaveBeenCalled();
+
+    await expect(startRun(client, 'chat-1', 'run-1', 'Build it.')).resolves.toMatchObject({ status: 'applied' });
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(recover).not.toHaveBeenCalled();
+    await client.close();
+  }, 15_000);
+
+  it('should stop starting workers after three load failures in a row, and hand the failure to the recovery', async () => {
+    const workers = Array.from({ length: 4 }, () => {
+      const worker = new FakeResidentWorker();
+      worker.failNextProvide = loadFailure;
+      return worker;
+    });
+    const pool = [...workers];
+    const createWorker = vi.fn(() => pool.shift() as unknown as Worker);
+    const recover = vi.fn();
+    setCodeLoadFailureHandler(recover);
+    const client = createTestClient(createWorker);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Each use follows the previous one's failure.
+      await expect(startRun(client, 'chat-1', `run-${String(attempt)}`, 'Build it.')).rejects.toMatchObject({
+        code: loadFailure,
+      });
+    }
+    expect(recover).toHaveBeenCalledOnce();
+
+    await expect(startRun(client, 'chat-1', 'run-last', 'Build it.')).rejects.toMatchObject({
+      code: loadFailure,
+      message: expect.stringMatching(/Reload/u),
+    });
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    for (const worker of workers.slice(0, 3)) {
+      expect(worker.terminate).toHaveBeenCalled();
+    }
+    await client.close();
+  }, 30_000);
 });

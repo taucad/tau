@@ -72,6 +72,16 @@ describe('code-loading-owner', () => {
           code: "const { startServiceWorker } = await import('#offline/pwa-registration.js');",
         },
         {
+          name: 'a module worker started through the factory',
+          filename: page,
+          code: "const worker = createModuleWorker(() => new Worker(new URL('x.worker.ts', import.meta.url), { type: 'module' }), { name: 'x' });",
+        },
+        {
+          name: 'a library that takes the factory as an option',
+          filename: 'apps/libs/share/src/artifact-worker.ts',
+          code: "const worker = options.createModuleWorker(() => new Worker(new URL('a.worker.ts', import.meta.url)), { name: 'a' });",
+        },
+        {
           name: 'outside the web app',
           filename: 'packages/runtime/src/client.ts',
           code: "const module = await import('./kernel.js');",
@@ -101,6 +111,18 @@ describe('code-loading-owner', () => {
           filename: library,
           code: "const { acquire } = await import('./typescript-codemirror.js');",
           errors: [{ messageId: 'rawImport' }],
+        },
+        {
+          name: 'a raw module worker',
+          filename: page,
+          code: "const worker = new Worker(new URL('x.worker.ts', import.meta.url), { type: 'module' });",
+          errors: [{ messageId: 'rawWorker' }],
+        },
+        {
+          name: 'a worker in a thunk that is not the factory',
+          filename: library,
+          code: "const options = { createWorker: () => new Worker(new URL('x.worker.ts', import.meta.url)) };",
+          errors: [{ messageId: 'rawWorker' }],
         },
         {
           name: 'React’s lazy by name',

@@ -10,6 +10,7 @@
 
 import { createInlineCompute, createSupervisedComputeWorker } from '@taucad/revisions';
 import type { ComputeCrashReport, ComputeWorker } from '@taucad/revisions';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /**
  * Build the compute the revision ports share.
@@ -24,10 +25,14 @@ export const createRevisionCompute = (onCrash?: (report: ComputeCrashReport) => 
   }
   return createSupervisedComputeWorker({
     spawn: () =>
-      new Worker(new URL('revision-compute.worker.ts', import.meta.url), {
-        type: 'module',
-        name: 'tau-revision-compute',
-      }),
+      createModuleWorker(
+        () =>
+          new Worker(new URL('revision-compute.worker.ts', import.meta.url), {
+            type: 'module',
+            name: 'tau-revision-compute',
+          }),
+        { name: 'revision-compute' },
+      ),
     fallback: inline,
     onCrash,
   });

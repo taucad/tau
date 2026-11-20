@@ -89,6 +89,7 @@
     "./lib/tree-refresh-hold": "./src/lib/tree-refresh-hold.ts",
     "./lib/url-credential.lib": "./src/lib/url-credential.lib.ts",
     "./lib/weak-key": "./src/lib/weak-key.ts",
+    "./lib/worker-factory": "./src/lib/worker-factory.ts",
     "./lib/worker-timing-report": "./src/lib/worker-timing-report.ts",
     "./lib/xstate-test.utils": "./src/lib/xstate-test.utils.ts",
     "./lib/xstate.lib": "./src/lib/xstate.lib.ts",

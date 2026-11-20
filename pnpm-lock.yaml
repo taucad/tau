@@ -957,12 +957,6 @@ catalogs:
     workbox-precaching:
       specifier: 7.4.1
       version: 7.4.1
-    workbox-routing:
-      specifier: 7.4.1
-      version: 7.4.1
-    workbox-strategies:
-      specifier: 7.4.1
-      version: 7.4.1
     ws:
       specifier: ^8.22.0
       version: 8.22.0
@@ -1443,8 +1437,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.4
-        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.4(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.5
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.5(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -4091,6 +4085,9 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -4147,6 +4144,9 @@ importers:
       '@taucad/lsp-fs':
         specifier: workspace:*
         version: link:../lsp-fs
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -5234,12 +5234,6 @@ importers:
         specifier: 'catalog:'
         version: 7.4.1
       workbox-precaching:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-routing:
-        specifier: 'catalog:'
-        version: 7.4.1
-      workbox-strategies:
         specifier: 'catalog:'
         version: 7.4.1
       xstate:
@@ -8229,8 +8223,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.4
-        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.4(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.5
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.5(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
     devDependencies:
       '@react-three/fiber':
         specifier: 9.8.2
@@ -16219,8 +16213,8 @@ packages:
   '@taulabs/replicad@1.2.1-beta.0':
     resolution: {integrity: sha512-GQBXvhmyhH1tD5mnMcGbF59CTQhFExwuHKapu6oeTdobJFRlnFs9ejvr/LPJCjKCbGDYTrowIaRGZaXAWPLpSg==}
 
-  '@taulabs/three-viewport-gizmo@3.0.0-beta.4':
-    resolution: {integrity: sha512-VsBdLBgucL/qVTeXTTc3pFUHW0LNXdI+xeq8UuGeFfHcVvpBhpHcV+LOYZyC+/i2QQzeCfiJw1JJ0KFfepOD4g==}
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.5':
+    resolution: {integrity: sha512-Y0dHCVeGg4N0eSjgzcGBUN0nISpNajIqglQRD15oQJWBJJGXvgpqk9QiTLtSbBPEVQ45quPAKJCKpqAVDBFaoQ==}
     engines: {node: '>=20'}
     peerDependencies:
       camera-controls: ^3.0.0
@@ -37269,7 +37263,7 @@ snapshots:
       flatbush: 4.6.2
       opentype.js: 2.0.0
 
-  '@taulabs/three-viewport-gizmo@3.0.0-beta.4(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.5(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
     dependencies:
       three: 0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)
     optionalDependencies:

@@ -198,9 +198,13 @@ describe('the web app’s service worker on a built app (PL7)', () => {
       const response = await fetchFromPage(path);
       expect(response.fromServiceWorker(), path).toBe(false);
     }
+    // A navigation is answered with the browser's own request (navigation preload, FP1 of Brain
+    // `research/pl7-service-worker-staging-defects-blueprint.md`), so it passes through the worker: what matters is
+    // that the answer is the network's, never a cached document.
     for (const path of ['/pricing', '/auth/sign-in']) {
       const response = await page.goto(`${origin()}${path}`);
-      expect(response?.fromServiceWorker(), path).toBe(false);
+      const headers = await response?.allHeaders();
+      expect(headers?.['server-timing'] ?? '', path).not.toContain('sw;desc=cache');
     }
     /* oxlint-enable no-await-in-loop */
     // `/` without the app preference is marketing: the network's answer, never the cached Home shell.
@@ -236,7 +240,8 @@ describe('the web app’s service worker on a built app (PL7)', () => {
     const precached = stored.find((cache) => cache.name.startsWith('tau-precache-'));
     expect(precached?.urls.toSorted()).toStrictEqual(precache.map((entry) => entry.url).toSorted());
     expect(stored.map((cache) => cache.name).filter((name) => !name.startsWith('tau-precache-'))).toStrictEqual(
-      stored.some((cache) => cache.name === 'tau-assets') ? ['tau-assets'] : [],
+      // The asset cache carries the cache version since FP3 (`pwa-messages.ts`).
+      stored.some((cache) => cache.name === 'tau-assets-v3') ? ['tau-assets-v3'] : [],
     );
     const everything = stored.flatMap((cache) => cache.urls);
     expect(everything.filter((url) => /\.data|^\/api\/|^\/auth\/|^\/health\//u.test(url))).toStrictEqual([]);

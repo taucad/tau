@@ -25,6 +25,7 @@ import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
 import { safeModeHref } from '#lib/boot-signals.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { SafeModeNotice } from '#components/layout/safe-mode-bar.js';
 import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
@@ -134,7 +135,12 @@ function LayoutDocument({
   const color = useColor();
   const { setFaviconColor } = useFavicon();
   const usePointerCursors = useDocumentFact('pointerCursors') === true;
-  const bootWatchdogScript = buildBootWatchdogScript();
+  /* D0 (B28): the watchdog's script and strip only matter in the server's document, which runs them without the
+   * bundle. The client renders the same elements with empty inner HTML, which hydration keeps as the server wrote it
+   * (React neither compares nor rewrites a hydrated element's `dangerouslySetInnerHTML`), so their source strings stay
+   * out of the client bundle. `undefined`: the desktop build emits neither. */
+  const bootWatchdogScript = import.meta.env.SSR ? buildBootWatchdogScript() : isDesktopTarget() ? undefined : '';
+  const bootWatchdogStrip = import.meta.env.SSR ? bootWatchdogStripHtml : '';
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -194,7 +200,7 @@ function LayoutDocument({
         {bootWatchdogScript === undefined ? undefined : (
           /* The watchdog's strip, hidden until its script shows it; React never changes it after the server render. */
           /* oxlint-disable-next-line react/no-danger -- static markup the inline watchdog reveals */
-          <div dangerouslySetInnerHTML={{ __html: bootWatchdogStripHtml }} suppressHydrationWarning />
+          <div dangerouslySetInnerHTML={{ __html: bootWatchdogStrip }} suppressHydrationWarning />
         )}
         {documentChrome}
         {children}

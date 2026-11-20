@@ -49,6 +49,8 @@
     "/packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md",
     // Vendored upstream sources; PROVENANCE.json pins each file's sha256 to its original bytes.
     "/packages/plugins/picogk/dotnet/fixtures/**",
+    // The PL7 service worker as shipped before FP1, bundled output kept verbatim for the boot suite.
+    "/apps/ui-e2e/fixtures/service-worker/**",
     // Same: PicoVoxel example ports are pinned by sha256 in provenance.json; Tau's main.ts adapters
     // and GeoSpec suites stay formatted.
     "/libs/tau-examples/src/kernels/picovoxel/*/*.ts",

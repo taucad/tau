@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  activatesWorker,
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
-  retryUnpinnedMiss,
   workerClasses,
 } from '#offline/service-worker-routing.js';
-import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
 
 const origin = 'https://tau.new';
@@ -173,28 +173,6 @@ describe('the deployment ask passes through (adaptive app deployment mode W7)', 
   );
 });
 
-describe('retryUnpinnedMiss', () => {
-  it('should keep a hit and never retry a request already sent without credentials', async () => {
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
-    const hit = new Response('chunk', { status: 200 });
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), hit, fetchFile)).resolves.toBe(hit);
-    const miss = new Response('gone', { status: 404 });
-    await expect(
-      retryUnpinnedMiss(new Request(`${origin}/assets/a.js`, { credentials: 'omit' }), miss, fetchFile),
-    ).resolves.toBe(miss);
-    expect(fetchFile).not.toHaveBeenCalled();
-  });
-
-  it('should ask a miss again without the skew pin, from the live deploy', async () => {
-    const retried = new Response('chunk', { status: 200 });
-    const fetchFile = vi.fn<(input: string, init: RequestInit) => Promise<Response>>().mockResolvedValue(retried);
-    const miss = new Response('<!DOCTYPE html><title>Not Found</title>', { status: 404 });
-
-    await expect(retryUnpinnedMiss(new Request(`${origin}/assets/a.js`), miss, fetchFile)).resolves.toBe(retried);
-    expect(fetchFile).toHaveBeenCalledExactlyOnceWith(`${origin}/assets/a.js`, { credentials: 'omit' });
-  });
-});
-
 describe('installMessage', () => {
   it('should report a completed install, a quota failure and any other failure', () => {
     expect(installMessage()).toStrictEqual({ type: serviceWorkerMessageType, status: 'ready' });
@@ -204,5 +182,25 @@ describe('installMessage', () => {
       status: 'failed',
       detail: 'Failed to fetch',
     });
+  });
+});
+
+describe('activatesWorker (FP3)', () => {
+  it('should activate on the update rule’s message whatever the build', () => {
+    expect(activatesWorker({ type: skipWaitingMessageType }, 0)).toBe(true);
+    expect(activatesWorker({ type: skipWaitingMessageType }, 7)).toBe(true);
+  });
+
+  it('should activate on an activate-if-build message only for this worker’s known build', () => {
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 7 }, 7)).toBe(true);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 6 }, 7)).toBe(false);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: 0 }, 0)).toBe(false);
+    expect(activatesWorker({ type: activateIfBuildMessageType, buildId: '7' }, 7)).toBe(false);
+  });
+
+  it('should ignore anything else', () => {
+    for (const data of [undefined, null, 'SKIP_WAITING', { type: 'other' }]) {
+      expect(activatesWorker(data, 7)).toBe(false);
+    }
   });
 });

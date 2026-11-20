@@ -11,8 +11,9 @@
  * retry. Optional code ({@link LoadCodeOptions.optional}) degrades instead: the recovery hears of it, never reloads
  * for it, and the caller falls back.
  *
- * Realm-neutral and dependency-free: the page and the module workers share it, each installing its own recovery
- * through {@link setCodeLoadFailureSink}.
+ * Realm-neutral and dependency-free: the page installs its recovery through {@link setCodeLoadFailureSink}; a
+ * dedicated module worker tells its page by default ({@link workerCodeLoadFailureType}, FP10), and the page replaces
+ * the worker, since a new worker is a new realm.
  */
 
 /** How the realm's recovery should treat a failed load: code the caller needs, or code it can do without. */
@@ -58,7 +59,45 @@ export const isCodeLoadFailure = (error: unknown): boolean => {
   return false;
 };
 
+/**
+ * The message a module worker's realm posts to the page when code it needs failed to load (PL7 staging defects
+ * FP10): the page's module-worker factory (`@taucad/ui-core/lib/worker-factory`) takes it off the worker's own channel
+ * and replaces the worker, since that realm can never load the module again.
+ */
+export const workerCodeLoadFailureType = 'tau/worker-code-load-failed';
+
+/** {@link workerCodeLoadFailureType}'s message. */
+export type WorkerCodeLoadFailureMessage = Readonly<{
+  type: typeof workerCodeLoadFailureType;
+  /** The browser's own wording, which names the module that failed. */
+  message: string;
+}>;
+
+/**
+ * Whether this realm is a dedicated worker, whose parent hears what it posts on its own scope. A service worker or a
+ * shared worker has no one parent to tell.
+ */
+const isDedicatedWorker = (): boolean => {
+  const scope = (globalThis as { DedicatedWorkerGlobalScope?: abstract new () => unknown }).DedicatedWorkerGlobalScope;
+  return scope !== undefined && globalThis instanceof scope;
+};
+
+/**
+ * A dedicated worker's recovery, installed by default: tell the page, which owns replacing the worker. Optional code
+ * degrades inside the worker and is not worth a new one.
+ */
+const tellParentWorker: CodeLoadFailureSink = (failure, kind) => {
+  if (kind === 'required') {
+    const message: WorkerCodeLoadFailureMessage = {
+      type: workerCodeLoadFailureType,
+      message: failure instanceof Error ? failure.message : String(failure),
+    };
+    globalThis.postMessage(message);
+  }
+};
+
 let sink: CodeLoadFailureSink | undefined;
+let isSinkInstalled = false;
 
 /**
  * Install this realm's recovery for failed code loads. The page installs the stale-build recovery once, at boot.
@@ -68,11 +107,18 @@ let sink: CodeLoadFailureSink | undefined;
  */
 export const setCodeLoadFailureSink = (next: CodeLoadFailureSink | undefined): (() => void) => {
   const previous = sink;
+  const wasInstalled = isSinkInstalled;
   sink = next;
+  isSinkInstalled = true;
   return () => {
     sink = previous;
+    isSinkInstalled = wasInstalled;
   };
 };
+
+/** The installed recovery, or a dedicated worker's default: telling its page. */
+const currentSink = (): CodeLoadFailureSink | undefined =>
+  isSinkInstalled ? sink : isDedicatedWorker() ? tellParentWorker : undefined;
 
 /**
  * Load code through the realm's one owner: run the importer once and, when the browser fails to load the module, hand
@@ -94,7 +140,7 @@ export const loadCode = async <Module>(importer: () => Promise<Module>, options?
   } catch (error) {
     if (isCodeLoadFailure(error)) {
       try {
-        sink?.(error, options?.optional === true ? 'optional' : 'required');
+        currentSink()?.(error, options?.optional === true ? 'optional' : 'required');
       } catch {
         // The recovery's own fault never replaces the failure the caller handles.
       }

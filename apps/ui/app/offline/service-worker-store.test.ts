@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import {
+  buildFloorKey,
   completeDocuments,
   fillFromHttpCache,
   installPrecache,
+  readStoredBuildFloor,
   readStoredUrls,
+  storeBuildFloor,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import type { PrecacheItem, StoreCache } from '#offline/service-worker-store.js';
+import type { FloorStorage, PrecacheItem, StoreCache } from '#offline/service-worker-store.js';
 
 const origin = 'https://tau.new';
 const shell = `${origin}/w/__shell/__shell/index.html`;
@@ -206,5 +209,61 @@ describe('fillFromHttpCache', () => {
     ).resolves.toBe(false);
     expect(put).toHaveBeenCalledOnce();
     expect(quota).toHaveBeenCalledOnce();
+  });
+});
+
+describe('the stored build floor (FP2)', () => {
+  const stateCache = 'tau-state-v3';
+
+  /** Cache Storage as far as the floor uses it, in memory: what a worker restarted later reads back. */
+  const createStorage = (): FloorStorage & { readonly names: () => readonly string[] } => {
+    const caches = new Map<string, Map<string, Response>>();
+    return {
+      names: () => [...caches.keys()],
+      has: async (name) => caches.has(name),
+      delete: async (name) => caches.delete(name),
+      open: async (name) => {
+        const entries = caches.get(name) ?? new Map<string, Response>();
+        caches.set(name, entries);
+        return {
+          match: async (key: RequestInfo | URL) => entries.get(String(key))?.clone(),
+          put: async (key: RequestInfo | URL, response: Response) => {
+            entries.set(String(key), response);
+          },
+        } as unknown as Cache;
+      },
+    };
+  };
+
+  it('should read back the floor a worker stored, as a worker started later does', async () => {
+    const storage = createStorage();
+    await storeBuildFloor(storage, stateCache, 1_795_000_000_000);
+
+    await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBe(1_795_000_000_000);
+    expect(storage.names()).toStrictEqual([stateCache]);
+  });
+
+  it('should read no floor when none was stored, without creating the cache', async () => {
+    const storage = createStorage();
+
+    await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBeUndefined();
+    expect(storage.names()).toStrictEqual([]);
+  });
+
+  it('should forget the floor when the server reports none', async () => {
+    const storage = createStorage();
+    await storeBuildFloor(storage, stateCache, 1_795_000_000_000);
+    await storeBuildFloor(storage, stateCache, undefined);
+
+    await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBeUndefined();
+    expect(storage.names()).toStrictEqual([]);
+  });
+
+  it('should read a stored value that is no build id as no floor', async () => {
+    const storage = createStorage();
+    const cache = await storage.open(stateCache);
+    await cache.put(buildFloorKey, new Response('not-a-build'));
+
+    await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBeUndefined();
   });
 });

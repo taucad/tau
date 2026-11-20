@@ -497,8 +497,7 @@ export const startDeployServer = async (
       documents.push(live);
       response.cookie(deployCookie, live, { path: '/' });
     }
-    // The page's build checks only: the service worker asks for the build floor with `?worker=1` (FP2).
-    if (live === 'next' && request.path === '/health/build' && request.query['worker'] === undefined) {
+    if (live === 'next' && request.path === '/health/build') {
       buildChecks += 1;
     }
     if (shells !== undefined && request.method === 'GET' && projectUrl.test(request.path)) {

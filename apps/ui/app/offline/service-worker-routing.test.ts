@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   activatesWorker,
   answerNavigation,
-  cachedShellAgeLimit,
   installMessage,
   isCachedOnFirstUse,
   isSafeModeNavigation,
   isShellInBounds,
   navigationCandidate,
+  readBuildFloorMessage,
   workerClasses,
 } from '#offline/service-worker-routing.js';
-import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import {
+  activateIfBuildMessageType,
+  buildFloorMessageType,
+  serviceWorkerMessageType,
+  skipWaitingMessageType,
+} from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
 import { safeModeHref } from '#lib/boot-signals.js';
 
@@ -223,22 +228,45 @@ describe('isSafeModeNavigation (FP5)', () => {
 });
 
 describe('isShellInBounds (FP2)', () => {
-  const now = 1_800_000_000_000;
+  const buildId = 1_795_000_000_000;
 
-  it('should hold a shell younger than the age limit with no floor reported', () => {
-    expect(isShellInBounds({ buildId: now - cachedShellAgeLimit + 1, now, floor: undefined })).toBe(true);
+  it('should hold the shells while the server has reported no floor, whatever the build', () => {
+    expect(isShellInBounds({ buildId, floor: undefined })).toBe(true);
+    expect(isShellInBounds({ buildId: 0, floor: undefined })).toBe(true);
   });
 
-  it('should not hold a shell at or past the age limit', () => {
-    expect(isShellInBounds({ buildId: now - cachedShellAgeLimit, now, floor: undefined })).toBe(false);
+  it('should hold the shells of a build at or above the floor, and not those of a build below it', () => {
+    expect(isShellInBounds({ buildId, floor: buildId })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId - 1 })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId + 1 })).toBe(false);
   });
 
-  it('should not hold a shell below the floor the server reported, and hold one at it', () => {
-    expect(isShellInBounds({ buildId: now - 1000, now, floor: now - 999 })).toBe(false);
-    expect(isShellInBounds({ buildId: now - 1000, now, floor: now - 1000 })).toBe(true);
+  it('should not hold the shells of an unknown build (0) once a floor is reported', () => {
+    expect(isShellInBounds({ buildId: 0, floor: 1 })).toBe(false);
+  });
+});
+
+describe('readBuildFloorMessage (FP2)', () => {
+  it('should read the floor a page relays from the server', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: 1_795_000_000_000 })).toStrictEqual({
+      minBuildId: 1_795_000_000_000,
+    });
   });
 
-  it('should not hold a shell of an unknown build', () => {
-    expect(isShellInBounds({ buildId: 0, now, floor: undefined })).toBe(false);
+  it('should read a relayed answer that names no floor as none', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType })).toStrictEqual({ minBuildId: undefined });
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: undefined })).toStrictEqual({
+      minBuildId: undefined,
+    });
+  });
+
+  it.each([
+    ['another message', { type: skipWaitingMessageType }],
+    ['no object', 'tau-build-floor'],
+    ['a floor that is no build id', { type: buildFloorMessageType, minBuildId: -5 }],
+    ['a fractional floor', { type: buildFloorMessageType, minBuildId: 1.5 }],
+    ['a floor as text', { type: buildFloorMessageType, minBuildId: '1795000000000' }],
+  ])('should ignore %s', (_label, data) => {
+    expect(readBuildFloorMessage(data)).toBeUndefined();
   });
 });

@@ -70,6 +70,26 @@ const isOwnedBy = (node, owners) => {
   );
 };
 
+/**
+ * The expression an owner holds for an `import()`: `import(…).then((loaded) => ({ … }))` names the exports used, so
+ * the bundler can still drop the rest (an import whose namespace escapes into `load` keeps every export); otherwise the
+ * import itself.
+ *
+ * @param {any} node - The `ImportExpression`.
+ * @returns {any} The `then()` call, or the import.
+ */
+const namedImportOf = (node) => {
+  const then = node.parent;
+  return then?.type === 'MemberExpression' &&
+    then.object === node &&
+    then.property.type === 'Identifier' &&
+    then.property.name === 'then' &&
+    then.parent?.type === 'CallExpression' &&
+    then.parent.callee === then
+    ? then.parent
+    : node;
+};
+
 /** @type {RuleModule} */
 export const noUnownedCodeLoadRule = {
   meta: {
@@ -80,9 +100,9 @@ export const noUnownedCodeLoadRule = {
     },
     messages: {
       unownedImport:
-        "Load code through the owner: `load(async () => import('…'))` from `#lib/code-loading.js` (with `{ optional: true }` for code the caller can do without). A failed load stays failed for the life of the page; the owner hands it to the recovery, which reloads or offers the reload.",
+        "Load code through the owner: `load(async () => import('…'))` from `#lib/code-loading.js` (with `{ optional: true }` for code the caller can do without; name the exports used with `import('…').then((loaded) => ({ X: loaded.X }))` so the bundler can drop the rest). A failed load stays failed for the life of the page; the owner hands it to the recovery, which reloads or offers the reload.",
       unownedWorkerImport:
-        "Load code inside a worker through `loadInWorker(async () => import('…'))` from `#workers/worker-load.js`: it reports `WORKER_LOAD_FAILED`, and the page starts a new worker, since this one keeps the failure.",
+        "Load code inside a worker through `loadInWorker(async () => import('…'))` from `#workers/worker-load.js` (name the exports used with `import('…').then((loaded) => ({ X: loaded.X }))`): it reports `WORKER_LOAD_FAILED`, and the page starts a new worker, since this one keeps the failure.",
       unownedWorker:
         "Create a module worker through `createModuleWorker(() => new Worker(new URL('…', import.meta.url), …), { name })` from `#lib/module-worker.js`, which reports its script failing to load.",
       reactLazy:
@@ -143,7 +163,7 @@ export const noUnownedCodeLoadRule = {
         }
       },
       ImportExpression(node) {
-        if (!isOwnedBy(node, ownerLoads)) {
+        if (!isOwnedBy(namedImportOf(node), ownerLoads)) {
           context.report({ node, messageId: inWorker ? 'unownedWorkerImport' : 'unownedImport' });
         }
       },

@@ -9,7 +9,9 @@ import { lazy } from '#lib/lazy-component.js';
 
 /* The code block carries the syntax highlighter, so it stays off the Home page's critical path until a card shows. */
 const ChatLoginCommand = lazy(async () => {
-  const module = await load(async () => import('#components/chat/chat-login-command.js'));
+  const module = await load(async () =>
+    import('#components/chat/chat-login-command.js').then((loaded) => ({ ChatLoginCommand: loaded.ChatLoginCommand })),
+  );
   return { default: module.ChatLoginCommand };
 });
 

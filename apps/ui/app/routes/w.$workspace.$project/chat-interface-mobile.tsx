@@ -40,69 +40,121 @@ import { lazy } from '#lib/lazy-component.js';
  * stays on the chat never downloads the editor (CodeMirror and the dockview
  * workbench), parameters, converter or revision panels. */
 const ChatFileTree = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-file-tree.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-file-tree.js').then((loaded) => ({ ChatFileTree: loaded.ChatFileTree })),
+  );
   return { default: module.ChatFileTree };
 });
 const ChatParameters = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-parameters.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-parameters.js').then((loaded) => ({
+      ChatParameters: loaded.ChatParameters,
+    })),
+  );
   return { default: module.ChatParameters };
 });
 const ChatEditorLayout = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-editor-layout.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-editor-layout.js').then((loaded) => ({
+      ChatEditorLayout: loaded.ChatEditorLayout,
+    })),
+  );
   return { default: module.ChatEditorLayout };
 });
 const ChatDetails = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-details.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-details.js').then((loaded) => ({ ChatDetails: loaded.ChatDetails })),
+  );
   return { default: module.ChatDetails };
 });
 const ChatConverter = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-converter.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-converter.js').then((loaded) => ({
+      ChatConverter: loaded.ChatConverter,
+    })),
+  );
   return { default: module.ChatConverter };
 });
 const ProjectShareWorkbenchPanel = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/project-share-action.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/project-share-action.js').then((loaded) => ({
+      ProjectShareWorkbenchPanel: loaded.ProjectShareWorkbenchPanel,
+    })),
+  );
   return { default: module.ProjectShareWorkbenchPanel };
 });
 const ChatRevisions = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-revisions.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-revisions.js').then((loaded) => ({
+      ChatRevisions: loaded.ChatRevisions,
+    })),
+  );
   return { default: module.ChatRevisions };
 });
 /* The bodies the desktop Workbench registers, each behind its own availability gate, so a phone reaches every
  * registry pane (I1) with the same content and refusals. */
 const ModelPanelBody = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-explorer.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-explorer.js').then((loaded) => ({
+      ModelPanelBody: loaded.ModelPanelBody,
+    })),
+  );
   return { default: module.ModelPanelBody };
 });
 const KinematicsPanelBody = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-kinematics.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-kinematics.js').then((loaded) => ({
+      KinematicsPanelBody: loaded.KinematicsPanelBody,
+    })),
+  );
   return { default: module.KinematicsPanelBody };
 });
 const PrintPanelBody = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-print.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-print.js').then((loaded) => ({ PrintPanelBody: loaded.PrintPanelBody })),
+  );
   return { default: module.PrintPanelBody };
 });
 const BrowserPane = lazy(async () => {
-  const module = await load(async () => import('#components/browser/browser-pane.js'));
+  const module = await load(async () =>
+    import('#components/browser/browser-pane.js').then((loaded) => ({ BrowserPane: loaded.BrowserPane })),
+  );
   return { default: module.BrowserPane };
 });
 const AgentsPanelBody = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-agents.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-agents.js').then((loaded) => ({
+      AgentsPanelBody: loaded.AgentsPanelBody,
+    })),
+  );
   return { default: module.AgentsPanelBody };
 });
 const JobsPanelBody = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-jobs.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-jobs.js').then((loaded) => ({ JobsPanelBody: loaded.JobsPanelBody })),
+  );
   return { default: module.JobsPanelBody };
 });
 const TelemetryPanelContent = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-kernel.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-kernel.js').then((loaded) => ({
+      TelemetryPanelContent: loaded.TelemetryPanelContent,
+    })),
+  );
   return { default: module.TelemetryPanelContent };
 });
 const ChatConsole = lazy(async () => {
-  const module = await load(async () => import('#routes/w.$workspace.$project/chat-console.js'));
+  const module = await load(async () =>
+    import('#routes/w.$workspace.$project/chat-console.js').then((loaded) => ({ ChatConsole: loaded.ChatConsole })),
+  );
   return { default: module.ChatConsole };
 });
 const ProjectTerminalPane = lazy(async () => {
-  const module = await load(async () => import('#components/terminal/terminal-pane.js'));
+  const module = await load(async () =>
+    import('#components/terminal/terminal-pane.js').then((loaded) => ({
+      ProjectTerminalPane: loaded.ProjectTerminalPane,
+    })),
+  );
   return { default: module.ProjectTerminalPane };
 });
 

@@ -27,7 +27,11 @@ import { load } from '#lib/code-loading.js';
 import { lazy } from '#lib/lazy-component.js';
 
 const GlassPrismLoaderLazy = lazy(async () => {
-  const module = await load(async () => import('#components/geometry/loader/glass-prism-loader.js'));
+  const module = await load(async () =>
+    import('#components/geometry/loader/glass-prism-loader.js').then((loaded) => ({
+      GlassPrismLoader: loaded.GlassPrismLoader,
+    })),
+  );
   return { default: module.GlassPrismLoader };
 });
 

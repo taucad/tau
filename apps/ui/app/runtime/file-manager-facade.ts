@@ -196,7 +196,11 @@ export const createRecordWatch =
       try {
         await whenServicesReady();
         abort.signal.throwIfAborted();
-        const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
+        const { createFileSystemBridgeProxy } = await load(async () =>
+          import('@taucad/fs-bridge').then((loaded) => ({
+            createFileSystemBridgeProxy: loaded.createFileSystemBridgeProxy,
+          })),
+        );
         abort.signal.throwIfAborted();
         const proxy = createFileSystemBridgeProxy(opener(root, 'working-copy'));
         /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
@@ -269,7 +273,11 @@ export const createDuplicateProjectReader =
   ): ((projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>) =>
   async (projectRoot) => {
     await whenServicesReady();
-    const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
+    const { createFileSystemBridgeProxy } = await load(async () =>
+      import('@taucad/fs-bridge').then((loaded) => ({
+        createFileSystemBridgeProxy: loaded.createFileSystemBridgeProxy,
+      })),
+    );
     const proxy = createFileSystemBridgeProxy(opener(projectRoot, 'user'));
     try {
       const files = await proxy.contents('', { versionedOnly: true });

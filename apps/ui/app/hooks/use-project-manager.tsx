@@ -28,7 +28,9 @@ const projectManagerServices: Omit<ProjectManagerServices, 'generateProjectName'
     prepareFirstProjectTour({
       readProjectCount,
       async readAccount() {
-        const { authClient } = await load(async () => import('#lib/auth-client.js'));
+        const { authClient } = await load(async () =>
+          import('#lib/auth-client.js').then((loaded) => ({ authClient: loaded.authClient })),
+        );
         const { data, error } = await authClient.getSession();
         if (error !== null) {
           throw new Error('The session could not be read');

@@ -426,8 +426,12 @@ export const ChatTextarea = memo(function ({
         if (!cadRef) {
           throw new Error('No CAD view available for image capture');
         }
-        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } = await load(
-          async () => import('#services/headless-capture.js'),
+        const { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } = await load(async () =>
+          import('#services/headless-capture.js').then((loaded) => ({
+            captureCadImages: loaded.captureCadImages,
+            captureFilesToDataUrls: loaded.captureFilesToDataUrls,
+            omittedSectionCutsNotice: loaded.omittedSectionCutsNotice,
+          })),
         );
         const graphicsRef = resolveGraphicsRefForEntry(entryPath);
         const { files, omittedSectionCutIds } = await captureCadImages({

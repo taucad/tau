@@ -28,7 +28,9 @@ export function createLazySkillResolver(
   let pending: Promise<SkillResolver> | undefined;
   const importResolver = async (): Promise<SkillResolver> => {
     try {
-      const { createSkillResolver } = await load(async () => import('#lib/skill-resolver.js'));
+      const { createSkillResolver } = await load(async () =>
+        import('#lib/skill-resolver.js').then((loaded) => ({ createSkillResolver: loaded.createSkillResolver })),
+      );
       return createSkillResolver(deps);
     } catch (error) {
       pending = undefined;
@@ -68,7 +70,9 @@ export const loadedSystemSkillBundles = (): readonly SystemSkillBundle[] | undef
 
 const importBundles = async (): Promise<readonly SystemSkillBundle[]> => {
   try {
-    const { systemSkillBundles } = await load(async () => import('@taucad/skills/resources'));
+    const { systemSkillBundles } = await load(async () =>
+      import('@taucad/skills/resources').then((loaded) => ({ systemSkillBundles: loaded.systemSkillBundles })),
+    );
     bundles = systemSkillBundles;
     return systemSkillBundles;
   } catch (error) {

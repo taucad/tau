@@ -127,6 +127,8 @@ export type DeployServer = {
   readonly heldRequest: Promise<void>;
   /** How many requests `resetOnce` reset (at most one). */
   readonly resets: () => number;
+  /** How many requests `resetOnce` matched, the reset one included. */
+  readonly resetMatches: () => number;
   deploy(): void;
   close(): Promise<void>;
 };
@@ -148,8 +150,9 @@ export const startDeployServer = async (
     readonly hold?: boolean;
     readonly retain?: boolean;
     /**
-     * The first `/assets/*` request whose path matches has its connection reset, as a dropped connection or a network
-     * change does; later ones are served (PL7 blueprint row 9: a transient failure on the live build).
+     * The first `/assets/*` request whose path matches has its connection dropped after the headers, as a dead
+     * connection or a network change does; later ones are served (PL7 blueprint row 9: a transient failure on the live
+     * build).
      */
     readonly resetOnce?: RegExp;
   } = {},
@@ -160,6 +163,7 @@ export const startDeployServer = async (
   let live: Deploy = 'previous';
   let buildChecks = 0;
   let resets = 0;
+  let resetMatches = 0;
   const documents: Deploy[] = [];
   const held: Array<() => void> = [];
   let markHeld: () => void = () => undefined;
@@ -180,9 +184,18 @@ export const startDeployServer = async (
     const cookie = request.headers.cookie ?? '';
     const renderedByNext =
       cookie.includes(`${deployCookie}=next`) || (live === 'next' && !cookie.includes(deployCookie));
+    if (resetOnce?.test(request.originalUrl) === true) {
+      resetMatches += 1;
+    }
     if (resetOnce !== undefined && resets === 0 && resetOnce.test(request.originalUrl)) {
       resets += 1;
-      request.socket.destroy();
+      /* The connection drops after the headers, as a network change or a dead connection does mid-response. A reset
+         before any byte is not enough: Chromium may resend an idempotent request whose reused socket reset before it
+         answered, so the page would never see the failure. */
+      response.writeHead(200, { 'content-type': 'text/javascript', 'content-length': '1048576' });
+      response.write('// truncated\n', () => {
+        request.socket.destroy();
+      });
       return;
     }
     if (hold && live === 'previous' && heldChunk.test(request.originalUrl)) {
@@ -255,6 +268,7 @@ export const startDeployServer = async (
     buildChecks: () => buildChecks,
     heldRequest,
     resets: () => resets,
+    resetMatches: () => resetMatches,
     deploy() {
       live = 'next';
       for (const release of held.splice(0)) {

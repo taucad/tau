@@ -1166,7 +1166,11 @@ function FileManagerScope({
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
+      const { createFileSystemBridgeProxy } = await load(async () =>
+        import('@taucad/fs-bridge').then((loaded) => ({
+          createFileSystemBridgeProxy: loaded.createFileSystemBridgeProxy,
+        })),
+      );
       // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
       const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;

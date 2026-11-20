@@ -51,7 +51,9 @@ export async function getKernelDependencies(kernelId: KernelProvider): Promise<R
     return {};
   }
 
-  const { kernelLibraries } = await load(async () => import('#utils/kernel-libraries.js'));
+  const { kernelLibraries } = await load(async () =>
+    import('#utils/kernel-libraries.js').then((loaded) => ({ kernelLibraries: loaded.kernelLibraries })),
+  );
   return { ...kernelLibraries[kernelId] };
 }
 
@@ -82,8 +84,12 @@ export async function getKernelProjectTemplate(kernelId: KernelProvider): Promis
 
     case 'picogk': {
       const [csproj, lock] = await Promise.all([
-        load(async () => import('@taucad/picogk/project/project.csproj?raw')),
-        load(async () => import('@taucad/picogk/project/packages.lock.json?raw')),
+        load(async () =>
+          import('@taucad/picogk/project/project.csproj?raw').then((loaded) => ({ default: loaded.default })),
+        ),
+        load(async () =>
+          import('@taucad/picogk/project/packages.lock.json?raw').then((loaded) => ({ default: loaded.default })),
+        ),
       ]);
       return { 'project.csproj': csproj.default, 'packages.lock.json': lock.default };
     }

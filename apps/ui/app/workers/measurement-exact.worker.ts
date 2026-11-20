@@ -28,7 +28,9 @@ type ExactEngine = Parameters<typeof queryDirectAp242MinimumDistance>[0]['engine
 export async function evaluateExactOccurrenceDistance(
   request: ExactRequest,
   initialize: () => Promise<ExactEngine> = async () => {
-    const native = await loadInWorker(async () => import('geospec-engine'));
+    const native = await loadInWorker(async () =>
+      import('geospec-engine').then((loaded) => ({ initialize: loaded.initialize, Engine: loaded.Engine })),
+    );
     await native.initialize();
     return new native.Engine();
   },

@@ -270,13 +270,29 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
    * load fails again for the life of the page, so the page needs a new realm: an untouched page reloads into the same
    * build once and mounts, where it used to keep the failure as genuine and leave a dead control. */
   it('should reload once into the same build when a lazy chunk fails once on the live build', async () => {
-    const { page, live } = await open('/', false, { resetOnce: heldChunk });
+    const { page, live, errors } = await open('/', false, { resetOnce: heldChunk });
+    // Wait for the second document, then say what the page saw if it never came.
+    await expect
+      .poll(() => live.documents.length, { timeout: 30_000 })
+      .toBeGreaterThan(1)
+      .catch(() => undefined);
+    const state = {
+      resets: live.resets(),
+      chunkRequests: live.resetMatches(),
+      moduleLoadErrors: errors,
+      reload: await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-transient-reload')),
+    };
 
-    await expect.poll(() => live.documents, { timeout: 30_000 }).toStrictEqual(['previous', 'previous']);
+    expect(live.documents, `the page after the reset: ${JSON.stringify(state)}`).toStrictEqual([
+      'previous',
+      'previous',
+    ]);
     await page.getByRole('main').waitFor({ timeout: 30_000 });
     await page.waitForLoadState('networkidle');
 
     expect(live.resets()).toBe(1);
+    // Once failed, once loaded by the new document: the reset reached the page, not a transparent browser retry.
+    expect(live.resetMatches()).toBe(2);
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
     expect(await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-transient-reload'))).toMatch(
       /^\d+@\d+$/u,

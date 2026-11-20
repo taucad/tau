@@ -93,7 +93,9 @@ export function DebugProbes(): ReactNode {
     probeGlobals.__tauCaptureImages = async (input) => {
       const { activeChatId: chatId, ...deps } = depsRef.current;
       // The RPC handler stack loads on the first probe call; a failed import rejects this probe's promise.
-      const { createRpcHandlers } = await load(async () => import('#hooks/rpc-handlers.js'));
+      const { createRpcHandlers } = await load(async () =>
+        import('#hooks/rpc-handlers.js').then((loaded) => ({ createRpcHandlers: loaded.createRpcHandlers })),
+      );
       return createRpcHandlers({ chatId, ...deps }).executeRpcCall({
         rpcName: rpcName.captureImages,
         args: input,

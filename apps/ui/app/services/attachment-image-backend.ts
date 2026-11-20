@@ -11,10 +11,20 @@ export const attachmentImageBackend: AttachmentImageBackend = {
   async createClient() {
     const [{ createRuntimeClient }, { webWorkerTransport }, { fromMemoryFs }, { observeRuntimeClient }] =
       await Promise.all([
-        load(async () => import('@taucad/runtime/client')),
-        load(async () => import('@taucad/runtime/transport/web')),
-        load(async () => import('@taucad/runtime/filesystem')),
-        load(async () => import('#telemetry/runtime-telemetry.js')),
+        load(async () =>
+          import('@taucad/runtime/client').then((loaded) => ({ createRuntimeClient: loaded.createRuntimeClient })),
+        ),
+        load(async () =>
+          import('@taucad/runtime/transport/web').then((loaded) => ({ webWorkerTransport: loaded.webWorkerTransport })),
+        ),
+        load(async () =>
+          import('@taucad/runtime/filesystem').then((loaded) => ({ fromMemoryFs: loaded.fromMemoryFs })),
+        ),
+        load(async () =>
+          import('#telemetry/runtime-telemetry.js').then((loaded) => ({
+            observeRuntimeClient: loaded.observeRuntimeClient,
+          })),
+        ),
       ]);
     const client = createRuntimeClient({
       transport: webWorkerTransport({

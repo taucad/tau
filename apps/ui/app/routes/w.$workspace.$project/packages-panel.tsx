@@ -120,9 +120,9 @@ export function PackagesPanel(): React.JSX.Element {
     const toolCallId = randomUuid();
     try {
       // The RPC handler stack (the package resolver and `semver`) loads on the first Install, not with the panel.
-      const handlersModule = await load(async () => import('#hooks/rpc-handlers.js')).catch((error: unknown) =>
-        error instanceof Error ? error : new Error(String(error)),
-      );
+      const handlersModule = await load(async () =>
+        import('#hooks/rpc-handlers.js').then((loaded) => ({ createRpcHandlers: loaded.createRpcHandlers })),
+      ).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
       if (handlersModule instanceof Error) {
         setResult({
           toolCallId,

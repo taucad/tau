@@ -43,7 +43,11 @@ export const desktopKernelOptions =
     }
     // Dynamic so the electron renderer module never enters the web bundle's
     // eager graph, the way every other preset defers its heavy import.
-    const { createElectronClientOptions } = await load(async () => import('@taucad/runtime/electron/renderer'));
+    const { createElectronClientOptions } = await load(async () =>
+      import('@taucad/runtime/electron/renderer').then((loaded) => ({
+        createElectronClientOptions: loaded.createElectronClientOptions,
+      })),
+    );
     const provideClientOptions = createElectronClientOptions<typeof runtime>({
       config: createUiRuntimeConfig(ENV),
       context: { projectRoot, definition: 'default', computeMode },

@@ -194,8 +194,17 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
       }
       // The capture recipe and the camera rig bring three.js; they load with the first capture (progressive loading PL5).
       const [{ captureCadImages, omittedSectionCutsNotice }, { getGraphicsCameraState }] = await Promise.all([
-        load(async () => import('#services/headless-capture.js')),
-        load(async () => import('@taucad/viewer/graphics/graphics-camera')),
+        load(async () =>
+          import('#services/headless-capture.js').then((loaded) => ({
+            captureCadImages: loaded.captureCadImages,
+            omittedSectionCutsNotice: loaded.omittedSectionCutsNotice,
+          })),
+        ),
+        load(async () =>
+          import('@taucad/viewer/graphics/graphics-camera').then((loaded) => ({
+            getGraphicsCameraState: loaded.getGraphicsCameraState,
+          })),
+        ),
       ]);
       const { files, omittedSectionCutIds } = await captureCadImages({
         cadRef: claimedActor,

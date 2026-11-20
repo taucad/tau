@@ -90,7 +90,9 @@ const warmQuietly = async (warm: WarmClass, target: string, loaded: string): Pro
 };
 
 const warmFromManifest: WarmClass = async (target, loaded) => {
-  const { warmRouteClass } = await load(async () => import('#lib/warm-route-class.js'));
+  const { warmRouteClass } = await load(async () =>
+    import('#lib/warm-route-class.js').then((loaded) => ({ warmRouteClass: loaded.warmRouteClass })),
+  );
   return warmRouteClass({ target, loaded });
 };
 

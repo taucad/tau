@@ -223,7 +223,11 @@ const parameterCloseBound = 10_000;
 const agentRuntimeIdleTimeout = 120_000;
 
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
-  const { createTransferredFileSystemBridgeProxy } = await loadInWorker(async () => import('@taucad/fs-bridge'));
+  const { createTransferredFileSystemBridgeProxy } = await loadInWorker(async () =>
+    import('@taucad/fs-bridge').then((loaded) => ({
+      createTransferredFileSystemBridgeProxy: loaded.createTransferredFileSystemBridgeProxy,
+    })),
+  );
   const proxy = createTransferredFileSystemBridgeProxy(port);
   let readyExpiry: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -734,12 +738,18 @@ const composeProjectHost = async (
   });
   // Lazy: the headless-image graph eagerly resolves the resvg wasm URL at
   // module load, which only the full app build serves.
-  const headlessImageModule = await loadInWorker(async () => import('#services/headless-image.service.js'));
+  const headlessImageModule = await loadInWorker(async () =>
+    import('#services/headless-image.service.js').then((loaded) => ({
+      HeadlessImageService: loaded.HeadlessImageService,
+    })),
+  );
   const imageService = new headlessImageModule.HeadlessImageService();
   opened(() => {
     imageService.dispose();
   });
-  const { createFileSystemBridgePort } = await loadInWorker(async () => import('@taucad/fs-bridge'));
+  const { createFileSystemBridgePort } = await loadInWorker(async () =>
+    import('@taucad/fs-bridge').then((loaded) => ({ createFileSystemBridgePort: loaded.createFileSystemBridgePort })),
+  );
   const revisionsSlot =
     provide.revisionsPort === undefined ? undefined : swappable(createPortRevisionsClient(provide.revisionsPort));
   const revisions = revisionsSlot?.view;

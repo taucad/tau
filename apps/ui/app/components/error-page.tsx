@@ -46,9 +46,15 @@ function MessageBlock({ title }: CodeBlockProps): React.JSX.Element {
 /* Optional (PL7 FP9): the error page shows the message alone if the code block cannot load, and never reloads for it. */
 const CollapsibleCodeBlock = lazy<React.ComponentType<CodeBlockProps>>(
   async () => {
-    const m = await load(async () => import('@taucad/editor-ui/components/ui/collapsible-code-block'), {
-      optional: true,
-    });
+    const m = await load(
+      async () =>
+        import('@taucad/editor-ui/components/ui/collapsible-code-block').then((loaded) => ({
+          CollapsibleCodeBlock: loaded.CollapsibleCodeBlock,
+        })),
+      {
+        optional: true,
+      },
+    );
     return { default: m.CollapsibleCodeBlock };
   },
   { fallback: MessageBlock },

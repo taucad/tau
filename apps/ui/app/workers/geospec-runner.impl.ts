@@ -283,7 +283,11 @@ function createDiscoveryFileSystem(proxy: ProjectFileSystemBridge): GeoSpecDisco
 }
 
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
-  const { createTransferredFileSystemBridgeProxy } = await loadInWorker(async () => import('@taucad/fs-bridge'));
+  const { createTransferredFileSystemBridgeProxy } = await loadInWorker(async () =>
+    import('@taucad/fs-bridge').then((loaded) => ({
+      createTransferredFileSystemBridgeProxy: loaded.createTransferredFileSystemBridgeProxy,
+    })),
+  );
   const proxy = createTransferredFileSystemBridgeProxy(port);
   await proxy.ready;
   return proxy;

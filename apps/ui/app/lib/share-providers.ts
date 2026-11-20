@@ -25,7 +25,11 @@ export const shareProviderRegistry = createShareProviderRegistry([
     descriptor: builtinShareProviderDescriptor,
     load: async () => {
       try {
-        const { builtinShareProvider } = await load(async () => import('#lib/builtin-share-provider.js'));
+        const { builtinShareProvider } = await load(async () =>
+          import('#lib/builtin-share-provider.js').then((loaded) => ({
+            builtinShareProvider: loaded.builtinShareProvider,
+          })),
+        );
         return builtinShareProvider;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {

@@ -18,10 +18,18 @@ export class UsdzTranscodeError extends Error {}
 export async function transcodeGlbToUsdz(glb: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
   const [{ createRuntimeClient }, { webWorkerTransport }, { fromMemoryFs }, { observeRuntimeClient }] =
     await Promise.all([
-      load(async () => import('@taucad/runtime/client')),
-      load(async () => import('@taucad/runtime/transport/web')),
-      load(async () => import('@taucad/runtime/filesystem')),
-      load(async () => import('#telemetry/runtime-telemetry.js')),
+      load(async () =>
+        import('@taucad/runtime/client').then((loaded) => ({ createRuntimeClient: loaded.createRuntimeClient })),
+      ),
+      load(async () =>
+        import('@taucad/runtime/transport/web').then((loaded) => ({ webWorkerTransport: loaded.webWorkerTransport })),
+      ),
+      load(async () => import('@taucad/runtime/filesystem').then((loaded) => ({ fromMemoryFs: loaded.fromMemoryFs }))),
+      load(async () =>
+        import('#telemetry/runtime-telemetry.js').then((loaded) => ({
+          observeRuntimeClient: loaded.observeRuntimeClient,
+        })),
+      ),
     ]);
   const client = createRuntimeClient<typeof usdzRuntime>({
     transport: webWorkerTransport({

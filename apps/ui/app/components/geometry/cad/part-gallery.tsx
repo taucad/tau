@@ -9,7 +9,11 @@ export type PartGalleryRequest = ModelComponentPreviewRequest;
 
 const PartGalleryContext = createContext<((request: PartGalleryRequest) => void) | undefined>(undefined);
 const ProjectPartGallery = lazy(async () => {
-  const module = await load(async () => import('#components/geometry/cad/project-part-gallery.js'));
+  const module = await load(async () =>
+    import('#components/geometry/cad/project-part-gallery.js').then((loaded) => ({
+      ProjectPartGallery: loaded.ProjectPartGallery,
+    })),
+  );
   return { default: module.ProjectPartGallery };
 });
 

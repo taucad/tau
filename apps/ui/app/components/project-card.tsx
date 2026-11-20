@@ -53,7 +53,9 @@ const projectCardGraphicsOptions = {
 export const projectCardPreviewByteLimit = 16 * 1024 * 1024;
 
 const CadPreviewViewer = lazy(async () => {
-  const module = await load(async () => import('#components/cad-preview.js'));
+  const module = await load(async () =>
+    import('#components/cad-preview.js').then((loaded) => ({ CadPreviewViewer: loaded.CadPreviewViewer })),
+  );
   return { default: module.CadPreviewViewer };
 });
 

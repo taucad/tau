@@ -46,7 +46,9 @@ const ChatWorkspaceAuthorityContext = createContext<ChatWorkspaceAuthorityContex
 export const readRootedBridgeCapabilities = async (
   openConnection: () => FileSystemBridgeConnection,
 ): Promise<ProviderCapabilities> => {
-  const { createFileSystemBridgeProxy } = await load(async () => import('@taucad/fs-bridge'));
+  const { createFileSystemBridgeProxy } = await load(async () =>
+    import('@taucad/fs-bridge').then((loaded) => ({ createFileSystemBridgeProxy: loaded.createFileSystemBridgeProxy })),
+  );
   const proxy = createFileSystemBridgeProxy(openConnection());
   try {
     await proxy.ready;

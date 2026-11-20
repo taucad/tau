@@ -40,8 +40,10 @@ workerScope.addEventListener('message', (event) => {
 });
 
 try {
-  ({ handleGeoSpecRunnerRequest: handleRequest } = await loadInWorker(
-    async () => import('#workers/geospec-runner.impl.js'),
+  ({ handleGeoSpecRunnerRequest: handleRequest } = await loadInWorker(async () =>
+    import('#workers/geospec-runner.impl.js').then((loaded) => ({
+      handleGeoSpecRunnerRequest: loaded.handleGeoSpecRunnerRequest,
+    })),
   ));
 } catch (error) {
   const message = `GeoSpec worker failed to load: ${error instanceof Error ? error.message : String(error)}`;

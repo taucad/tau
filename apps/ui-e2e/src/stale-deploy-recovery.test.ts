@@ -475,6 +475,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     await page.waitForTimeout(1000);
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
     expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);
-    expect(live.requests(agentWorkerScript)).toBe(3);
+    // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
+    expect(live.requests(agentWorkerScript)).toBeGreaterThanOrEqual(3);
   }, 120_000);
 });

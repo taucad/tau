@@ -64,6 +64,7 @@ type FetchEventLike = LifecycleEvent & {
 /** The worker global, as far as this file uses it (the DOM library has no `ServiceWorkerGlobalScope`). */
 type WorkerScope = {
   readonly location: { readonly origin: string };
+  readonly navigator: { readonly onLine: boolean };
   readonly registration: {
     readonly installing: unknown;
     readonly waiting: unknown;
@@ -338,6 +339,24 @@ const answerFromCache = async (event: FetchEventLike, cacheName: string, key: st
   return scope.fetch(event.request);
 };
 
+/** Where the worker holds a subresource, by the index. */
+const locateStored = (url: string): ReturnType<typeof subresourceKey> =>
+  subresourceKey({ url, cacheKeyFor, precached, assets, precacheName, assetCacheName });
+
+/**
+ * Offline, before the index is loaded: wait for it, then answer from the cache, or with a network error for a file the
+ * worker does not hold (the network the browser would ask is offline).
+ */
+const answerOfflineAfterIndex = async (event: FetchEventLike): Promise<Response> => {
+  await indexReady;
+  const location = locateStored(event.request.url);
+  if (location === undefined) {
+    return Response.error();
+  }
+  const cache = await scope.caches.open(location.cacheName);
+  return (await cache.match(location.key)) ?? Response.error();
+};
+
 /** URLs a copy is already waiting on, so repeated misses start one copy each. */
 const filling = new Set<string>();
 
@@ -384,18 +403,16 @@ scope.addEventListener('fetch', (event) => {
     event.respondWith(answerNavigationEvent(event));
     return;
   }
-  // Decided now, from the index: before it is loaded the worker answers nothing.
+  // Decided now, from the index: before it is loaded the worker answers nothing online, so the request stays the
+  // browser's own. Offline the network cannot answer it anyway, so a worker restarted by this very request waits for
+  // its index and answers from the cache, or with a network error for a file it does not hold.
   if (!indexLoaded) {
+    if (!scope.navigator.onLine) {
+      event.respondWith(answerOfflineAfterIndex(event));
+    }
     return;
   }
-  const location = subresourceKey({
-    url: request.url,
-    cacheKeyFor,
-    precached,
-    assets,
-    precacheName,
-    assetCacheName,
-  });
+  const location = locateStored(request.url);
   if (location !== undefined) {
     event.respondWith(answerFromCache(event, location.cacheName, location.key));
     return;

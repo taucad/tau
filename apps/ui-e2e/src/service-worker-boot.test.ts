@@ -420,6 +420,36 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     );
   }, 180_000);
 
+  it('FP1: should answer a stored file offline when the request itself restarts the worker', async () => {
+    const { same } = requireDeploys();
+    const { page } = await openUnderWorker(same, same.workers.scripts);
+    // A precached script Home's shell names: stored by the install, and loaded by this page.
+    const homeShell = readFileSync(join(buildRoot, 'client/__shell/home/index.html'), 'utf8');
+    const entries = JSON.parse(
+      readFileSync(join(buildRoot, 'service-worker-precache.json'), 'utf8'),
+    ) as PrecacheEntry[];
+    const stored = entries.find(({ url }) => url.endsWith('.js') && homeShell.includes(`"${url}"`))?.url;
+    if (stored === undefined || context === undefined) {
+      expect.fail('Home’s shell names no precached script');
+    }
+    // Only the worker can answer: no HTTP cache copy, no network, and an idle worker that this request restarts, so
+    // its index is not loaded yet.
+    const session = await context.newCDPSession(page);
+    await session.send('Network.clearBrowserCache');
+    await session.send('ServiceWorker.enable');
+    await session.send('ServiceWorker.stopAllWorkers');
+    await context.setOffline(true);
+    const answer = await page.evaluate(async (url) => {
+      try {
+        const response = await fetch(url);
+        return response.status;
+      } catch (error) {
+        return String(error);
+      }
+    }, stored);
+    expect(answer).toBe(200);
+  }, 180_000);
+
   it('row 6: should free a browser that a stalled worker holds with one deploy of the kill switch', async () => {
     const { same } = requireDeploys();
     // A worker from before FP1 (the fixed one never stalls the page): the stall to free is the pre-fix worker's.

@@ -465,6 +465,11 @@
     "reason": "reads another project's build output"
   },
   {
+    "file": "apps/ui-e2e/src/stale-deploy-recovery.test.ts",
+    "target": "apps/libs/api-llm-gateway/src/models/model.constants.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
     "file": "apps/ui-e2e/src/support/two-deploys.ts",
     "target": "apps/ui/build/**",
     "reason": "reads another project's build output"

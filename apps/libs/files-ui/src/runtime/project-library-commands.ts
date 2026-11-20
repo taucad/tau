@@ -64,6 +64,7 @@ import type {
   ProjectLibraryWorker,
 } from '#types/project-library-io.types.js';
 import type { ChatStorage } from '#types/chat-storage.types.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** What a duplicate's name ends with. */
 const copySuffix = ' (Copy)';
@@ -402,8 +403,8 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   }
 
   /**
-   * Create a project. A supplied id is checked and then written, so two creations of it — an *Open* racing
-   * materialize on sign-in, or two tabs — hold one lock per id across the check and the write; the second sees the
+   * Create a project. A supplied id is checked and then written, so two creations of it — two *Open*s of one
+   * cloud project, in one tab or two — hold one lock per id across the check and the write; the second sees the
    * first's project and is refused. A minted id cannot collide, so it takes no lock.
    *
    * An earlier creation of the id that never finished — a reload, a re-init or a tab closed between its directory
@@ -787,7 +788,10 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+    const { leaseSettledChatLogs } = await loadCode(async () => {
+      const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+      return { leaseSettledChatLogs };
+    });
     return leaseSettledChatLogs({
       projectId,
       chats,
@@ -1134,8 +1138,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     /* D19: a project born with no remote backs up to Tau Cloud from its first
        revision — a template, a fork, a file or zip import. A caller that
        supplies the id is adopting an identity that has a remote of its own (a
-       Tau Cloud open, a materialized project, a linked GitHub import), so it
-       is left alone. The session decides once it knows the account (W11). */
+       Tau Cloud open, a linked GitHub import), so it is left alone. The session decides once it knows the account (W11). */
     if (options.id === undefined) {
       this.#host.services.cloudIntent.set(projectId, 'default');
     }

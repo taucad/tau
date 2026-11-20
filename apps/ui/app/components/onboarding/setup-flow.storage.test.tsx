@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true, useFeatureState: () => 'on' }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
 /* "Take it again" reads the project listing; these suites have no project. */

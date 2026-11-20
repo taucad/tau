@@ -1,6 +1,6 @@
 # replicad — Functions
 
-131 top-level symbols. Signatures are verbatim typescript.
+132 top-level symbols. Signatures are verbatim typescript.
 
 // asDir (function)
 export declare function asDir(direction: Direction): gp_Dir;
@@ -71,7 +71,7 @@ export declare function iterTopo<Entity extends TopoEntity>(shape: TopoDS_Shape,
 // Import a font in the text system
 // Remarks: The font should be in TTF
 // loadFont (function)
-export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<default_2.Font>;
+export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<opentype_2.Font>;
 
 // lookFromPlane (function)
 export declare function lookFromPlane(projectionPlane: ProjectionPlane): ProjectionCamera;
@@ -291,6 +291,10 @@ declare function drawText(text: string, { startX, startY, fontSize, fontFamily }
     fontFamily?: string | undefined;
 }): Drawing;
 
+// Builds only the extrusion from explicit geometry and direction
+// extrudeFaceUntil (function)
+declare function extrudeFaceUntil(profile: Face, target: Face, extrusionDirection: Point): Shape3D;
+
 // Creates a predicate selecting elements touching the shape's maximum Y bound
 // Remarks: "Front" is defined as the positive Y direction.
 // frontMost (function)
@@ -318,7 +322,7 @@ declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweep
 declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
 
 // getFont (function)
-export declare function getFont(fontFamily?: string): default_2.Font;
+export declare function getFont(fontFamily?: string): opentype_2.Font;
 
 // getManifold (function)
 export declare function getManifold(): ManifoldToplevel;

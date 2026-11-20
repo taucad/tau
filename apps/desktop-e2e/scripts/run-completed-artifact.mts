@@ -528,6 +528,8 @@ const main = async (): Promise<void> => {
       'src/desktop-community-preview.spec.ts',
       'src/desktop-shell-packaged.spec.ts',
       'src/desktop-lfs-packaged.spec.ts',
+      /* Skips itself here until the shipped renderer is adaptive (adaptive app deployment mode W8). */
+      'src/desktop-adaptive-mode.spec.ts',
       'src/filesystem-projection-live.spec.ts',
       'src/filesystem-projection-metadata.spec.ts',
       'src/filesystem-projection-observation.spec.ts',

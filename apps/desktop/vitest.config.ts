@@ -3,7 +3,6 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   // Mirrors electron.vite.config.ts for a self-host build; unit tests exercise that transport.
   define: {
-    tauCloudBuildEnabled: 'false',
     tauTelemetryHostCloudBuild: 'false',
     tauSentryDsn: '""',
     tauSentryRelease: '""',
@@ -14,12 +13,17 @@ export default defineConfig({
     // `test-macos-package-mode` target, so vitest only claims the src suites.
     include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     environment: 'node',
-    /* ponytail: Node 24's V8 can abort a fork with `Check failed: jit_page.has_value()` when it tiers up a
-     * wasm-to-JS wrapper after a worker thread that used it has exited (nodejs/node#66366). `main.test.ts` boots real
-     * compute-store workers. An unreachable tiering budget keeps wrappers untiered; V8 flags are process-wide, so
-     * they cannot ride NODE_OPTIONS and worker threads inherit them from here. Remove once Node 24 ships the V8
-     * backport (9b8ca54d5a, 68210d500a) or CI leaves Node 24. */
-    execArgv: ['--wasm-wrapper-tiering-budget=1000000000'],
+    /* ponytail: Node 24's V8 (13.6) can abort a fork with `Check failed: jit_page.has_value()` or
+     * `jit_page_->allocations_.erase(addr) == 1` (nodejs/node#66366). Wasm import wrappers live in a process-wide
+     * cache; when a worker thread that used one exits, wasm code GC starts freeing it, and another thread can take a
+     * reference to it before seeing it is dying, so the wrapper is freed twice. `main.test.ts` boots real
+     * compute-store workers. An unreachable tiering budget stops the wrapper tier-up that usually takes that
+     * reference; `--no-wasm-code-gc` removes the only path that frees dying code, which also covers the lookups
+     * instantiation makes. V8 flags are process-wide: worker threads reject them in `execArgv` and NODE_OPTIONS
+     * refuses them, so the forks pool passes them from here. Remove once Node 24 ships the V8 backport (9b8ca54d5a,
+     * 68210d500a; nodejs/node#66376) or CI leaves Node 24. */
+    pool: 'forks',
+    execArgv: ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc'],
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',

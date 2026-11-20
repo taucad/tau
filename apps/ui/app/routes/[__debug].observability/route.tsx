@@ -15,6 +15,8 @@ import {
   triggerObservabilityWorkerError,
   triggerObservabilityKernelTermination,
 } from '#lib/observability-harness-triggers.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export const meta: MetaFunction = () => [{ title: 'Observability harness · Tau' }];
 
@@ -78,10 +80,17 @@ const navigateToTrigger = (trigger: string): void => {
 
 /** Exercise the browser restore owner on a disposable in-memory project, never a user's filesystem. */
 const triggerObservabilityRevisionFailure = async (status: (message: string) => void): Promise<void> => {
-  const { getRevisionClient } = await import('#hooks/use-revision-status.js');
-  const worker = new Worker(new URL('../../lib/observability-harness-revision.worker.ts', import.meta.url), {
-    type: 'module',
+  const { getRevisionClient } = await loadCode(async () => {
+    const { getRevisionClient } = await import('#hooks/use-revision-status.js');
+    return { getRevisionClient };
   });
+  const worker = createModuleWorker(
+    () =>
+      new Worker(new URL('../../lib/observability-harness-revision.worker.ts', import.meta.url), {
+        type: 'module',
+      }),
+    { name: 'observability-harness-revision' },
+  );
   const projectId = `observability-${randomUuid()}`;
   const client = getRevisionClient({ projectId, worker });
   const failed = Promise.withResolvers<void>();

@@ -547,7 +547,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => ({
   ...(await importOriginal<typeof SidebarStatusModule>()),
   useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
 }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false, useFeatureState: () => 'off' }));
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({
   MobileProjectTopBar: () => null,
 }));

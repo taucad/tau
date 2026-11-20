@@ -24,7 +24,6 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { readReportedBuildFloor, subscribeReportedBuildFloor } from '#lib/build-identity.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
-import { deleteOrphanWorkerCaches } from '#offline/pwa-caches.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -58,6 +57,8 @@ export const checkForRetiringWorker = async (): Promise<void> => {
       // Retired already: delete what no worker owns, such as the empty asset cache an in-flight fetch of the retired
       // worker re-created after it deleted its caches (FP3).
       if ('caches' in globalThis) {
+        // Loaded here, off Home's critical tier: only a page with no registration needs it.
+        const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
         await deleteOrphanWorkerCaches(globalThis.caches);
       }
       return;
@@ -77,6 +78,8 @@ export const leaveServiceWorker = async (): Promise<void> => {
     const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(async (registration) => registration.unregister()));
     if ('caches' in globalThis) {
+      // Loaded here, off Home's critical tier: only a page in safe mode needs it.
+      const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
       await deleteOrphanWorkerCaches(globalThis.caches);
     }
   } catch {

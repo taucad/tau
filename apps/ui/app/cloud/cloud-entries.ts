@@ -1,5 +1,6 @@
 import { createCloudLoader } from '#cloud/cloud-loader.js';
 import type * as CloudSurfacesExports from '#cloud/cloud-surfaces.lazy.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The Cloud chunk's module. @public */
 export type CloudSurfacesModule = typeof CloudSurfacesExports;
@@ -10,5 +11,5 @@ export type CloudSurfacesModule = typeof CloudSurfacesExports;
  * through it. Part of Core; the chunk it loads is not.
  */
 export const cloudSurfaces = createCloudLoader<CloudSurfacesModule>({
-  importer: async () => import('#cloud/cloud-surfaces.lazy.js'),
+  importer: async () => loadCode(async () => import('#cloud/cloud-surfaces.lazy.js')),
 });

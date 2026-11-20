@@ -158,6 +158,31 @@ const byName = (a: { name: string }, b: { name: string }): number => a.name.loca
 export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
   projects(workspaceValue, { tags: ['type:package'], private: false }).sort(byName);
 
+/** Dimensions a project may leave out. */
+const optionalTagDimensions: ReadonlySet<string> = new Set(['host', 'release', 'deploy', 'shell', 'ui', 'protocol']);
+
+/** Dimensions only some projects may carry, with the projects that may. */
+const tagPlacements: Readonly<
+  Record<string, { readonly projects: string; readonly admits: (tags: readonly string[]) => boolean } | undefined>
+> = {
+  api: {
+    projects: 'scope:api type:app-lib',
+    admits: (tags) => tags.includes('scope:api') && tags.includes('type:app-lib'),
+  },
+  shell: {
+    projects: 'type:lib or type:app-lib',
+    admits: (tags) => tags.includes('type:lib') || tags.includes('type:app-lib'),
+  },
+  ui: {
+    projects: 'scope:ui type:app-lib',
+    admits: (tags) => tags.includes('scope:ui') && tags.includes('type:app-lib'),
+  },
+  protocol: {
+    projects: 'type:lib or type:package',
+    admits: (tags) => tags.includes('type:lib') || tags.includes('type:package'),
+  },
+};
+
 /**
  * Every project carries exactly one `type:` and one `scope:` from the
  * vocabulary. Application libraries additionally carry exactly one `layer:`;
@@ -165,7 +190,11 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
  * also carry exactly one `api:`, which names them in the dependency-direction
  * constraints; no other project may carry one. A `shell:` tag is optional and
  * only for private libraries (`type:lib` or `type:app-lib`): the published
- * owners that bundle them are selected by other tags. Host, release and deploy
+ * owners that bundle them are selected by other tags. A `ui:` tag is optional
+ * and only for UI app libraries (`scope:ui type:app-lib`);
+ * `scripts/src/ui-layering-graph.test.ts` pins which one each carries. A
+ * `protocol:` tag is optional and only for `type:lib` or `type:package`
+ * projects. Host, release and deploy
  * tags are optional but must be unique and valid. `ci:` lane tags are optional
  * and may repeat with different values, one per lane, but each must be valid
  * and none may be listed twice.
@@ -188,24 +217,17 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
       }
 
       const [tag, ...extra] = present;
-      const apiLibrary = tags.includes('scope:api') && tags.includes('type:app-lib');
       const required =
-        dimension !== 'host' &&
-        dimension !== 'release' &&
-        dimension !== 'deploy' &&
-        dimension !== 'shell' &&
+        !optionalTagDimensions.has(dimension) &&
         (dimension !== 'layer' || tags.includes('type:app-lib')) &&
-        (dimension !== 'api' || apiLibrary);
+        (dimension !== 'api' || (tags.includes('scope:api') && tags.includes('type:app-lib')));
       if ((required && tag === undefined) || extra.length > 0) {
         return [`expected exactly one ${dimension}: tag, found ${present.join(', ') || 'none'}`];
       }
 
-      if (dimension === 'api' && tag !== undefined && !apiLibrary) {
-        return [`unexpected tag "${tag}" (api: is only for scope:api type:app-lib projects)`];
-      }
-
-      if (dimension === 'shell' && tag !== undefined && !tags.includes('type:lib') && !tags.includes('type:app-lib')) {
-        return [`unexpected tag "${tag}" (shell: is only for type:lib or type:app-lib projects)`];
+      const placement = tagPlacements[dimension];
+      if (tag !== undefined && placement !== undefined && !placement.admits(tags)) {
+        return [`unexpected tag "${tag}" (${dimension}: is only for ${placement.projects} projects)`];
       }
 
       if (tag === undefined) {

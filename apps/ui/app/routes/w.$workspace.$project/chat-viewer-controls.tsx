@@ -8,7 +8,7 @@ import { CaptureViewControl } from '#components/geometry/cad/capture-view-contro
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { selectCadOperationTimeout } from '#machines/cad.machine.js';
 import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 
 type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
@@ -39,7 +39,7 @@ export function ChatViewerControls({
   viewFields,
 }: ChatViewerControlsProps): React.JSX.Element {
   const cadRef = useCad();
-  const isViewerControlsEnabled = useFeature('viewerControls');
+  const isViewerControlsEnabled = useFeatureState('viewerControls') === 'on';
   const operationTimeoutValue = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
   const setOperationTimeout = useCallback(
     (operationTimeout: number) => {

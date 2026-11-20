@@ -11,7 +11,7 @@ import type {
 import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { experimentalFeatureFlagNames, flagRegistry, featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { initialDeploymentMode } from '#cloud/deployment-mode.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -129,8 +129,8 @@ export function availableSettingsSections(
  * @returns The sections, stable while the flags are.
  */
 export function useSettingsSections(): readonly SettingsSectionDefinition[] {
-  const viewerControls = useFeature('viewerControls');
-  const onboarding = useFeature('onboarding');
+  const viewerControls = useFeatureState('viewerControls') === 'on';
+  const onboarding = useFeatureState('onboarding') === 'on';
   const isFunded = useDeploymentMode().state === 'funded';
   return useMemo(() => {
     const flags: Readonly<Partial<Record<FeatureFlagName, boolean>>> = { viewerControls, onboarding };

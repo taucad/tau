@@ -16,6 +16,7 @@ import {
   disconnectAttachmentIntakeTelemetry,
 } from '#telemetry/attachment-intake-telemetry.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
 
@@ -31,7 +32,7 @@ let sdk: PostHog | undefined;
 /** Resolves the singleton, fetching it on first admission. */
 const loadSdk = async (): Promise<PostHog> => {
   if (sdk === undefined) {
-    const module_ = await import('posthog-js');
+    const module_ = await loadCode(async () => import('posthog-js'));
     sdk = module_.posthog;
   }
   return sdk;

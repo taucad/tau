@@ -306,7 +306,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.2' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.2.1-beta.0' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,

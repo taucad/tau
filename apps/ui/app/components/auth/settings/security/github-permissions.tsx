@@ -4,7 +4,7 @@ import { ExternalLink } from 'lucide-react';
 import { Switch } from '@taucad/ui/components/switch';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
-import { LinkedAccount } from '#components/auth/settings/security/linked-account.js';
+import { LinkedAccount } from '@taucad/settings-ui/components/auth/settings/security/linked-account';
 import { getGithubGistCapability, setGithubGistEnabled } from '#lib/share-providers.js';
 import { Button } from '@taucad/ui/components/button';
 

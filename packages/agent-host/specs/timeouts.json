@@ -1378,6 +1378,14 @@
       "token": "timeout: timeoutMilliseconds",
       "class": "External edge",
       "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "UI-WORKER-REPLACEMENT-BACKOFF",
+      "bound": "Agent host worker whose code failed to load: replaced at once, then after 1 s; at most 3 failures in 10 min, past which the page's own stale-build recovery decides",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "replacement.replacementDelay",
+      "class": "Backoff",
+      "owner": "PL7 staging defects FP10"
     }
   ]
 }

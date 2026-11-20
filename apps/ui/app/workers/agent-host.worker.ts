@@ -18,6 +18,7 @@ import type { BrowserProjectHost, ResidentWorkerContext } from '#workers/agent-h
 import { createProjectHosts } from '#workers/agent-host-projects.js';
 import { createImplementationLoader } from '#workers/agent-host-implementation.js';
 import { randomUuid } from '@taucad/utils/id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type WorkerScope = {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -77,7 +78,7 @@ const capabilityOf = async (
 
 const loadImplementationModule = async () => {
   try {
-    return await import('./agent-host.impl.js');
+    return await loadCode(async () => import('./agent-host.impl.js'));
   } catch (error) {
     throw Object.assign(
       new Error(`Agent host worker failed to load: ${error instanceof Error ? error.message : String(error)}`),
@@ -91,8 +92,9 @@ const loadImplementationModule = async () => {
  * first `provide`, which waits on the project's revision root and the session. The load starts once that probe has
  * answered: the session's readiness waits on the probe, which must not share the thread with this module's evaluation
  * (a stall there past the page's liveness bound would close the channel and fail the probe for the document). A warm
- * reopen's chat history then does not wait for this module after the provide's own inputs. A load that failed before
- * a provide is retried by that provide; a provide waiting on it reports its failure.
+ * reopen's chat history then does not wait for this module after the provide's own inputs. A load that failed is not
+ * retried here: this worker keeps the failed module, so `loadCode` tells the page, which replaces the worker (FP10),
+ * and every provide meanwhile reports the failure.
  */
 const implementation = createImplementationLoader(loadImplementationModule);
 

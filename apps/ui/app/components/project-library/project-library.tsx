@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -85,20 +85,19 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
-import {
-  CloudProjectCard,
-  OnTauCloudMark,
-  isCloudOnly,
-  toLibraryRows,
-  useMaterializeCloudProjects,
-} from '#routes/projects_/cloud-projects.js';
+import { CloudProjectCard, OnTauCloudMark, isCloudOnly, toLibraryRows } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
-const ProjectCardLivePreview = lazy(async () => {
-  const module = await import('#components/project-card-live-preview.js');
-  return { default: module.ProjectCardLivePreview };
-});
+const ProjectCardLivePreview = lazyCode(
+  async () => {
+    const module = await import('#components/project-card-live-preview.js');
+    return { default: module.ProjectCardLivePreview };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -344,13 +343,6 @@ export function ProjectLibrary({
     void retryCloudListing();
   }, [retryCloudListing]);
   const openCloudProject = useOpenCloudProject();
-  useMaterializeCloudProjects({
-    cloud: cloudProjects,
-    isSettled: isCloudSettled,
-    isFetching: isCloudFetching,
-    held: heldProjects,
-    isLoading,
-  });
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {

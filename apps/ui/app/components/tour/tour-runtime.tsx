@@ -38,7 +38,7 @@ import type { TourPlacement } from '#components/tour/tour-placement.js';
 import { tourSession } from '#components/tour/tour-session.js';
 import { selectFocusedChatId } from '#components/tour/tour-signals.js';
 import { readTourStored, subscribeTourStored } from '#components/tour/tour-stored.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
@@ -171,7 +171,7 @@ const useShowMe = (
 
 function TourTipCard({ tip, arrival, hasTestRun, registry, send, fillComposer }: TourTipCardProps): React.JSX.Element {
   const { profile, viewer } = usePersonRecord();
-  const isViewerControlsEnabled = useFeature('viewerControls');
+  const isViewerControlsEnabled = useFeatureState('viewerControls') === 'on';
   const { open: openSettings } = useSettingsDialog();
   const isNarrow = useIsMobile();
   const formats = useMainEntryFormats();

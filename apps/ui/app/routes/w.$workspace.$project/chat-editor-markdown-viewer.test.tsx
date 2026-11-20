@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 vi.mock('#routes/w.$workspace.$project/chat-editor-code-viewer.js', () => ({
   ChatEditorCodeViewer: () => <div role='textbox' aria-label='Source editor' />,
 }));
-vi.mock('#components/markdown/markdown-viewer-chat.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer-chat', () => ({
   MarkdownViewerChat: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='markdown-preview'>{children}</div>
   ),

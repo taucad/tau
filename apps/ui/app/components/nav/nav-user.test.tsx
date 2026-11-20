@@ -47,8 +47,8 @@ vi.mock('#flags/use-feature.js', async (importOriginal) => {
   const actual = await importOriginal<typeof UseFeatureModule>();
   return {
     ...actual,
-    useFeature: (flag: Parameters<typeof actual.useFeature>[0]) =>
-      flag === 'onboarding' ? onboardingFlag.isEnabled : actual.useFeature(flag),
+    useFeatureState: (flag: Parameters<typeof actual.useFeatureState>[0]) =>
+      flag === 'onboarding' ? (onboardingFlag.isEnabled ? 'on' : 'off') : actual.useFeatureState(flag),
   };
 });
 

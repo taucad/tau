@@ -14,6 +14,7 @@ import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modu
 import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
 import { installLiveBuildChecks } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
+import { installWorkerRealmRecovery } from '#lib/worker-realm-recovery.js';
 import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
 import { setProjectOpenRouteClassReader } from '@taucad/ui-core/lib/project-open-performance';
 import { inspect } from '#machines/inspector.js';
@@ -44,6 +45,9 @@ void startErrorReporting(recoverFromSdkLoadFailure);
 
 // TAU-UI-6: a lazy chunk a deploy stopped serving reloads the page into the live build once.
 installStaleBuildRecovery();
+
+// FP10: a module worker whose code failed to load is replaced by a new worker, within a bound, then the recovery above.
+installWorkerRealmRecovery();
 
 // TAU-UI-S: notice a deploy before the next click; the root's client middleware then loads the next page as a document.
 installLiveBuildChecks();

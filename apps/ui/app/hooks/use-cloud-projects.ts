@@ -17,8 +17,6 @@ import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
-import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { parseProjectCreationLocation } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
@@ -937,95 +935,3 @@ export const backupByDefaultNotice = (
     ? 'pending'
     : undefined;
 };
-
-const materializeKey = 'tau:materialize-cloud-projects';
-const materializedKey = 'tau:materialized-cloud-projects';
-const materializeTopic = new Topic<void>({ name: 'materialize-cloud-projects' });
-
-const readMaterializeLocation = (): ProjectCreationLocation | undefined => {
-  try {
-    const value = globalThis.localStorage.getItem(materializeKey);
-    return value === null ? undefined : parseProjectCreationLocation(JSON.parse(value));
-  } catch {
-    return undefined;
-  }
-};
-
-/* One cached answer, so `useSyncExternalStore` sees a stable snapshot. */
-let materializeLocation = readMaterializeLocation();
-
-/**
- * Where this device brings the account's Tau Cloud projects on sign-in (D20),
- * or `undefined` — the default — for nowhere.
- *
- * One workspace at most: a project is one directory per device, and two
- * workspaces bringing the same id would be a `duplicate-id` conflict.
- *
- * @public
- */
-export const materializeOnSignIn = Object.freeze({
-  get: (): ProjectCreationLocation | undefined => materializeLocation,
-  set(location: ProjectCreationLocation | undefined): void {
-    materializeLocation = location;
-    try {
-      if (location === undefined) {
-        globalThis.localStorage.removeItem(materializeKey);
-      } else {
-        globalThis.localStorage.setItem(materializeKey, JSON.stringify(location));
-      }
-    } catch {
-      // The in-memory choice still applies for this document.
-    }
-    materializeTopic.emit();
-  },
-  subscribe: (listener: () => void): (() => void) => materializeTopic.subscribe(listener),
-});
-
-const readMaterialized = (): Set<string> => {
-  try {
-    const value: unknown = JSON.parse(globalThis.localStorage.getItem(materializedKey) ?? '[]');
-    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []);
-  } catch {
-    return new Set();
-  }
-};
-
-/**
- * The ids this device has already brought from Tau Cloud (RV-W11 5), so a
- * project deleted here is not brought back on the next library visit.
- *
- * @public
- */
-export const materializedCloudProjects = Object.freeze({
-  has(projectId: string): boolean {
-    return readMaterialized().has(projectId);
-  },
-  add(projectId: string): void {
-    const ids = readMaterialized();
-    ids.add(projectId);
-    try {
-      globalThis.localStorage.setItem(materializedKey, JSON.stringify([...ids]));
-    } catch {
-      // Without storage the next pass asks again; `createProject` refuses a held id.
-    }
-  },
-});
-
-/* Another tab's writes (RV-W11 7): its setting change reaches this one. */
-if (typeof globalThis.addEventListener === 'function') {
-  globalThis.addEventListener('storage', (event: StorageEvent) => {
-    if (event.key === null || event.key === materializeKey) {
-      materializeLocation = readMaterializeLocation();
-      materializeTopic.emit();
-    }
-  });
-}
-
-/**
- * The materialize-on-sign-in destination, live.
- *
- * @returns The workspace, or `undefined` when the setting is off.
- * @public
- */
-export const useMaterializeOnSignInLocation = (): ProjectCreationLocation | undefined =>
-  useSyncExternalStore(materializeOnSignIn.subscribe, materializeOnSignIn.get, () => undefined);

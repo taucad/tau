@@ -7,7 +7,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeature, useFeatureState } from '#flags/use-feature.js';
 import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
@@ -108,7 +108,7 @@ export type SetupFlowProps = Readonly<{
  */
 export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: SetupFlowProps): React.JSX.Element {
   const navigate = useNavigate();
-  const isViewerControlsEnabled = useFeature('viewerControls');
+  const isViewerControlsEnabled = useFeatureState('viewerControls') === 'on';
   const isWarehouseEnabled = useFeature('partsWarehouse');
   const steps = setupSteps(isViewerControlsEnabled);
   const { profile, viewer, onboarding, writeProfile, writeViewer, writeOnboarding } = usePersonRecord();

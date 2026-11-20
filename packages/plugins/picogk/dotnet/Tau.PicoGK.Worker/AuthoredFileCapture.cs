@@ -1,9 +1,13 @@
-using System.Security.Cryptography;
-
 namespace Tau.PicoGK.Worker;
 
 // Both runtimes use this collector, so the two offer the same authored STL and VDB exports.
-// Receipts own copies, never paths an author can overwrite in a subsequent build.
+// Receipts own their bytes, never paths an author can overwrite in a subsequent build.
+//
+// Capture costs no memory beyond the files themselves (D4). The browser's filesystem lives in the
+// worker, so a copy is a second resident file; files in this build's own output directory are
+// therefore moved into the receipt directory, which a rename does without touching their bytes.
+// Files the model wrote into the workspace are copied, since the workspace is the author's. Each
+// receipt is hashed once, in the pass that makes it, with a constant-memory digest.
 internal sealed class AuthoredFileCapture : IDisposable
 {
     private readonly string workspace;
@@ -16,7 +20,7 @@ internal sealed class AuthoredFileCapture : IDisposable
         this.workspace = Path.GetFullPath(workspace);
         root = Path.Combine(Path.GetFullPath(artifacts), "authored", Guid.NewGuid().ToString("N"));
         OutputRoot = Path.Combine(root, "work");
-        inputs = GeometryFiles(this.workspace).ToDictionary(path => path, Digest, StringComparer.Ordinal);
+        inputs = GeometryFiles(this.workspace).ToDictionary(path => path, StreamingSha256.HexOf, StringComparer.Ordinal);
         Directory.CreateDirectory(OutputRoot);
     }
 
@@ -27,18 +31,26 @@ internal sealed class AuthoredFileCapture : IDisposable
         if (completed) throw new InvalidOperationException("Authored files were already captured.");
         var files = new List<AuthoredFile>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in GeometryFiles(OutputRoot).Concat(GeometryFiles(workspace)))
+        // Both trees are listed before any file leaves them: the receipts directory is not inside
+        // either, but a move must not run under a live enumeration of its source directory.
+        var outputs = GeometryFiles(OutputRoot).ToList();
+        var written = GeometryFiles(workspace).ToList();
+        foreach (var source in outputs.Concat(written))
         {
-            var digest = Digest(source);
-            if (inputs.TryGetValue(source, out var input) && input == digest) continue;
-            var owner = source.StartsWith(OutputRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                ? OutputRoot : workspace;
-            var name = Path.GetRelativePath(owner, source).Replace(Path.DirectorySeparatorChar, '/');
+            var owned = source.StartsWith(OutputRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+            if (!owned && inputs.TryGetValue(source, out var input) && input == StreamingSha256.HexOf(source)) continue;
+            var name = Path.GetRelativePath(owned ? OutputRoot : workspace, source).Replace(Path.DirectorySeparatorChar, '/');
             if (!names.Add(name)) throw new InvalidOperationException($"Conflicting authored output name: {name}.");
             var target = Path.Combine(root, "files", name);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(source, target);
-            files.Add(new AuthoredFile(target, name, new FileInfo(target).Length, Digest(target),
+            string digest;
+            if (owned)
+            {
+                File.Move(source, target);
+                digest = StreamingSha256.HexOf(target);
+            }
+            else digest = StreamingSha256.CopyAndHex(source, target);
+            files.Add(new AuthoredFile(target, name, new FileInfo(target).Length, digest,
                 Path.GetExtension(name).Equals(".stl", StringComparison.OrdinalIgnoreCase) ? "model/stl" : "application/vnd.openvdb"));
         }
         completed = true;
@@ -67,12 +79,6 @@ internal sealed class AuthoredFileCapture : IDisposable
                 || Path.GetExtension(path).Equals(".vdb", StringComparison.OrdinalIgnoreCase))
                 yield return path;
         }
-    }
-
-    private static string Digest(string path)
-    {
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 }
 

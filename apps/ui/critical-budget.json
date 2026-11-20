@@ -11,15 +11,15 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 1958140,
-        "requests": 309,
-        "largestChunkBrotliBytes": 167393,
+        "brotliBytes": 1961917,
+        "requests": 307,
+        "largestChunkBrotliBytes": 167408,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1239607,
-        "requests": 228,
-        "largestChunkBrotliBytes": 140852,
+        "brotliBytes": 1252396,
+        "requests": 224,
+        "largestChunkBrotliBytes": 137653,
         "knownHeavy": {}
       }
     },

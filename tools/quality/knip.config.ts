@@ -101,6 +101,8 @@ const config: KnipConfig = {
     // Loaded by Nx plugin or build tooling, not direct imports
     '@typescript/native-preview',
     '@tailwindcss/typography',
+    // `apps/ui/app/styles/global.css` imports its styles and Tailwind scans its dist from the root node_modules
+    'streamdown',
   ],
 
   // Nx runs a target command from the workspace root (or a root-relative `cwd`), but knip's Nx
@@ -213,7 +215,7 @@ const config: KnipConfig = {
       entry: ['scripts/svg-sprite.d.ts'],
     },
     'apps/libs/desktop-services-host': {
-      // Ambient `tauCloudBuildEnabled` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
+      // Ambient `tauTelemetryHostCloudBuild` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
       entry: ['src/build-environment.d.ts'],
     },
     'apps/libs/api-lifecycle': {
@@ -235,7 +237,7 @@ const config: KnipConfig = {
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
-        // Ambient `tauCloudBuildEnabled`, defined by electron.vite.config.ts.
+        // Ambient build constants (`tauSentryDsn` and the rest), defined by electron.vite.config.ts.
         'src/build-environment.d.ts',
       ],
       ignoreDependencies: [

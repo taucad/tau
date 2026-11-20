@@ -36,19 +36,19 @@ export type TauDeploymentCeiling = 'cloud' | 'self-host' | 'adaptive';
 /**
  * Resolve `TAU_CLOUD_ENABLED` to the build's ceiling before Vite constructs any client, worker or SSR graph (D1):
  * `true` is `cloud` (pinned funded), `false` is `self-host` (pinned unfunded) and `adaptive` reads the API's
- * deployment answer at run time. Unset is `self-host` until the flip (W8). Any other value fails the build.
+ * deployment answer at run time. Unset is `adaptive` (the flip, W8). Any other value fails the build.
  *
  * @param value - The variable's value.
  * @returns The ceiling.
  */
 export const resolveTauDeploymentCeiling = (value: string | undefined): TauDeploymentCeiling => {
-  if (value === undefined || value === 'false') {
+  if (value === 'false') {
     return 'self-host';
   }
   if (value === 'true') {
     return 'cloud';
   }
-  if (value === 'adaptive') {
+  if (value === undefined || value === 'adaptive') {
     return 'adaptive';
   }
   throw new Error('TAU_CLOUD_ENABLED must be exactly true, false or adaptive.');
@@ -59,7 +59,7 @@ export const uiBuildDirectoryVariable = 'TAU_UI_BUILD_DIRECTORY';
 
 /**
  * The web build's output directory, relative to `apps/ui`: `build`, or the name `TAU_UI_BUILD_DIRECTORY` gives, so CI
- * can keep a second build (`ui:build-adaptive`) beside the first (gate G1).
+ * can keep a second build (`ui:build-self-host`) beside the first (gate G1).
  *
  * @param value - The variable's value.
  * @returns A directory name.

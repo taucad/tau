@@ -23,7 +23,7 @@ import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } fr
 import { isDesktopTarget } from '#lib/build-target.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
-import { deleteOrphanWorkerCaches } from '#offline/service-worker-retire.js';
+import { deleteOrphanWorkerCaches } from '#offline/pwa-caches.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;

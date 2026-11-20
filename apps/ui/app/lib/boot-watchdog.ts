@@ -18,7 +18,7 @@
  */
 import { bootGlobalName, bootStripId, safeModeHref } from '#lib/boot-signals.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { workerCacheNamePattern } from '#offline/service-worker-retire.js';
+import { workerCacheNamePattern } from '#offline/pwa-caches.js';
 
 /** How long the page may take to mount its shell before the strip is shown. Milliseconds. @public */
 export const bootWatchdogDeadline = 20_000;

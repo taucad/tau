@@ -493,6 +493,14 @@
       "owner": "W6"
     },
     {
+      "id": "AGENT-HOST-WORKER-LOAD-BACKOFF",
+      "bound": "Agent-host worker restart after its code failed to load (workerLoadRetryDelay 500 ms, doubling): the next use waits before starting a new worker; after three failures in a row no worker starts and the page's code-load recovery takes over (PL7 blueprint FP10)",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "setTimeout(resolve, wait)",
+      "class": "Backoff",
+      "owner": "pl7-service-worker-staging-defects-blueprint FP10"
+    },
+    {
       "id": "E4f",
       "bound": "File-manager worker restart window (3.5 s): a root mount restarts a dead worker once; a second death within it shows the error (RV1-F1)",
       "site": "apps/ui/app/machines/file-manager.machine.ts",

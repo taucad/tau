@@ -374,14 +374,14 @@ export const swappable = <Target extends object>(
       }
       /* A peer that never answers would hold the target, its port and its callers forever: past the bound the
        * target's own `finish` rejects the calls still waiting (#2748 review). */
-      const within = options?.retireWithin;
+      const retireWithin = options?.retireWithin;
       retiring.set(
         target,
-        within === undefined
+        retireWithin === undefined
           ? undefined
           : setTimeout(() => {
               finishRetired(target);
-            }, within),
+            }, retireWithin),
       );
     },
     close: () => {

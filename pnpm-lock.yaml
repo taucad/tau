@@ -4510,9 +4510,6 @@ importers:
       '@taucad/json-schema':
         specifier: workspace:*
         version: link:../../../libs/json-schema
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../../packages/runtime
       '@taucad/telemetry':
         specifier: workspace:*
         version: link:../../../libs/telemetry
@@ -4531,9 +4528,6 @@ importers:
       es-module-lexer:
         specifier: 'catalog:'
         version: 2.3.2
-      geospec:
-        specifier: 'catalog:'
-        version: 0.6.0(vitest@4.1.11)
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -4564,9 +4558,6 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.14.3
         version: 3.14.17(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@taucad/chat':
-        specifier: workspace:*
-        version: link:../../../libs/chat
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types

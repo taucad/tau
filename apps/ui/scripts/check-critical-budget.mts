@@ -44,10 +44,10 @@
  * the checked-in `self-host` entry (drift of `main` above the entry is the self-host check's concern). `--write`
  * refuses an adaptive build.
  *
- * Usage (after `nx build ui`):
- *   node apps/ui/scripts/check-critical-budget.mts           # check
- *   node apps/ui/scripts/check-critical-budget.mts --write   # rebaseline this build's variant
- *   node apps/ui/scripts/check-critical-budget.mts --build build-adaptive --baseline build   # gate G1
+ * Usage (after `nx run ui:build-self-host` and `nx build ui`; unset `TAU_CLOUD_ENABLED` builds `adaptive` since W8):
+ *   node apps/ui/scripts/check-critical-budget.mts --build build-self-host           # check the self-host entry
+ *   node apps/ui/scripts/check-critical-budget.mts --build build-self-host --write   # rebaseline it
+ *   node apps/ui/scripts/check-critical-budget.mts --build build --baseline build-self-host   # gate G1
  *
  * Exit codes:
  *   0  Every class within budget, no early kernel and no split route module

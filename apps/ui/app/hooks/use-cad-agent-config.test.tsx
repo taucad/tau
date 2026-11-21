@@ -59,7 +59,8 @@ const personHarness = vi.hoisted((): { onboarding: boolean; profile: HarnessProf
   profile: { version: 1, goals: [], languages: [] },
 }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'onboarding' ? personHarness.onboarding : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'onboarding' && personHarness.onboarding ? 'on' : 'off'),
 }));
 vi.mock('#preferences/use-person-record.js', () => ({
   usePersonRecord: () => ({ profile: personHarness.profile }),

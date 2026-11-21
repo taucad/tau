@@ -2348,9 +2348,8 @@ export const uiRouteDeploymentAnswer: BrowserCommand<[answer: DeploymentAnswerSt
   });
 };
 
-/** Whether this run serves the adaptive web build (`ui-e2e:test:e2e:adaptive` sets the directory). */
-export const uiIsAdaptiveTier: BrowserCommand<[], boolean> = () =>
-  process.env['TAU_E2E_UI_BUILD_DIRECTORY'] === 'build-adaptive';
+/** Whether this run is the adaptive web tier (`ui-e2e:test:e2e:adaptive` sets `TAU_E2E_ADAPTIVE_TIER`). */
+export const uiIsAdaptiveTier: BrowserCommand<[], boolean> = () => process.env['TAU_E2E_ADAPTIVE_TIER'] === 'true';
 
 /** Refuse every request of the target context whose URL matches `pattern`, as a missing file refuses it. */
 export const uiFailTargetRequests: BrowserCommand<[pattern: string]> = async (commandContext, pattern) => {

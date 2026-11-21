@@ -26,7 +26,7 @@ const viteClientUrl = new URL('/@vite/client', testBaseURL);
  */
 const snapshotBuild = process.env['TAU_E2E_UI_SNAPSHOT'] === 'true';
 /**
- * Serve another build directory of `apps/ui` in place (`build-adaptive`, adaptive app deployment mode W7), through the
+ * Serve another build directory of `apps/ui` in place (such as `build-self-host`, adaptive app deployment mode W7), through the
  * same production server as a snapshot. Unset serves `apps/ui/build` with `server.ts`.
  */
 const uiBuildDirectory = process.env['TAU_E2E_UI_BUILD_DIRECTORY'];

@@ -149,9 +149,44 @@ export const flagRegistry = {
 
 export type FeatureFlagName = keyof typeof flagRegistry;
 
+/**
+ * Flags whose value can arrive after the page's first client render: those PostHog decides (`posthogKey`) and those
+ * that follow another flag (`requires`). They have no boolean reader: `useFeatureState` and `readFeatureState` say
+ * `unknown` until the value is settled, so a consumer cannot take "not known yet" for "off".
+ */
+export type RemoteFeatureFlagName = {
+  [K in FeatureFlagName]: (typeof flagRegistry)[K] extends
+    | { readonly posthogKey: string }
+    | { readonly requires: string }
+    ? K
+    : never;
+}[FeatureFlagName];
+
+/** Flags whose value is known synchronously on the client (a build default or a stored override). */
+export type LocalFeatureFlagName = Exclude<FeatureFlagName, RemoteFeatureFlagName>;
+
+/**
+ * Whether a flag is on, off, or not known yet. `unknown` holds during the server render and hydration for every flag,
+ * and for a {@link RemoteFeatureFlagName} until PostHog has answered or no answer will come.
+ */
+export type FeatureFlagState = 'on' | 'off' | 'unknown';
+
+/**
+ * Whether a registry name is a {@link RemoteFeatureFlagName}.
+ *
+ * @param name - The registry name.
+ * @returns Whether its value can arrive after the first client render.
+ */
+export const isRemoteFeatureFlag = (name: FeatureFlagName): name is RemoteFeatureFlagName => {
+  const definition: FlagDefinition = flagRegistry[name];
+  return definition.posthogKey !== undefined || definition.requires !== undefined;
+};
+
 export const featureFlagNames = Object.keys(flagRegistry) as FeatureFlagName[];
 
-export const experimentalFeatureFlagNames = featureFlagNames.filter((name) => flagRegistry[name].showInExperimental);
+export const experimentalFeatureFlagNames: readonly LocalFeatureFlagName[] = featureFlagNames.filter(
+  (name): name is LocalFeatureFlagName => flagRegistry[name].showInExperimental && !isRemoteFeatureFlag(name),
+);
 
 /**
  * Zod object schema built from the registry.
@@ -165,6 +200,9 @@ export const featureFlagsSchema = z.object(
 );
 
 export type FeatureFlags = z.infer<typeof featureFlagsSchema>;
+
+/** The resolved values of the {@link LocalFeatureFlagName} flags: what a boolean reader may show. */
+export type LocalFeatureFlags = Readonly<Pick<FeatureFlags, LocalFeatureFlagName>>;
 
 /**
  * Resolved defaults (all flags at their default values).

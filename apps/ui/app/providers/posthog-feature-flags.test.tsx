@@ -48,13 +48,13 @@ Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.f
 
 const { posthog } = await import('posthog-js');
 const { WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js');
-const { useFeature } = await import('#flags/use-feature.js');
+const { useFeatureState } = await import('#flags/use-feature.js');
 
 type ConsoleWindow = { posthog?: typeof posthog };
 
 const Flags = (): React.JSX.Element => (
   <p>
-    {`onboarding=${String(useFeature('onboarding'))} viewerControls=${String(useFeature('viewerControls'))} autoOpen=${String(useFeature('onboardingAutoOpen'))}`}
+    {`onboarding=${String(useFeatureState('onboarding') === 'on')} viewerControls=${String(useFeatureState('viewerControls') === 'on')} autoOpen=${String(useFeatureState('onboardingAutoOpen') === 'on')}`}
   </p>
 );
 

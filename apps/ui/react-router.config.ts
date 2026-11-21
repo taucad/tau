@@ -39,7 +39,7 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
-  /* `build` unless CI keeps a second build beside it (`ui:build-adaptive`, gate G1). */
+  /* `build` unless CI keeps a second build beside it (`ui:build-self-host`, gate G1). */
   buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
   /**
    * Hands the dev dependency optimizer its crawl entries: the client entry and every route

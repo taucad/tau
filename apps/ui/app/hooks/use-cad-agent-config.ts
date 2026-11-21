@@ -4,7 +4,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { personFieldFromProfile } from '@taucad/preferences';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
@@ -364,7 +364,8 @@ export const useAgentHostPlacements = (): {
  * @returns The field, or `undefined`.
  */
 const usePersonField = (executionKind: CadAgentConfigInput['execution']['kind']): CadAgentConfigInput['person'] => {
-  const isOnboardingEnabled = useFeature('onboarding');
+  /* Only a known `on` shares the person: a turn sent before PostHog answers carries no personal field. */
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const [isPersonShared] = useCookie(cookieName.chatCtxPerson, true);
   const { profile } = usePersonRecord();
   if (!isOnboardingEnabled || !isPersonShared || executionKind !== 'tau') {

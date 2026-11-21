@@ -13,7 +13,7 @@ import { resolveUiBuildDirectory, uiBuildDirectoryVariable } from '../build-envi
  * `index.html` React Router emits is what the shell serves over `app://tau`.
  *
  * `appDirectory` keeps its default (`./app`) and `buildDirectory` is `./build`, or the
- * directory `TAU_UI_BUILD_DIRECTORY` names (`build:desktop-adaptive` uses `build-adaptive`),
+ * directory `TAU_UI_BUILD_DIRECTORY` names,
  * relative to this directory: the React Router CLI derives its root from the
  * `--config` file's directory (belt-and-braces `REACT_ROUTER_ROOT` in
  * `apps/ui/project.json`), and `routes.ts`/`root.tsx` are hardcoded lookups

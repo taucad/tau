@@ -87,15 +87,13 @@ const foundationProtocolDebt: readonly DebtEdge[] = [
   { source: 'ui-core', target: 'agent-tools', work: 'W3' },
   { source: 'ui-core', target: 'chat', work: 'W3' },
   { source: 'ui-core', target: 'skills', work: 'W3' },
-  { source: 'ui-kit', target: 'chat', work: 'W1' },
 ];
 
-/** L0's domain-package edges. `runtime` is declared but unused; the W7 rows wait on owner libraries. */
+/** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [
   { source: 'ui-core', target: 'kinematics', work: 'W7' },
   { source: 'ui-core', target: 'parameters', work: 'W7' },
   { source: 'ui-core', target: 'revisions', work: 'W7' },
-  { source: 'ui-core', target: 'runtime', work: 'W1' },
   { source: 'ui-core', target: 'viewer', work: 'W7' },
   { source: 'ui-core', target: 'workbench', work: 'W7' },
   { source: 'ui-kit', target: 'workbench-panes', work: 'W6' },

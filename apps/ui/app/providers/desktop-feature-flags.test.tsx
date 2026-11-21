@@ -36,7 +36,7 @@ Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.f
 
 const { DesktopAnalyticsProvider } = await import('#providers/desktop-analytics-provider.js');
 const { desktopAnalyticsStorageName, useDesktopAnalytics } = await import('#hooks/use-desktop-analytics.js');
-const { useFeature } = await import('#flags/use-feature.js');
+const { useFeatureState } = await import('#flags/use-feature.js');
 
 function Workspace(): React.JSX.Element {
   const [isEnabled, setEnabled] = useDesktopAnalytics();
@@ -47,7 +47,7 @@ function Workspace(): React.JSX.Element {
         setEnabled(!isEnabled);
       }}
     >
-      {`viewerControls=${String(useFeature('viewerControls'))}`}
+      {`viewerControls=${String(useFeatureState('viewerControls') === 'on')}`}
     </button>
   );
 }

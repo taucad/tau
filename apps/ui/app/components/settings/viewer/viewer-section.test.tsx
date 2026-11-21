@@ -12,7 +12,8 @@ import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-it
 
 const flags = vi.hoisted(() => ({ viewerControls: false }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => flag === 'viewerControls' && flags.viewerControls,
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && flags.viewerControls ? 'on' : 'off'),
 }));
 vi.mock('#components/settings/settings-content.js', () => ({
   SettingsContent: ({ section }: { readonly section: string }) => <div>Mounted {section} section</div>,

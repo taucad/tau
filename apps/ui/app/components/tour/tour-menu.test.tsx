@@ -6,7 +6,10 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@taucad/ui/components/dropdown-menu';
 
 const flags = vi.hoisted(() => ({ onboarding: true }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: keyof typeof flags) => flags[flag] }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: keyof typeof flags) => flags[flag],
+  useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+}));
 const telemetry = vi.hoisted(() => ({ tourPaused: vi.fn(), tourResumed: vi.fn() }));
 vi.mock('#telemetry/onboarding-telemetry.js', () => ({ useOnboardingTelemetry: () => telemetry }));
 const listing = vi.hoisted(() => ({

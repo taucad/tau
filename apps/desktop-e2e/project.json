@@ -37,11 +37,10 @@
       "parallelism": false,
       "dependsOn": [
         { "projects": ["desktop"], "target": "build" },
-        { "projects": ["api"], "target": "build" },
-        { "projects": ["ui"], "target": "check-desktop-payload-adaptive" }
+        { "projects": ["api"], "target": "build" }
       ],
       "metadata": {
-        "description": "Release gate T-REH.2 (desktop resilient startup blueprint, I2): the operator rehearsal with its profile produced by the unpackaged app built at the release's base commit and opened by this build. TAU_E2E_REHEARSAL_BASE_DESKTOP_ROOT names that build's apps/desktop in a second worktree, with desktop:build and ui:build run there; the target refuses to run without it. Needs this checkout's desktop and UI builds and the services test:e2e uses. Before the adaptive app deployment mode flip (W8) the desktop build is the shipped self-host renderer and the gate also runs the adaptive renderer (`ui:build:desktop-adaptive`) through `desktop-adaptive-mode.spec.ts`."
+        "description": "Release gate T-REH.2 (desktop resilient startup blueprint, I2): the operator rehearsal with its profile produced by the unpackaged app built at the release's base commit and opened by this build. TAU_E2E_REHEARSAL_BASE_DESKTOP_ROOT names that build's apps/desktop in a second worktree, with desktop:build and ui:build run there; the target refuses to run without it. Needs this checkout's desktop and UI builds and the services test:e2e uses. Since the adaptive app deployment mode flip (W8) the shipped renderer is `adaptive`, and `desktop-adaptive-mode.spec.ts` runs it."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
@@ -97,10 +96,6 @@
         {
           "projects": ["api"],
           "target": "build"
-        },
-        {
-          "projects": ["ui"],
-          "target": "check-desktop-payload-adaptive"
         }
       ],
       "options": {
@@ -190,10 +185,6 @@
         {
           "projects": ["cli"],
           "target": "build"
-        },
-        {
-          "projects": ["ui"],
-          "target": "check-desktop-payload-adaptive"
         }
       ],
       "options": {

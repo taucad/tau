@@ -11,7 +11,7 @@ import type { TourStepId } from '@taucad/preferences';
 import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { tourChromeCopy, tourMenuCopy } from '#components/tour/tour-copy.js';
 import { tourSession } from '#components/tour/tour-session.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { nextGuidedTipNumber } from '#machines/tour.machine.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
@@ -66,7 +66,7 @@ export const useTourReplay = (): (() => void) | undefined => {
  * @returns The item, or `undefined` with the flag off or no project to take the tour in.
  */
 export const useTourMenuItem = (replay: (() => void) | undefined): TourMenuItem | undefined => {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const { onboarding } = usePersonRecord();
   const { device, writeDevice } = useDeviceRecord();
   const telemetry = useOnboardingTelemetry();

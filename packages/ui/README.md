@@ -48,7 +48,7 @@ export const SaveButton = () => <Button>Save model</Button>;
 
 Import `tw-animate-css` if you use any overlay component (`Dialog`, `Sheet`, `DropdownMenu`, `ContextMenu`, `Popover`, `Tooltip`) — their enter and exit transitions come from it.
 
-Every component has its own subpath so bundlers drop what you do not use. The root export re-exports the same modules for convenience.
+Every component has its own subpath so bundlers drop what you do not use. The root export re-exports the same modules for convenience, except `FormatBadge` and `FormatFileIcon`: import them from `@taucad/ui/components/format-badge`, because the root export does not include them.
 
 ## Feature-API map
 

@@ -29,7 +29,7 @@ describe('package exports', () => {
     );
 
     expect(packageJson.exports).toEqual({ ...moduleExports, './package.json': './package.json' });
-    expect(Object.keys(moduleExports)).toHaveLength(75);
+    expect(Object.keys(moduleExports)).toHaveLength(77);
   });
 
   it('points every export at a file that exists', () => {

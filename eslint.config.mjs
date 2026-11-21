@@ -329,7 +329,6 @@ export const uiLibraryDependencyDebt = [
   { source: 'editor-ui', target: 'chat-ui', work: 'W4' },
   { source: 'editor-ui', target: 'files-ui', work: 'W4' },
   { source: 'files-ui', target: 'chat-ui', work: 'W5' },
-  { source: 'files-ui', target: 'project-workspace', work: 'W5' },
 ];
 
 const uiLibraryConstraints = Object.entries(uiLibraryDependencies).map(([name, dependencies]) => ({
@@ -362,10 +361,8 @@ const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
  * when another L0 file starts.
  */
 export const uiFoundationProtocolDebtFiles = [
-  { file: 'apps/libs/ui-core/src/lib/external-agent.ts', work: 'W2' },
   { file: 'apps/libs/ui-core/src/lib/large-object-guard.test.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/lib/large-object-guard.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/utils/run-auto-resume.ts', work: 'W2' },
   { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.test.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/workers/agent-host-placement.test.ts', work: 'W3' },

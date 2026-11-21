@@ -94,11 +94,13 @@
     "./utils/chat-execution": "./src/utils/chat-execution.ts",
     "./utils/chat-recency.utils": "./src/utils/chat-recency.utils.ts",
     "./utils/error.utils": "./src/utils/error.utils.ts",
+    "./utils/external-agent": "./src/utils/external-agent.ts",
     "./utils/external-call-summary": "./src/utils/external-call-summary.ts",
     "./utils/external-tool-output": "./src/utils/external-tool-output.ts",
     "./utils/model-groups": "./src/utils/model-groups.ts",
     "./utils/new-chat-execution": "./src/utils/new-chat-execution.ts",
     "./utils/question-tool": "./src/utils/question-tool.ts",
+    "./utils/run-auto-resume": "./src/utils/run-auto-resume.ts",
     "./utils/shell-command-summary": "./src/utils/shell-command-summary.ts",
     "./package.json": "./package.json"
   },

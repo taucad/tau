@@ -1,7 +1,7 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCredits } from '#utils/credits.utils.js';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { formatUsdMinor } from '@taucad/billing';
 import { ExternalLink, LoaderCircle } from 'lucide-react';

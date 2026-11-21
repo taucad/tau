@@ -95,7 +95,7 @@ import {
   recordModelPendingAutoResume,
   recordProviderUnavailableAutoResume,
   recordRateLimitAutoResume,
-} from '@taucad/ui-core/utils/run-auto-resume';
+} from '@taucad/chat-ui/utils/run-auto-resume';
 import {
   chatProjectionLogic,
   selectAttentionRow,

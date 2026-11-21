@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalSto
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';

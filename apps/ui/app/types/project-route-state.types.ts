@@ -6,7 +6,7 @@
  * `project-route-notices.tsx`.
  */
 import type { Project } from '@taucad/types';
-import type { PendingProjectRecoveryReason } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { PendingProjectRecoveryReason } from '@taucad/project-library/types/pending-project-operation.types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 
 /** The slugs a project URL was addressed by, for a route that resolved to nothing. @public */

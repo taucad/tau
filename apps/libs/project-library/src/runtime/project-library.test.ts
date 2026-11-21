@@ -72,7 +72,7 @@ vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createNodeWorkspace: vi.fn(async (path: string) => ({
     workspaceId: 'wsp_node',

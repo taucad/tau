@@ -2,9 +2,12 @@ import path from 'node:path';
 import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } from '@taucad/formal/drift';
-import { libraryAccessMachine, libraryAccessQueryMachine } from '@taucad/files-ui/machines/library-access.machine';
-import { libraryDiscoveryMachine } from '@taucad/files-ui/machines/library-discovery.machine';
-import { libraryRecoveryMachine } from '@taucad/files-ui/machines/library-recovery.machine';
+import {
+  libraryAccessMachine,
+  libraryAccessQueryMachine,
+} from '@taucad/project-library/machines/library-access.machine';
+import { libraryDiscoveryMachine } from '@taucad/project-library/machines/library-discovery.machine';
+import { libraryRecoveryMachine } from '@taucad/project-library/machines/library-recovery.machine';
 
 const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
@@ -28,13 +31,13 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
         actions: machineActions(machines),
         tables: hashFiles(specs, ['expected.json', ...configs]),
         sources: hashFiles(workspace, [
-          'apps/libs/files-ui/src/hooks/project-manager-provider.tsx',
-          'apps/libs/files-ui/src/machines/library-discovery.machine.ts',
-          'apps/libs/files-ui/src/machines/library-recovery.machine.ts',
-          'apps/libs/files-ui/src/machines/library-access.machine.ts',
-          'apps/libs/files-ui/src/runtime/project-library.ts',
-          'apps/libs/files-ui/src/runtime/project-library-commands.ts',
-          'apps/libs/files-ui/src/runtime/project-library-workspace.ts',
+          'apps/libs/project-library/src/hooks/project-manager-provider.tsx',
+          'apps/libs/project-library/src/machines/library-discovery.machine.ts',
+          'apps/libs/project-library/src/machines/library-recovery.machine.ts',
+          'apps/libs/project-library/src/machines/library-access.machine.ts',
+          'apps/libs/project-library/src/runtime/project-library.ts',
+          'apps/libs/project-library/src/runtime/project-library-commands.ts',
+          'apps/libs/project-library/src/runtime/project-library-workspace.ts',
         ]),
         specs: hashFiles(specs, ['LibraryCatalog.tla']),
       }),

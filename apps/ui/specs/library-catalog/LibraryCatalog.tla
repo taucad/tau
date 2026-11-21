@@ -142,6 +142,10 @@
 \* their order. No action or correspondence changes.
 \* Auto-bring on sign-in removed (2026-11-20): `project-library-commands.ts` stops naming that setting in two
 \* comments; comments only. No action or correspondence changes.
+\* Layering W5 (2026-11-21): the project library (the three library machines, the project-manager machine, the
+\* service, its commands, storage, observations and workspace commands, the provider and listing hooks, and their
+\* types) moved unchanged from `@taucad/files-ui` to `@taucad/project-library`; the sources re-point their imports
+\* of the files-ui modules that stayed. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

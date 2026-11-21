@@ -47,15 +47,15 @@ import {
   pinHomeStorageBackend,
   requestHomeStoragePersistence,
   setProjectFileSystemConfig,
-} from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
 import type {
   ProjectFileSystemConfig,
   Workspace,
   WorkspaceBindingRepair,
   WorkspaceEntry,
-} from '#filesystem/handle-store.js';
-import { directoryPicker } from '#constants/browser.constants.js';
-import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
+import { nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import type {
   PendingProjectOperation,
@@ -64,7 +64,7 @@ import type {
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
-import { projectSlugsOf } from '#utils/project-url.utils.js';
+import { projectSlugsOf } from '@taucad/files-ui/utils/project-url.utils';
 import type { DiscoveryPlan, DiscoveryWrites } from '#machines/library-discovery.machine.js';
 import type { RecoveryRowInput, ReplayOutcome } from '#machines/library-recovery.machine.js';
 import type {

@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { CloudProjectUnavailableError, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';

@@ -27,9 +27,9 @@ import type {
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
-import type { PendingProjectOperation } from '@taucad/files-ui/types/pending-project-operation.types';
-import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
-import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+import type { PendingProjectOperation } from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
+import type { ProjectListing } from '@taucad/project-library/runtime/project-library-storage';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -206,7 +206,7 @@ const mockGetProjectLibraryState = vi.fn<(projectId: string) => Promise<ProjectL
 const mockDeleteProjectResources = vi.fn<(projectId: string) => Promise<void>>();
 /** Runs at the next readiness wait for the worker (`getReadiedWorker`), then clears itself. */
 let onWorkerRead: (() => void) | undefined;
-vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

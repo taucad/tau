@@ -52,21 +52,29 @@ import {
   createLibraryDiscovery,
   libraryDiscoveryIgnoredEvents,
   libraryDiscoveryMachine,
-} from '@taucad/files-ui/machines/library-discovery.machine';
+} from '@taucad/project-library/machines/library-discovery.machine';
 import {
   createLibraryRecovery,
   libraryRecoveryIgnoredEvents,
   libraryRecoveryMachine,
-} from '@taucad/files-ui/machines/library-recovery.machine';
-import type { RecoveryRow, RecoveryRowInput, ReplayOutcome } from '@taucad/files-ui/machines/library-recovery.machine';
+} from '@taucad/project-library/machines/library-recovery.machine';
+import type {
+  RecoveryRow,
+  RecoveryRowInput,
+  ReplayOutcome,
+} from '@taucad/project-library/machines/library-recovery.machine';
 import {
   createLibraryAccess,
   libraryAccessIgnoredEvents,
   libraryAccessMachine,
   libraryAccessQueryIgnoredEvents,
   libraryAccessQueryMachine,
-} from '@taucad/files-ui/machines/library-access.machine';
-import type { AccessAnswer, AccessPass, AccessQueryContext } from '@taucad/files-ui/machines/library-access.machine';
+} from '@taucad/project-library/machines/library-access.machine';
+import type {
+  AccessAnswer,
+  AccessPass,
+  AccessQueryContext,
+} from '@taucad/project-library/machines/library-access.machine';
 
 const specs = import.meta.dirname;
 const graph = readSpecGraph(path.join(specs, 'LibraryCatalog/graph.json'));

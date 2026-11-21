@@ -37,12 +37,12 @@ import {
   isNodeWorkspace,
   isNodeWorkspaceConnected,
   setProjectCreationLocation,
-} from '#filesystem/handle-store.js';
-import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
-import { directoryPicker } from '#constants/browser.constants.js';
-import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '#utils/project-name.utils.js';
-import { directorySlug, homeWorkspaceSlug } from '#utils/project-url.utils.js';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { isOrphanedProjectRoute } from '@taucad/files-ui/filesystem/orphaned-project-route';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
+import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
+import { directorySlug, homeWorkspaceSlug } from '@taucad/files-ui/utils/project-url.utils';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
 import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import {

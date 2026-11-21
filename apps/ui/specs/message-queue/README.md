@@ -101,3 +101,5 @@ DC-10 chat-ui slice 1 re-pinned the drift after `chat-message-queue.machine.ts` 
 PL7 staging defects FP9 re-pinned the drift after `chat-textarea.tsx` began loading the headless capture service through the code-loading owner (`loadCode`); no action changed.
 
 UI layering W2 re-pinned the drift after `chat-session-store.ts` began importing `run-auto-resume` from `@taucad/chat-ui`, where it moved unchanged from `@taucad/ui-core`; no action changed.
+
+UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; no action changed.

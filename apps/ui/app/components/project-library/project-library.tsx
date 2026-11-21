@@ -14,8 +14,8 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
-import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
+import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
@@ -71,7 +71,7 @@ import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type {
   ProjectDiscoveryConflict,
   WorkspaceBindingRepairGroup,
-} from '@taucad/files-ui/runtime/project-library-storage';
+} from '@taucad/project-library/runtime/project-library-storage';
 import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';

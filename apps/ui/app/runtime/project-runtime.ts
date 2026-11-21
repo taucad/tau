@@ -76,7 +76,7 @@ import type {
 import { editorMachine } from '#machines/editor.machine.js';
 import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import { startViewRecordSession } from '#workbench-records/view-record-session.js';
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';

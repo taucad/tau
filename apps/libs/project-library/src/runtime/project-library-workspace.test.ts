@@ -7,12 +7,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
-import { workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
+import { workspaceConnectionMachine } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { workspaceMarkerSchemaUrl } from '@taucad/types';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
 import type { WorkspaceCommandsHost } from '#runtime/project-library-workspace.js';
 
-vi.mock('#constants/browser.constants.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   directoryPicker: () => ({ available: true, backend: 'webaccess', pick: async () => undefined }),
 }));

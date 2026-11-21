@@ -48,6 +48,7 @@ const uiTagByProject: Readonly<Record<string, string>> = {
   'settings-ui': 'settings-ui',
   'billing-ui': 'billing-ui',
   'chat-surfaces': 'chat-surfaces',
+  'project-library': 'project-library',
   'project-workspace': 'project-workspace',
   'agent-host-ui': 'agent-host-ui',
   consent: 'infra',
@@ -91,7 +92,7 @@ const foundationPackageDebt: readonly DebtEdge[] = [
 ];
 
 /** Edges no other rule refuses that keep a closure rule from holding. */
-const closureDebt: readonly DebtEdge[] = [{ source: 'files-ui', target: 'chat', work: 'W5' }];
+const closureDebt: readonly DebtEdge[] = [];
 
 /** What each library's closure may not reach once the debt is cleared. */
 const closureRules: ReadonlyArray<{ readonly source: string; readonly excluded: (project: string) => boolean }> = [

@@ -1,6 +1,6 @@
 import type { Project, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
 
 /** Local library state that cannot be reconstructed from portable project files. */
 export type ProjectLibraryState = {

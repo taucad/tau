@@ -181,6 +181,9 @@
 \* code-loading owner (`loadCode`); delivery, persistence and the queue are untouched. No action or verdict changes.
 \* UI layering W2 (2026-11-21): `chat-session-store.ts` takes `run-auto-resume` from `@taucad/chat-ui`, where it moved
 \* unchanged from `@taucad/ui-core`; only the import moved. No action or verdict changes.
+\* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
+\* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
+\* moved. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

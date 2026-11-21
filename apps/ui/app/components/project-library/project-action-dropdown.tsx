@@ -1,7 +1,7 @@
 import { Copy, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@taucad/ui/components/dropdown-menu';

@@ -22,7 +22,7 @@ import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { selectRuntimeOpenAhead } from '#runtime/app-runtime.js';
 import type { AppRuntime } from '#runtime/app-runtime.js';
-import type { CreateProjectOptions } from '@taucad/files-ui/runtime/project-library-commands';
+import type { CreateProjectOptions } from '@taucad/project-library/runtime/project-library-commands';
 
 /**
  * What this device creates for a Tau Cloud project before its first pull: the

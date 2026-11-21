@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { webPosthogOptions } from '#lib/web-posthog.lib.js';
 import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { PostHogAnalyticsProvider } from '#providers/posthog-analytics-provider.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+
+const subscribeNever = (): (() => void) => () => undefined;
+const readIsHydrated = (): boolean => true;
+const readIsHydratedOnServer = (): boolean => false;
 
 /**
  * Web analytics boundary: PostHog only after accepted consent, with session
@@ -14,6 +18,9 @@ import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
  */
 export function WebAnalyticsProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const consentStatus = useCookieConsent();
+  /* F2c: the server render and the hydrating render read consent as `unknown` whatever the cookie says (P2), which is
+     not the visitor's decision. Until the client has read it, the boundary is told nothing was decided. */
+  const isHydrated = useSyncExternalStore(subscribeNever, readIsHydrated, readIsHydratedOnServer);
   /* A declined analytics decision also denies runtime telemetry on this browser (Q21); `unknown` does not block. */
   useEffect(() => {
     pageTelemetry()?.setAnalyticsDecision(consentStatus);
@@ -22,7 +29,7 @@ export function WebAnalyticsProvider({ children }: { readonly children: ReactNod
   const [isReplayEnabled] = useState(() => !isMemoryConstrainedDevice());
   return (
     <PostHogAnalyticsProvider
-      isActive={consentStatus === 'accepted'}
+      isActive={isHydrated ? consentStatus === 'accepted' : undefined}
       options={options}
       isReplayEnabled={isReplayEnabled}
     >

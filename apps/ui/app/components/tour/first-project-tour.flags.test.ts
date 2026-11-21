@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
+import { connectRemoteFlags, disconnectRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
 import type { RemoteFlagClient } from '#flags/remote-flags.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
@@ -90,5 +90,38 @@ describe('prepareFirstProjectTour before PostHog answers', () => {
     await settle();
 
     expect(personRecordStores.onboarding.read().tour.wanted).toBeUndefined();
+  });
+});
+
+/*
+ * F2c: the analytics boundary lets go of PostHog and follows it again when its effect re-runs or it remounts. That is
+ * not a decision, so neither a waiting request nor a later first project may read `onboarding` as off across it.
+ */
+describe('prepareFirstProjectTour across a re-run of the analytics boundary', () => {
+  it('should still ask for the tour when the boundary follows PostHog again while the request waits', async () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    const askForTour = await prepareFirstProjectTour(ports);
+    askForTour?.();
+
+    releaseRemoteFlags();
+    connectRemoteFlags(posthog.client);
+    posthog.answer({ onboarding: true });
+    await settle();
+
+    expect(personRecordStores.onboarding.read().tour.wanted).toBe(true);
+  });
+
+  it('should ask for the tour at once when onboarding was on before the boundary followed PostHog again', async () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    posthog.answer({ onboarding: true });
+    releaseRemoteFlags();
+    connectRemoteFlags(posthog.client);
+
+    const askForTour = await prepareFirstProjectTour(ports);
+    askForTour?.();
+
+    expect(personRecordStores.onboarding.read().tour.wanted).toBe(true);
   });
 });

@@ -12,6 +12,8 @@ import {
   disconnectRemoteFlags,
   readRemoteFlagStatus,
   readRemoteFlagValues,
+  releaseRemoteFlags,
+  subscribeRemoteFlags,
 } from '#flags/remote-flags.js';
 import { useFeatureState } from '#flags/use-feature.js';
 
@@ -188,6 +190,77 @@ describe('remote flag status', () => {
     connectRemoteFlags(client);
     client.answer({}, true);
     expect(readRemoteFlagStatus()).toBe('absent');
+  });
+
+  /*
+   * F2c: the analytics boundary releases the client when its admission effect re-runs or the boundary remounts, then
+   * follows it again. Only a decision (withdrawal, no SDK, a failed load) may publish a final off.
+   */
+  it('never reads a flag PostHog answered on as off when the boundary releases and follows the client again', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    client.answer({ onboarding: true });
+    const seen: string[] = [];
+    const unsubscribe = subscribeRemoteFlags(() => {
+      seen.push(readFeatureState('onboarding'));
+    });
+
+    releaseRemoteFlags();
+    connectRemoteFlags(client);
+
+    unsubscribe();
+    expect(seen).not.toContain('off');
+    expect(readFeatureState('onboarding')).toBe('on');
+    expect(readRemoteFlagStatus()).toBe('evaluated');
+  });
+
+  it('follows the client again after a release', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    client.answer({ onboarding: true });
+    releaseRemoteFlags();
+    connectRemoteFlags(client);
+
+    client.answer({ onboarding: false });
+
+    expect(readFeatureState('onboarding')).toBe('off');
+  });
+
+  it('stops following a released client without publishing anything', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    client.answer({ onboarding: true });
+    const listener = vi.fn();
+    const unsubscribe = subscribeRemoteFlags(listener);
+
+    releaseRemoteFlags();
+    client.answer({ onboarding: false });
+
+    unsubscribe();
+    expect(listener).not.toHaveBeenCalled();
+    expect(readFeatureState('onboarding')).toBe('on');
+  });
+
+  it('is pending again, not off, when a client is followed after a withdrawal', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    client.answer({ onboarding: true });
+    disconnectRemoteFlags();
+    expect(readFeatureState('onboarding')).toBe('off');
+
+    connectRemoteFlags(client);
+
+    expect(readFeatureState('onboarding')).toBe('unknown');
+  });
+
+  it('starts unknown when another client is followed', () => {
+    const first = createAnsweringClient();
+    connectRemoteFlags(first);
+    first.answer({ onboarding: true });
+
+    connectRemoteFlags(createAnsweringClient());
+
+    expect(readFeatureState('onboarding')).toBe('unknown');
   });
 
   it('is absent when the client throws while subscribing', () => {

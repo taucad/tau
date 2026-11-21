@@ -4474,9 +4474,6 @@ importers:
       '@sentry/react':
         specifier: 'catalog:'
         version: 10.75.0(react@19.3.1)
-      '@taucad/agent-host':
-        specifier: workspace:*
-        version: link:../../../packages/agent-host
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events

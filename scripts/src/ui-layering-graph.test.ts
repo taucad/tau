@@ -21,7 +21,6 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '../..');
 
 type DebtEdge = { readonly source: string; readonly target: string; readonly work: string };
-type DebtFile = { readonly file: string; readonly work: string };
 type DepConstraint = {
   readonly sourceTag?: string;
   readonly onlyDependOnLibsWithTags?: readonly string[];
@@ -33,7 +32,6 @@ type EslintLayering = {
   readonly default: readonly ConfigEntry[];
   readonly uiLibraryDependencies: Readonly<Record<string, readonly string[]>>;
   readonly uiLibraryDependencyDebt: readonly DebtEdge[];
-  readonly uiFoundationProtocolDebtFiles: readonly DebtFile[];
 };
 
 const eslint = (await import(pathToFileURL(resolve(root, 'eslint.config.mjs')).href)) as EslintLayering;
@@ -80,9 +78,6 @@ const foundationTargets = new Set([
   'types',
   'utils',
 ]);
-
-/** L0's agent-protocol edges (the files behind them are `uiFoundationProtocolDebtFiles`). */
-const foundationProtocolDebt: readonly DebtEdge[] = [{ source: 'ui-core', target: 'agent-host', work: 'W2' }];
 
 /** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [
@@ -137,12 +132,7 @@ const directDependencies = (project: string): readonly string[] => [
 const graphEdges = (sources: readonly string[]): readonly DebtEdge[] =>
   sources.flatMap((source) => directDependencies(source).map((target) => ({ source, target, work: '' })));
 
-const allDebt = [
-  ...eslint.uiLibraryDependencyDebt,
-  ...foundationProtocolDebt,
-  ...foundationPackageDebt,
-  ...closureDebt,
-];
+const allDebt = [...eslint.uiLibraryDependencyDebt, ...foundationPackageDebt, ...closureDebt];
 
 /** Every project a source reaches once the listed debt edges are cut. */
 const residualClosure = (source: string): ReadonlySet<string> => {
@@ -216,12 +206,6 @@ describe('UI app library layering graph', () => {
     for (const name of foundation) {
       expect(constraints).toContainEqual({ sourceTag: `ui:${name}`, notDependOnLibsWithTags: ['protocol:agent'] });
     }
-
-    const debtFiles = eslint.uiFoundationProtocolDebtFiles.map(({ file }) => file);
-    const exemption = eslint.default.find((entry) => entry.files?.join('\n') === debtFiles.join('\n'));
-    const exempted = exemption === undefined ? [] : (boundaryRule(exemption)?.[1].depConstraints ?? []);
-    expect(exempted.filter((constraint) => constraint.notDependOnLibsWithTags !== undefined)).toEqual([]);
-    expect(exempted.length).toBe(constraints.length - foundation.length);
   });
 
   it('refuses every UI app library edge outside the allowlist except the listed debt', () => {
@@ -237,13 +221,13 @@ describe('UI app library layering graph', () => {
     expect(violations).toEqual(keys(eslint.uiLibraryDependencyDebt));
   });
 
-  it('keeps L0 off the agent protocol except the listed debt', () => {
+  it('keeps L0 off the agent protocol', () => {
     const violations = graphEdges(foundation)
       .filter(({ target }) => agentProtocol.includes(target))
       .map((edge) => edgeKey(edge))
       .toSorted();
 
-    expect(violations).toEqual(keys(foundationProtocolDebt));
+    expect(violations).toEqual([]);
   });
 
   it('keeps L0 on the platform packages except the listed domain debt', () => {
@@ -269,7 +253,7 @@ describe('UI app library layering graph', () => {
     expect(reached).toEqual([]);
   });
 
-  it('exempts exactly the L0 files that name the agent protocol', () => {
+  it('keeps every L0 source file off the agent protocol', () => {
     const naming = foundation
       .flatMap((project) =>
         globSync(`${graph.nodes[project]?.data.root ?? ''}/src/**/*.{ts,tsx}`, { cwd: root }).filter((file) =>
@@ -278,6 +262,6 @@ describe('UI app library layering graph', () => {
       )
       .toSorted();
 
-    expect(naming).toEqual(eslint.uiFoundationProtocolDebtFiles.map(({ file }) => file).toSorted());
+    expect(naming).toEqual([]);
   });
 });

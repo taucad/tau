@@ -358,16 +358,6 @@ const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
 }));
 
 /**
- * The L0 files that import the agent protocol today, each with the work item that moves it out. They keep every
- * other boundary constraint; scripts/src/ui-layering-graph.test.ts fails when one stops importing the protocol and
- * when another L0 file starts.
- */
-export const uiFoundationProtocolDebtFiles = [
-  { file: 'apps/libs/ui-core/src/lib/external-agent.ts', work: 'W2' },
-  { file: 'apps/libs/ui-core/src/utils/run-auto-resume.ts', work: 'W2' },
-];
-
-/**
  * Nx module boundaries. The options are shared so the runtime-e2e override can add its
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
@@ -756,23 +746,6 @@ const config = [
     plugins: { '@nx': nxEslintPlugin },
     rules: {
       '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
-    },
-  },
-
-  {
-    // The L0 agent-protocol debt (above): every other boundary constraint still applies to these files.
-    files: uiFoundationProtocolDebtFiles.map(({ file }) => file),
-    plugins: { '@nx': nxEslintPlugin },
-    rules: {
-      '@nx/enforce-module-boundaries': [
-        'error',
-        {
-          ...moduleBoundaryOptions,
-          depConstraints: moduleBoundaryOptions.depConstraints.filter(
-            (constraint) => !uiFoundationConstraints.includes(constraint),
-          ),
-        },
-      ],
     },
   },
 

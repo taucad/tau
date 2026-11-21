@@ -134,7 +134,6 @@
     "@codemirror/state": "catalog:",
     "@codemirror/view": "catalog:",
     "@sentry/react": "catalog:",
-    "@taucad/agent-host": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-client": "workspace:*",

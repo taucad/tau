@@ -77,7 +77,6 @@
     "@tanstack/react-virtual": "^3.14.3",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
-    "@taucad/workbench-panes": "workspace:*",
     "class-variance-authority": "catalog:",
     "date-fns": "catalog:",
     "lucide-react": "catalog:",

@@ -56,6 +56,7 @@ Every component has its own subpath so bundlers drop what you do not use. The ro
 | ---------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Components | `@taucad/ui/components/<name>`          | One Radix-backed primitive per module — `button`, `dialog`, `sidebar`, `table`, and 40 more |
 | Variants   | `@taucad/ui/components/<name>.variants` | The `cva` definitions behind a component, for building matching surfaces                    |
+| Badges     | `@taucad/ui/components/format-badge`    | `FormatBadge` (a file format's coloured badge) and `FormatFileIcon` (a badge or file icon)  |
 | Hooks      | `@taucad/ui/hooks/use-mobile`           | Viewport helper used by the responsive layouts                                              |
 | Utilities  | `@taucad/ui/utils/cn`                   | `clsx` + `tailwind-merge` class composer                                                    |
 | Tokens     | `@taucad/ui/styles/tokens.css`          | Colour, radius, shadow, and typography tokens for all four themes                           |
@@ -82,7 +83,7 @@ Semantic versioning. The package is pre-1.0: minor versions may change component
 
 ## Security and provenance
 
-Published from the [taucad/tau](https://github.com/taucad/tau) repository with npm provenance attestation. The package contains no network code, no telemetry, and no runtime dependencies beyond React and the Radix primitives it re-exports.
+Published from the [taucad/tau](https://github.com/taucad/tau) repository with npm provenance attestation. The package contains no network code, no telemetry, and no runtime dependencies beyond React and the Radix primitives it re-exports. `components/format-badge` carries Tau's file-extension catalog and string hash inside `dist`; they are not installed as packages.
 
 ## License
 

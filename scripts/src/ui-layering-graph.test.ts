@@ -81,6 +81,9 @@ const foundationTargets = new Set([
   'utils',
 ]);
 
+/** The viewer stack `ui-kit` left in W6, when `FormatBadge` moved from `@taucad/workbench-panes` to `@taucad/ui`. */
+const viewerStack: ReadonlySet<string> = new Set(['parameters', 'runtime', 'viewer', 'workbench-panes']);
+
 /** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [
   { source: 'ui-core', target: 'kinematics', work: 'W7' },
@@ -88,7 +91,6 @@ const foundationPackageDebt: readonly DebtEdge[] = [
   { source: 'ui-core', target: 'revisions', work: 'W7' },
   { source: 'ui-core', target: 'viewer', work: 'W7' },
   { source: 'ui-core', target: 'workbench', work: 'W7' },
-  { source: 'ui-kit', target: 'workbench-panes', work: 'W6' },
 ];
 
 /** Edges no other rule refuses that keep a closure rule from holding. */
@@ -97,7 +99,10 @@ const closureDebt: readonly DebtEdge[] = [];
 /** What each library's closure may not reach once the debt is cleared. */
 const closureRules: ReadonlyArray<{ readonly source: string; readonly excluded: (project: string) => boolean }> = [
   { source: 'ui-core', excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) },
-  { source: 'ui-kit', excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) },
+  {
+    source: 'ui-kit',
+    excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) || viewerStack.has(project),
+  },
   { source: 'files-ui', excluded: (project) => project === 'chat' },
   { source: 'editor-ui', excluded: (project) => project === 'chat-ui' || project === 'files-ui' },
 ];

@@ -1,3 +1,5 @@
+import { bundlePattern, workspace } from '@taucad/nx';
+import { assembleBundledDeclarations } from '@taucad/nx/bundled-declarations';
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
@@ -28,6 +30,7 @@ const baseConfig: UserConfig = {
     'src/components/drawer.tsx',
     'src/components/dropdown-menu.tsx',
     'src/components/field.tsx',
+    'src/components/format-badge.tsx',
     'src/components/heading.tsx',
     'src/components/heading.variants.ts',
     'src/components/highlight-text.tsx',
@@ -98,15 +101,22 @@ const baseConfig: UserConfig = {
     { from: 'src/styles/base.css.d.ts', to: `${outDir}/styles` },
   ],
   dts: true,
+  hooks: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- tsdown's hook API uses colon-delimited names.
+    'build:done': async ({ options }) => assembleBundledDeclarations(process.cwd(), options.outDir, 'taucad-ui'),
+  },
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const packageConfig: UserConfig = {
-  ...baseConfig,
-  format: 'esm',
-  outDir: 'dist',
-};
-
-export default defineConfig(packageConfig);
+/** The private workspace libraries `format-badge` imports (`@taucad/types`, `@taucad/utils`) ship inside `dist`. */
+export default defineConfig(async () => {
+  const pattern = bundlePattern(await workspace(), 'taucad-ui');
+  return {
+    ...baseConfig,
+    format: 'esm',
+    outDir: 'dist',
+    deps: { alwaysBundle: [pattern], dts: { neverBundle: [pattern] } },
+  } satisfies UserConfig;
+});

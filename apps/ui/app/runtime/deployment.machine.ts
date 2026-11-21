@@ -19,6 +19,10 @@ import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
  * composition's `localStorage` entry for this origin, read in `recalling` (MC-R5).
  *
  * Safe mode (D10): `idle` reads no record and asks nothing.
+ *
+ * A server-rendered page starts from the server's answer (W11): `seed` is the mode the document was rendered with, so
+ * the first client render matches it, and the record read in `recalling` does not replace it. The page still asks once
+ * at load, and the record and I2 govern from that ask on.
  */
 
 /** How long one ask may run before it counts as failed (I15: `pending` lasts at most this). Milliseconds. @public */
@@ -67,6 +71,11 @@ export type DeploymentMachineInput = Readonly<{
   visible?: boolean;
   /** This page load runs in safe mode: read nothing, ask nothing (D10). */
   safeMode?: boolean;
+  /**
+   * The mode the server rendered the document with (W11), from its own ask of the same origin. `unknown` while
+   * `pending`, or absent, is no seed: the page starts from its record.
+   */
+  seed?: DeploymentModeSnapshot;
 }>;
 
 /** The machine's context. @public */
@@ -151,6 +160,9 @@ const unprovidedAsk = createAsyncLogic<DeploymentAskOutcome>({
   run: async () => notProvided('ask'),
 });
 const noConnectivity = createCallbackLogic<EventObject>(() => undefined);
+
+/** Whether a mode came from an answer rather than the start's `pending` (a server seed, W11). */
+const isAnswered = (mode: DeploymentModeSnapshot): boolean => mode.state !== 'unknown' || mode.problem !== 'pending';
 
 /** The mode a record gives before any ask (the table's `start` rows). @public */
 export const modeOfRecord = (record: DeploymentRecord | undefined): DeploymentModeSnapshot => {
@@ -344,10 +356,11 @@ export const deploymentMachine = setup({
     context.fault === undefined ? { context: { fault: faultMessage(event.error) } } : {},
   context: ({ input }) => ({
     parentRef: input.parentRef,
-    mode: {
-      state: 'unknown',
-      problem: input.safeMode === true ? 'safe-mode' : 'pending',
-    },
+    /* D10 outranks a seed: safe mode shows no Cloud whatever the server answered. */
+    mode:
+      input.safeMode === true
+        ? { state: 'unknown', problem: 'safe-mode' }
+        : (input.seed ?? { state: 'unknown', problem: 'pending' }),
     record: undefined,
     visible: input.visible ?? true,
     failures: 0,
@@ -379,7 +392,8 @@ export const deploymentMachine = setup({
         id: 'recall',
         src: 'recall',
         onDone: ({ context, event }, enq) => {
-          const mode = modeOfRecord(event.output);
+          /* W11: the server's answer is newer than this install's record, and the document was rendered with it. */
+          const mode = isAnswered(context.mode) ? context.mode : modeOfRecord(event.output);
           tellParent(context, mode, enq);
           return { target: 'asking', context: { mode, record: event.output } };
         },

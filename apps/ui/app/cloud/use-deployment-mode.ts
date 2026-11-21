@@ -14,8 +14,8 @@ const noRuntime = {
 
 /**
  * The display mode of the page's API origin (adaptive app deployment mode charter D2): the pinned constant of a
- * `cloud` or `self-host` build, else what the runtime's `deployment` child last reported, `unknown` on the server and
- * in the first client render (I13). Never throws: outside an `AppRuntimeProvider` it is the build's initial mode.
+ * `cloud` or `self-host` build, else what the runtime's `deployment` child last reported. On the server and in the
+ * first client render it is the server's own answer when the document carries one (W11), else `unknown` (I13). Never throws: outside an `AppRuntimeProvider` it is the build's initial mode.
  *
  * @returns The mode.
  * @public

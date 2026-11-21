@@ -19,6 +19,7 @@ import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-l
 import { setProjectOpenRouteClassReader } from '@taucad/ui-core/lib/project-open-performance';
 import { inspect } from '#machines/inspector.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
+import { readDocumentDeploymentSeed } from '#cloud/deployment-seed.js';
 import { heldAppRuntime, holdAppRuntime } from '#runtime/app-runtime-holder.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { admittedAnalytics } from '#providers/posthog-analytics-provider.js';
@@ -64,6 +65,8 @@ if (heldAppRuntime() === undefined) {
       /* D0: `?safe=1` starts this page load in safe mode, read before the runtime exists. The next navigation drops the
        * parameter, and a reload without it is a normal start. */
       safeMode: isSafeModeRequested(globalThis.location.search) || desktopSafeMode() !== undefined,
+      /* W11: the deployment answer the server rendered the document with, so the first render matches it. */
+      deploymentSeed: readDocumentDeploymentSeed(),
       ...(inspect === undefined ? {} : { inspect }),
     }),
   );

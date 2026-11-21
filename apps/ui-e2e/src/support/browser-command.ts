@@ -2351,6 +2351,123 @@ export const uiRouteDeploymentAnswer: BrowserCommand<[answer: DeploymentAnswerSt
 /** Whether this run is the adaptive web tier (`ui-e2e:test:e2e:adaptive` sets `TAU_E2E_ADAPTIVE_TIER`). */
 export const uiIsAdaptiveTier: BrowserCommand<[], boolean> = () => process.env['TAU_E2E_ADAPTIVE_TIER'] === 'true';
 
+/** What a seeded UI server's own API stand-in answers `GET /v1/deployment` with (W11). */
+type SeededDeploymentAnswer = DeploymentAnswerStub | 'blackholed';
+
+/** The UI servers `uiStartSeededServer` started, each with its API stand-in, stopped by `uiStopSeededServers`. */
+const seededServers: Array<{ ui: ChildProcess; api: Server }> = [];
+
+const listenOnFreePort = async (server: Server): Promise<number> =>
+  new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('The stand-in has no TCP port.'));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+
+const freePort = async (): Promise<number> => {
+  const probe = createServer();
+  const port = await listenOnFreePort(probe);
+  await new Promise<void>((resolve) => {
+    probe.close(() => {
+      resolve();
+    });
+  });
+  return port;
+};
+
+/**
+ * Start a second UI server over the tier's build whose API is a stand-in of its own (adaptive app deployment mode
+ * W11), so its root loader's server-side ask gets `answer` and its per-process cache starts empty. The stand-in answers
+ * the deployment route (or holds it open, `blackholed`) for the server and the page alike, and every other API path
+ * `404`, so the page is signed out. Returns the server's origin.
+ */
+export const uiStartSeededServer: BrowserCommand<[answer: SeededDeploymentAnswer], string> = async (
+  _commandContext,
+  answer,
+) => {
+  const api = createServer((request, response) => {
+    const headers = {
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-origin': request.headers.origin ?? '*',
+      vary: 'origin',
+    };
+    if (/^\/v1\/deployment(?:\?|$)/u.test(request.url ?? '')) {
+      if (answer === 'blackholed') {
+        return; // Never answered: the server's deadline and the page's own end the wait.
+      }
+      response.writeHead(200, { ...headers, 'content-type': 'application/json' });
+      response.end(JSON.stringify(deploymentAnswerBodies[answer]));
+      return;
+    }
+    response.writeHead(404, headers);
+    response.end();
+  });
+  const apiPort = await listenOnFreePort(api);
+  const uiPort = await freePort();
+  const origin = `http://localhost:${uiPort}`;
+  const uiRoot = resolve(import.meta.dirname, '../../../ui');
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  environment['PORT'] = String(uiPort);
+  environment['NODE_ENV'] = 'production';
+  environment['TAU_DEBUG'] = 'true';
+  environment['TAU_API_URL'] = `http://127.0.0.1:${apiPort}`;
+  environment['TAU_WEBSOCKET_URL'] = `ws://127.0.0.1:${apiPort}`;
+  environment['TAU_FRONTEND_URL'] = origin;
+  environment['TAU_E2E_UI_BUILD_ROOT'] = resolve(uiRoot, process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build');
+  const ui = spawn(
+    'node',
+    ['--import', '@oxc-node/core/register', resolve(import.meta.dirname, '../../production-server.ts')],
+    { cwd: uiRoot, env: environment, stdio: 'inherit' },
+  );
+  seededServers.push({ ui, api });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    if (ui.exitCode !== null) {
+      throw new Error(`The seeded UI server exited with ${ui.exitCode}.`);
+    }
+    try {
+      const response = await fetch(`${origin}/health/build`);
+      if (response.ok) {
+        return origin;
+      }
+    } catch {
+      /* Not listening yet. */
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`The seeded UI server at ${origin} did not start within 60 s.`);
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+};
+
+/** Stop every server `uiStartSeededServer` started. */
+export const uiStopSeededServers: BrowserCommand = async () => {
+  for (const { ui, api } of seededServers.splice(0)) {
+    ui.kill('SIGTERM');
+    api.closeAllConnections();
+    api.close();
+  }
+};
+
+/** Fetch a document as the server renders it, with no browser: its status, its HTML and how long it took. */
+export const uiFetchDocument: BrowserCommand<
+  [url: string],
+  Readonly<{ status: number; html: string; milliseconds: number }>
+> = async (_commandContext, url) => {
+  const started = performance.now();
+  const response = await fetch(url);
+  const html = await response.text();
+  return { status: response.status, html, milliseconds: performance.now() - started };
+};
+
 /** Refuse every request of the target context whose URL matches `pattern`, as a missing file refuses it. */
 export const uiFailTargetRequests: BrowserCommand<[pattern: string]> = async (commandContext, pattern) => {
   const { context } = sessionFor(commandContext);
@@ -4080,6 +4197,9 @@ export const uiBrowserCommands = {
   uiFailTargetRequests,
   uiCloudChunkPaths,
   uiIsAdaptiveTier,
+  uiStartSeededServer,
+  uiStopSeededServers,
+  uiFetchDocument,
   uiReadDelayedTargetRequests,
   uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,

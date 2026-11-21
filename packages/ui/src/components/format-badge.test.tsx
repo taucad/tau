@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import axe from 'axe-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FormatBadge, FormatFileIcon } from '#components/format-badge.js';
 
@@ -44,5 +45,20 @@ describe('FormatFileIcon', () => {
     expect(screen.getByText('gcode')).toBeInTheDocument();
     rerender(<FormatFileIcon filename='report.csv' />);
     expect(container.querySelector('.lucide-format-3d')).toBeNull();
+  });
+});
+
+describe('format badge accessibility smoke test', () => {
+  it.each([
+    ['a format badge', <FormatBadge key='badge' extension='stl' aria-label='STL mesh' />],
+    ['the badge of a catalog file', <FormatFileIcon key='catalog' filename='exports/gear.step' />],
+    ['the plain icon of any other file', <FormatFileIcon key='plain' filename='gear.ts' />],
+  ])('should have no automated violations for %s', async (_case, icon) => {
+    const { baseElement: container } = render(<main>{icon}</main>);
+
+    // Axe cannot measure the badge label's contrast without the layout and canvas that jsdom lacks.
+    const results = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+
+    expect(results.violations).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
 import { browserHostLabels, closeParameterActors, hostBuildOf, swappable } from '#workers/agent-host.impl.js';
@@ -133,5 +133,105 @@ describe('swappable', () => {
     slot.close();
 
     expect(finish.mock.calls).toEqual([[second], [first]]);
+  });
+
+  it('should release a retired target only once its last call under way settles', async () => {
+    const finish = vi.fn();
+    const firstCall = Promise.withResolvers<string>();
+    const secondCall = Promise.withResolvers<string>();
+    const calls = [firstCall, secondCall];
+    const first = { read: vi.fn(async () => calls.shift()!.promise) };
+    const slot = swappable(first, finish);
+
+    const one = slot.view.read();
+    const two = slot.view.read();
+    slot.retire(slot.swap({ read: vi.fn(async () => 'second') }));
+
+    firstCall.resolve('one');
+    await expect(one).resolves.toBe('one');
+    expect(finish).not.toHaveBeenCalled();
+    secondCall.resolve('two');
+    await expect(two).resolves.toBe('two');
+    expect(finish).toHaveBeenCalledExactlyOnceWith(first);
+  });
+
+  describe('with retireWithin', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /* A target whose `finish` rejects what it still owes, as a revisions client's `close` does. */
+    const closable = () => {
+      const reads = new Set<PromiseWithResolvers<string>>();
+      return {
+        read: vi.fn(async () => {
+          const read = Promise.withResolvers<string>();
+          reads.add(read);
+          return read.promise;
+        }),
+        reads,
+        close: () => {
+          for (const read of reads) {
+            read.reject(Object.assign(new Error('The project host closed.'), { code: 'PROJECT_HOST_CLOSED' }));
+          }
+          reads.clear();
+        },
+      };
+    };
+
+    it('should finish a retired target whose peer never answers once the bound passes', async () => {
+      const first = closable();
+      const finish = vi.fn((target: ReturnType<typeof closable>) => {
+        target.close();
+      });
+      const slot = swappable(first, finish, { retireWithin: 1000 });
+
+      const stuck = expect(slot.view.read()).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+      slot.retire(slot.swap(closable()));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(finish).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(finish).toHaveBeenCalledExactlyOnceWith(first);
+      await stuck;
+      expect(finish).toHaveBeenCalledOnce();
+    });
+
+    it('should let a call that answers inside the bound complete, and clear the bound when it does', async () => {
+      const first = closable();
+      const finish = vi.fn((target: ReturnType<typeof closable>) => {
+        target.close();
+      });
+      const slot = swappable(first, finish, { retireWithin: 1000 });
+
+      const answered = slot.view.read();
+      slot.retire(slot.swap(closable()));
+      [...first.reads][0]!.resolve('answered');
+
+      await expect(answered).resolves.toBe('answered');
+      expect(finish).toHaveBeenCalledExactlyOnceWith(first);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('should clear the bound of a retired target when the slot closes', async () => {
+      const first = closable();
+      const second = closable();
+      const finish = vi.fn((target: ReturnType<typeof closable>) => {
+        target.close();
+      });
+      const slot = swappable(first, finish, { retireWithin: 1000 });
+
+      const closed = expect(slot.view.read()).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+      slot.retire(slot.swap(second));
+      slot.close();
+
+      expect(finish.mock.calls).toEqual([[second], [first]]);
+      expect(vi.getTimerCount()).toBe(0);
+      await closed;
+    });
   });
 });

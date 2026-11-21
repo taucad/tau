@@ -832,6 +832,68 @@ describe('the oldest retained build (FP2)', () => {
     ]);
   });
 
+  it('should keep the floor above a build it dropped even when an older build stays (a rollback)', async () => {
+    // Build A (older id) went live after B: B left the live build first, and leaves retention first.
+    const live = await startLiveDeploy(
+      { 'assets/route-A.js': 'a' },
+      {
+        ...indexOf([
+          { path: 'assets/route-A.js', integrity: integrityOf('a'), generation: 0 },
+          { path: 'assets/route-B.js', integrity: integrityOf('b'), generation: 2, retiredAt: now - 31 * day },
+        ]),
+        builds: [
+          { buildId: 1_794_800_000_000, generation: 0 },
+          { buildId: 1_794_900_000_000, generation: 2, retiredAt: now - 31 * day },
+        ],
+      },
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(1_794_900_000_001);
+    const index = await readIndex(client);
+    expect(index.builds).toStrictEqual([
+      { buildId: ownBuildId, generation: 0 },
+      { buildId: 1_794_800_000_000, generation: 1, retiredAt: now },
+    ]);
+    expect(index.droppedBuildFloor).toBe(1_794_900_000_001);
+  });
+
+  it('should carry the floor above every dropped build into later deploys', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-A.js': 'a' },
+      {
+        ...indexOf([{ path: 'assets/route-A.js', integrity: integrityOf('a'), generation: 0 }]),
+        builds: [{ buildId: 1_794_800_000_000, generation: 0 }],
+        droppedBuildFloor: 1_794_900_000_001,
+      },
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(1_794_900_000_001);
+    const { droppedBuildFloor } = await readIndex(client);
+    expect(droppedBuildFloor).toBe(1_794_900_000_001);
+  });
+
+  it('should refuse a live index whose dropped-build floor is malformed', () => {
+    expect(() =>
+      parseServedAssetsIndex({ ...indexOf([]), builds: [], droppedBuildFloor: -1 }, 'the live index'),
+    ).toThrow('malformed dropped-build floor');
+  });
+
   it('should report this build as the floor when the live index records no builds, never an older one', async () => {
     const live = await startLiveDeploy(
       { 'assets/route-OLD1.js': 'old1' },

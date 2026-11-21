@@ -3,6 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import {
   buildFloorKey,
   completeDocuments,
+  createBuildFloorWriter,
   fillFromHttpCache,
   installPrecache,
   readStoredBuildFloor,
@@ -215,8 +216,13 @@ describe('fillFromHttpCache', () => {
 describe('the stored build floor (FP2)', () => {
   const stateCache = 'tau-state-v3';
 
-  /** Cache Storage as far as the floor uses it, in memory: what a worker restarted later reads back. */
-  const createStorage = (): FloorStorage & { readonly names: () => readonly string[] } => {
+  /**
+   * Cache Storage as far as the floor uses it, in memory: what a worker restarted later reads back. `beforePut` runs
+   * before each write lands, so a test can hold or fail one.
+   */
+  const createStorage = (
+    beforePut: (value: string) => Promise<void> = async () => undefined,
+  ): FloorStorage & { readonly names: () => readonly string[] } => {
     const caches = new Map<string, Map<string, Response>>();
     return {
       names: () => [...caches.keys()],
@@ -225,12 +231,13 @@ describe('the stored build floor (FP2)', () => {
       open: async (name) => {
         const entries = caches.get(name) ?? new Map<string, Response>();
         caches.set(name, entries);
-        return {
-          match: async (key: string) => entries.get(key)?.clone(),
-          put: async (key: string, response: Response) => {
-            entries.set(key, response);
-          },
-        } as unknown as Cache;
+        const cache = mock<Cache>();
+        cache.match.mockImplementation(async (key) => entries.get(key as string)?.clone());
+        cache.put.mockImplementation(async (key, response) => {
+          await beforePut(await response.clone().text());
+          entries.set(key as string, response);
+        });
+        return cache;
       },
     };
   };
@@ -265,5 +272,50 @@ describe('the stored build floor (FP2)', () => {
     await cache.put(buildFloorKey, new Response('not-a-build'));
 
     await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBeUndefined();
+  });
+
+  describe('createBuildFloorWriter', () => {
+    it('should store floors in the order they were handed on, though an earlier write is slower', async () => {
+      let releaseFirst: () => void = () => undefined;
+      const firstHeld = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const storage = createStorage(async (value) => {
+        if (value === '1795000000001') {
+          await firstHeld;
+        }
+      });
+      const write = createBuildFloorWriter(storage, stateCache, () => true);
+
+      const first = write(1_795_000_000_001);
+      const second = write(1_795_000_000_002);
+      releaseFirst();
+      await Promise.all([first, second]);
+
+      await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBe(1_795_000_000_002);
+    });
+
+    it('should store a later floor when an earlier write fails, and never reject', async () => {
+      const storage = createStorage(async (value) => {
+        if (value === '1795000000001') {
+          throw new DOMException('full', 'QuotaExceededError');
+        }
+      });
+      const write = createBuildFloorWriter(storage, stateCache, () => true);
+
+      await expect(write(1_795_000_000_001)).resolves.toBeUndefined();
+      await expect(write(1_795_000_000_002)).resolves.toBeUndefined();
+
+      await expect(readStoredBuildFloor(storage, stateCache)).resolves.toBe(1_795_000_000_002);
+    });
+
+    it('should write nothing once the worker may no longer write its caches', async () => {
+      const storage = createStorage();
+      const write = createBuildFloorWriter(storage, stateCache, () => false);
+
+      await write(1_795_000_000_001);
+
+      expect(storage.names()).toStrictEqual([]);
+    });
   });
 });

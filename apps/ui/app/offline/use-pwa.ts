@@ -1,7 +1,7 @@
 /**
  * The page side of the web app's service worker that every document carries (progressive loading PL7): when to start
- * the registration (`pwa-registration.ts`, loaded on demand, so the interactive tier carries only this), and
- * the last install outcome it heard, which the offline usage notice shows (`offline-shell.tsx`).
+ * the registration (`pwa-registration.ts`, loaded on demand, so the interactive tier carries only this), and safe
+ * mode's departure from it.
  *
  * **When.** Once the page has loaded and the main thread is idle, so the precache download never competes with the
  * requests a first visit needs. Inside a project workspace the registration only attaches to a worker an earlier page
@@ -67,23 +67,8 @@ export const checkForRetiringWorker = async (): Promise<void> => {
   }
 };
 
-/**
- * Safe mode (`?safe=1`) under a worker: unregister every registration and delete the worker caches, so the next load
- * reaches the network as if no worker were there (FP5). A page in safe mode registers nothing.
- */
-export const leaveServiceWorker = async (): Promise<void> => {
-  try {
-    const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map(async (registration) => registration.unregister()));
-    if ('caches' in globalThis) {
-      // Loaded here, off Home's critical tier: only a page in safe mode needs it.
-      const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
-      await deleteOrphanWorkerCaches(globalThis.caches);
-    }
-  } catch {
-    // Storage refused: the next safe-mode load tries again.
-  }
-};
+/** How long after the page settles safe mode sweeps the worker caches a second time. Milliseconds. */
+export const safeModeResweepMilliseconds = 10_000;
 
 /** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
 export const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
@@ -118,6 +103,45 @@ const afterLoadAndIdle = (start: () => void): (() => void) => {
     globalThis.removeEventListener('load', scheduleIdle);
     cancelIdle?.();
   };
+};
+
+/**
+ * Safe mode (`?safe=1`) under a worker: unregister every registration and delete the worker caches, so the next load
+ * reaches the network as if no worker were there (FP5). A page in safe mode registers nothing.
+ */
+export const leaveServiceWorker = async (
+  settle: (sweep: () => void) => void = (sweep) => {
+    afterLoadAndIdle(() => {
+      sweep();
+      setTimeout(sweep, safeModeResweepMilliseconds);
+    });
+  },
+): Promise<void> => {
+  try {
+    const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(async (registration) => registration.unregister()));
+    if ('caches' in globalThis) {
+      // Loaded here, off Home's critical tier: only a page in safe mode needs it.
+      const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
+      await deleteOrphanWorkerCaches(globalThis.caches);
+      /* The unregistered worker keeps controlling this page until it navigates, so a chunk the page loads later (a lazy
+       * route module, the idle warm-up) is cached again on first use. Sweep once the page has settled, and once more. */
+      if (globalThis.navigator.serviceWorker.controller !== null) {
+        settle(() => {
+          // async-iife: bootstrap -- a sweep that fails leaves what the next normal load's orphan cleanup deletes.
+          void (async () => {
+            try {
+              await deleteOrphanWorkerCaches(globalThis.caches);
+            } catch {
+              // Storage refused: as above.
+            }
+          })();
+        });
+      }
+    }
+  } catch {
+    // Storage refused: the next safe-mode load tries again.
+  }
 };
 
 /**

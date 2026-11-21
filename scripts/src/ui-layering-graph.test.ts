@@ -47,6 +47,7 @@ const uiTagByProject: Readonly<Record<string, string>> = {
   'publish-ui': 'publish-ui',
   'settings-ui': 'settings-ui',
   'billing-ui': 'billing-ui',
+  'chat-surfaces': 'chat-surfaces',
   'project-workspace': 'project-workspace',
   'agent-host-ui': 'agent-host-ui',
   consent: 'infra',

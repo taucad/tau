@@ -292,7 +292,7 @@ describe('validateTags() for the UI layering', () => {
         ],
       }),
     ).toEqual([
-      'fixture/unknown-ui-name: unknown tag "ui:chat" (ui: must be one of ui-core, ui-kit, chat-ui, files-ui, editor-ui, revisions-ui, publish-ui, settings-ui, billing-ui, project-workspace, agent-host-ui, infra, unlayered)',
+      'fixture/unknown-ui-name: unknown tag "ui:chat" (ui: must be one of ui-core, ui-kit, chat-ui, files-ui, editor-ui, revisions-ui, publish-ui, settings-ui, billing-ui, chat-surfaces, project-workspace, agent-host-ui, infra, unlayered)',
       'fixture/two-ui-names: expected exactly one ui: tag, found ui:infra, ui:ui-kit',
       'fixture/ui-app: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',
       'fixture/shared-app-lib: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',

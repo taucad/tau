@@ -4,7 +4,7 @@ import { Document } from '@tiptap/extension-document';
 import { Paragraph } from '@tiptap/extension-paragraph';
 import { Text } from '@tiptap/extension-text';
 import { HardBreak } from '@tiptap/extension-hard-break';
-import { ContextChipNode } from '@taucad/files-ui/components/chat/context-chip-node';
+import { ContextChipNode } from '@taucad/chat-surfaces/components/chat/context-chip-node';
 import { SubmitOnEnter } from '@taucad/chat-ui/components/tiptap/submit-on-enter';
 import {
   SlashCommand,

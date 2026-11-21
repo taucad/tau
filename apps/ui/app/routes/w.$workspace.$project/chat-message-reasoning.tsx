@@ -7,7 +7,7 @@ import { normalizeLatexDelimiters } from '@taucad/agent-host';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { ThoughtBubble } from '@taucad/ui-kit/icons/thought-bubble';
-import { MarkdownViewerChat } from '@taucad/editor-ui/components/markdown/markdown-viewer-chat';
+import { MarkdownViewerChat } from '@taucad/chat-surfaces/components/markdown/markdown-viewer-chat';
 
 type ChatMessageReasoningProperties = {
   readonly parts: readonly ReasoningUIPart[];

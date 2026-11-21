@@ -49,6 +49,7 @@ const workspaceRootInputs = (target: TargetConfiguration | undefined): string[] 
 const uiLibraries = [
   'ui-kit',
   'chat-ui',
+  'chat-surfaces',
   'project-workspace',
   'files-ui',
   'editor-ui',

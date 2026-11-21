@@ -8,8 +8,8 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { FileServicesProvider } from '#hooks/use-file-services.js';
-import type { FileServices } from '#hooks/use-file-services.js';
+import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import { ContextChipNode } from '#components/chat/context-chip-node.js';
 
 const existing = new Set(['src/parts/index.ts', 'src/assemblies/index.ts', 'models/bracket.scad']);

@@ -14,7 +14,7 @@ import {
 import type { AnswersFile, Ask, AskAnswers, QuestionReply } from '@taucad/chat';
 import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 
 /** The chat's questions and the person's answers, live from `.tau/chats/<chatId>/`. @public */
 export type ChatQuestions = {

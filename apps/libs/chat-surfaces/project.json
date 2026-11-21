@@ -1,0 +1,15 @@
+{
+  "name": "chat-surfaces",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/chat-surfaces",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:feature", "ui:chat-surfaces"],
+  "targets": {
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
+    }
+  }
+}

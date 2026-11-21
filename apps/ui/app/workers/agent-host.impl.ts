@@ -281,21 +281,65 @@ const openProjectBridges = async (ports: Pick<AgentHostProjectProvide, 'fileSyst
   return { fileSystem, projectRoot, durability };
 };
 
+const disposeBridge = (bridge: ProjectFileSystemBridge): void => {
+  bridge.dispose();
+};
+
 /**
  * One object whose far end `swap` replaces in place (RV1-F1): holders keep `view`, and each call reaches the current
- * target, read at call time.
+ * target, read at call time. A call keeps the target it started on, so `retire` finishes a replaced target only once
+ * its calls under way settle, and `close` finishes every target now.
+ *
+ * @param initial - The first target.
+ * @param finish - Releases a target: a bridge proxy's `dispose`, a revisions client's `close`.
+ * @returns The view holders keep, and the slot's swap, retire and close.
+ * @internal
  */
 // oxlint-disable-next-line typescript/no-restricted-types -- a Proxy target is any object; these are bridge proxies.
-const swappable = <Target extends object>(
+export const swappable = <Target extends object>(
   initial: Target,
-): Readonly<{ view: Target; swap: (next: Target) => Target }> => {
+  finish: (target: Target) => void,
+): Readonly<{ view: Target; swap: (next: Target) => Target; retire: (target: Target) => void; close: () => void }> => {
   let current = initial;
+  /* Calls each target has under way, and the replaced targets still waiting for theirs to settle. */
+  const pending = new Map<Target, number>();
+  const retiring = new Set<Target>();
+  const settled = (target: Target): void => {
+    const left = (pending.get(target) ?? 1) - 1;
+    if (left > 0) {
+      pending.set(target, left);
+      return;
+    }
+    pending.delete(target);
+    if (retiring.delete(target)) {
+      finish(target);
+    }
+  };
+  /* The caller's own promise, so it settles as the target's call did, after the target is counted settled. */
+  const underway = async (target: Target, call: Promise<unknown>): Promise<unknown> => {
+    try {
+      return await call;
+    } finally {
+      settled(target);
+    }
+  };
   const view = new Proxy(initial, {
     get: (_target, key) => {
       const value: unknown = Reflect.get(current, key);
       return typeof value === 'function'
-        ? (...args: unknown[]): unknown =>
-            Reflect.apply(Reflect.get(current, key) as (...parameters: unknown[]) => unknown, current, args)
+        ? (...args: unknown[]): unknown => {
+            const target = current;
+            const result: unknown = Reflect.apply(
+              Reflect.get(target, key) as (...parameters: unknown[]) => unknown,
+              target,
+              args,
+            );
+            if (result instanceof Promise) {
+              pending.set(target, (pending.get(target) ?? 0) + 1);
+              return underway(target, result);
+            }
+            return result;
+          }
         : value;
     },
   });
@@ -305,6 +349,21 @@ const swappable = <Target extends object>(
       const previous = current;
       current = next;
       return previous;
+    },
+    /* A call already under way finishes on the target it started on: a replaced target is finished once its calls
+     * settle, not under them (a turn's first read raced a recovery rebridge and was cut off `CHANNEL_CLOSED`). */
+    retire: (target) => {
+      if (pending.has(target)) {
+        retiring.add(target);
+      } else {
+        finish(target);
+      }
+    },
+    close: () => {
+      for (const target of [current, ...retiring]) {
+        finish(target);
+      }
+      retiring.clear();
     },
   };
 };
@@ -663,13 +722,13 @@ const composeProjectHost = async (
       : ({ mode: 'memory' } as const);
   const bridges = await openProjectBridges(provide);
   /* Every holder below keeps these views, so a rebridge reaches all of them (RV1-F1). */
-  const fileSystemSlot = swappable(bridges.fileSystem);
-  const projectRootSlot = swappable(bridges.projectRoot);
+  const fileSystemSlot = swappable(bridges.fileSystem, disposeBridge);
+  const projectRootSlot = swappable(bridges.projectRoot, disposeBridge);
   const fileSystem = fileSystemSlot.view;
   const projectRoot = projectRootSlot.view;
   opened(() => {
-    fileSystem.dispose();
-    projectRoot.dispose();
+    fileSystemSlot.close();
+    projectRootSlot.close();
   });
   const storageBackend = provide.projectStorage.backend;
   const durability = await resolveWorkerDurability(storageBackend, bridges.durability);
@@ -747,9 +806,13 @@ const composeProjectHost = async (
     return { createFileSystemBridgePort };
   });
   const revisionsSlot =
-    provide.revisionsPort === undefined ? undefined : swappable(createPortRevisionsClient(provide.revisionsPort));
+    provide.revisionsPort === undefined
+      ? undefined
+      : swappable(createPortRevisionsClient(provide.revisionsPort), (client) => {
+          client.close();
+        });
   const revisions = revisionsSlot?.view;
-  opened(() => revisions?.close());
+  opened(() => revisionsSlot?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(executorView),
     runtimeConfig,
@@ -1073,9 +1136,12 @@ const composeProjectHost = async (
         }
         throw error;
       }
-      const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
+      const replaced = [
+        [fileSystemSlot, fileSystemSlot.swap(next.fileSystem)],
+        [projectRootSlot, projectRootSlot.swap(next.projectRoot)],
+      ] as const;
       if (ports.revisionsPort !== undefined && revisionsSlot !== undefined) {
-        revisionsSlot.swap(createPortRevisionsClient(ports.revisionsPort)).close();
+        revisionsSlot.retire(revisionsSlot.swap(createPortRevisionsClient(ports.revisionsPort)));
       } else {
         ports.revisionsPort?.close();
       }
@@ -1092,8 +1158,8 @@ const composeProjectHost = async (
         actor.send({ type: 'close' });
       }
       parameterActors.clear();
-      for (const proxy of replaced) {
-        proxy.dispose();
+      for (const [slot, proxy] of replaced) {
+        slot.retire(proxy);
       }
     },
     drain: async (signal) => {
@@ -1155,12 +1221,12 @@ const composeProjectHost = async (
         failures.push(error);
       });
       imageService.dispose();
-      revisions?.close();
+      revisionsSlot?.close();
       placement.close();
       runtimeClient.terminate();
       computeConnection?.dispose();
-      fileSystem.dispose();
-      projectRoot.dispose();
+      fileSystemSlot.close();
+      projectRootSlot.close();
       if (failures.length > 0) {
         throw new AggregateError(failures, 'The project host could not release every resource.');
       }

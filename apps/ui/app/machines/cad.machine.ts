@@ -31,6 +31,8 @@ import type {
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import type { WorkerCodeLoadError } from '@taucad/ui-core/lib/worker-factory';
+import { workerReplacement, workerReplacementBound } from '#lib/worker-realm-recovery.js';
 export type LatestRenderingOutcome = 'success' | 'failure' | undefined;
 
 type CadTag = 'cad-loading' | 'cad-runtime-error';
@@ -86,6 +88,10 @@ export type CadContext = {
   heapWatch: Readonly<{ baseline: number; latest: number }> | undefined;
   /** Invalidates an asynchronous document opening superseded by newer actor intent. */
   openAttempt: number;
+  /** Runtime workers replaced since the last connect because their code failed to load (FP10); a local bound. */
+  workerReplacements: number;
+  /** Milliseconds before the next runtime worker starts, from the page's backoff (`workerReplacement`). */
+  workerReplacementDelay: number;
 };
 
 type KernelConnectedEvent = {
@@ -158,6 +164,8 @@ type CadEvent =
   | { type: 'resumeRuntime' }
   | { type: 'closeRuntime' }
   | { type: 'kernelAllocated'; client: AppRuntimeClient; cleanups: Array<() => void> }
+  /** The client's runtime worker could not load its code (its script, or an import inside it): FP10. */
+  | { type: 'kernelWorkerCodeLoadFailed'; client: AppRuntimeClient; failure: WorkerCodeLoadError }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
@@ -383,6 +391,13 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
      * the records Tau keeps are read-only (invariant CI1, W14). */
     fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'agent')),
     compute: computeConnection?.compute,
+    /* FP10: the worker's code failed to load. The transport sees only its channel close; the unit replaces the
+     * worker. The worker starts after `client` is assigned, so the failure always names it. */
+    onWorkerCodeLoadFailure: (failure) => {
+      if (client !== undefined) {
+        machineRef.send({ type: 'kernelWorkerCodeLoadFailed', client, failure });
+      }
+    },
   });
   client = createRuntimeClient(kernelOptions);
 
@@ -768,6 +783,36 @@ const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
 };
 
 /*
+ * FP10 (PL7 staging verification 2026-11-21, row 5): this unit's runtime worker could not load its code, its script
+ * or an import inside it, so the worker, a realm of its own, can never load it. The unit starts another worker within
+ * the page's bound and backoff (`workerReplacement`). Past them the page's own recovery has the failure (it reloads an
+ * untouched page into the live build), and the unit shows the load failure itself, for which the viewer offers
+ * Reload: never only the closed channel the transport saw. A failure from a worker the unit already let go is stale.
+ */
+const replaceFailedWorker = ({ context, event }: CadArgs<'kernelWorkerCodeLoadFailed'>, enq: CadEnqueue) => {
+  if (event.client !== context.kernelClient && event.client !== context.connectingClient) {
+    return {};
+  }
+  const released = destroyKernel(context, enq);
+  const replacement = workerReplacement(event.failure.worker);
+  if (replacement.replace && context.workerReplacements < workerReplacementBound) {
+    return {
+      target: '#cad.replacingWorker',
+      context: {
+        ...released,
+        workerReplacements: context.workerReplacements + 1,
+        workerReplacementDelay: replacement.replacementDelay,
+      },
+    };
+  }
+  const kernelIssues = new Map(context.kernelIssues);
+  kernelIssues.set('__connection__', [
+    { message: event.failure.message, code: 'RUNTIME', type: 'runtime', severity: 'error' },
+  ]);
+  return { target: '#cad.error', context: { ...released, kernelIssues, workerReplacements: 0 } };
+};
+
+/*
  * D-RT-03: WebAssembly memory never shrinks, so a runtime keeps the largest heap it ever reached. Recycle it through
  * the park and reconnect path once its heap has passed the device threshold and grown a quarter of that threshold past
  * its first render on this runtime: the first render is what the model itself needs, so a fresh runtime never
@@ -1053,6 +1098,9 @@ export const cadMachine = setup({
     tags: types<CadTag>(),
   },
   actors: cadActors,
+  delays: {
+    workerReplacementDelay: ({ context }) => context.workerReplacementDelay,
+  },
 }).createMachine({
   id: 'cad',
   context: ({ input }) => ({
@@ -1089,6 +1137,8 @@ export const cadMachine = setup({
     recycleHeapBytes: input.recycleHeapBytes,
     heapWatch: undefined,
     openAttempt: 0,
+    workerReplacements: 0,
+    workerReplacementDelay: 0,
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
@@ -1096,6 +1146,7 @@ export const cadMachine = setup({
     kernelAllocated: ({ event }) => ({
       context: { connectingClient: event.client, eventCleanups: event.cleanups },
     }),
+    kernelWorkerCodeLoadFailed: replaceFailedWorker,
     stateChanged: ({ event }) => (event.state === 'error' ? { target: '.error' } : {}),
     documentOpened: ({ context, event }, enq) => {
       if (event.requestId !== context.openAttempt || context.parkWhenIdle) {
@@ -1199,6 +1250,7 @@ export const cadMachine = setup({
     runtimeClosing: {
       on: {
         closeRuntime: {},
+        kernelWorkerCodeLoadFailed: {},
         filesystemBindingChanged: {},
         restoreParameters: {},
         stateChanged: {},
@@ -1258,6 +1310,7 @@ export const cadMachine = setup({
       },
       on: {
         closeRuntime: {},
+        kernelWorkerCodeLoadFailed: {},
         filesystemBindingChanged: {},
         restoreParameters: {},
         stateChanged: {},
@@ -1269,6 +1322,7 @@ export const cadMachine = setup({
     },
     runtimeCloseFailed: {
       on: {
+        kernelWorkerCodeLoadFailed: {},
         filesystemBindingChanged: {},
         restoreParameters: {},
         stateChanged: {},
@@ -1322,12 +1376,41 @@ export const cadMachine = setup({
           }
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: { kernelClient: event.client, connectingClient: undefined, eventCleanups: event.cleanups },
+            context: {
+              kernelClient: event.client,
+              connectingClient: undefined,
+              eventCleanups: event.cleanups,
+              workerReplacements: 0,
+            },
           };
         },
         initializeModel: renderRequest(),
         setEntryPath: renderRequest(),
         ...runtimeSignals,
+      },
+    },
+
+    /* FP10: the runtime worker's code failed to load; the next worker starts after the page's backoff. */
+    replacingWorker: {
+      tags: ['cad-loading'],
+      after: {
+        workerReplacementDelay: { target: 'connecting' },
+      },
+      on: {
+        parkRuntime: { target: 'parked', context: { parkWhenIdle: false } },
+        initializeModel: renderRequest(),
+        setEntryPath: renderRequest(),
+        commitParameters: renderRequest(),
+        setPreviewParameters: renderRequest(),
+        scrubParameters: renderRequest(),
+        restoreParameters: ({ context }) => ({
+          context: {
+            openAttempt: context.openAttempt + 1,
+            parameterRender: undefined,
+            latestRenderingOutcome: undefined,
+          },
+        }),
+        setCodeIssues: resultSignals.setCodeIssues,
       },
     },
 
@@ -1500,7 +1583,7 @@ export const selectCadLoadingPhase = (snapshot: CadSnapshot): 'buffering' | 'con
   if (!snapshot.hasTag('cad-loading')) {
     return undefined;
   }
-  if (snapshot.matches('connecting')) {
+  if (snapshot.matches('connecting') || snapshot.matches('replacingWorker')) {
     return 'connecting';
   }
   if (snapshot.context.parameterRender?.kind === 'scrub') {

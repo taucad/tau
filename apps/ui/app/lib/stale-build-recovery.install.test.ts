@@ -624,6 +624,72 @@ describe('installStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  /**
+   * A client navigation in flight, as React Router's own global holds it: the URL still names the page being left,
+   * and the router's pending navigation names the destination.
+   */
+  const stubPendingNavigation = (destination: string, formMethod?: string): void => {
+    const url = new URL(destination, 'https://tau.test');
+    vi.stubGlobal('__reactRouterDataRouter', {
+      state: {
+        navigation: {
+          state: 'loading',
+          location: { pathname: url.pathname, search: url.search, hash: url.hash },
+          ...(formMethod === undefined ? {} : { formMethod }),
+        },
+      },
+      createHref: (location: { pathname: string; search: string; hash: string }) =>
+        `${location.pathname}${location.search}${location.hash}`,
+    });
+  };
+
+  const stubReloadAndAssign = (): { reload: ReturnType<typeof vi.fn>; assign: ReturnType<typeof vi.fn> } => {
+    const reload = vi.fn();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, pathname: '/', search: '', hash: '', reload, assign });
+    return { reload, assign };
+  };
+
+  /* PL7 staging verification 2026-11-21, row 5 (`/convert`): a route module's dependency failed during a client
+   * navigation within the auto-reload window, and the page's reload of the current URL landed the user on Home. */
+  it.each([
+    ['on the build the server still runs', 'own'],
+    ['after a deploy replaced the build', 'deployed'],
+  ] as const)(
+    "should reload into a client navigation's destination when its code fails to load %s",
+    async (_case, server) => {
+      const { installStaleBuildRecovery } = await load();
+      stubServer(server === 'own' ? ownBuildId : deployedBuildId);
+      const { reload, assign } = stubReloadAndAssign();
+      stubPendingNavigation('/convert?from=home#viewer');
+      uninstall = installStaleBuildRecovery();
+
+      const event = new Event('vite:preloadError');
+      Object.assign(event, {
+        payload: new TypeError('Failed to fetch dynamically imported module: /assets/route-1.js'),
+      });
+      globalThis.dispatchEvent(event);
+      await settle();
+
+      expect(assign).toHaveBeenCalledExactlyOnceWith('/convert?from=home#viewer');
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should reload the page itself when no navigation is pending, or a submission is', async () => {
+    const { installStaleBuildRecovery } = await load();
+    stubServer(deployedBuildId);
+    const { reload, assign } = stubReloadAndAssign();
+    stubPendingNavigation('/convert', 'POST');
+    uninstall = installStaleBuildRecovery();
+
+    rejectWithStaleModule();
+    await settle();
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it('should leave any other SDK load failure alone', async () => {
     const { recoverFromSdkLoadFailure } = await load();
     const fetchMock = stubServer(deployedBuildId);

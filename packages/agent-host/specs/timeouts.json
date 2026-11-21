@@ -19,7 +19,8 @@
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
-    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
+    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
+    "apps/ui/app/machines/cad.machine.ts"
   ],
   "rows": [
     {
@@ -1386,6 +1387,14 @@
       "token": "replacement.replacementDelay",
       "class": "Backoff",
       "owner": "PL7 staging defects FP10"
+    },
+    {
+      "id": "UI-CAD-WORKER-REPLACEMENT-BACKOFF",
+      "bound": "Kernel runtime worker whose code failed to load: the CAD unit starts the next one at once, then after 1 s; at most 3 failures in 10 min, past which the page's own stale-build recovery decides and the viewer offers Reload",
+      "site": "apps/ui/app/machines/cad.machine.ts",
+      "token": "workerReplacementDelay",
+      "class": "Backoff",
+      "owner": "PL7 staging defects FP10 (staging verification 2026-11-21)"
     }
   ]
 }

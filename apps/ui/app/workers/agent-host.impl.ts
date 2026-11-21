@@ -215,6 +215,11 @@ const bridgeReadyBound = 15_000;
 /** How long a parameter actor may take to finish its last write when the host closes (D15). Milliseconds. */
 const parameterCloseBound = 10_000;
 /**
+ * How long a rebridge's replaced revisions client may wait on its requests before it is closed and they reject
+ * `PROJECT_HOST_CLOSED`: a bridge call's own default bound. Milliseconds.
+ */
+const revisionsRetireBound = 30_000;
+/**
  * Milliseconds the agent's runtime may sit with no tool call or open document
  * before its worker is terminated; the next tool call starts a fresh one. A
  * turn's tool calls land well inside it, so only the gaps between turns pay a
@@ -288,10 +293,12 @@ const disposeBridge = (bridge: ProjectFileSystemBridge): void => {
 /**
  * One object whose far end `swap` replaces in place (RV1-F1): holders keep `view`, and each call reaches the current
  * target, read at call time. A call keeps the target it started on, so `retire` finishes a replaced target only once
- * its calls under way settle, and `close` finishes every target now.
+ * its calls under way settle, or once `retireWithin` has passed when given, and `close` finishes every target now.
  *
  * @param initial - The first target.
  * @param finish - Releases a target: a bridge proxy's `dispose`, a revisions client's `close`.
+ * @param options - `retireWithin`: milliseconds a retired target's calls may take before it is finished anyway, for a
+ * target whose calls carry no bound of their own; its `finish` must then reject them.
  * @returns The view holders keep, and the slot's swap, retire and close.
  * @internal
  */
@@ -299,11 +306,21 @@ const disposeBridge = (bridge: ProjectFileSystemBridge): void => {
 export const swappable = <Target extends object>(
   initial: Target,
   finish: (target: Target) => void,
+  options?: Readonly<{ retireWithin?: number }>,
 ): Readonly<{ view: Target; swap: (next: Target) => Target; retire: (target: Target) => void; close: () => void }> => {
   let current = initial;
-  /* Calls each target has under way, and the replaced targets still waiting for theirs to settle. */
+  /* Calls each target has under way, and the replaced targets still waiting for theirs to settle, each with the
+   * expiry that finishes it anyway when `retireWithin` is given. */
   const pending = new Map<Target, number>();
-  const retiring = new Set<Target>();
+  const retiring = new Map<Target, ReturnType<typeof setTimeout> | undefined>();
+  const finishRetired = (target: Target): void => {
+    if (!retiring.has(target)) {
+      return;
+    }
+    clearTimeout(retiring.get(target));
+    retiring.delete(target);
+    finish(target);
+  };
   const settled = (target: Target): void => {
     const left = (pending.get(target) ?? 1) - 1;
     if (left > 0) {
@@ -311,9 +328,7 @@ export const swappable = <Target extends object>(
       return;
     }
     pending.delete(target);
-    if (retiring.delete(target)) {
-      finish(target);
-    }
+    finishRetired(target);
   };
   /* The caller's own promise, so it settles as the target's call did, after the target is counted settled. */
   const underway = async (target: Target, call: Promise<unknown>): Promise<unknown> => {
@@ -353,17 +368,31 @@ export const swappable = <Target extends object>(
     /* A call already under way finishes on the target it started on: a replaced target is finished once its calls
      * settle, not under them (a turn's first read raced a recovery rebridge and was cut off `CHANNEL_CLOSED`). */
     retire: (target) => {
-      if (pending.has(target)) {
-        retiring.add(target);
-      } else {
+      if (!pending.has(target)) {
         finish(target);
+        return;
       }
+      /* A peer that never answers would hold the target, its port and its callers forever: past the bound the
+       * target's own `finish` rejects the calls still waiting (#2748 review). */
+      const retireWithin = options?.retireWithin;
+      retiring.set(
+        target,
+        retireWithin === undefined
+          ? undefined
+          : setTimeout(() => {
+              finishRetired(target);
+            }, retireWithin),
+      );
     },
     close: () => {
-      for (const target of [current, ...retiring]) {
-        finish(target);
+      const retired = [...retiring.keys()];
+      for (const retireExpiry of retiring.values()) {
+        clearTimeout(retireExpiry);
       }
       retiring.clear();
+      for (const target of [current, ...retired]) {
+        finish(target);
+      }
     },
   };
 };
@@ -808,9 +837,14 @@ const composeProjectHost = async (
   const revisionsSlot =
     provide.revisionsPort === undefined
       ? undefined
-      : swappable(createPortRevisionsClient(provide.revisionsPort), (client) => {
-          client.close();
-        });
+      : swappable(
+          createPortRevisionsClient(provide.revisionsPort),
+          (client) => {
+            client.close();
+          },
+          /* A revision request has no timeout of its own, unlike a bridge call: a peer gone quiet is bounded here. */
+          { retireWithin: revisionsRetireBound },
+        );
   const revisions = revisionsSlot?.view;
   opened(() => revisionsSlot?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({

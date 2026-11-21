@@ -832,6 +832,15 @@
       "owner": "W6"
     },
     {
+      "id": "REVISIONS-RETIRE-BOUND",
+      "bound": "A rebridge's replaced revisions client waits at most 30 s (revisionsRetireBound) for its requests under way, then its close rejects them PROJECT_HOST_CLOSED; a revision-port request has no timeout of its own (#2748 review)",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "}, retireWithin)",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "outside this charter: the revisions-ui owner (revision-port requests that reject when the revision root's port dies, so a retired client settles on the root's answer or its death)"
+    },
+    {
       "id": "D16",
       "bound": "A parameter actor's last write when its desktop, daemon or tau mcp host closes (10 s)",
       "site": "packages/host/src/parameter-actors.ts",

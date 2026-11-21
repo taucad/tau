@@ -14,9 +14,10 @@ import type {
 } from '@taucad/chat/rpc';
 import { rpcClientErrorCode } from '@taucad/chat';
 import { getErrno } from '@taucad/utils/error';
-import { resolveRootedPath } from '@taucad/utils/path';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { LargeObjectsFacet } from '@taucad/revisions';
+import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
+import type { KernelClosure } from '@taucad/ui-core/lib/kernel-closure';
 
 /* A pointer is at most this many bytes (`@taucad/revisions` lfs.ts), and starts with its spec line. */
 const maximumPointerBytes = 1024;
@@ -168,45 +169,6 @@ type KernelClients = Readonly<{
   images?: RpcImageClient | undefined;
   geospec?: RpcGeoSpecClient | undefined;
 }>;
-
-/*
- * A caller's path as the facet names it, checkout-relative: an agent's `targetFile` may carry a leading `/` or `./`,
- * repaired as the project-path tool inputs are. A path that cannot be made rooted stays as it was, and matches nothing.
- */
-const checkoutPathOf = (path: string): string => {
-  try {
-    return resolveRootedPath(path.startsWith('/') && !path.startsWith('//') ? path.slice(1) : path);
-  } catch {
-    return path;
-  }
-};
-
-/** What a kernel run reads before anything else: named paths, or the whole workspace. */
-export type KernelClosure = readonly string[] | 'workspace';
-
-/**
- * The closure of a kernel run over one entry (T6): `tau.json` and the entry, whichever kernel runs it. Any other
- * pending path the kernel opens is read through to its object and waits for it (D9), and a kernel that mirrors the
- * whole workspace lists a pending path at its object's size (`@taucad/filesystem` pending stats), so a mirror needs
- * no wider closure.
- *
- * @param entryPath - The entry the kernel runs; empty while the project names none.
- * @returns The closure.
- */
-export const kernelClosure = (entryPath: string): readonly string[] => {
-  const path = checkoutPathOf(entryPath);
-  return path === '' ? ['tau.json'] : ['tau.json', path];
-};
-
-/**
- * Whether a closure still holds a pending large object.
- *
- * @param closure - See {@link kernelClosure}.
- * @param pendingPaths - The facet's pending paths.
- * @returns `true` while a path the run reads holds its pointer.
- */
-export const closureHasPending = (closure: KernelClosure, pendingPaths: readonly string[]): boolean =>
-  closure === 'workspace' ? pendingPaths.length > 0 : closure.some((path) => pendingPaths.includes(path));
 
 /* The facet a run over this closure waits on: a failed fill always, so its reason and retry reach the caller. */
 const blockingFacet = (facet: LargeObjectsFacet | undefined, closure: KernelClosure): LargeObjectsFacet | undefined =>

@@ -1982,7 +1982,8 @@
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/billing-ui/src/**/*.{ts,tsx}",
-        "apps/libs/ui-core/src/**/*.{ts,tsx}"
+        "apps/libs/ui-core/src/**/*.{ts,tsx}",
+        "apps/libs/agent-host-ui/src/**/*.{ts,tsx}"
       ],
       "rules": {
         "tau-lint/no-engineering-vocabulary-in-copy": "error"
@@ -2001,7 +2002,8 @@
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/billing-ui/src/**/*.{ts,tsx}",
-        "apps/libs/ui-core/src/**/*.{ts,tsx}"
+        "apps/libs/ui-core/src/**/*.{ts,tsx}",
+        "apps/libs/agent-host-ui/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}", "**/*.test-harness.{ts,tsx}", "**/*.stories.{ts,tsx}"],
       "rules": {
@@ -2021,6 +2023,7 @@
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/billing-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
+        "apps/libs/agent-host-ui/src/**/*.{ts,tsx}",
         "packages/ui/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}"],
@@ -2200,6 +2203,7 @@
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
+        "apps/libs/agent-host-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-kit/src/**/*.{ts,tsx}"
       ],
       "rules": {

@@ -50,6 +50,7 @@ const uiTagByProject: Readonly<Record<string, string>> = {
   'settings-ui': 'settings-ui',
   'billing-ui': 'billing-ui',
   'project-workspace': 'project-workspace',
+  'agent-host-ui': 'agent-host-ui',
   consent: 'infra',
   'csharp-language': 'infra',
   'fs-client': 'infra',
@@ -83,13 +84,7 @@ const foundationTargets = new Set([
 ]);
 
 /** L0's agent-protocol edges (the files behind them are `uiFoundationProtocolDebtFiles`). */
-const foundationProtocolDebt: readonly DebtEdge[] = [
-  { source: 'ui-core', target: 'agent-host', work: 'W3' },
-  { source: 'ui-core', target: 'agent-observability', work: 'W3' },
-  { source: 'ui-core', target: 'agent-tools', work: 'W3' },
-  { source: 'ui-core', target: 'chat', work: 'W3' },
-  { source: 'ui-core', target: 'skills', work: 'W3' },
-];
+const foundationProtocolDebt: readonly DebtEdge[] = [{ source: 'ui-core', target: 'agent-host', work: 'W2' }];
 
 /** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [

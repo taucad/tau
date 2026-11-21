@@ -43,7 +43,7 @@ import type {
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import { createPortRevisionsClient } from '@taucad/agent-host-ui/workers/agent-host-revisions';
 import { mayCreateChat } from '#runtime/project-runtime.helpers.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 

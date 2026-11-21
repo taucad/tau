@@ -64,6 +64,7 @@ export const projectTagVocabulary = {
     'settings-ui',
     'billing-ui',
     'project-workspace',
+    'agent-host-ui',
     'infra',
     'unlayered',
   ],

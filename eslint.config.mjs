@@ -294,7 +294,7 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
  * `ui:<name>`), from docs/research/ui-app-lib-layering-blueprint.md. Four layers, the app above all of them:
  * L0 foundation (`ui-core`, `ui-kit`), L1 features (the `*-ui` libraries), L2 composition
  * (`project-workspace`; `chat-surfaces` and `project-library` join it in W4 and W5) and L3 agent-host adapters
- * (`agent-host-ui`, W3). `layer:` tags leave the libraries of one layer unordered, so, as with the API
+ * (`agent-host-ui`). `layer:` tags leave the libraries of one layer unordered, so, as with the API
  * libraries, each names the UI app libraries it may depend on. Every library may also depend on `ui:infra` (the
  * file-system client, the language servers and the consent banner) and on `scope:shared` projects and packages.
  * The two sideways L1 edges are declared: the revisions conflict editor is the editor, and settings is the
@@ -317,6 +317,8 @@ export const uiLibraryDependencies = {
    */
   'billing-ui': ['settings-ui', 'ui-core', 'ui-kit'],
   'project-workspace': ['ui-core', 'ui-kit'],
+  // L3 sits beside L2: an adapter implements an agent port over L0 and L1, never over a composed surface.
+  'agent-host-ui': ['revisions-ui', 'ui-core'],
   infra: ['infra', 'ui-core'],
 };
 
@@ -363,15 +365,7 @@ const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
  */
 export const uiFoundationProtocolDebtFiles = [
   { file: 'apps/libs/ui-core/src/lib/external-agent.ts', work: 'W2' },
-  { file: 'apps/libs/ui-core/src/lib/large-object-guard.test.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/lib/large-object-guard.ts', work: 'W3' },
   { file: 'apps/libs/ui-core/src/utils/run-auto-resume.ts', work: 'W2' },
-  { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.test.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/workers/agent-host-evidence.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/workers/agent-host-placement.test.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/workers/agent-host-placement.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.test.ts', work: 'W3' },
-  { file: 'apps/libs/ui-core/src/workers/system-skills-overlay.ts', work: 'W3' },
 ];
 
 /**

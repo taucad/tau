@@ -9,8 +9,8 @@ import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
-import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
-import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
+import type { KernelClosure } from '@taucad/ui-core/lib/kernel-closure';
 import { useReconciledManifest } from '#lib/manifest-reconciliation.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */

@@ -34,7 +34,7 @@ import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
+import type { ProjectRouteAccess } from '@taucad/project-library/runtime/project-library';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 

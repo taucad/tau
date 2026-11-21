@@ -97,7 +97,7 @@ vi.mock('#runtime/file-manager-facade.js', async (importOriginal) => {
 });
 
 /* A read owner that admits every read at once: no observation runs while the file managers are idle. */
-vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOriginal) => ({
+vi.mock('@taucad/project-library/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: unknown) => ({
     connect: () => () => undefined,

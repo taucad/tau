@@ -1,12 +1,12 @@
 import { convertLegacyProjectManifestBytes } from '@taucad/types';
 import type { StorageProvider } from '#types/storage.types.js';
-import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
+import type { AppUiPreferences } from '@taucad/project-library/types/project-library-io.types';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type {
   PendingPermanentDeleteProjectOperation,
   PendingProjectOperation,
-} from '@taucad/files-ui/types/pending-project-operation.types';
-import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
+} from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 import { announceCandidateConsent, withCandidateConsentLock } from '@taucad/ui-core/lib/geospec-candidate-consent';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';

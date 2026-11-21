@@ -1,7 +1,7 @@
 /**
- * The app's binding of the project library service (`@taucad/files-ui/runtime/project-library`).
+ * The app's binding of the project library service (`@taucad/project-library/runtime/project-library`).
  *
- * The service and its commands live in files-ui; what only the app can supply is bound here: the object-store worker
+ * The service and its commands live in project-library; what only the app can supply is bound here: the object-store worker
  * (`new URL(…, import.meta.url)`), the runtime fault and worker-failure reporters, the build-skew write stop, the chat
  * file store, the legacy listing, the project templates and kernel lock files (`?raw`), the initial user message, Tau
  * Cloud's backup intent and the chat projection's catch-up. Each service reads its module when it is called, so a
@@ -9,11 +9,11 @@
  */
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
-import { ProjectLibrary as ProjectLibraryService } from '@taucad/files-ui/runtime/project-library';
+import { ProjectLibrary as ProjectLibraryService } from '@taucad/project-library/runtime/project-library';
 import type {
   ProjectLibraryOptions as ProjectLibraryServiceOptions,
   ProjectLibraryServices,
-} from '@taucad/files-ui/runtime/project-library';
+} from '@taucad/project-library/runtime/project-library';
 import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';

@@ -39,24 +39,27 @@ import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { projectManagerMachine } from '#machines/project-manager.machine.js';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
+import {
+  selectWorkspaceConnectionState,
+  workspaceConnectionMachine,
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
-} from '#machines/workspace-connection.machine.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+} from '@taucad/files-ui/machines/workspace-connection.machine';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
   createNodeWorkspace,
   createWorkspace,
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { isWorkspaceOverlapError } from '@taucad/ui-core/filesystem/workspace-errors';
-import type { Workspace } from '#filesystem/handle-store.js';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { createLibraryDiscovery, selectEpochCurrent } from '#machines/library-discovery.machine.js';
 import type { LibraryDiscoveryActor } from '#machines/library-discovery.machine.js';
 import { createLibraryRecovery } from '#machines/library-recovery.machine.js';
@@ -97,7 +100,7 @@ import type {
 } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
 import type { StartedObjectStore } from '#machines/project-manager.machine.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /**
  * What the library takes from the app, beside its commands' services: the object-store worker's start, the runtime

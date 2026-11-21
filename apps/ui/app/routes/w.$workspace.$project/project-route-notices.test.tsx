@@ -7,7 +7,7 @@ import type { Project } from '@taucad/types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
-import type { PendingProjectRecoveryReason } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { PendingProjectRecoveryReason } from '@taucad/project-library/types/pending-project-operation.types';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';

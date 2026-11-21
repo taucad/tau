@@ -48,7 +48,7 @@ import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 import type { LiveProjectSessions } from '#services/chat-session-store.js';
-import { selectLibraryRevision } from '@taucad/files-ui/runtime/project-library';
+import { selectLibraryRevision } from '@taucad/project-library/runtime/project-library';
 import { ProjectLibrary } from '#runtime/project-library.js';
 import { createRootFileFacade } from '#runtime/file-manager-facade.js';
 import type { RootFileFacade } from '#runtime/file-manager-facade.js';

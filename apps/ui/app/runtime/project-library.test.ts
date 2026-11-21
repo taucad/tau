@@ -1,6 +1,6 @@
 /**
- * The app's binding of the project library (`@taucad/files-ui/runtime/project-library`): the rows that need the app's
- * runtime, worker, chat store and device storage. The service's own rows are files-ui's suites.
+ * The app's binding of the project library (`@taucad/project-library/runtime/project-library`): the rows that need the app's
+ * runtime, worker, chat store and device storage. The service's own rows are project-library's suites.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
@@ -9,7 +9,7 @@ import { flush } from '@taucad/xstate-testing/clock';
 import { ProjectLibrary } from '#runtime/project-library.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import { mock } from 'vitest-mock-extended';
-import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 
 const worker = vi.hoisted(() => ({
@@ -27,7 +27,7 @@ vi.mock('#db/chat-file-storage.js', () => ({
 }));
 
 /* A read owner that admits every read at once: no observation runs in these rows. */
-vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOriginal) => ({
+vi.mock('@taucad/project-library/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: ChatStorage) => ({
     connect: () => () => undefined,

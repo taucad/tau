@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouterModule from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CreatedProject, CreateProjectOptions } from '@taucad/files-ui/runtime/project-library-commands';
+import type { CreatedProject, CreateProjectOptions } from '@taucad/project-library/runtime/project-library-commands';
 import { ForkAction, remixProjectName } from '#components/share/fork-action.js';
 import { toast } from '@taucad/ui/components/sonner';
 

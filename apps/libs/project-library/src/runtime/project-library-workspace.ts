@@ -9,30 +9,33 @@
 import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { selectWorkspaceConnectionState } from '#machines/workspace-connection.machine.js';
-import type { PreparedWorkspaceCatalog, workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
+import { selectWorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
+import type {
+  PreparedWorkspaceCatalog,
+  workspaceConnectionMachine,
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import { WorkspaceRecoveryPendingError } from '@taucad/ui-core/filesystem/workspace-errors';
-import { directoryPicker } from '#constants/browser.constants.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   getWorkspaceMetadata,
   requestHandlePermission,
   repairWorkspaceBindings as repairStoredWorkspaceBindings,
   setProjectFileSystemConfig,
-} from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
 import type {
   FolderEvidence,
   FolderProject,
   RelinkTarget,
   Workspace,
   WorkspaceBindingRepairResult,
-} from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
 import type { ScopedStorageClient } from '@taucad/fs-client/file-system-client';
 import { parseWorkspaceMarker, workspaceMarkerPath } from '@taucad/types';
 import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryFileManager } from '#types/project-library-io.types.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { Actor, SnapshotFrom } from 'xstate';
 
 /** A connected workspace folder: the row, how many projects it holds, and whether this connection minted it. @public */

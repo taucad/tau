@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Chat } from '@taucad/chat';
-import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import { QueryClient } from '@tanstack/react-query';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { ensureFocusedChatForProject, isKnownChatId, mayCreateChat } from '#runtime/project-runtime.helpers.js';

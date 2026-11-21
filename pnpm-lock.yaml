@@ -4019,33 +4019,18 @@ importers:
 
   apps/libs/files-ui:
     dependencies:
-      '@tanstack/react-query':
-        specifier: 'catalog:'
-        version: 5.104.2(react@19.3.1)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
-      '@taucad/chat':
-        specifier: workspace:*
-        version: link:../../../libs/chat
-      '@taucad/chat-ui':
-        specifier: workspace:*
-        version: link:../chat-ui
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem
-      '@taucad/fs-bridge':
-        specifier: workspace:*
-        version: link:../../../libs/fs-bridge
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
-      '@taucad/revisions':
-        specifier: workspace:*
-        version: link:../../../packages/revisions
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../../packages/plugins/slicer
@@ -4070,9 +4055,6 @@ importers:
       '@xstate/react':
         specifier: 7.0.0-alpha.3
         version: 7.0.0-alpha.3(@types/react@19.2.17)(react@19.3.1)(xstate@6.0.0-alpha.59)
-      deepmerge:
-        specifier: 'catalog:'
-        version: 4.3.1
       es-cookie:
         specifier: ^1.5.0
         version: 1.5.0
@@ -4082,12 +4064,6 @@ importers:
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      type-fest:
-        specifier: 'catalog:'
-        version: 4.41.0
-      uint8array-extras:
-        specifier: 'catalog:'
-        version: 1.6.0
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4278,6 +4254,85 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  apps/libs/project-library:
+    dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.104.2(react@19.3.1)
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../../packages/agent-host
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../../../libs/chat
+      '@taucad/chat-ui':
+        specifier: workspace:*
+        version: link:../chat-ui
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
+      '@taucad/files-ui':
+        specifier: workspace:*
+        version: link:../files-ui
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
+      '@taucad/fs-bridge':
+        specifier: workspace:*
+        version: link:../../../libs/fs-bridge
+      '@taucad/fs-client':
+        specifier: workspace:*
+        version: link:../fs-client
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
+      deepmerge:
+        specifier: 'catalog:'
+        version: 4.3.1
+      type-fest:
+        specifier: 'catalog:'
+        version: 4.41.0
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../../packages/runtime
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../../libs/xstate-testing
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -5121,6 +5176,9 @@ importers:
       '@taucad/preferences':
         specifier: workspace:*
         version: link:../libs/preferences
+      '@taucad/project-library':
+        specifier: workspace:*
+        version: link:../libs/project-library
       '@taucad/project-workspace':
         specifier: workspace:*
         version: link:../libs/project-workspace

@@ -1,11 +1,11 @@
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
-import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
+import type { AppUiPreferences } from '@taucad/project-library/types/project-library-io.types';
 
 /**
  * Persistent storage contract for project-local library state and editor state.
  *
- * Chats are *not* here: a chat is files in its project (`ChatStorage` in `@taucad/files-ui/types/chat-storage.types`).
+ * Chats are *not* here: a chat is files in its project (`ChatStorage` in `@taucad/project-library/types/chat-storage.types`).
  *
  * Implementors MUST honour the atomic read-modify-write rules captured in
  * `docs/policy/storage-policy.md`: a mutation performs `get → merge → put`

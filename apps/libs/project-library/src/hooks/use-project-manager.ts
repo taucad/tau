@@ -16,8 +16,12 @@ import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { projectManagerMachine } from '#machines/project-manager.machine.js';
-import type { WorkspaceConnectionState } from '#machines/workspace-connection.machine.js';
-import type { FolderEvidence, RelinkTarget, WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
+import type {
+  FolderEvidence,
+  RelinkTarget,
+  WorkspaceBindingRepairResult,
+} from '@taucad/files-ui/filesystem/handle-store';
 import type { CommitCancelledDraftRestoreInput } from '#types/chat-storage.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';

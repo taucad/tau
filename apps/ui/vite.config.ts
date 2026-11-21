@@ -25,6 +25,7 @@ import {
   uiBuildDirectoryVariable,
   serviceWorkerKillSwitchVariable,
   unstampedBuildRelease,
+  unstampedRetainedBuildFloor,
 } from './build-environment.js';
 import type { TauDeploymentCeiling } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
@@ -613,7 +614,12 @@ export default defineConfig(({ command, mode }) => {
    * the placeholder and publishes `/tau-release.json`, the only place the API learns UI releases from, with
    * `scripts/stamp-build-release.mts`.
    */
-  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(unstampedBuildRelease) };
+  const serverDefine = {
+    ...buildIdDefine,
+    tauBuildRelease: JSON.stringify(unstampedBuildRelease),
+    // The oldest build whose assets the deploy serves, stamped by `scripts/retain-previous-assets.mts` (FP2).
+    tauRetainedBuildFloor: JSON.stringify(unstampedRetainedBuildFloor),
+  };
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';

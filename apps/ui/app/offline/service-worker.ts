@@ -17,7 +17,7 @@
  * | Request | Answer |
  * | --- | --- |
  * | A navigation a class answers (`service-worker-routing.ts`), the class wholly stored | Its precached document, cache-first (shells) or network-first within 3 s (`/usage`) |
- * | The same, on a reload or while a newer worker installs or waits | Network-first within 3 s, the precached document as the fallback |
+ * | The same, on a reload, while a newer worker installs or waits, or while this worker's build is below the last `minBuildId` a page handed it (FP2) | Network-first within 3 s, the precached document as the fallback |
  * | Any other GET navigation, or a class not wholly stored | The browser's own navigation: the navigation preload response |
  * | A safe-mode navigation (`?safe=1`) | None: the browser handles it (FP5) |
  * | A file the worker holds (precache, or cached on first use) | The cache |
@@ -43,17 +43,21 @@ import {
   installMessage,
   isCachedOnFirstUse,
   isSafeModeNavigation,
+  isShellInBounds,
   navigationCandidate,
   navigationNetworkTimeout,
+  readBuildFloorMessage,
 } from '#offline/service-worker-routing.js';
 import {
   completeDocuments,
   fillFromHttpCache,
   installPrecache,
+  readStoredBuildFloor,
+  createBuildFloorWriter,
   readStoredUrls,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import { assetCacheName, cachePrefix, precacheNamePart } from '#offline/pwa-messages.js';
+import { assetCacheName, cachePrefix, precacheNamePart, stateCacheName } from '#offline/pwa-messages.js';
 import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/pwa-caches.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
@@ -83,7 +87,7 @@ type WorkerScope = {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   addEventListener(type: 'install' | 'activate', listener: (event: LifecycleEvent) => void): void;
   addEventListener(type: 'fetch', listener: (event: FetchEventLike) => void): void;
-  addEventListener(type: 'message', listener: (event: { readonly data: unknown }) => void): void;
+  addEventListener(type: 'message', listener: (event: { readonly data: unknown } & LifecycleEvent) => void): void;
 };
 /** The globals the build writes into the worker (`scripts/build-service-worker.ts`'s injection points). */
 type InjectedGlobal = {
@@ -187,6 +191,38 @@ const replacesPreFixWorker = async (): Promise<boolean> => {
   return names.some((name) => isPreFixWorkerCache(name));
 };
 
+/**
+ * The last build floor (`minBuildId`) a page handed this worker from its own `/health/build` check (FP2), kept in the
+ * state cache so a worker started later knows it without the network. `undefined` while the server reported none. The
+ * worker asks no server for it: the page's check is the one request, and the worker never sends one in its stead.
+ */
+let buildFloor: number | undefined;
+/** Whether a page handed this worker a floor since it started: then the stored one is older. */
+let floorHandedOn = false;
+/** The stored floor, read once per worker start by the first navigation; every later one awaits the same read. */
+let floorRead: Promise<undefined | void> | undefined;
+const readFloorOnce = async (): Promise<undefined | void> => {
+  floorRead ??= settle(
+    (async () => {
+      const stored = await readStoredBuildFloor(scope.caches, stateCacheName);
+      if (!floorHandedOn) {
+        buildFloor = stored;
+      }
+    })(),
+  );
+  return floorRead;
+};
+
+/** Writes the floors in the order pages handed them on; a worker whose caches were deleted under it writes none (FP5). */
+const writeBuildFloor = createBuildFloorWriter(scope.caches, stateCacheName, () => !storageCleared);
+
+/** Keep the floor a page handed on: at once in memory, and stored after every earlier one. */
+const keepBuildFloor = async (floor: number | undefined): Promise<void> => {
+  floorHandedOn = true;
+  buildFloor = floor;
+  await writeBuildFloor(floor);
+};
+
 scope.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -249,6 +285,11 @@ scope.addEventListener('message', (event) => {
   if (activatesWorker(event.data, workerBuildId)) {
     // async-iife: bootstrap -- a message listener cannot await; activation proceeds on its own.
     void scope.skipWaiting();
+    return;
+  }
+  const floor = readBuildFloorMessage(event.data);
+  if (floor !== undefined) {
+    event.waitUntil(settle(keepBuildFloor(floor.minBuildId)));
   }
 });
 
@@ -320,11 +361,13 @@ const answerNavigationEvent = async (event: FetchEventLike): Promise<Response> =
   if (candidate === undefined) {
     return readNavigation(event);
   }
+  await readFloorOnce();
   const answer = answerNavigation({
     candidate,
     request,
     tauEntry: candidate.workerClass.routeClass.id === 'home' ? await readTauEntry() : undefined,
     updatePending: scope.registration.installing !== null || scope.registration.waiting !== null,
+    shellInBounds: isShellInBounds({ buildId: workerBuildId, floor: buildFloor }),
   });
   if (answer.kind === 'network') {
     return readNavigation(event);

@@ -29,6 +29,11 @@
  * whose successor can never install is not held by its current worker. A page that finds no registration deletes the
  * worker caches nothing owns (`deleteOrphanWorkerCaches`) before it registers.
  *
+ * **Build floor (FP2).** Each `minBuildId` the page's own `/health/build` check (`build-skew.ts`, at the moments
+ * `stale-build-navigation.ts` asks) finds is handed to the active worker (`buildFloorMessageType`), once per change: the
+ * worker keeps the last one and serves the cached shells of a build below it only offline. The worker asks no server
+ * itself: FP1's rule is that it never sends a request in the page's stead, and the page already asks.
+ *
  * One exception: a waiting worker that would replace the retired `/usage` worker (`/offline-shell-worker.js`, which
  * ui@0.3.0 and earlier registered at the same scope) activates at once, whatever the verdict. That worker serves no
  * deploy the page could be on, and once this page registers `/service-worker.js` the browser checks only the new
@@ -36,8 +41,10 @@
  * the old worker would keep its pages and its caches for as long as a tab stays open.
  */
 import type { ServerVerdict } from '#filesystem/build-skew.js';
+import type { ReportedBuildFloor } from '#lib/build-identity.js';
 import {
   activateIfBuildMessageType,
+  buildFloorMessageType,
   retiredServiceWorkerUrl,
   serviceWorkerMessageType,
   skipWaitingMessageType,
@@ -150,10 +157,18 @@ export type VerdictSource = Readonly<{
   queryLiveBuild: () => Promise<void>;
 }>;
 
+/** The floor the page's build check reported, as `build-identity.ts` exports it; handed in like the verdict. */
+export type BuildFloorSource = Readonly<{
+  readReportedBuildFloor: () => ReportedBuildFloor | undefined;
+  subscribeReportedBuildFloor: (listener: () => void) => () => void;
+}>;
+
 export const startServiceWorker = (
   options: Readonly<{
     inWorkspace: boolean;
     verdict: VerdictSource;
+    /** Where the page's build check reports the server's build floor; without it no floor is handed on (FP2). */
+    buildFloor?: BuildFloorSource;
     onInstallStatus: (status: ServiceWorkerInstallStatus) => void;
     /** This page's build id (`readBuildId`), or `0` when unknown: a worker waiting on that build is activated at once. */
     buildId?: number;
@@ -170,6 +185,22 @@ export const startServiceWorker = (
   const buildId = options.buildId ?? 0;
   /** Waiting workers already asked to activate if they are of this page's build. */
   const offered = new WeakSet<ServiceWorker>();
+  /** The last floor handed on, and the worker it went to. */
+  let handedOn: Readonly<{ worker: ServiceWorker; floor: ReportedBuildFloor }> | undefined;
+
+  /** Hand the active worker the floor the page's build check last found, once per floor and worker. */
+  const handOnBuildFloor = (): void => {
+    const floor = options.buildFloor?.readReportedBuildFloor();
+    const active = registration?.active;
+    if (stopped || floor === undefined || active === null || active === undefined) {
+      return;
+    }
+    if (handedOn?.worker === active && handedOn.floor === floor) {
+      return;
+    }
+    handedOn = { worker: active, floor };
+    active.postMessage({ type: buildFloorMessageType, minBuildId: floor === 'none' ? undefined : floor });
+  };
 
   const applyRule = (): void => {
     if (registration === undefined || stopped) {
@@ -205,6 +236,8 @@ export const startServiceWorker = (
       // async-iife: bootstrap -- the answer arrives through `subscribeServerVerdict`.
       void queryLiveBuild();
     }
+    // A worker that became active since (an activation) gets the floor too.
+    handOnBuildFloor();
   };
 
   /** The fleet rule's retirement: unregister, then delete every worker cache. */
@@ -252,6 +285,7 @@ export const startServiceWorker = (
   };
   container.addEventListener('message', onMessage);
   const unsubscribeVerdict = subscribeServerVerdict(applyRule);
+  const unsubscribeFloor = options.buildFloor?.subscribeReportedBuildFloor(handOnBuildFloor);
 
   const attach = async (): Promise<void> => {
     try {
@@ -278,6 +312,7 @@ export const startServiceWorker = (
   return () => {
     stopped = true;
     unsubscribeVerdict();
+    unsubscribeFloor?.();
     container.removeEventListener('message', onMessage);
   };
 };

@@ -92,7 +92,7 @@ const stallReport =
  * Reload's cleanup. A literal, not an import: the desktop build carries this module and must carry no web worker
  * surface (`check-desktop-payload.mts`). `boot-watchdog.test.ts` holds it to `isWorkerCache`. @public
  */
-export const bootWorkerCachePattern = String.raw`^tau-(?:precache-|runtime-|offline-shell-|assets(?:-v\d+)?$)`;
+export const bootWorkerCachePattern = String.raw`^tau-(?:precache-|runtime-|offline-shell-|assets(?:-v\d+)?$|state-v\d+$)`;
 
 /** Longest wait for Reload's worker cleanup before reloading anyway. Milliseconds. @public */
 export const bootReloadCleanupLimit = 3000;

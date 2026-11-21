@@ -21,6 +21,7 @@ import { useLocation } from 'react-router';
 import { Topic } from '@taucad/events';
 import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { readReportedBuildFloor, subscribeReportedBuildFloor } from '#lib/build-identity.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
 import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
 
@@ -181,6 +182,7 @@ export function useServiceWorker(): void {
             stop = startServiceWorker({
               inWorkspace,
               verdict: { readServerVerdict, subscribeServerVerdict, queryLiveBuild },
+              buildFloor: { readReportedBuildFloor, subscribeReportedBuildFloor },
               onInstallStatus: setInstallStatus,
               buildId,
             });

@@ -33,7 +33,7 @@ export const tauInlineScriptHashes = {
   /** The new-project page's name-field focus script (`focusProjectNameScript`). */
   focusProjectName: "'sha256-krFFxd6XBrbV2JhsS5gQwSQO5RrhqFDZXtxHkLZLXyc='",
   /** The web boot watchdog (`buildBootWatchdogScript`, `#lib/boot-watchdog`), in every web document's `<body>`. */
-  bootWatchdog: "'sha256-0ySrooiVwMioTy562ziVKxe9S1PfZAf7v77xpwglWo0='",
+  bootWatchdog: "'sha256-Id/EjSWPx38VoGQvRvNO89Zip49g1CGd4TYDJphe3is='",
 } as const;
 
 /** The name of one listed inline script. */

@@ -5,10 +5,17 @@ import {
   installMessage,
   isCachedOnFirstUse,
   isSafeModeNavigation,
+  isShellInBounds,
   navigationCandidate,
+  readBuildFloorMessage,
   workerClasses,
 } from '#offline/service-worker-routing.js';
-import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import {
+  activateIfBuildMessageType,
+  buildFloorMessageType,
+  serviceWorkerMessageType,
+  skipWaitingMessageType,
+} from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
 import { safeModeHref } from '#lib/boot-signals.js';
 
@@ -99,14 +106,26 @@ describe('navigationCandidate', () => {
 describe('answerNavigation', () => {
   const answer = (
     path: string,
-    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string }> = {},
+    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string; shellInBounds: boolean }> = {},
   ): ReturnType<typeof answerNavigation> =>
     answerNavigation({
       candidate: candidateFor(path),
       request: navigation(path, facts.cache === undefined ? {} : { cache: facts.cache }),
       tauEntry: facts.tauEntry,
       updatePending: facts.updatePending ?? false,
+      shellInBounds: facts.shellInBounds ?? true,
     });
+
+  it('should ask the network first for a cache-first class while its shells are out of bounds (FP2)', () => {
+    expect(answer('/w/home/bracket-v2', { shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: projectDocument,
+    });
+    expect(answer('/', { tauEntry: 'app', shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: homeDocument,
+    });
+  });
 
   it('should open a project from the precached shell, cache-first', () => {
     expect(answer('/w/home/bracket-v2')).toStrictEqual({ kind: 'cache-first', document: projectDocument });
@@ -217,5 +236,49 @@ describe('isSafeModeNavigation (FP5)', () => {
     for (const url of [`${origin}/`, `${origin}/?safe=0`, `${origin}/?unsafe=1`, 'not a url']) {
       expect(isSafeModeNavigation(url), url).toBe(false);
     }
+  });
+});
+
+describe('isShellInBounds (FP2)', () => {
+  const buildId = 1_795_000_000_000;
+
+  it('should hold the shells while the server has reported no floor, whatever the build', () => {
+    expect(isShellInBounds({ buildId, floor: undefined })).toBe(true);
+    expect(isShellInBounds({ buildId: 0, floor: undefined })).toBe(true);
+  });
+
+  it('should hold the shells of a build at or above the floor, and not those of a build below it', () => {
+    expect(isShellInBounds({ buildId, floor: buildId })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId - 1 })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId + 1 })).toBe(false);
+  });
+
+  it('should not hold the shells of an unknown build (0) once a floor is reported', () => {
+    expect(isShellInBounds({ buildId: 0, floor: 1 })).toBe(false);
+  });
+});
+
+describe('readBuildFloorMessage (FP2)', () => {
+  it('should read the floor a page relays from the server', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: 1_795_000_000_000 })).toStrictEqual({
+      minBuildId: 1_795_000_000_000,
+    });
+  });
+
+  it('should read a relayed answer that names no floor as none', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType })).toStrictEqual({ minBuildId: undefined });
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: undefined })).toStrictEqual({
+      minBuildId: undefined,
+    });
+  });
+
+  it.each([
+    ['another message', { type: skipWaitingMessageType }],
+    ['no object', 'tau-build-floor'],
+    ['a floor that is no build id', { type: buildFloorMessageType, minBuildId: -5 }],
+    ['a fractional floor', { type: buildFloorMessageType, minBuildId: 1.5 }],
+    ['a floor as text', { type: buildFloorMessageType, minBuildId: '1795000000000' }],
+  ])('should ignore %s', (_label, data) => {
+    expect(readBuildFloorMessage(data)).toBeUndefined();
   });
 });

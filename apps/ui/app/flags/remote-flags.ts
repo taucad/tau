@@ -18,6 +18,10 @@
  * connected but has not answered, `evaluated` once PostHog's values (or a seeded state) are in, and `absent` when no
  * answer will come (analytics not admitted or withdrawn, the SDK failed to load, or the flag load failed), so the
  * defaults are final.
+ *
+ * Only a decision publishes `absent` ({@link disconnectRemoteFlags}). Letting go of the client because its follower
+ * re-runs or remounts is not one ({@link releaseRemoteFlags}): the last answer stands until the client is followed
+ * again, so a flag PostHog answered on never reads as a final off in between (F2c).
  */
 
 import { Topic } from '@taucad/events';
@@ -53,6 +57,8 @@ let values: RemoteFlagValues | undefined;
 /* Until the analytics boundary decides, nothing has answered. */
 let status: RemoteFlagStatus = 'pending';
 let disconnectClient: (() => void) | undefined;
+/* The client whose answer `values` holds, so following it again keeps that answer. */
+let answeredClient: RemoteFlagClient | undefined;
 
 /** Each PostHog-backed registry name with its PostHog flag key. */
 const remoteFlagKeys: ReadonlyArray<readonly [FeatureFlagName, string]> = featureFlagNames.flatMap((name) => {
@@ -140,14 +146,21 @@ export function subscribeRemoteFlags(listener: () => void): () => void {
 }
 
 /**
- * Follow a PostHog client's evaluated flags until {@link disconnectRemoteFlags}. Called by the analytics boundary
- * once the host admits analytics; replaces any earlier client.
+ * Follow a PostHog client's evaluated flags until {@link releaseRemoteFlags} or {@link disconnectRemoteFlags}. Called
+ * by the analytics boundary once the host admits analytics; replaces any earlier client.
+ *
+ * Following the client whose answer is held again (the boundary's effect re-ran, or the boundary remounted) keeps that
+ * answer until the client calls back, which it does at once when its flags have loaded. Any other client, or one
+ * followed after no answer was coming, starts `pending`.
  *
  * @param client - The initialised PostHog singleton.
  */
 export function connectRemoteFlags(client: RemoteFlagClient): void {
   releaseClient();
-  update(undefined, 'pending');
+  if (client !== answeredClient || status !== 'evaluated') {
+    answeredClient = undefined;
+    update(undefined, 'pending');
+  }
   const read = (
     _flags?: readonly string[],
     _variants?: Readonly<Record<string, string | boolean>>,
@@ -156,6 +169,7 @@ export function connectRemoteFlags(client: RemoteFlagClient): void {
     const variants = client.featureFlags?.getFlagVariants();
     /* A failed flag load still answers: no value is coming, so what the client holds now is final. */
     const answered: RemoteFlagStatus = context?.errorsLoading === true ? 'absent' : 'evaluated';
+    answeredClient = client;
     update(variants === undefined ? values : project(variants), answered);
   };
   try {
@@ -165,6 +179,7 @@ export function connectRemoteFlags(client: RemoteFlagClient): void {
   } catch {
     // Optional analytics must not prevent the product from opening; defaults stay in force.
     disconnectClient = undefined;
+    answeredClient = undefined;
     update(undefined, 'absent');
   }
 }
@@ -175,10 +190,21 @@ function releaseClient(): void {
 }
 
 /**
- * Stop following the client and return every PostHog-backed flag to its registry default, which is then final:
- * analytics are not admitted, were withdrawn, or the SDK could not load.
+ * Stop following the client without deciding anything: the values and status stay as they are, and nothing is
+ * published. The analytics boundary calls this when its admission effect is cleaned up, which a re-run or a remount
+ * does while analytics stay admitted; whatever comes next (following the client again, or a withdrawal through
+ * {@link disconnectRemoteFlags}) decides.
+ */
+export function releaseRemoteFlags(): void {
+  releaseClient();
+}
+
+/**
+ * Stop following the client and return every PostHog-backed flag to its registry default, which is then final. Call it
+ * only on a decision: analytics are not admitted, were withdrawn, the build has no key, or the SDK could not load.
  */
 export function disconnectRemoteFlags(): void {
   releaseClient();
+  answeredClient = undefined;
   update(undefined, 'absent');
 }

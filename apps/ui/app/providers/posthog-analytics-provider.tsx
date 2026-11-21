@@ -9,7 +9,7 @@ import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
-import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
+import { connectRemoteFlags, disconnectRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
 import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
 import {
   connectAttachmentIntakeTelemetry,
@@ -104,14 +104,15 @@ const whenIdle = (start: () => void): (() => void) => {
 
 /**
  * Applies the host's analytics decision to the PostHog singleton. It renders nothing,
- * so a change never moves the product between React trees.
+ * so a change never moves the product between React trees. While the host has not read its decision
+ * (`isActive` undefined) it does nothing at all: no start, no withdrawal, no storage cleared, no flag state published.
  */
 function PostHogLifecycle({
   isActive,
   options,
   isReplayEnabled,
 }: {
-  readonly isActive: boolean;
+  readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
 }): undefined {
@@ -137,6 +138,11 @@ function PostHogLifecycle({
   const [admittedGeneration, setAdmittedGeneration] = useState(0);
 
   useEffect(() => {
+    /* F2c: not a decision. Withdrawing here would clear a consenting visitor's PostHog storage, count their admission
+       as a new grant, and publish every PostHog-backed flag as a final off that a redirect cannot take back. */
+    if (isActive === undefined) {
+      return undefined;
+    }
     const { apiKey } = posthogConfig;
     decision.current += 1;
     const generation = decision.current;
@@ -211,7 +217,9 @@ function PostHogLifecycle({
     return () => {
       withdrawn = true;
       setAnalyticsLinkSource(undefined);
-      disconnectRemoteFlags();
+      /* A cleanup is not a decision: a re-run or a remount follows the client again, and a withdrawal publishes the
+         defaults in the branch above. Releasing keeps the answer PostHog gave, so no flag reads off in between. */
+      releaseRemoteFlags();
       disconnectBaselineTelemetry();
       disconnectAttachmentIntakeTelemetry();
       setConsoleClient(undefined);
@@ -266,7 +274,8 @@ export const admittedAnalytics: Analytics = {
 
 /**
  * PostHog analytics boundary shared by the web and desktop hosts: stable ancestry, with the SDK
- * running only while `isActive`.
+ * running only while `isActive`. `isActive` is `undefined` while the host cannot know its decision yet (the hydration
+ * render of a server-rendered document); nothing is started, withdrawn or published then.
  *
  * @param props - The host's decision, its SDK options and whether to start session replay.
  * @returns The analytics context around `children`.
@@ -277,7 +286,7 @@ export function PostHogAnalyticsProvider({
   isReplayEnabled,
   children,
 }: {
-  readonly isActive: boolean;
+  readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
   readonly children: ReactNode;
@@ -285,7 +294,7 @@ export function PostHogAnalyticsProvider({
   return (
     <AnalyticsContextProvider analytics={admittedAnalytics}>
       <PostHogLifecycle
-        isActive={isActive && posthogConfig.apiKey !== ''}
+        isActive={posthogConfig.apiKey === '' ? false : isActive}
         options={options}
         isReplayEnabled={isReplayEnabled}
       />

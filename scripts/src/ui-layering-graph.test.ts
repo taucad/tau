@@ -82,7 +82,7 @@ const foundationTargets = new Set([
 ]);
 
 /** The viewer stack `ui-kit` left in W6, when `FormatBadge` moved from `@taucad/workbench-panes` to `@taucad/ui`. */
-const viewerStack = ['parameters', 'runtime', 'viewer', 'workbench-panes'];
+const viewerStack: ReadonlySet<string> = new Set(['parameters', 'runtime', 'viewer', 'workbench-panes']);
 
 /** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [
@@ -101,7 +101,7 @@ const closureRules: ReadonlyArray<{ readonly source: string; readonly excluded: 
   { source: 'ui-core', excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) },
   {
     source: 'ui-kit',
-    excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) || viewerStack.includes(project),
+    excluded: (project) => agentProtocol.includes(project) || isRuntimePlugin(project) || viewerStack.has(project),
   },
   { source: 'files-ui', excluded: (project) => project === 'chat' },
   { source: 'editor-ui', excluded: (project) => project === 'chat-ui' || project === 'files-ui' },

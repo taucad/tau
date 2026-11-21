@@ -589,6 +589,39 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
       await expect
         .poll(async () => readWorkerState(page), { timeout: 30_000, interval: 250 })
         .toMatchObject({ registered: false, caches: [] });
+      /* The worker still controls this page, but writes nothing after safe mode stopped it: a lazy chunk the person
+       * loads well after the page settled (here `/usage`, against a funded API) is not cached again, whatever the
+       * timing (FP5, adaptive app deployment mode W12 rework). */
+      await page.route(/\/v1\/deployment(?:\?|$)/u, async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: { 'access-control-allow-origin': live.origin, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            version: 1,
+            edition: 'cloud',
+            billing: { funded: true, environment: 'development' },
+            maxAgeSeconds: 300,
+          }),
+        });
+      });
+      await page.waitForTimeout(15_000);
+      const lateChunks: string[] = [];
+      page.on('request', (request) => {
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith('/assets/') && pathname.endsWith('.js')) {
+          lateChunks.push(pathname);
+        }
+      });
+      await page.evaluate(async () => {
+        const router = (
+          globalThis as unknown as { __reactRouterDataRouter: { navigate: (path: string) => Promise<void> } }
+        ).__reactRouterDataRouter;
+        await router.navigate('/usage');
+      });
+      await page.waitForURL(/\/usage$/u);
+      await page.waitForTimeout(5000);
+      expect(lateChunks.length, 'the in-app navigation loaded no lazy chunk').toBeGreaterThan(0);
+      expect(await readWorkerState(page)).toMatchObject({ registered: false, caches: [] });
     }, 180_000);
   });
 

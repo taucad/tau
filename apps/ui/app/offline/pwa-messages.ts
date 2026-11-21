@@ -53,6 +53,12 @@ export const activateIfBuildMessageType = 'tau-activate-if-build';
  */
 export const buildFloorMessageType = 'tau-build-floor';
 
+/**
+ * `type` of the message a page in safe mode sends the worker that controls it (FP5): stop writing caches for the rest
+ * of its life. The worker answers on the message's port once no write of its own can follow.
+ */
+export const stopCachingMessageType = 'tau-stop-caching';
+
 /** `type` of every message the worker posts to its pages. */
 export const serviceWorkerMessageType = 'tau-service-worker';
 

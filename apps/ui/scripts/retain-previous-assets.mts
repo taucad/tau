@@ -31,8 +31,10 @@
  * already serves keeps every asset at the age the live index lists.
  *
  * The index also records the builds the deploy serves (`builds`: build id, generation, retirement), kept by the
- * same rule as their assets, and the oldest of them is the deploy's retained build floor: a cached shell of an older
- * build names files this deploy no longer serves. It is stamped into the server graph over the placeholder
+ * same rule as their assets. The deploy's retained build floor is the oldest of them, raised above every build a
+ * deploy of this site stopped serving (`droppedBuildFloor`, carried in the index): builds leave by retirement, not by
+ * id, so after a rollback a dropped build can have a higher id than a kept one. A cached shell below the floor names
+ * files this deploy may no longer serve. It is stamped into the server graph over the placeholder
  * `unstampedRetainedBuildFloor` (same length, so every byte offset holds), where `/health/build` reads it and
  * reports it in `minBuildId` (FP2 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`). An index from
  * before the records lists no builds, so the floor starts at the oldest build recorded: higher than the truth, which
@@ -127,6 +129,11 @@ export type ServedAssetsIndex = {
   readonly schema: typeof servedAssetsIndexSchema;
   readonly assets: readonly ServedAsset[];
   readonly builds?: readonly ServedBuild[];
+  /**
+   * One above the highest build id a deploy of this site stopped serving, carried from deploy to deploy: builds leave
+   * retention by retirement, not by id, so after a rollback a dropped build can have a higher id than a kept one.
+   */
+  readonly droppedBuildFloor?: number;
 };
 
 /** Characters a published asset path may not carry: controls, a backslash, and URL syntax (`?`, `#`, `%`). */
@@ -309,6 +316,17 @@ const assertServedBuild = (entry: unknown): ServedBuild => {
   return retiredAt === undefined ? { buildId, generation } : { buildId, generation, retiredAt };
 };
 
+/** Check a live index's dropped-build floor, which arrives as untrusted JSON: a positive safe integer, or absent. */
+const parseDroppedBuildFloor = (value: unknown, source: string): Pick<ServedAssetsIndex, 'droppedBuildFloor'> => {
+  if (value === undefined) {
+    return {};
+  }
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${source} has a malformed dropped-build floor.`);
+  }
+  return { droppedBuildFloor: value };
+};
+
 /**
  * Check a live index, which arrives as untrusted JSON, once: its schema, every entry, and one entry
  * per path (a path listed twice keeps its youngest generation, so it is downloaded once).
@@ -327,7 +345,7 @@ export const parseServedAssetsIndex = (
 ): ServedAssetsIndex => {
   const { isServable = isServableAssetPath, isRetired = (): boolean => false } = kind;
   const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
-    Record<'schema' | 'assets' | 'builds', unknown>
+    Record<'schema' | 'assets' | 'builds' | 'droppedBuildFloor', unknown>
   >;
   if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
     throw new Error(`${source} is not a ${servedAssetsIndexSchema} index.`);
@@ -345,8 +363,9 @@ export const parseServedAssetsIndex = (
     }
   }
   const assets = [...youngest.values()];
+  const dropped = parseDroppedBuildFloor(index.droppedBuildFloor, source);
   if (index.builds === undefined) {
-    return { schema: servedAssetsIndexSchema, assets };
+    return { schema: servedAssetsIndexSchema, assets, ...dropped };
   }
   if (!Array.isArray(index.builds)) {
     throw new TypeError(`${source} has a malformed build list.`);
@@ -359,7 +378,7 @@ export const parseServedAssetsIndex = (
       builds.set(build.buildId, build);
     }
   }
-  return { schema: servedAssetsIndexSchema, assets, builds: [...builds.values()] };
+  return { schema: servedAssetsIndexSchema, assets, builds: [...builds.values()], ...dropped };
 };
 
 /**
@@ -742,13 +761,39 @@ type PassResult = {
 };
 
 /**
- * The oldest build an index records, the deploy's retained build floor.
+ * The deploy's retained build floor: no lower than the oldest build it serves, and above every build a deploy of this
+ * site stopped serving ({@link ServedAssetsIndex.droppedBuildFloor}). A kept build below it is only sent to the
+ * network first, which is safe; a dropped build at or above it would open a shell whose files are gone.
  *
- * @param builds - The builds a deploy serves, its own included.
- * @returns The lowest build id, or `undefined` when none is recorded.
+ * @param index - The new deploy's index.
+ * @returns The floor, or `undefined` when the index records no builds.
  */
-const oldestBuild = (builds: readonly ServedBuild[] | undefined): number | undefined =>
-  builds === undefined || builds.length === 0 ? undefined : Math.min(...builds.map((build) => build.buildId));
+const retainedBuildFloor = (index: ServedAssetsIndex): number | undefined =>
+  index.builds === undefined || index.builds.length === 0
+    ? undefined
+    : Math.max(Math.min(...index.builds.map((build) => build.buildId)), index.droppedBuildFloor ?? 0);
+
+const droppedFloorField = (floor: number | undefined): Pick<ServedAssetsIndex, 'droppedBuildFloor'> =>
+  floor === undefined ? {} : { droppedBuildFloor: floor };
+
+/**
+ * One above the highest build id the new deploy stops serving, or the live index's, whichever is higher.
+ *
+ * @param previous - The live index.
+ * @param builds - The builds the new deploy serves.
+ * @returns The new dropped-build floor, or `undefined` when no build was ever dropped.
+ */
+const nextDroppedBuildFloor = (
+  previous: ServedAssetsIndex | undefined,
+  builds: readonly ServedBuild[],
+): number | undefined => {
+  const served = new Set(builds.map((build) => build.buildId));
+  const dropped = (previous?.builds ?? [])
+    .filter((build) => !served.has(build.buildId))
+    .map((build) => build.buildId + 1);
+  const floor = Math.max(previous?.droppedBuildFloor ?? 0, ...dropped);
+  return floor > 0 ? floor : undefined;
+};
 
 /** One index: list the build's own files, keep the live deploy's, write the new index. */
 const retainIndex = async (pass: Pass, kind: IndexKind): Promise<PassResult> => {
@@ -778,6 +823,7 @@ const retainIndex = async (pass: Pass, kind: IndexKind): Promise<PassResult> => 
     schema: servedAssetsIndexSchema,
     assets: [...own, ...kept].toSorted((left, right) => left.path.localeCompare(right.path)),
     ...(builds === undefined ? {} : { builds }),
+    ...(builds === undefined ? {} : droppedFloorField(nextDroppedBuildFloor(previous, builds))),
   };
   await writeFile(join(pass.clientDirectory, kind.fileName), `${JSON.stringify(index)}\n`);
   return {
@@ -845,7 +891,7 @@ export const retainPreviousAssets = async (options: {
     storedBytes: assets.storedBytes + runtimes.storedBytes,
     index: assets.index,
     runtimes: runtimes.index,
-    floor: oldestBuild(assets.index.builds),
+    floor: retainedBuildFloor(assets.index),
   };
 };
 

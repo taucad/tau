@@ -257,3 +257,38 @@ export const storeBuildFloor = async (
   const cache = await caches.open(cacheName);
   await cache.put(buildFloorKey, new Response(String(floor)));
 };
+
+/**
+ * A writer of the build floor that lands floors in the order they were handed on (FP2): each write waits for the one
+ * before, so a slower earlier write never overwrites a later floor, and a failed write is dropped without blocking the
+ * next. Never rejects.
+ *
+ * @param caches - The worker's Cache Storage.
+ * @param cacheName - The state cache (`stateCacheName`).
+ * @param canWrite - Whether the worker may still write its caches, asked when each write's turn comes.
+ * @returns Writes one floor (`undefined` for none) after every earlier one has settled.
+ */
+export const createBuildFloorWriter = (
+  caches: FloorStorage,
+  cacheName: string,
+  canWrite: () => boolean,
+): ((floor: number | undefined) => Promise<void>) => {
+  let last: Promise<void> = Promise.resolve();
+  return async (floor) => {
+    const write = async (): Promise<void> => {
+      try {
+        if (canWrite()) {
+          await storeBuildFloor(caches, cacheName, floor);
+        }
+      } catch {
+        // Storage refused this one: the next floor is still written.
+      }
+    };
+    const previous = last;
+    last = (async () => {
+      await previous;
+      await write();
+    })();
+    return last;
+  };
+};

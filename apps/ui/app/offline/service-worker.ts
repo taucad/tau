@@ -53,8 +53,8 @@ import {
   fillFromHttpCache,
   installPrecache,
   readStoredBuildFloor,
+  createBuildFloorWriter,
   readStoredUrls,
-  storeBuildFloor,
   subresourceKey,
 } from '#offline/service-worker-store.js';
 import { assetCacheName, cachePrefix, precacheNamePart, stateCacheName } from '#offline/pwa-messages.js';
@@ -213,14 +213,14 @@ const readFloorOnce = async (): Promise<undefined | void> => {
   return floorRead;
 };
 
-/** Keep the floor a page handed on; a worker whose caches were deleted under it writes none (FP5). */
+/** Writes the floors in the order pages handed them on; a worker whose caches were deleted under it writes none (FP5). */
+const writeBuildFloor = createBuildFloorWriter(scope.caches, stateCacheName, () => !storageCleared);
+
+/** Keep the floor a page handed on: at once in memory, and stored after every earlier one. */
 const keepBuildFloor = async (floor: number | undefined): Promise<void> => {
   floorHandedOn = true;
   buildFloor = floor;
-  if (storageCleared) {
-    return;
-  }
-  await storeBuildFloor(scope.caches, stateCacheName, floor);
+  await writeBuildFloor(floor);
 };
 
 scope.addEventListener('install', (event) => {

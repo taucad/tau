@@ -57,7 +57,14 @@ import {
   readStoredUrls,
   subresourceKey,
 } from '#offline/service-worker-store.js';
-import { assetCacheName, cachePrefix, precacheNamePart, stateCacheName } from '#offline/pwa-messages.js';
+import {
+  assetCacheName,
+  cachePrefix,
+  precacheNamePart,
+  stateCacheName,
+  stopCachingMessageType,
+} from '#offline/pwa-messages.js';
+import { createCachingStop } from '#offline/service-worker-stop.js';
 import { isPreFixWorkerCache, isRetiredWorkerCache } from '#offline/pwa-caches.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
@@ -81,13 +88,17 @@ type WorkerScope = {
     claim(): Promise<void>;
   };
   readonly caches: CacheStorage;
+  readonly indexedDB?: IDBFactory;
   // oxlint-disable-next-line typescript/no-restricted-types -- The Cookie Store API answers a missing cookie with `null`.
   readonly cookieStore?: { get(name: string): Promise<{ readonly value: string } | null> };
   skipWaiting(): Promise<void>;
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   addEventListener(type: 'install' | 'activate', listener: (event: LifecycleEvent) => void): void;
   addEventListener(type: 'fetch', listener: (event: FetchEventLike) => void): void;
-  addEventListener(type: 'message', listener: (event: { readonly data: unknown } & LifecycleEvent) => void): void;
+  addEventListener(
+    type: 'message',
+    listener: (event: { readonly data: unknown; readonly ports?: readonly MessagePort[] } & LifecycleEvent) => void,
+  ): void;
 };
 /** The globals the build writes into the worker (`scripts/build-service-worker.ts`'s injection points). */
 type InjectedGlobal = {
@@ -148,6 +159,8 @@ let indexLoaded = false;
  * pages it still controls finish loading (FP5).
  */
 let storageCleared = false;
+/** FP5: a page in safe mode stops this worker's cache writes for the rest of its life. */
+const caching = createCachingStop(scope.indexedDB);
 
 /** A cache that exists, opened; never creates one. */
 const openExisting = async (cacheName: string): Promise<Cache | undefined> =>
@@ -214,13 +227,19 @@ const readFloorOnce = async (): Promise<undefined | void> => {
 };
 
 /** Writes the floors in the order pages handed them on; a worker whose caches were deleted under it writes none (FP5). */
-const writeBuildFloor = createBuildFloorWriter(scope.caches, stateCacheName, () => !storageCleared);
+const writeBuildFloor = createBuildFloorWriter(
+  scope.caches,
+  stateCacheName,
+  () => !storageCleared && !caching.isStopped(),
+);
 
 /** Keep the floor a page handed on: at once in memory, and stored after every earlier one. */
 const keepBuildFloor = async (floor: number | undefined): Promise<void> => {
   floorHandedOn = true;
   buildFloor = floor;
-  await writeBuildFloor(floor);
+  await caching.write(async () => {
+    await writeBuildFloor(floor);
+  });
 };
 
 scope.addEventListener('install', (event) => {
@@ -230,6 +249,8 @@ scope.addEventListener('install', (event) => {
       // successor (D16): over one, this worker activates as soon as it is installed. With FP1 a page of another build
       // loses nothing under it online, since every miss is the browser's own request.
       const overPreFix = await replacesPreFixWorker();
+      // A new worker writes again, whatever stop an earlier worker of this origin stored (FP5).
+      await caching.clear();
       await indexReady;
       const cache = await scope.caches.open(precacheName);
       const report = await installPrecache({
@@ -281,7 +302,21 @@ scope.addEventListener('activate', (event) => {
   );
 });
 
+/** Whether a page sent the safe-mode stop (FP5). */
+const isStopCachingMessage = (data: unknown): boolean =>
+  typeof data === 'object' && data !== null && 'type' in data && data.type === stopCachingMessageType;
+
 scope.addEventListener('message', (event) => {
+  if (isStopCachingMessage(event.data)) {
+    event.waitUntil(
+      (async () => {
+        await caching.stop();
+        // Answered once no write of this worker can follow, so the page's sweep is the last word (FP5).
+        event.ports?.[0]?.postMessage({ type: stopCachingMessageType });
+      })(),
+    );
+    return;
+  }
   if (activatesWorker(event.data, workerBuildId)) {
     // async-iife: bootstrap -- a message listener cannot await; activation proceeds on its own.
     void scope.skipWaiting();
@@ -418,37 +453,42 @@ const answerOfflineAfterIndex = async (event: FetchEventLike): Promise<Response>
 /** URLs a copy is already waiting on, so repeated misses start one copy each. */
 const filling = new Set<string>();
 
+/** Copy one file from the HTTP cache into the asset cache; run only through {@link caching}. */
+const fillForOffline = async (url: string): Promise<void> => {
+  if (!storageCleared && assets.size > 0 && !(await scope.caches.has(assetCacheName))) {
+    storageCleared = true;
+  }
+  if (storageCleared) {
+    return;
+  }
+  const cache = await scope.caches.open(assetCacheName);
+  await fillFromHttpCache({
+    url,
+    fetchFile: async (input, init) => scope.fetch(input, init),
+    cache,
+    wait: async (milliseconds) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds);
+      }),
+    onStored: async (storedUrl) => {
+      assets.add(storedUrl);
+      await assetExpiration.updateTimestamp(storedUrl);
+      await assetExpiration.expireEntries();
+      assets = await readStoredUrls([cache]);
+    },
+    onQuotaExceeded: async () => {
+      await scope.caches.delete(assetCacheName);
+      reloadIndex();
+    },
+  });
+};
+
 /** After the page's own request for a file, copy it from the HTTP cache into the asset cache, for offline use. */
 const keepForOffline = (event: FetchEventLike, url: string): void => {
   filling.add(url);
   const copy = async (): Promise<void> => {
     try {
-      if (!storageCleared && assets.size > 0 && !(await scope.caches.has(assetCacheName))) {
-        storageCleared = true;
-      }
-      if (storageCleared) {
-        return;
-      }
-      const cache = await scope.caches.open(assetCacheName);
-      await fillFromHttpCache({
-        url,
-        fetchFile: async (input, init) => scope.fetch(input, init),
-        cache,
-        wait: async (milliseconds) =>
-          new Promise<void>((resolve) => {
-            setTimeout(resolve, milliseconds);
-          }),
-        onStored: async (storedUrl) => {
-          assets.add(storedUrl);
-          await assetExpiration.updateTimestamp(storedUrl);
-          await assetExpiration.expireEntries();
-          assets = await readStoredUrls([cache]);
-        },
-        onQuotaExceeded: async () => {
-          await scope.caches.delete(assetCacheName);
-          reloadIndex();
-        },
-      });
+      await caching.write(async () => fillForOffline(url));
     } catch {
       // The copy is only for offline use: the next miss tries again.
     } finally {
@@ -486,7 +526,7 @@ scope.addEventListener('fetch', (event) => {
     return;
   }
   // A miss: no answer, so the request stays the browser's own.
-  if (isCachedOnFirstUse(request, scope.location.origin) && !filling.has(request.url)) {
+  if (isCachedOnFirstUse(request, scope.location.origin) && !filling.has(request.url) && !caching.isStopped()) {
     keepForOffline(event, request.url);
   }
 });

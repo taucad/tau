@@ -16,6 +16,7 @@ const librariesDirectory = join(import.meta.dirname, '../../../libs');
 const uiLibraries = [
   'ui-kit',
   'chat-ui',
+  'chat-surfaces',
   'project-workspace',
   'files-ui',
   'editor-ui',

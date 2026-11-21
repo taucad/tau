@@ -13,13 +13,13 @@ import {
 } from '@taucad/chat';
 import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
-import type { FileContentSelection } from '#hooks/use-file-content.js';
+import type { FileContentSelection } from '@taucad/files-ui/hooks/use-file-content';
 
 const files = new Map<string, string>();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const manager = mock<FileManagerContextValue>();
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: (path: string) =>
     files.has(path)
       ? { ...mock<FileContentSelection>(), kind: 'text', content: encoder.encode(files.get(path)) }

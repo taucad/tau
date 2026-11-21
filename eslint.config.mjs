@@ -293,7 +293,7 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
  * Dependency direction between the UI app libraries (`apps/libs/*`, `scope:ui type:app-lib`, tagged
  * `ui:<name>`), from docs/research/ui-app-lib-layering-blueprint.md. Four layers, the app above all of them:
  * L0 foundation (`ui-core`, `ui-kit`), L1 features (the `*-ui` libraries), L2 composition
- * (`project-workspace`; `chat-surfaces` and `project-library` join it in W4 and W5) and L3 agent-host adapters
+ * (`chat-surfaces`, `project-workspace`; `project-library` joins them in W5) and L3 agent-host adapters
  * (`agent-host-ui`). `layer:` tags leave the libraries of one layer unordered, so, as with the API
  * libraries, each names the UI app libraries it may depend on. Every library may also depend on `ui:infra` (the
  * file-system client, the language servers and the consent banner) and on `scope:shared` projects and packages.
@@ -316,6 +316,8 @@ export const uiLibraryDependencies = {
    * is declared debt the operator keeps; the agent-protocol ban below applies to L0 only.
    */
   'billing-ui': ['settings-ui', 'ui-core', 'ui-kit'],
+  // L2 composes L1 features; no L2 library depends on another.
+  'chat-surfaces': ['chat-ui', 'editor-ui', 'files-ui', 'ui-core', 'ui-kit'],
   'project-workspace': ['ui-core', 'ui-kit'],
   // L3 sits beside L2: an adapter implements an agent port over L0 and L1, never over a composed surface.
   'agent-host-ui': ['revisions-ui', 'ui-core'],
@@ -327,11 +329,7 @@ export const uiLibraryDependencies = {
  * The list only shrinks: scripts/src/ui-layering-graph.test.ts fails when a listed edge is gone from the graph
  * and when an edge outside the allowlist and this list appears.
  */
-export const uiLibraryDependencyDebt = [
-  { source: 'editor-ui', target: 'chat-ui', work: 'W4' },
-  { source: 'editor-ui', target: 'files-ui', work: 'W4' },
-  { source: 'files-ui', target: 'chat-ui', work: 'W5' },
-];
+export const uiLibraryDependencyDebt = [{ source: 'files-ui', target: 'chat-ui', work: 'W5' }];
 
 const uiLibraryConstraints = Object.entries(uiLibraryDependencies).map(([name, dependencies]) => ({
   sourceTag: `ui:${name}`,

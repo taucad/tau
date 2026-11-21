@@ -54,6 +54,7 @@
     "@taucad/camera": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/chat-ui": "workspace:*",
+    "@taucad/chat-surfaces": "workspace:*",
     "@taucad/consent": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/csharp-language": "workspace:*",

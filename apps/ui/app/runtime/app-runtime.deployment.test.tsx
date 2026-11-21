@@ -1,8 +1,8 @@
 /**
  * The runtime root and its `deployment` child (adaptive app deployment mode charter W1, I1, I13): the root keeps the
  * mode `deployment` reports, starts from the build's initial mode, hands the child the page's visibility, focus and
- * the person's Retry, and tags error events with the mode. Unit tests run under the `cloud` ceiling, so the composed
- * runtime here is pinned funded; the adaptive composition has its own project (`*.adaptive.test.ts`).
+ * the person's Retry, and tags error events with the mode. The composed runtime's owner has its own file
+ * (`app-runtime.deployment-owner.test.ts`).
  */
 import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -15,7 +15,6 @@ import type { DeploymentChildInput, DeploymentCommand } from '#runtime/app-runti
 import { createAppRuntime, describeDeploymentMode, selectDeploymentMode } from '#runtime/app-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
-import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import type { DeploymentOwnerLogic } from '#runtime/deployment.js';
 
@@ -77,36 +76,6 @@ describe('app runtime: deployment', () => {
     expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({ state: 'unfunded', basis: 'pinned' });
   });
 
-  it('should pin a cloud build funded with no request, and tag error events with the mode', () => {
-    const runtime = createAppRuntime({
-      clock: new StepClock(),
-      environment: () => createFakeEnvironmentHost(),
-      idleFileManagers: true,
-    });
-    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({
-      state: 'funded',
-      basis: 'pinned',
-      environment: undefined,
-    });
-    runtime.start();
-    expect(applyTauEventContext<{ tags?: Record<string, string> }>({}).tags?.['deployment_mode']).toBe('funded/pinned');
-    runtime.stop();
-  });
-
-  it('should keep a pinned build pinned whatever seed it is handed (W11)', () => {
-    const runtime = createAppRuntime({
-      clock: new StepClock(),
-      environment: () => createFakeEnvironmentHost(),
-      idleFileManagers: true,
-      deploymentSeed: { state: 'unfunded', basis: 'confirmed' },
-    });
-    expect(selectDeploymentMode(runtime.getSnapshot())).toEqual({
-      state: 'funded',
-      basis: 'pinned',
-      environment: undefined,
-    });
-  });
-
   it('should describe each mode as one tag value', () => {
     expect(describeDeploymentMode({ state: 'unknown', problem: 'safe-mode' })).toBe('unknown/safe-mode');
     expect(describeDeploymentMode({ state: 'unfunded', basis: 'absent' })).toBe('unfunded/absent');
@@ -118,15 +87,10 @@ describe('app runtime: deployment', () => {
       <AppRuntimeProvider runtime={runtime}>{children}</AppRuntimeProvider>
     );
     expect(renderHook(() => useDeploymentMode(), { wrapper }).result.current).toEqual({
-      state: 'funded',
-      basis: 'pinned',
-      environment: undefined,
+      state: 'unknown',
+      problem: 'pending',
     });
-    expect(renderHook(() => useDeploymentMode()).result.current).toEqual({
-      state: 'funded',
-      basis: 'pinned',
-      environment: undefined,
-    });
+    expect(renderHook(() => useDeploymentMode()).result.current).toEqual({ state: 'unknown', problem: 'pending' });
     runtime.stop();
   });
 });

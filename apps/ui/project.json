@@ -61,16 +61,10 @@
           "env": "PORTLESS_URL"
         },
         {
-          "env": "TAU_CLOUD_ENABLED"
-        },
-        {
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
           "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
-        },
-        {
-          "env": "TAU_BILLING_ENVIRONMENT"
         },
         {
           "env": "NETLIFY"
@@ -141,108 +135,6 @@
         }
       }
     },
-    "build-self-host": {
-      "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
-      "outputs": ["{projectRoot}/build-self-host"],
-      "inputs": [
-        "production",
-        "^production",
-        {
-          "env": "TAU_API_URL"
-        },
-        {
-          "env": "TAU_WEBSOCKET_URL"
-        },
-        {
-          "env": "TAU_FRONTEND_URL"
-        },
-        {
-          "env": "PORTLESS_URL"
-        },
-        {
-          "env": "TAU_DESKTOP_RELEASED"
-        },
-        {
-          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
-        },
-        {
-          "env": "TAU_BILLING_ENVIRONMENT"
-        },
-        {
-          "env": "NETLIFY"
-        },
-        {
-          "env": "NETLIFY_LOCAL"
-        },
-        {
-          "env": "CONTEXT"
-        },
-        {
-          "env": "DEPLOY_PRIME_URL"
-        },
-        {
-          "env": "DEPLOY_URL"
-        },
-        {
-          "env": "NETLIFY_AI_GATEWAY_URL"
-        },
-        {
-          "env": "TAU_DEBUG"
-        },
-        {
-          "env": "SENTRY_ENVIRONMENT"
-        },
-        {
-          "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
-        },
-        {
-          "env": "PICOGK_BROWSER_ASSETS_ROOT"
-        },
-        {
-          "env": "PICOGK_BROWSER_MIRROR_BASE"
-        },
-        {
-          "env": "CADMPEG_ENGINES_BASE"
-        },
-        {
-          "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
-        },
-        {
-          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
-        },
-        {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
-        },
-        {
-          "env": "POSTHOG_CLIENT_KEY"
-        },
-        {
-          "env": "POSTHOG_API_HOST"
-        },
-        {
-          "env": "POSTHOG_UI_HOST"
-        },
-        {
-          "env": "POSTHOG_ASSET_HOST"
-        },
-        {
-          "env": "STATS"
-        }
-      ],
-      "command": "node ../../tools/build-lock.mjs build -- \"react-router build --sourcemapClient hidden --sourcemapServer hidden\"",
-      "options": {
-        "cwd": "{projectRoot}",
-        "env": {
-          "NODE_OPTIONS": "--max-old-space-size=8192",
-          "TAU_CLOUD_ENABLED": "false",
-          "TAU_UI_BUILD_DIRECTORY": "build-self-host"
-        }
-      },
-      "metadata": {
-        "description": "The self-host web build (adaptive app deployment mode charter W8): `TAU_CLOUD_ENABLED=false` into `build-self-host/`, beside the adaptive `ui:build`. `ui:check-critical-budget` holds it to the checked-in self-host entry, and `ui:check-critical-budget-adaptive` holds `ui:build` to it (gate G1). Not deployed."
-      }
-    },
     "build:desktop": {
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
@@ -251,9 +143,6 @@
         "production",
         "^production",
         "{workspaceRoot}/apps/desktop/package.json",
-        {
-          "env": "TAU_CLOUD_ENABLED"
-        },
         {
           "env": "TAU_TELEMETRY_HOST"
         },
@@ -305,16 +194,16 @@
       "outputs": [],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts --expect-ceiling adaptive"
+        "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts --expect-deployment-owner"
       }
     },
     "check-critical-budget": {
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Measures the self-host build (`ui:build-self-host`, build-self-host/), the variant the entry describes; the adaptive `ui:build` is held to it by `ui:check-critical-budget-adaptive`. CI's build lane runs it whenever this app is affected."
+        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against the one `adaptive` entry of critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Every build is the adaptive app (adaptive app deployment mode W12). CI's build lane runs it whenever this app is affected."
       },
-      "dependsOn": ["build-self-host"],
+      "dependsOn": ["build"],
       "inputs": [
         "{projectRoot}/scripts/check-critical-budget.mts",
         "{projectRoot}/scripts/critical-path.mts",
@@ -325,39 +214,13 @@
           "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
         },
         {
-          "dependentTasksOutputFiles": "apps/ui/build-self-host/{client-module-ids.json,service-worker-precache.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,service-worker-precache.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
         }
       ],
       "outputs": [],
       "options": {
         "cwd": ".",
-        "command": "node apps/ui/scripts/check-critical-budget.mts --build build-self-host"
-      }
-    },
-    "check-critical-budget-adaptive": {
-      "executor": "nx:run-commands",
-      "cache": true,
-      "metadata": {
-        "description": "Gate G1 (adaptive app deployment mode charter I10, I11): the adaptive build `ui:build` (build/, the shipped ceiling since the flip, W8) against the checked-in self-host entry of critical-budget.json and the same run's self-host build in build-self-host/, within +2 requests, 1 % of total bytes and 1 % of the largest chunk per route class; also every check check-critical-budget makes. --write is refused for it. CI's build lane runs it whenever this app is affected."
-      },
-      "dependsOn": ["build", "build-self-host"],
-      "inputs": [
-        "{projectRoot}/scripts/check-critical-budget.mts",
-        "{projectRoot}/scripts/critical-path.mts",
-        "{projectRoot}/critical-budget.json",
-        "{projectRoot}/scripts/precache-list.ts",
-        "{projectRoot}/build-environment.ts",
-        {
-          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
-        },
-        {
-          "dependentTasksOutputFiles": "apps/ui/{build,build-self-host}/{client-module-ids.json,service-worker-precache.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
-        }
-      ],
-      "outputs": [],
-      "options": {
-        "cwd": ".",
-        "command": "node apps/ui/scripts/check-critical-budget.mts --build build --baseline build-self-host"
+        "command": "node apps/ui/scripts/check-critical-budget.mts"
       }
     },
     "check-static-shells": {
@@ -499,9 +362,6 @@
         "production",
         "^production",
         {
-          "env": "TAU_CLOUD_ENABLED"
-        },
-        {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
@@ -522,8 +382,7 @@
         "cwd": "{projectRoot}/serve",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192",
-          "REACT_ROUTER_ROOT": ".",
-          "TAU_CLOUD_ENABLED": "false"
+          "REACT_ROUTER_ROOT": "."
         }
       }
     },

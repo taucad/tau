@@ -56,7 +56,7 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
     }
     hasSignedOut.current = true;
 
-    purgeFinancial?.('logout');
+    purgeFinancial('logout');
     signOut();
   }, [purgeFinancial, signOut]);
 

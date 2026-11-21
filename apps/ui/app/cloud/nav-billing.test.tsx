@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { useBillingNavRoutes as useCloudRoutes } from '#cloud/nav-billing.cloud.js';
-import { useBillingNavRoutes as useSelfHostRoutes } from '#cloud/nav-billing.self-host.js';
+import { useBillingNavRoutes as useCloudRoutes } from '#cloud/nav-billing.funded.js';
+import { useBillingNavRoutes as useSelfHostRoutes } from '#cloud/nav-billing.unfunded.js';
 
 describe('billing navigation build boundary', () => {
   it('emits Usage only for Tau Cloud', () => {

@@ -48,7 +48,7 @@ const cloudChunkRequested = async (paths: readonly string[]): Promise<boolean> =
 };
 
 describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
-  test('asks for the Cloud chunk once the answer is funded, and has no /usage (D8)', async () => {
+  test('asks for the Cloud chunk once the answer is funded, and shows /usage (D8, W12)', async () => {
     await cloud.uiInstallCloudStandIns();
     await commands.uiRouteDeploymentAnswer('funded');
     const chunks = await commands.uiCloudChunkPaths();
@@ -56,8 +56,9 @@ describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
     await commands.uiStartObservedRequests();
     await home();
     await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    /* One build (W12): `/usage` is in the web manifest and shows the usage page while funded. */
     await target.navigate('/usage');
-    await target.expectVisible(selectors.getByText(/not found/iu).first(), 30_000);
+    await target.expectVisible(selectors.getByRole('heading', { name: 'Tau usage' }), 30_000);
   });
 
   test('never asks for the Cloud chunk against an unfunded answer', async () => {
@@ -245,5 +246,98 @@ describe.skipIf(!adaptiveTier)('server-supplied first snapshot (W11, T-BA14 exte
     const page = await commands.uiFetchDocument(`${origin}/`);
     expect(page.status).toBe(200);
     expect(documentSeed(page.html)).toBeUndefined();
+  });
+});
+
+/** Navigate inside the loaded app, as a link click does: the router's own navigation, no document request. */
+const navigateInApp = async (path: string): Promise<void> => {
+  await target.evaluate(async (to: string) => {
+    const router = (globalThis as unknown as { __reactRouterDataRouter: { navigate: (path: string) => Promise<void> } })
+      .__reactRouterDataRouter;
+    await router.navigate(to);
+  }, path);
+};
+
+const usageHeading = selectors.getByRole('heading', { name: 'Tau usage' });
+const notFoundHeading = selectors.getByRole('heading', { name: 'Page not found' });
+
+describe.skipIf(!adaptiveTier)('/usage on the one web build (W12 ruling 1)', () => {
+  afterEach(async () => {
+    await commands.uiStopSeededServers();
+  });
+
+  test('renders the usage page against a funded API, in the server HTML on a direct load and after an in-app navigation', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.status).toBe(200);
+    expect(page.html).toMatch(/<h1[^>]*>Tau usage/u);
+    expect(documentSeed(page.html)).toEqual({ state: 'funded', basis: 'confirmed', environment: 'development' });
+    await recordPageErrors();
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(usageHeading, 60_000);
+    expect(await hydrationErrors()).toEqual([]);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(usageHeading, 30_000);
+  });
+
+  test('shows not-found against an unfunded API, on a direct load and after an in-app navigation', async () => {
+    const origin = await commands.uiStartSeededServer('unfunded');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.html).toMatch(/<h1[^>]*>Page not found/u);
+    await recordPageErrors();
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(notFoundHeading, 60_000);
+    expect(await hydrationErrors()).toEqual([]);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(notFoundHeading, 30_000);
+  });
+
+  test('checks, then says it cannot check with a Retry, against a blackholed route (I15), on both loads', async () => {
+    const origin = await commands.uiStartSeededServer('blackholed');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.milliseconds).toBeLessThan(5000);
+    expect(page.html).toContain('Checking this server');
+    const cannotCheck = selectors.getByText('Can’t check this server’s billing right now.');
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(cannotCheck, 30_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Retry' }), 5000);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(cannotCheck, 30_000);
+  });
+});
+
+describe.skipIf(!adaptiveTier)('prerendered shells (W12 ruling 2)', () => {
+  test('moves no content when a late funded answer shows the Cloud surfaces on Home', async () => {
+    await cloud.uiInstallCloudStandIns();
+    await commands.uiRouteDeploymentAnswer('funded');
+    await commands.uiDelayTargetRequests(deploymentPattern, 'until-released');
+    const chunks = await commands.uiCloudChunkPaths();
+    await commands.uiStartObservedRequests();
+    await home();
+    await target.delay(settleWindow);
+    await target.evaluate(() => {
+      const shifts: number[] = [];
+      (globalThis as unknown as { tauLayoutShifts: number[] }).tauLayoutShifts = shifts;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as Array<PerformanceEntry & { value: number; hadRecentInput: boolean }>) {
+          if (!entry.hadRecentInput) {
+            shifts.push(entry.value);
+          }
+        }
+      }).observe({ type: 'layout-shift' });
+    });
+    await commands.uiReleaseTargetRequests();
+    await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    await target.delay(settleWindow);
+    const shifted = await target.evaluate(() =>
+      (globalThis as unknown as { tauLayoutShifts: number[] }).tauLayoutShifts.reduce((sum, value) => sum + value, 0),
+    );
+    expect(shifted).toBe(0);
   });
 });

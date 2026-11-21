@@ -50,9 +50,8 @@ env:
   # Nx remote cache, read only (no environment, no `id-token: write`); the server is set only when a token is present.
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
-  # The e2e fixture both builds are made for, as ci.yml sets it workflow-wide. `TAU_CLOUD_ENABLED` is not set here, so
-  # both desktop builds carry the shipped renderer (`adaptive` since the adaptive app deployment mode flip, W8; the base
-  # release's may predate it); the target sets it for its own cloud web UI build.
+  # The e2e fixture both builds are made for, as ci.yml sets it workflow-wide. Both desktop builds carry the one
+  # adaptive renderer (adaptive app deployment mode W12; the base release's may predate it).
   TAU_API_URL: http://localhost:4000
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000

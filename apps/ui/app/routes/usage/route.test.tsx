@@ -6,6 +6,12 @@ import { wireUsageSnapshotSchema } from '@taucad/billing';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import UsagePage from '#routes/usage/route.js';
 
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+
 const useUsageSnapshot = vi.hoisted(() => vi.fn());
 const useCredits = vi.hoisted(() => vi.fn());
 const useOpenHolds = vi.hoisted(() => vi.fn());

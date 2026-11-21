@@ -131,8 +131,8 @@ export default defineConfig({
     csharpAssets.plugin,
     openscadLanguage.plugin,
     cadmpegEnginesManifest,
-    /* A `tau serve` bundle pins `self-host`, whatever `TAU_CLOUD_ENABLED` says (adaptive app deployment mode D12). */
-    createUiSourceAliasPlugin({ emitModuleGraph: true, deploymentCeiling: 'self-host' }),
+    /* A `tau serve` bundle is the one adaptive app: its API's deployment answer decides what it shows (W12). */
+    createUiSourceAliasPlugin({ emitModuleGraph: true }),
     createAssetIntegrity({ receipt: true }),
     tauRuntime(),
     base64Loader,
@@ -142,10 +142,7 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [
-      createUiSourceAliasPlugin({ emitModuleGraph: true, deploymentCeiling: 'self-host' }),
-      createAssetIntegrity({ receipt: false }),
-    ],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true }), createAssetIntegrity({ receipt: false })],
   },
   // The same browser stubs as the web and desktop builds (`@resvg/resvg-js`).
   resolve: { alias: [...uiResolveAlias] },

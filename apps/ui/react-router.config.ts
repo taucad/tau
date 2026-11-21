@@ -1,14 +1,11 @@
 import type { Config } from '@react-router/dev/config';
 import {
   resolveServiceWorkerKillSwitch,
-  resolveTauDeploymentCeiling,
   resolveUiBuildDirectory,
   uiBuildDirectoryVariable,
   serviceWorkerKillSwitchVariable,
 } from './build-environment.ts';
 
-/* `/usage` is prerendered and precached by the `cloud` ceiling only (adaptive app deployment mode D8). */
-const tauCloudEnabled = resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']) === 'cloud';
 /** `TAU_SERVICE_WORKER_KILL_SWITCH=true`: `buildEnd` writes the retiring worker instead of the web app's (PL7). */
 const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
 
@@ -39,7 +36,7 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
-  /* `build` unless CI keeps a second build beside it (`ui:build-self-host`, gate G1). */
+  /* `build` unless `TAU_UI_BUILD_DIRECTORY` names another. */
   buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
   /**
    * Hands the dev dependency optimizer its crawl entries: the client entry and every route
@@ -122,10 +119,7 @@ export default {
     const worker = await buildServiceWorker({
       buildDirectory: reactRouterConfig.buildDirectory,
       workerSourcePath: `${reactRouterConfig.appDirectory}/offline/${serviceWorkerKillSwitch ? 'service-worker-kill-switch.ts' : 'service-worker.ts'}`,
-      // `/usage` is a cloud route: a self-host build neither prerenders nor precaches it.
-      classes: workerRouteClasses().filter(
-        (workerClass) => tauCloudEnabled || workerClass.routeClass.id !== 'offline-shell',
-      ),
+      classes: workerRouteClasses(),
       // Also written at /offline-shell-worker.js, retiring the /usage worker that ui@0.3.0 and earlier registered.
       retiringWorkerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker-kill-switch.ts`,
       killSwitch: serviceWorkerKillSwitch,
@@ -139,7 +133,7 @@ export default {
   prerender: {
     async paths() {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');
-      return listStaticPrerenderPaths().filter((path) => tauCloudEnabled || path !== '/usage');
+      return listStaticPrerenderPaths();
     },
     concurrency: prerenderConcurrency,
   },

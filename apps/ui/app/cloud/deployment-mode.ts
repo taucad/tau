@@ -1,2 +1,33 @@
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- replaced with one build-selected implementation.
-export { createDeploymentOwner, initialDeploymentMode } from '#cloud/deployment-mode.self-host.js';
+import { ENV } from '#environment.config.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
+import { createDeploymentOwner as createOwner } from '#runtime/deployment.js';
+import type { DeploymentOwnerLogic } from '#runtime/deployment.js';
+
+/**
+ * The `adaptive` ceiling's display mode (adaptive app deployment mode charter D2, I13): `unknown` on the server and
+ * in the first client render unless the server rendered the document with its own answer (W11, `#cloud/deployment-seed`),
+ * then whatever the runtime's `deployment` child reports for the origin of `TAU_API_URL`. This is the only module that reaches the owner, so neither pinned build contains it (I10).
+ */
+export const initialDeploymentMode: DeploymentModeSnapshot = { state: 'unknown', problem: 'pending' };
+
+/** What the composition hands the owner. @public */
+export type DeploymentOwnerOptions = Readonly<{
+  /** The runtime's clock, epoch milliseconds; `Date.now` by default. */
+  now?: () => number;
+}>;
+
+/** Build the owner the runtime invokes as `deployment`. @public */
+export type DeploymentOwnerFactory = (options: DeploymentOwnerOptions) => DeploymentOwnerLogic;
+
+/**
+ * The page's API URL, or none during the desktop build's SPA prerender: that render has no `window.ENV` (preload
+ * injects it in the app), and its snapshot is `unknown` whatever the owner holds (I13).
+ */
+const pageApiUrl = (): string | undefined =>
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent during desktop SPA prerender.
+  isDesktopTarget() && globalThis.window === undefined ? undefined : ENV.TAU_API_URL;
+
+/** The adaptive owner over the page's API URL, fetch, `localStorage` and `online` event. */
+export const createDeploymentOwner: DeploymentOwnerFactory | undefined = ({ now }) =>
+  createOwner({ apiUrl: pageApiUrl(), ...(now === undefined ? {} : { now }) });

@@ -7,7 +7,7 @@ import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 // The provider table lives with the self-host card, which is the flavour that
 // needs its billing hosts; Cloud borrows only the display name from it.
-import { providerEntryFrom } from '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js';
+import { providerEntryFrom } from '#routes/w.$workspace.$project/chat-error-provider-account.unfunded.js';
 
 /**
  * Tau Cloud: the supplier account behind Tau's key refused the turn.

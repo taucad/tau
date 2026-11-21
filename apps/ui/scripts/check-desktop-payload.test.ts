@@ -8,7 +8,7 @@ import { join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
-import { desktopCeilingOf, inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
+import { carriesDeploymentOwner, inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -555,37 +555,28 @@ describe('Desktop renderer ownership', () => {
   });
 });
 
-describe('Desktop renderer deployment ceiling (adaptive app deployment mode W6)', () => {
-  it('reads the ceiling from the module graph', () => {
-    expect(desktopCeilingOf(['apps/ui/app/cloud/deployment-ceiling.adaptive.ts'])).toBe('adaptive');
-    expect(desktopCeilingOf(['/abs/apps/ui/app/cloud/deployment-ceiling.cloud.ts'])).toBe('cloud');
-    expect(desktopCeilingOf(['apps/ui/app/cloud/nav-billing.adaptive.tsx'])).toBe('adaptive');
-    expect(desktopCeilingOf(['apps/ui/app/root-layout.tsx'])).toBeUndefined();
-    expect(() =>
-      desktopCeilingOf([
-        'apps/ui/app/cloud/deployment-ceiling.adaptive.ts',
-        'apps/ui/app/cloud/deployment-ceiling.self-host.ts',
-      ]),
-    ).toThrow(/more than one/u);
+describe('Desktop renderer display-mode owner (adaptive app deployment mode W6, W12)', () => {
+  it('reads the owner from the module graph', () => {
+    expect(carriesDeploymentOwner(['apps/ui/app/runtime/deployment.machine.ts'])).toBe(true);
+    expect(carriesDeploymentOwner([String.raw`C:\tau\apps\ui\app\runtime\deployment.machine.ts`])).toBe(true);
+    expect(carriesDeploymentOwner(['apps/ui/app/root-layout.tsx'])).toBe(false);
   });
 
-  it('reports the ceiling and refuses a renderer built for another', async () => {
+  it('reports the owner and refuses a renderer without one when it is required', async () => {
     const paths = await fixture();
-    await writeFile(
-      join(paths.renderer, 'tau-module-graph-123.json'),
-      JSON.stringify({
-        chunks: [
-          {
-            fileName: 'renamed.js',
-            moduleIds: ['apps/ui/app/root-layout.tsx', 'apps/ui/app/cloud/deployment-ceiling.adaptive.ts'],
-          },
-        ],
-      }),
-    );
-    const adaptive = await inspectDesktopPayload({ ...paths, expectedCeiling: 'adaptive' });
-    expect(adaptive.ceiling).toBe('adaptive');
-    expect(adaptive.violations).toEqual([]);
-    const pinned = await inspectDesktopPayload({ ...paths, expectedCeiling: 'self-host' });
-    expect(pinned.violations).toEqual(['Renderer deployment ceiling is adaptive, expected self-host']);
+    const graph = async (moduleIds: string[]): Promise<void> =>
+      writeFile(
+        join(paths.renderer, 'tau-module-graph-123.json'),
+        JSON.stringify({ chunks: [{ fileName: 'renamed.js', moduleIds }] }),
+      );
+    await graph(['apps/ui/app/root-layout.tsx', 'apps/ui/app/runtime/deployment.machine.ts']);
+    const owned = await inspectDesktopPayload({ ...paths, expectDeploymentOwner: true });
+    expect(owned.deploymentOwner).toBe(true);
+    expect(owned.violations).toEqual([]);
+    await graph(['apps/ui/app/root-layout.tsx']);
+    const ownerless = await inspectDesktopPayload({ ...paths, expectDeploymentOwner: true });
+    expect(ownerless.violations).toEqual([
+      'Renderer carries no display-mode owner (apps/ui/app/runtime/deployment.machine.ts)',
+    ]);
   });
 });

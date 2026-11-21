@@ -18,6 +18,16 @@ import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
+
 const githubToken = vi.hoisted(() =>
   vi.fn(async () => ({
     accessToken: 'secret',

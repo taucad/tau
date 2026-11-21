@@ -22,8 +22,7 @@ import { safeModeHref } from '#lib/boot-signals.js';
 const origin = 'https://tau.new';
 const projectDocument = '/w/__shell/__shell/index.html';
 const homeDocument = '/__shell/home/index.html';
-const usageDocument = '/usage/index.html';
-const precached = new Set([projectDocument, homeDocument, usageDocument]);
+const precached = new Set([projectDocument, homeDocument]);
 const isPrecached = (document: string): boolean => precached.has(document);
 
 const navigation = (path: string, overrides: Partial<RequestFacts> = {}): RequestFacts => ({
@@ -43,13 +42,12 @@ const candidateFor = (path: string, overrides?: Partial<RequestFacts>): Navigati
 };
 
 describe('the worker classes', () => {
-  it('should answer the project shell, the Home shell and the usage page from their built documents', () => {
+  it('should answer the project shell and the Home shell from their built documents', () => {
     expect(
       workerClasses.map(({ routeClass, delivery, document }) => ({ id: routeClass.id, delivery, document })),
     ).toStrictEqual([
       { id: 'project', delivery: 'cache-first', document: projectDocument },
       { id: 'home', delivery: 'cache-first', document: homeDocument },
-      { id: 'offline-shell', delivery: 'network-first', document: usageDocument },
     ]);
   });
 });
@@ -61,8 +59,6 @@ describe('navigationCandidate', () => {
     ['/w/acme/proj_01HZ%20x', 'project'],
     ['/', 'home'],
     ['/?source=pwa', 'home'],
-    ['/usage', 'offline-shell'],
-    ['/usage/', 'offline-shell'],
   ])('should take the navigation to %s for the %s class', (path, id) => {
     expect(candidateFor(path).workerClass.routeClass.id).toBe(id);
   });
@@ -83,6 +79,8 @@ describe('navigationCandidate', () => {
     '/health/build',
     '/projects',
     '/settings',
+    // `/usage` is function-rendered since the offline usage shell was retired (adaptive app deployment mode W12).
+    '/usage',
     '/s/published-model',
     '/manifest.webmanifest',
   ])('should leave the navigation to %s to the browser', (path) => {
@@ -98,8 +96,7 @@ describe('navigationCandidate', () => {
   });
 
   it('should leave a class to the browser when its document is not in this worker’s precache', () => {
-    // A self-host build has no `/usage` route, so its worker precaches no usage document.
-    expect(navigationCandidate(navigation('/usage'), origin, (document) => document !== usageDocument)).toBeUndefined();
+    expect(navigationCandidate(navigation('/'), origin, (document) => document !== homeDocument)).toBeUndefined();
   });
 });
 
@@ -156,10 +153,6 @@ describe('answerNavigation', () => {
     expect(answer('/', { tauEntry: 'website' })).toStrictEqual({ kind: 'network' });
     expect(answer('/?website', { tauEntry: 'app' })).toStrictEqual({ kind: 'network' });
     expect(answer('/?utm_source=launch&ref=hn')).toStrictEqual({ kind: 'network' });
-  });
-
-  it('should answer the usage page network-first, whatever the cache mode', () => {
-    expect(answer('/usage')).toStrictEqual({ kind: 'network-first', document: usageDocument });
   });
 });
 

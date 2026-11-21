@@ -1041,6 +1041,11 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
       );
     },
   );
+  /* One build (adaptive app deployment mode W12): the cloud-load tier's stand-in API is Tau Cloud's, so its
+   * deployment route answers funded. A spec's own deployment route, registered later, still wins. */
+  if (process.env[cloudLoadTierVariable] === 'true') {
+    await routeDeploymentAnswer(context, 'funded');
+  }
 };
 
 /** Change how long each stand-in answer is held, for the requests that arrive from now on. */
@@ -2333,7 +2338,10 @@ export const uiRouteDeploymentAnswer: BrowserCommand<[answer: DeploymentAnswerSt
   commandContext,
   answer,
 ) => {
-  const { context } = sessionFor(commandContext);
+  await routeDeploymentAnswer(sessionFor(commandContext).context, answer);
+};
+
+const routeDeploymentAnswer = async (context: ProviderContext, answer: DeploymentAnswerStub): Promise<void> => {
   await context.route(/\/v1\/deployment(?:\?|$)/u, async (route, request) => {
     await route.fulfill({
       status: 200,

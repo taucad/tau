@@ -95,15 +95,6 @@ describe('data requests', () => {
       });
     });
 
-    it('keeps the offline shell neutral on its .data request, without reading the model catalog', async () => {
-      const handler = handlerFor({ id: 'routes/usage', path: 'usage', module: { default: () => null } });
-
-      const result = await requestData(handler, 'https://tau.new/usage', ['root']);
-
-      expect(result).toMatchObject({ kind: 'routes', routes: { root: { data: { queries: undefined } } } });
-      expect(mocks.prefetchModelCatalog).not.toHaveBeenCalled();
-    });
-
     it('reads the model catalog on any other page', async () => {
       const handler = handlerFor({ id: 'routes/projects', path: 'projects', module: { default: () => null } });
 

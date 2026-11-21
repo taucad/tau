@@ -3,11 +3,10 @@
  * Gate G1's one-way dependency (adaptive app deployment mode charter, Principal ruling on the request bound): the Cloud
  * chunk must not share a module with a route chunk, because rolldown gives every such module a chunk of its own and
  * each one is a request on Home or the project route. Walked from `cloud-surfaces.lazy.tsx` the way the build resolves
- * it (`ceilingSpecifier`: the chunk's own imports as the `cloud` ceiling, every other import as `adaptive`), the
- * chunk's own code (the Cloud-only modules it reaches) imports, at its first Core hop:
+ * it, the chunk's own code (the Cloud-only modules it reaches) imports, at its first Core hop:
  *
- * - reaches no facade or self-host rendering (`*.adaptive.*`, `*.self-host.*`): those are Core, so reaching one means
- *   a Cloud implementation went through a facade;
+ * - reaches no facade outside `cloud/` and no unfunded rendering (`*.unfunded.*`): those are Core, so reaching one
+ *   means a Cloud implementation went through a facade;
  * - reaches no route module but the Cloud-only credit leaves;
  * - reaches no other Core module beyond the reviewed list below, which holds the modules every route already loads.
  *   A new entry is a new shared module: render it in Core and hand the chunk a leaf, or give the chunk its own copy
@@ -16,8 +15,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-// oxlint-disable-next-line no-restricted-imports -- this test walks the graph with the build's own alias rule.
-import { ceilingSpecifier } from './vite.config.js';
 
 const appRoot = join(import.meta.dirname, 'app');
 const cloudEntry = join(appRoot, 'cloud/cloud-surfaces.lazy.tsx');
@@ -47,16 +44,26 @@ const reviewedCoreModules = new Map<string, string>([
   ],
 ]);
 
+/** The facades outside `cloud/`: Core modules that mount a Cloud rendering through `FundedSurface`. */
+const facadeModules = new Set([
+  'components/chat/chat-model-selector.tsx',
+  'components/icons/svg-sprite-mount.tsx',
+  'hooks/use-credit-preflight.ts',
+  'routes/w.$workspace.$project/chat-details-usage.tsx',
+  'routes/w.$workspace.$project/chat-error-credits.tsx',
+  'routes/w.$workspace.$project/chat-error-provider-account.tsx',
+  'routes/w.$workspace.$project/chat-message-data-usage.tsx',
+]);
+
 const isCloudOnly = (module: string): boolean =>
-  module.startsWith('cloud/') || /\.cloud\.tsx?$/u.test(module) || cloudOnlyRouteModules.has(module);
+  module.startsWith('cloud/') || /\.funded\.tsx?$/u.test(module) || cloudOnlyRouteModules.has(module);
 
 /** The `#` specifiers a file imports at run time: static imports and re-exports, never `import type`. */
 const runtimeSpecifiers = (source: string): string[] =>
   [...source.matchAll(/^(?:import|export)(?!\s+type\b)[^'"]*?from\s+'(#[^']+)'/gmu)].map(([, specifier]) => specifier);
 
-const resolveSpecifier = (specifier: string, importer: string): string | undefined => {
-  const ceiling = importer === cloudEntry ? 'cloud' : 'adaptive';
-  const resolved = ceilingSpecifier(specifier.split('?')[0] ?? specifier, ceiling);
+const resolveSpecifier = (specifier: string): string | undefined => {
+  const resolved = specifier.split('?')[0] ?? specifier;
   const base = join(appRoot, resolved.slice(1)).replace(/\.js$/u, '');
   return [`${base}.ts`, `${base}.tsx`, `${base}.js`, base].find((candidate) => existsSync(candidate));
 };
@@ -74,12 +81,11 @@ const coreImportsOfCloudChunk = (): Set<string> => {
   while (queue.length > 0) {
     const file = queue.pop()!;
     for (const specifier of runtimeSpecifiers(readFileSync(file, 'utf8'))) {
-      const target = resolveSpecifier(specifier, file);
+      const target = resolveSpecifier(specifier);
       if (target === undefined || seen.has(target)) {
         continue;
       }
       seen.add(target);
-      /* What the entry names is a Cloud implementation, whatever its file is called (the unsuffixed model selector). */
       if (file === cloudEntry || isCloudOnly(toModule(target))) {
         queue.push(target);
       } else {
@@ -93,8 +99,8 @@ const coreImportsOfCloudChunk = (): Set<string> => {
 describe('the Cloud chunk shares no module with a route chunk (gate G1)', () => {
   const modules = coreImportsOfCloudChunk();
 
-  it('reaches no facade and no self-host rendering', () => {
-    expect([...modules].filter((module) => /\.(?:adaptive|self-host)\.tsx?$/u.test(module))).toEqual([]);
+  it('reaches no facade and no unfunded rendering', () => {
+    expect([...modules].filter((module) => facadeModules.has(module) || /\.unfunded\.tsx?$/u.test(module))).toEqual([]);
   });
 
   it('reaches no route module but its own credit leaves', () => {

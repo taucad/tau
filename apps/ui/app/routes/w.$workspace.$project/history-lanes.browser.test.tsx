@@ -31,7 +31,7 @@ vi.hoisted(() => {
 });
 /* eslint-enable @typescript-eslint/naming-convention -- back to the workspace rule for the rest of the file. */
 vi.mock('#cloud/commercial-features.js', async () => {
-  const cloud = await import('#cloud/commercial-features.cloud.js');
+  const cloud = await import('#cloud/commercial-features.funded.js');
   return { CommercialUpgradeLabel: cloud.CommercialUpgradeLabel, useCommercialFeatures: () => ({}) };
 });
 const projectSnapshot = { context: { project: { syncChats: true, name: 'Sensor enclosure' } } };

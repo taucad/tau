@@ -1,6 +1,5 @@
 # Build
 build
-build-self-host
 dist
 
 # Public

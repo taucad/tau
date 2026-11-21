@@ -35,6 +35,8 @@ vi.mock('#hooks/use-revision-status.js', () => {
     useRevisionStatus: () => status,
     useRevisionCommands: () => commands,
     useProjectRole: () => 'owner',
+    /* The link's revision is the head of `main`, so the pane never asks the client how far they diverge. */
+    useRevisionClient: () => undefined,
   };
 });
 vi.mock('#lib/share-providers.js', async (importOriginal) => ({

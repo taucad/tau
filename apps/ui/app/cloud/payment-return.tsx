@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCredits } from '@taucad/billing-ui/utils/credits.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { isDesktopTarget } from '#lib/build-target.js';

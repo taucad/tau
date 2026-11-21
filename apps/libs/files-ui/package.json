@@ -116,7 +116,6 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
-    "@taucad/project-workspace": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/types": "workspace:*",

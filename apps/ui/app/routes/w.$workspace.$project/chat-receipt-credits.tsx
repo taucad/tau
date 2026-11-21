@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCredits } from '@taucad/billing-ui/utils/credits.utils';
 import type { UsageData } from '@taucad/chat';
 import { formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
 import type { WireOperationReceipt } from '@taucad/billing';

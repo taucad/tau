@@ -21,8 +21,8 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { ChangeIndicator } from '@taucad/chat-ui/components/change-indicator';
 import { OpenRenderButton } from '@taucad/files-ui/components/files/open-render-button';
 import { shouldShowOpenRenderButton } from '@taucad/files-ui/components/files/open-render-button.ignore';
-import type { CodeLanguage } from '@taucad/ui-core/lib/code-language-resolution';
-import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import type { CodeLanguage } from '@taucad/editor-ui/lib/code-language-resolution';
+import { resolveHighlightLanguageForPath } from '@taucad/editor-ui/lib/code-language-resolution';
 
 const fileOperationActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
 

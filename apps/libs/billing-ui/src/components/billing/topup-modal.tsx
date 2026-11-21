@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleCheck, ExternalLink, Info, LoaderCircle } from 'lucide-react';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCredits } from '#utils/credits.utils.js';
 import {
   formatUsdMinor,
   formatUsdTotalMinor,

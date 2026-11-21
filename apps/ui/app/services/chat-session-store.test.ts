@@ -26,7 +26,7 @@ import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';

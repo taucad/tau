@@ -41,6 +41,7 @@
     "./components/share/tau-publication": "./src/components/share/tau-publication.tsx",
     "./components/share/use-view-ping": "./src/components/share/use-view-ping.ts",
     "./hooks/use-publish-cloud-project-preview": "./src/hooks/use-publish-cloud-project-preview.ts",
+    "./lib/builtin-share-provider-descriptor": "./src/lib/builtin-share-provider-descriptor.ts",
     "./lib/github-url": "./src/lib/github-url.ts",
     "./machines/import-disk.machine": "./src/machines/import-disk.machine.ts",
     "./machines/import-github.machine": "./src/machines/import-github.machine.ts",

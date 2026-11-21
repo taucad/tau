@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
-import { browserHostLabels, closeParameterActors, hostBuildOf } from '#workers/agent-host.impl.js';
+import { browserHostLabels, closeParameterActors, hostBuildOf, swappable } from '#workers/agent-host.impl.js';
 
 /* W6.r2 M1 (D15): a parameter actor's close is bounded; one past the bound or left uncertain is stopped, and a
  * retried close passes a stopped actor instead of waiting the bound again. */
@@ -66,5 +66,72 @@ describe('browserHostLabels', () => {
   it('sends no build for the unknown label, as its evidence reports none', () => {
     expect(browserHostLabels('0000000')).toEqual({ kind: 'browser' });
     expect(browserHostLabels(undefined)).toEqual({ kind: 'browser' });
+  });
+});
+
+/* A rebridge swaps a slot's target while a turn's call may be under way on the old one: that call finishes there, and
+ * the old target is released only once it settles. Disposing it under the call failed the turn's start `HOST_FAULT`
+ * ("Bridge proxy closed") in agent-host-recovery's `bridges` case. */
+describe('swappable', () => {
+  const target = (name: string) => {
+    const reads = Promise.withResolvers<string>();
+    return {
+      name,
+      reads,
+      read: vi.fn(async () => reads.promise),
+      peek: vi.fn(() => name),
+    };
+  };
+
+  it('should finish a call on the target it started on, and release that target only once the call settles', async () => {
+    const finish = vi.fn();
+    const first = target('first');
+    const second = target('second');
+    const slot = swappable(first, finish);
+
+    const underway = slot.view.read();
+    slot.retire(slot.swap(second));
+
+    expect(finish).not.toHaveBeenCalled();
+    expect(slot.view.peek()).toBe('second');
+    first.reads.resolve('from first');
+    await expect(underway).resolves.toBe('from first');
+    await vi.waitFor(() => {
+      expect(finish).toHaveBeenCalledExactlyOnceWith(first);
+    });
+    expect(second.read).not.toHaveBeenCalled();
+  });
+
+  it('should release a replaced target at once when nothing is under way, and after a call that fails', async () => {
+    const finish = vi.fn();
+    const first = target('first');
+    const second = target('second');
+    const third = target('third');
+    const slot = swappable(first, finish);
+
+    slot.retire(slot.swap(second));
+    expect(finish).toHaveBeenCalledExactlyOnceWith(first);
+
+    const failing = slot.view.read();
+    slot.retire(slot.swap(third));
+    expect(finish).toHaveBeenCalledOnce();
+    second.reads.reject(new Error('peer gone'));
+    await expect(failing).rejects.toThrow('peer gone');
+    await vi.waitFor(() => {
+      expect(finish).toHaveBeenLastCalledWith(second);
+    });
+  });
+
+  it('should release the current target and every one still waiting on its calls when closed', () => {
+    const finish = vi.fn();
+    const first = target('first');
+    const second = target('second');
+    const slot = swappable(first, finish);
+
+    void slot.view.read();
+    slot.retire(slot.swap(second));
+    slot.close();
+
+    expect(finish.mock.calls).toEqual([[second], [first]]);
   });
 });

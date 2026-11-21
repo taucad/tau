@@ -27,6 +27,14 @@ export const resolveTauBuildRelease = (
  */
 export const unstampedBuildRelease = '@TAU_RELEASE';
 
+/**
+ * What the server graph's `tauRetainedBuildFloor` holds until `scripts/retain-previous-assets.mts` stamps the oldest
+ * build whose assets the deploy serves over it (FP2). Thirteen characters, like a build id (milliseconds since the
+ * epoch, until the year 2286), so stamping keeps every byte offset; not a build id, so an unstamped build reports no
+ * retained floor.
+ */
+export const unstampedRetainedBuildFloor = '@TAU_RETAINED';
+
 /** Whether a value is a stamped release label (12 hex, as {@link resolveTauBuildRelease} gives). */
 export const isStampedBuildRelease = (value: string): boolean => /^[\da-f]{12}$/u.test(value);
 

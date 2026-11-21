@@ -16,7 +16,7 @@ import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { DraftAttachmentModel } from '@taucad/chat-ui/hooks/draft.machine';
 import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
-import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),

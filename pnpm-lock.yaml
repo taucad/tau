@@ -3973,9 +3973,6 @@ importers:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
-      '@taucad/project-workspace':
-        specifier: workspace:*
-        version: link:../project-workspace
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../../../packages/revisions
@@ -4480,9 +4477,6 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
-      '@taucad/billing':
-        specifier: workspace:*
-        version: link:../billing
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
@@ -4492,9 +4486,6 @@ importers:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
-      '@taucad/grammars':
-        specifier: workspace:*
-        version: link:../../../libs/grammars
       '@taucad/kinematics':
         specifier: workspace:*
         version: link:../../../packages/kinematics
@@ -4504,9 +4495,6 @@ importers:
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../../../packages/revisions
-      '@taucad/share':
-        specifier: workspace:*
-        version: link:../share
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types

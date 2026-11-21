@@ -109,6 +109,8 @@ describe('the service worker kill switch (PL7)', () => {
       // A fixed worker's (FP3): its precache and asset cache carry the cache version.
       'tau-precache-v3-https://tau.new/',
       'tau-assets-v3',
+      // The worker's state (the last build floor, FP2).
+      'tau-state-v3',
       // The retired worker's cache for one shell version (`offlineShellCacheName`, shipped up to ui@0.3.0).
       'tau-offline-shell-3f9a2c1d0b7e',
     ]) {

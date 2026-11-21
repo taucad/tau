@@ -49,7 +49,7 @@ import {
   timelineRowContent,
   timelineRowHover,
 } from '@taucad/revisions-ui/components/revisions/revision-timeline';
-import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import { resolveHighlightLanguageForPath } from '@taucad/editor-ui/lib/code-language-resolution';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';

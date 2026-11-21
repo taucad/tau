@@ -65,7 +65,7 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { externalAgentRefusalReasons } from '@taucad/ui-core/lib/external-agent';
+import { externalAgentRefusalReasons } from '@taucad/chat-ui/utils/external-agent';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModels } from '@taucad/chat-ui/utils/model-groups';

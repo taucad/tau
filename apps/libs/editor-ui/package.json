@@ -57,6 +57,7 @@
     "./lib/bundled-types-lazy": "./src/lib/bundled-types-lazy.ts",
     "./lib/bundled-types-mount": "./src/lib/bundled-types-mount.ts",
     "./lib/bundled-types-sentinel": "./src/lib/bundled-types-sentinel.ts",
+    "./lib/code-language-resolution": "./src/lib/code-language-resolution.ts",
     "./lib/csharp-language/csharp-codemirror": "./src/lib/csharp-language/csharp-codemirror.ts",
     "./lib/editor-diagnostics": "./src/lib/editor-diagnostics.ts",
     "./lib/editor-document-session": "./src/lib/editor-document-session.ts",

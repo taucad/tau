@@ -428,6 +428,7 @@ describe('web boot watchdog Reload under a service worker (FP5)', () => {
       'tau-runtime-https://tau.new/',
       'tau-assets',
       'tau-assets-v3',
+      'tau-state-v3',
       'tau-offline-shell-3f9a2c1d0b7e',
       'taunt',
       'tau-billing',

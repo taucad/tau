@@ -331,7 +331,6 @@ export const uiLibraryDependencyDebt = [
   { source: 'editor-ui', target: 'chat-ui', work: 'W4' },
   { source: 'editor-ui', target: 'files-ui', work: 'W4' },
   { source: 'files-ui', target: 'chat-ui', work: 'W5' },
-  { source: 'files-ui', target: 'project-workspace', work: 'W5' },
 ];
 
 const uiLibraryConstraints = Object.entries(uiLibraryDependencies).map(([name, dependencies]) => ({

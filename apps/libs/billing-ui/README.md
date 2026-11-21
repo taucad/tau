@@ -29,6 +29,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/usage/usage-summary-cards`         | `UsageSummaryCards`                                                                                                                         |
 | `./components/usage/usage-table`                 | `UsageTable`, the activity rows and each row's credit explanation                                                                           |
 | `./components/usage/use-chat-name`               | `useChatName` and the `ChatRecordsReader` it is given                                                                                       |
+| `./utils/credits.utils`                          | `formatCredits`, whole credits with a unit that matches the amount                                                                          |
 | `./components/usage/use-usage-filters`           | `useUsageFilters` and the filter options                                                                                                    |
 | `./components/usage/charts/credit-usage-tooltip` | `CreditUsageTooltip`                                                                                                                        |
 | `./components/usage/charts/usage-bar-chart`      | `UsageBarChart`                                                                                                                             |

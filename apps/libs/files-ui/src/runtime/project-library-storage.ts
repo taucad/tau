@@ -13,7 +13,7 @@
  *
  * @module
  */
-import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
+import { declaresManifest } from '@taucad/ui-core/utils/project-manifest-equivalence';
 import type { QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { serializeProjectManifest } from '@taucad/types';

@@ -27,6 +27,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/share/tau-publication`             | `createPublicationLoader` (API base injected), `publicationMeta` and the viewer route surfaces |
 | `./components/share/use-view-ping`               | `useViewPing`, the publication view counter ping                                               |
 | `./hooks/use-publish-cloud-project-preview`      | `usePublishCloudProjectPreview` and `publishCloudProjectPreview`: the saved catalog preview    |
+| `./lib/builtin-share-provider-descriptor`        | `builtinShareProviderDescriptor`, the Tau catalog share provider's metadata                    |
 | `./lib/github-url`                               | `parseGitHubUrl` and `normalizeRepositoryFolder`, the import's repository address parsing      |
 | `./machines/import-disk.machine`                 | `importDiskMachine`; the route injects the planner and the main-file picker                    |
 | `./machines/import-github.machine`               | `importGitHubMachine`; the route injects the GitHub client (`githubClient` input)              |

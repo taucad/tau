@@ -70,13 +70,11 @@ const agentProtocol = ['agent-host', 'agent-observability', 'agent-tools', 'chat
 
 /** The projects outside the UI app libraries that L0 may depend on: the platform and the shared app libraries. */
 const foundationTargets = new Set([
-  'billing',
   'events',
   'filesystem',
   'json-schema',
   'preferences',
   'project-core',
-  'share',
   'taucad-ui',
   'telemetry',
   'types',
@@ -88,7 +86,6 @@ const foundationProtocolDebt: readonly DebtEdge[] = [{ source: 'ui-core', target
 
 /** L0's domain-package edges. The W7 rows wait on owner libraries. */
 const foundationPackageDebt: readonly DebtEdge[] = [
-  { source: 'ui-core', target: 'grammars', work: 'W2' },
   { source: 'ui-core', target: 'kinematics', work: 'W7' },
   { source: 'ui-core', target: 'parameters', work: 'W7' },
   { source: 'ui-core', target: 'revisions', work: 'W7' },

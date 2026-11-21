@@ -60,6 +60,7 @@
     "./lib/pending-payment-actions-purge": "./src/lib/pending-payment-actions-purge.ts",
     "./providers/billing-legal-links-provider": "./src/providers/billing-legal-links-provider.tsx",
     "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
+    "./utils/credits.utils": "./src/utils/credits.utils.ts",
     "./package.json": "./package.json"
   },
   "imports": {

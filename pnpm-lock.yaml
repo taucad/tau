@@ -4699,9 +4699,6 @@ importers:
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui
-      '@taucad/workbench-panes':
-        specifier: workspace:*
-        version: link:../../../packages/workbench-panes
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -8240,6 +8237,15 @@ importers:
         specifier: ^1.1.2
         version: 1.1.2(patch_hash=4d7c126bc95e7c5da45a5950038e40ad0e127dbf041cd91a85fd7d8fe64380a4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
+      '@taucad/nx':
+        specifier: workspace:*
+        version: link:../../tools/nx
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.6.3

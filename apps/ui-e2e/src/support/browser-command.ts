@@ -2358,7 +2358,7 @@ type SeededDeploymentAnswer = DeploymentAnswerStub | 'blackholed';
 const seededServers: Array<{ ui: ChildProcess; api: Server }> = [];
 
 const listenOnFreePort = async (server: Server): Promise<number> =>
-  new Promise((resolvePort, reject) => {
+  new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
@@ -2366,16 +2366,16 @@ const listenOnFreePort = async (server: Server): Promise<number> =>
         reject(new Error('The stand-in has no TCP port.'));
         return;
       }
-      resolvePort(address.port);
+      resolve(address.port);
     });
   });
 
 const freePort = async (): Promise<number> => {
   const probe = createServer();
   const port = await listenOnFreePort(probe);
-  await new Promise<void>((resolveClose) => {
+  await new Promise<void>((resolve) => {
     probe.close(() => {
-      resolveClose();
+      resolve();
     });
   });
   return port;
@@ -2412,23 +2412,18 @@ export const uiStartSeededServer: BrowserCommand<[answer: SeededDeploymentAnswer
   const uiPort = await freePort();
   const origin = `http://localhost:${uiPort}`;
   const uiRoot = resolve(import.meta.dirname, '../../../ui');
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  environment['PORT'] = String(uiPort);
+  environment['NODE_ENV'] = 'production';
+  environment['TAU_DEBUG'] = 'true';
+  environment['TAU_API_URL'] = `http://127.0.0.1:${apiPort}`;
+  environment['TAU_WEBSOCKET_URL'] = `ws://127.0.0.1:${apiPort}`;
+  environment['TAU_FRONTEND_URL'] = origin;
+  environment['TAU_E2E_UI_BUILD_ROOT'] = resolve(uiRoot, process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build');
   const ui = spawn(
     'node',
     ['--import', '@oxc-node/core/register', resolve(import.meta.dirname, '../../production-server.ts')],
-    {
-      cwd: uiRoot,
-      env: {
-        ...process.env,
-        PORT: String(uiPort),
-        NODE_ENV: 'production',
-        TAU_DEBUG: 'true',
-        TAU_API_URL: `http://127.0.0.1:${apiPort}`,
-        TAU_WEBSOCKET_URL: `ws://127.0.0.1:${apiPort}`,
-        TAU_FRONTEND_URL: origin,
-        TAU_E2E_UI_BUILD_ROOT: resolve(uiRoot, process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build'),
-      },
-      stdio: 'inherit',
-    },
+    { cwd: uiRoot, env: environment, stdio: 'inherit' },
   );
   seededServers.push({ ui, api });
   const deadline = Date.now() + 60_000;
@@ -2437,7 +2432,6 @@ export const uiStartSeededServer: BrowserCommand<[answer: SeededDeploymentAnswer
       throw new Error(`The seeded UI server exited with ${ui.exitCode}.`);
     }
     try {
-      // oxlint-disable-next-line no-await-in-loop -- polls one server until it answers.
       const response = await fetch(`${origin}/health/build`);
       if (response.ok) {
         return origin;
@@ -2448,9 +2442,8 @@ export const uiStartSeededServer: BrowserCommand<[answer: SeededDeploymentAnswer
     if (Date.now() > deadline) {
       throw new Error(`The seeded UI server at ${origin} did not start within 60 s.`);
     }
-    // oxlint-disable-next-line no-await-in-loop -- polls one server until it answers.
-    await new Promise((resolveWait) => {
-      setTimeout(resolveWait, 250);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
     });
   }
 };

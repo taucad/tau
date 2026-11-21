@@ -41,14 +41,14 @@
 # The Node CI runs Nx under (`.github/actions/setup-nx` `node-version`). `nx.json` hashes
 # `node --version` into every task, so any other version here misses every remote cache
 # entry CI wrote (`scripts/src/nx-cache-inputs.test.ts` keeps the two equal).
-ARG NODE_VERSION=24.20.0
+ARG NODE_VERSION=26.13.1
 ARG PNPM_VERSION=10.30.3
 # Pinned (charter W8): see the runtime-base stage.
 ARG GIT_VERSION=1:2.39.5-0+deb12u3
 ARG GIT_LFS_VERSION=3.3.0-1+deb12u1
 
 # ── Base ──────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-slim AS base
+FROM node:${NODE_VERSION}-bookworm-slim AS base
 ARG PNPM_VERSION
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -113,7 +113,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
 # ── Runtime base (shared by the API and the private apps) ─────────────────
-FROM node:${NODE_VERSION}-slim AS runtime-base
+FROM node:${NODE_VERSION}-bookworm-slim AS runtime-base
 WORKDIR /app
 
 # The Tau Hosted Remote is git's own binaries behind HTTP (charter D15):

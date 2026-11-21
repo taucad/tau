@@ -644,10 +644,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     const { page, live, failures } = await open();
     const chunk = thumbnailServiceChunk();
     // Opened as a document, so no idle prefetch from another page has the chunk in the HTTP cache first.
-    let fired = false;
-    void live.failNext(chunk).then(() => {
-      fired = true;
-    });
+    void live.failNext(chunk);
     /* Worked on from the start, as the staging tab was: the page offers a reload instead of taking one, so only the
      * route itself can stay standing. The page's recovery counts any input, whoever dispatched it, once its listeners
      * are in place, which the entry's own import decides. */
@@ -667,7 +664,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
 
     expect(
       await page.getByRole('heading', { name: 'Something went wrong' }).count(),
-      `part preview chunk failed: ${String(fired)}; module load errors: ${JSON.stringify(failures)}`,
+      `part preview chunk requests: ${String(live.requestCount(chunk))}; module load errors: ${JSON.stringify(failures)}`,
     ).toBe(0);
     expect(await page.getByText('Channel closed').count()).toBe(0);
     expect(live.documents).toStrictEqual(['previous']);

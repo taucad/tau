@@ -70,6 +70,12 @@ export const setWorkerCodeLoadHandler = (next: WorkerCodeLoadHandler | undefined
 export type CreateModuleWorkerOptions = Readonly<{
   /** The worker's name in reports and bounds, such as `agent-host`. */
   name: string;
+  /**
+   * The worker's owner hears its code failing to load, once, after the page's handler and before any `error` listener
+   * the owner adds itself: a transport that sees only its channel close then knows why, and starts the next worker
+   * within the page's bound (`workerReplacement`) instead of reporting a closed channel.
+   */
+  onCodeLoadFailure?: (failure: WorkerCodeLoadError) => void;
 }>;
 
 const isFailureMessage = (data: unknown): data is WorkerCodeLoadFailureMessage =>
@@ -107,6 +113,11 @@ export const createModuleWorker = (construct: () => Worker, options: CreateModul
       handler?.(failure);
     } catch {
       // The page's own fault never replaces the failure the worker's owner handles.
+    }
+    try {
+      options.onCodeLoadFailure?.(failure);
+    } catch {
+      // The owner's fault never stops the worker's own `error` event.
     }
   };
   // First, so the worker's own protocol never sees the factory's message.

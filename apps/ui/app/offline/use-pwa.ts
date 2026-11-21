@@ -18,12 +18,10 @@
  */
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { Topic } from '@taucad/events';
 import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { readReportedBuildFloor, subscribeReportedBuildFloor } from '#lib/build-identity.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
-import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -89,30 +87,6 @@ export const leaveServiceWorker = async (): Promise<void> => {
 
 /** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
 export const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
-
-let installStatus: ServiceWorkerInstallStatus | undefined;
-const installStatusTopic = new Topic<void>({ name: 'service-worker-install-status' });
-
-/**
- * Record an install outcome the worker or the registration reported.
- *
- * @param status - The outcome.
- */
-const setInstallStatus = (status: ServiceWorkerInstallStatus): void => {
-  installStatus = status;
-  installStatusTopic.emit();
-};
-
-/** The last install outcome this page heard: an install or quota failure is shown, never swallowed. */
-export const readInstallStatus = (): ServiceWorkerInstallStatus | undefined => installStatus;
-
-/**
- * Subscribe to {@link readInstallStatus}.
- *
- * @param listener - Called after each change.
- * @returns Unsubscribes.
- */
-export const subscribeInstallStatus = (listener: () => void): (() => void) => installStatusTopic.subscribe(listener);
 
 /**
  * Run `start` once the page has loaded and the main thread is idle.
@@ -183,7 +157,8 @@ export function useServiceWorker(): void {
               inWorkspace,
               verdict: { readServerVerdict, subscribeServerVerdict, queryLiveBuild },
               buildFloor: { readReportedBuildFloor, subscribeReportedBuildFloor },
-              onInstallStatus: setInstallStatus,
+              /* No page shows the install outcome since the offline usage shell was retired (W12). */
+              onInstallStatus: () => undefined,
               buildId,
             });
           }

@@ -14,7 +14,7 @@ import type { CloudSurfacesModule } from '#cloud/cloud-entries.js';
  */
 
 /** The funded mode a test renders under. */
-export const fundedTestMode: DeploymentModeSnapshot = {
+const fundedTestMode: DeploymentModeSnapshot = {
   state: 'funded',
   basis: 'confirmed',
   environment: 'development',

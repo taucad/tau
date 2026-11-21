@@ -847,7 +847,6 @@
     "app/worker-optimize-deps-entries.node.test.ts": 0.6,
     "app/workers/agent-host-projects.test.ts": 1.1,
     "app/workers/agent-host-relayed-provider.test.ts": 3.5,
-    "app/workers/agent-host-revisions.test.ts": 0.3,
     "app/workers/agent-host.impl.test.ts": 3.4,
     "app/workers/geospec-runner.candidate.test.ts": 0.7,
     "app/workers/geospec-runner.client.test.ts": 1.8,

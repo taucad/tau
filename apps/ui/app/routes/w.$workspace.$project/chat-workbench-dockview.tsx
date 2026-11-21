@@ -5,7 +5,7 @@ import {
   useOpenedLargeObjectPending,
   useProjectAvailability,
 } from '#hooks/use-project-availability.js';
-import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';

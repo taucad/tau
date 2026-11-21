@@ -1,7 +1,5 @@
 /**
- * The runtime composed under the `adaptive` ceiling (adaptive app deployment mode charter W1, W2, I1, I13, D10). Unit
- * tests run under the `cloud` ceiling, so the aliased boundary is pointed at its adaptive file here, exactly as the
- * alias rule points an adaptive build at it.
+ * The composed runtime and its display-mode owner (adaptive app deployment mode charter W1, W2, I1, I13, D10, W11).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
@@ -10,8 +8,6 @@ import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { deploymentRecordKey } from '#runtime/deployment.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
-
-vi.mock('#cloud/deployment-mode.js', async () => import('#cloud/deployment-mode.adaptive.js'));
 
 const apiOrigin = 'http://localhost:4000';
 const answer = (funded: boolean): Response =>

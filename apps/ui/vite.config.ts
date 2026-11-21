@@ -20,14 +20,12 @@ import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
 import {
   resolveServiceWorkerKillSwitch,
-  resolveTauDeploymentCeiling,
   resolveUiBuildDirectory,
   uiBuildDirectoryVariable,
   serviceWorkerKillSwitchVariable,
   unstampedBuildRelease,
   unstampedRetainedBuildFloor,
 } from './build-environment.js';
-import type { TauDeploymentCeiling } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -184,36 +182,12 @@ export const uiResolveAlias = [
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
   readonly observabilityHarnessEnabled?: boolean;
-  /**
-   * The build's ceiling (adaptive app deployment mode charter D1): which file each `#cloud/X.js` boundary and each
-   * self-host override resolves to. `self-host` when omitted, as an unaliased import resolves (I12).
-   */
-  readonly deploymentCeiling?: TauDeploymentCeiling;
   readonly target?: 'web' | 'desktop';
 };
 
 const harnessDisabledOverrides = new Map([
   ['#lib/observability-harness-context.js', '#lib/observability-harness-disabled.js'],
   ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
-]);
-
-/**
- * The `#cloud/X.js` boundaries. Each resolves to `X.cloud.*` under the `cloud` ceiling and `X.self-host.*` under
- * `self-host`; under `adaptive` to `X.adaptive.*` when that file exists, else `X.self-host.*`, so an adaptive build is
- * valid at every step and each boundary lights up when its facade lands (adaptive app deployment mode D1).
- */
-const cloudBoundarySpecifiers = new Set([
-  '#cloud/commercial-features.js',
-  '#cloud/deployment-ceiling.js',
-  '#cloud/deployment-mode.js',
-  '#cloud/environment-billing.js',
-  '#cloud/financial-purge.js',
-  '#cloud/nav-billing.js',
-  '#cloud/kernel-commerce.js',
-  '#cloud/root-billing.js',
-  '#cloud/settings-billing.js',
-  '#cloud/zoo-close-errors.js',
-  '#cloud/zoo-upgrade-banner.js',
 ]);
 
 const desktopSourceOverrides = new Map([
@@ -230,62 +204,9 @@ const desktopSourceOverrides = new Map([
   ['#hooks/use-privacy-choices.js', '#hooks/use-privacy-choices.desktop.js'],
 ]);
 
-const selfHostSourceOverrides = new Map([
-  ['#components/chat/chat-model-selector.js', '#components/chat/chat-model-selector.self-host.js'],
-  ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
-  ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
-  ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
-  [
-    '#routes/w.$workspace.$project/chat-details-usage.js',
-    '#routes/w.$workspace.$project/chat-details-usage.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-error-credits.js',
-    '#routes/w.$workspace.$project/chat-error-credits.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-error-provider-account.js',
-    '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-message-data-usage.js',
-    '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js',
-  ],
-]);
-
-/** Whether an `#…` specifier names a source file under `app/` (any of its script extensions). */
-const sourceExists = (specifier: string): boolean => {
-  const base = path.resolve(__dirname, 'app', specifier.slice(1)).replace(/\.js$/u, '');
-  return ['.ts', '.tsx', '.js', '.jsx'].some((extension) => existsSync(`${base}${extension}`));
-};
-
-/**
- * The specifier a ceiling selects (D1). `cloud`: the boundary's `.cloud` file; overrides do not apply. `self-host`:
- * the boundary's `.self-host` file, else the self-host override. `adaptive`: the boundary's or the specifier's own
- * `.adaptive` file when it exists, else what `self-host` selects.
- *
- * @param specifier - The requested `#…` specifier.
- * @param ceiling - The build's ceiling.
- * @returns The specifier to resolve.
- */
-export const ceilingSpecifier = (specifier: string, ceiling: TauDeploymentCeiling): string => {
-  const boundary = cloudBoundarySpecifiers.has(specifier);
-  if (ceiling === 'cloud') {
-    return boundary ? specifier.replace(/\.js$/u, '.cloud.js') : specifier;
-  }
-  const override = selfHostSourceOverrides.get(specifier);
-  if (ceiling === 'adaptive' && (boundary || override !== undefined)) {
-    const adaptive = specifier.replace(/\.js$/u, '.adaptive.js');
-    if (sourceExists(adaptive)) {
-      return adaptive;
-    }
-  }
-  return boundary ? specifier.replace(/\.js$/u, '.self-host.js') : (override ?? specifier);
-};
-
-/** The modules of an adaptive build's `cloud-core` chunk: the display-mode owner and its utilities (gate G1). */
+/** The modules of the `cloud-core` chunk: the display-mode owner and its utilities (gate G1). */
 export const cloudCoreModulePattern =
-  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode\.adaptive)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
+  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
 
 const normalizeProvenancePath = (moduleId: string): string => {
   const normalized = moduleId.replaceAll('\\', '/');
@@ -333,13 +254,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           options.target === 'desktop' && harnessSpecifier
             ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
             : harnessSpecifier;
-        /* The Cloud chunk (`*.lazy.tsx`) is the funded world of an adaptive build: what it imports resolves as the
-         * `cloud` ceiling does, so it reaches the Cloud implementations the facades stand in for (D6). */
-        const ceiling =
-          options.deploymentCeiling === 'adaptive' && importer?.endsWith('.lazy.tsx') === true
-            ? 'cloud'
-            : (options.deploymentCeiling ?? 'self-host');
-        const specifier = hostSpecifier === undefined ? undefined : ceilingSpecifier(hostSpecifier, ceiling);
+        const specifier = hostSpecifier;
         if (specifier === undefined) {
           return null;
         }
@@ -626,8 +541,6 @@ export default defineConfig(({ command, mode }) => {
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
-  /* Unit tests run under the `cloud` ceiling; the adaptive project runs its own (`vitest.adaptive.config.ts`). */
-  const deploymentCeiling = isTest ? 'cloud' : resolveTauDeploymentCeiling(process.env['TAU_CLOUD_ENABLED']);
 
   return {
     root: __dirname,
@@ -705,7 +618,6 @@ export default defineConfig(({ command, mode }) => {
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
-        deploymentCeiling,
         observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
@@ -762,7 +674,6 @@ export default defineConfig(({ command, mode }) => {
       plugins: () => [
         createUiSourceAliasPlugin({
           emitModuleGraph: true,
-          deploymentCeiling,
           observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
         }),
         createAssetIntegrity({ receipt: false }),
@@ -787,14 +698,13 @@ export default defineConfig(({ command, mode }) => {
                 groups: [
                   { name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u },
                   /*
-                   * Adaptive app deployment mode D6, gate G1: an adaptive build's display-mode owner and its utilities
-                   * go in one named chunk, out of Home's largest chunk. React Router keeps entry signatures exact, so a
-                   * group always takes its modules' dependencies too (here xstate and zod, which the shell loads
-                   * anyway). The financial session providers, the purge and the facades stay in the chunks automatic
-                   * splitting gives them: a group around them took the app runtime with it. Pinned builds keep today's
-                   * chunking (I10).
+                   * Adaptive app deployment mode D6, gate G1: the display-mode owner and its utilities go in one named
+                   * chunk, out of Home's largest chunk. React Router keeps entry signatures exact, so a group always
+                   * takes its modules' dependencies too (here xstate and zod, which the shell loads anyway). The
+                   * financial session providers, the purge and the facades stay in the chunks automatic splitting
+                   * gives them: a group around them took the app runtime with it.
                    */
-                  ...(deploymentCeiling === 'adaptive' ? [{ name: 'cloud-core', test: cloudCoreModulePattern }] : []),
+                  { name: 'cloud-core', test: cloudCoreModulePattern },
                 ],
               },
             },

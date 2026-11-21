@@ -10,11 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { cloudSurfaces } from '#cloud/cloud-entries.js';
-import { CloudAccountClosure, CloudBillingSettings, billingWaitCopy } from '#cloud/settings-billing.adaptive.js';
-import { NavBillingItem, NavCreditsMeter, useBillingNavRoutes } from '#cloud/nav-billing.adaptive.js';
-import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.adaptive.js';
-import { CloudPaymentReturn } from '#cloud/root-billing.adaptive.js';
-import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.adaptive.js';
+import { CloudAccountClosure, CloudBillingSettings, billingWaitCopy } from '#cloud/settings-billing.js';
+import { NavBillingItem, NavCreditsMeter, useBillingNavRoutes } from '#cloud/nav-billing.js';
+import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.js';
+import { CloudPaymentReturn } from '#cloud/root-billing.js';
+import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
 
 const harness = vi.hoisted(() => ({ mode: undefined as unknown, retried: 0 }));
 

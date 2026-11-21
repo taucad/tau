@@ -60,7 +60,6 @@ describe('applyTauEventContext', () => {
       build_id: '1792730113029',
       deploy_context: 'deploy-preview',
       /* Unit tests build for the `cloud` ceiling. */
-      deployment_ceiling: 'cloud',
     });
   });
 
@@ -99,7 +98,6 @@ describe('applyTauEventContext', () => {
     expect(tags).toStrictEqual({
       device_class: 'from-event',
       build_id: '1792730113029',
-      deployment_ceiling: 'cloud',
       e2e_run: 'e2e-1',
     });
     expect(readRouteId()).toBeUndefined();

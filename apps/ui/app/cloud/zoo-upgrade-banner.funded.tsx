@@ -1,7 +1,7 @@
 import { CircleAlert, CreditCard, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { zooCloseMessages } from '#cloud/zoo-close-errors.cloud.js';
+import { zooCloseMessages } from '#cloud/zoo-close-errors.funded.js';
 import { zooNeutralCloseMessages } from '#cloud/zoo-close-messages.js';
 
 type ZooUpgradeBannerProperties = {

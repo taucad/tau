@@ -10,8 +10,8 @@
  * behind this test.
  *
  * The walk follows the app's own specifiers (`#…` through the package imports map, and relative paths). For every
- * build-selected module it follows each variant beside it (`.cloud`, `.self-host`, `.desktop`), so the check holds
- * for every build. Declaration-level `import type` and `export type` erase, and `import()` is the lazy edge, so neither is followed.
+ * build-selected module it follows the `.desktop` variant beside it, so the check holds for the web and desktop
+ * builds. Declaration-level `import type` and `export type` erase, and `import()` is the lazy edge, so neither is followed.
  * Workspace packages never import `apps/ui/app`, so they are not walked.
  */
 
@@ -48,7 +48,7 @@ const lazyOnly = [
 ] as const;
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx'];
-const variants = ['', '.cloud', '.self-host', '.desktop'];
+const variants = ['', '.desktop'];
 
 const toPosix = (path: string): string => path.split(sep).join('/');
 
@@ -155,7 +155,7 @@ describe('runtime import boundary', () => {
     expect(reached).toContain('runtime/app-runtime.ts');
     expect(reached).toContain('runtime/app-runtime-provider.tsx');
     expect(reached).toContain('hooks/use-sessions.tsx');
-    expect(reached).toContain('cloud/root-billing.cloud.tsx');
+    expect(reached).toContain('cloud/root-billing.tsx');
   });
 
   it('should keep the composer image step off the conversion runtime', () => {

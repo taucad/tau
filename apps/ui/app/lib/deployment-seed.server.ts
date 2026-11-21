@@ -1,7 +1,6 @@
 import { deploymentAnswerPath, parseDeploymentAnswer } from '@taucad/types/deployment';
 import { requestAnswer } from '@taucad/utils/origin-answer';
-import { deploymentCeiling } from '#cloud/deployment-ceiling.js';
-import type { DeploymentCeiling, DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { classifyDeploymentAnswer } from '#runtime/deployment.js';
 import type { DeploymentAskOutcome } from '#runtime/deployment.machine.js';
 
@@ -9,7 +8,7 @@ import type { DeploymentAskOutcome } from '#runtime/deployment.machine.js';
  * The server's ask for the first snapshot (adaptive app deployment mode charter W11): the root loader asks the API's
  * `GET /v1/deployment` for the page's API origin with a 1 s deadline, through a per-process, per-origin cache, and
  * the document is rendered with the answer. A failure, a timeout or a `404` is no seed and never blocks the render; the
- * client then resolves as before (I2, I15). An adaptive build only: a pinned build asks nothing.
+ * client then resolves as before (I2, I15).
  */
 
 /** How long the server's ask may run before the render goes on without a seed (I15). Milliseconds. @public */
@@ -26,7 +25,6 @@ export type DeploymentSeedReader = (apiUrl: string | undefined) => Promise<Deplo
 
 /** What a reader is built with. @public */
 export type DeploymentSeedReaderOptions = Readonly<{
-  ceiling?: DeploymentCeiling;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   deadlineMilliseconds?: number;
@@ -76,12 +74,11 @@ type CacheEntry = Readonly<{ seed: DeploymentModeSnapshot | undefined; expiresAt
 /**
  * Build a reader with its own cache.
  *
- * @param options - The ceiling, fetch, clock and deadline.
+ * @param options - The fetch, clock and deadline.
  * @returns The reader.
  * @public
  */
 export const createDeploymentSeedReader = ({
-  ceiling = deploymentCeiling,
   fetch = globalThis.fetch.bind(globalThis),
   now = Date.now,
   deadlineMilliseconds = deploymentSeedDeadlineMilliseconds,
@@ -113,7 +110,7 @@ export const createDeploymentSeedReader = ({
     return seed;
   };
   return async (apiUrl) => {
-    const origin = ceiling === 'adaptive' ? originOf(apiUrl) : undefined;
+    const origin = originOf(apiUrl);
     if (origin === undefined) {
       return undefined;
     }

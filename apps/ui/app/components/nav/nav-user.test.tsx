@@ -10,6 +10,9 @@ import * as Cookies from 'es-cookie';
 import { metaConfig } from '#constants/meta.constants.js';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 
+/* The funded rendering, as the Cloud chunk carries it (adaptive app deployment mode W12). */
+vi.mock('#cloud/nav-billing.js', async () => import('#cloud/nav-billing.funded.js'));
+
 const clientEnvironment = globalThis.window.ENV;
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
 const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free', isResolved: true })));

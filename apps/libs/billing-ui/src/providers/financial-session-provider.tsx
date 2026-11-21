@@ -188,7 +188,7 @@ export const useOptionalFinancialSession = (): FinancialSessionController | unde
  *   build (sign-out and account switch purge through their own path).
  *
  * A first identity after none binds without a remount: it purges billing query state and other accounts' saved usage
- * and tells the other tabs. In a pinned `cloud` build every identity names its owner, so only (a) occurs.
+ * and tells the other tabs.
  *
  * @param props - The identity, the signed-in owner (the identity's owner by default) and the children.
  * @returns The children, or nothing for the one commit a cause (a) change withholds them.

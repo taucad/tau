@@ -211,7 +211,7 @@ describe('static-shell routing on Netlify (PL3)', () => {
     ['the library', '/projects'],
     ['a new project', '/projects/new'],
     ['a publication', '/s/abc123'],
-    ['the offline shell', '/usage'],
+    ['the usage page', '/usage'],
     ['settings', '/settings/billing'],
     ['the API proxy', '/api/ph/e/'],
     ['a health endpoint', '/health/build'],
@@ -420,15 +420,14 @@ describe('routeClassOfRouteId (RR7)', () => {
 });
 
 describe('the service worker’s classes (PL7)', () => {
-  it('should answer the two static shells cache-first and the usage page network-first, from their built files', () => {
+  it('should answer the two static shells cache-first, from their built files, and leave /usage to the function', () => {
     expect(
       workerRouteClasses().map(({ routeClass, delivery, document }) => [routeClass.id, delivery, document]),
     ).toStrictEqual([
       ['project', 'cache-first', '/w/__shell/__shell/index.html'],
       ['home', 'cache-first', homeShellDocument],
-      ['offline-shell', 'network-first', '/usage/index.html'],
     ]);
-    expect(listStaticPrerenderPaths()).toContain('/usage');
+    expect(listStaticPrerenderPaths()).not.toContain('/usage');
   });
 
   it('should match exactly the URLs Netlify serves each shell for', () => {

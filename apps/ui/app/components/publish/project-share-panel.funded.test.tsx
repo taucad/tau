@@ -1,9 +1,8 @@
 /**
- * T-G1 on a pinned `cloud` build with stalled entitlements (adaptive app deployment mode charter C1, I15): the app's
- * share panel over the real `cloud` plan facade. While the entitlements request hangs the plan reads `checking`, then
+ * T-G1 on a funded deployment with stalled entitlements (adaptive app deployment mode charter C1, I15): the app's
+ * share panel over the funded plan (`commercial-features.funded.tsx`, what the Cloud chunk carries). While the entitlements request hangs the plan reads `checking`, then
  * `unavailable` at the ask deadline; the person's choice is sent either way and the API decides. A plan refusal
- * offers Publish as public. Unit tests run under the `cloud` ceiling, so `#cloud/commercial-features.js` is the
- * pinned facade here.
+ * offers Publish as public.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen } from '@testing-library/react';
@@ -13,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import type { PublishDraft, RevisionStatusProjection } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { entitlementDeadlines } from '#cloud/commercial-features.cloud.js';
+import { entitlementDeadlines } from '#cloud/commercial-features.funded.js';
 import { askDeadlineMilliseconds } from '#lib/ask-deadline.js';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 
@@ -31,6 +30,7 @@ const harness = vi.hoisted(() => ({
 }));
 
 /* The entitlements request never answers: the plan stays unresolved. */
+vi.mock('#cloud/commercial-features.js', async () => import('#cloud/commercial-features.funded.js'));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: () => ({ ...entitlementsFromTier('free'), isResolved: false, isError: false }),
 }));

@@ -13,9 +13,9 @@ import { cloudIdentityKey, cloudPort } from '#cloud/cloud-port.js';
 import { askDeadlineMilliseconds } from '#lib/ask-deadline.js';
 import type { CloudIdentity } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
-import { useCommercialFeatures } from '#cloud/commercial-features.adaptive.js';
-import { isKernelRoutable } from '#cloud/kernel-commerce.adaptive.js';
-import { preflightCredit } from '#hooks/use-credit-preflight.adaptive.js';
+import { useCommercialFeatures } from '#cloud/commercial-features.js';
+import { isKernelRoutable } from '#cloud/kernel-commerce.js';
+import { preflightCredit } from '#hooks/use-credit-preflight.js';
 
 const harness = vi.hoisted(() => ({
   mode: undefined as unknown,

@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import type { BillingTier, Entitlements } from '@taucad/billing';
-import { entitlementDeadlines, useCommercialFeatures } from '#cloud/commercial-features.cloud.js';
+import { entitlementDeadlines, useCommercialFeatures } from '#cloud/commercial-features.funded.js';
 import { askDeadlineMilliseconds } from '#lib/ask-deadline.js';
 
 const plan = vi.hoisted(() => ({

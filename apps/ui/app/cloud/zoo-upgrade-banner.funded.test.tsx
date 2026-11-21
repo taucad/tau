@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { zooCloseMessages } from '#cloud/zoo-close-errors.cloud.js';
+import { zooCloseMessages } from '#cloud/zoo-close-errors.funded.js';
 
 const openSettingsDialog = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialog, close: vi.fn() }),
 }));
 
-const { ZooUpgradeBanner } = await import('#cloud/zoo-upgrade-banner.cloud.js');
+const { ZooUpgradeBanner } = await import('#cloud/zoo-upgrade-banner.funded.js');
 
 describe('ZooUpgradeBanner', () => {
   it('should keep a Free Zoo project open and expose upgrade plus explicit retry', () => {

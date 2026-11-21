@@ -24,16 +24,8 @@ describe('desktop route manifest', () => {
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');
   });
 
-  it('should carry /usage in the default adaptive build, and omit it from a self-host one (D8)', async () => {
+  it('should carry /usage, which guards itself by the display mode (D8)', () => {
     expect(JSON.stringify(routes)).toContain('../../app/routes/usage/');
-    vi.resetModules();
-    vi.stubEnv('TAU_CLOUD_ENABLED', 'false');
-    try {
-      const { default: selfHostRoutes } = await import('./routes.js');
-      expect(JSON.stringify(selfHostRoutes)).not.toContain('../../app/routes/usage/');
-    } finally {
-      vi.unstubAllEnvs();
-    }
   });
 
   /* The `tau://` contract main loads against (R4). `/i/*` is a server redirect,

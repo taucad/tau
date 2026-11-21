@@ -1,9 +1,24 @@
-/*
- * Tau Cloud's provider-account card. The self-host build swaps this module for `chat-error-provider-account.self-host.js`
- * through the source alias list in `apps/ui/vite.config.ts`; the card itself is Core
- * (`chat-error-provider-account-funded.tsx`), so an adaptive build renders it without the Cloud chunk.
+import { memo } from 'react';
+import type { ComponentProps } from 'react';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
+import { ChatErrorProviderAccount as SelfHostChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.unfunded.js';
+import { ChatErrorProviderAccountFunded } from '#routes/w.$workspace.$project/chat-error-provider-account-funded.js';
+import { ChatErrorNeutral } from '#routes/w.$workspace.$project/chat-error-neutral.js';
+
+// oxlint-disable-next-line no-barrel-files/no-barrel-files -- the details parser is shared by the funded and unfunded cards.
+export { providerEntryFrom } from '#routes/w.$workspace.$project/chat-error-provider-account.unfunded.js';
+
+/**
+ * The provider-account card: Tau Cloud's copy while funded, the operator's links when unfunded, neutral while unknown.
+ * Copy only, so no Cloud chunk is loaded for it (gate G1).
  */
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- the details parser is shared by every ceiling.
-export { providerEntryFrom } from '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js';
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- the pinned `cloud` build's card is the Core funded card.
-export { ChatErrorProviderAccountFunded as ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account-funded.js';
+export const ChatErrorProviderAccount = memo(function (props: ComponentProps<typeof ChatErrorProviderAccountFunded>) {
+  const { state } = useDeploymentMode();
+  if (state === 'funded') {
+    return <ChatErrorProviderAccountFunded {...props} />;
+  }
+  if (state === 'unfunded') {
+    return <SelfHostChatErrorProviderAccount {...props} />;
+  }
+  return <ChatErrorNeutral {...(props.className === undefined ? {} : { className: props.className })} />;
+});

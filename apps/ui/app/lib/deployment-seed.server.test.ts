@@ -1,7 +1,6 @@
 /**
  * The server's ask for the first snapshot (adaptive app deployment mode charter W11): the 1 s deadline, the per-origin
- * cache (answers 10 min, failures 30 s), one ask for concurrent requests, no ask without an API origin or in a pinned
- * build, and only an explicit answer as a seed.
+ * cache (answers 10 min, failures 30 s), one ask for concurrent requests, no ask without an API origin, and only an explicit answer as a seed.
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -36,7 +35,6 @@ describe('deployment seed reader (W11)', () => {
     const time = clock();
     const fetch = vi.fn(async (_url: string) => funded());
     const read = createDeploymentSeedReader({
-      ceiling: 'adaptive',
       fetch: fetch as typeof globalThis.fetch,
       now: time.now,
     });
@@ -64,7 +62,6 @@ describe('deployment seed reader (W11)', () => {
           }),
       );
       const read = createDeploymentSeedReader({
-        ceiling: 'adaptive',
         fetch: fetch as typeof globalThis.fetch,
         now: time.now,
       });
@@ -90,7 +87,7 @@ describe('deployment seed reader (W11)', () => {
         throw new TypeError('fetch failed');
       },
     ]) {
-      const read = createDeploymentSeedReader({ ceiling: 'adaptive', fetch: reply as typeof globalThis.fetch });
+      const read = createDeploymentSeedReader({ fetch: reply as typeof globalThis.fetch });
       // oxlint-disable-next-line no-await-in-loop -- each case is its own reader.
       await expect(read(apiUrl)).resolves.toBeUndefined();
     }
@@ -100,12 +97,10 @@ describe('deployment seed reader (W11)', () => {
     const answer = (billing: unknown) => async () =>
       Response.json({ version: 1, edition: 'cloud', billing, maxAgeSeconds: 300 });
     const unsupported = createDeploymentSeedReader({
-      ceiling: 'adaptive',
       fetch: answer({ funded: true, environment: 'mars' }) as typeof globalThis.fetch,
     });
     await expect(unsupported(apiUrl)).resolves.toEqual({ state: 'unknown', problem: 'unsupported' });
     const misconfigured = createDeploymentSeedReader({
-      ceiling: 'adaptive',
       fetch: answer({ funded: true }) as typeof globalThis.fetch,
     });
     await expect(misconfigured(apiUrl)).resolves.toEqual({ state: 'unknown', problem: 'misconfigured' });
@@ -114,7 +109,7 @@ describe('deployment seed reader (W11)', () => {
   it('should share one ask between concurrent requests for an origin', async () => {
     const { promise, resolve } = Promise.withResolvers<Response>();
     const fetch = vi.fn(async () => promise);
-    const read = createDeploymentSeedReader({ ceiling: 'adaptive', fetch: fetch as typeof globalThis.fetch });
+    const read = createDeploymentSeedReader({ fetch: fetch as typeof globalThis.fetch });
     const first = read(apiUrl);
     const second = read(`${apiUrl}/other`);
     resolve(funded());
@@ -125,17 +120,12 @@ describe('deployment seed reader (W11)', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('should ask nothing with no API origin, or in a pinned build', async () => {
+  it('should ask nothing with no API origin', async () => {
     const fetch = vi.fn(async () => funded());
-    const adaptive = createDeploymentSeedReader({ ceiling: 'adaptive', fetch: fetch as typeof globalThis.fetch });
+    const adaptive = createDeploymentSeedReader({ fetch: fetch as typeof globalThis.fetch });
     for (const url of [undefined, '', 'not a url', 'file:///api']) {
       // oxlint-disable-next-line no-await-in-loop -- each case is one read.
       await expect(adaptive(url)).resolves.toBeUndefined();
-    }
-    for (const ceiling of ['cloud', 'self-host'] as const) {
-      const pinned = createDeploymentSeedReader({ ceiling, fetch: fetch as typeof globalThis.fetch });
-      // oxlint-disable-next-line no-await-in-loop -- each case is one read.
-      await expect(pinned(apiUrl)).resolves.toBeUndefined();
     }
     expect(fetch).not.toHaveBeenCalled();
   });

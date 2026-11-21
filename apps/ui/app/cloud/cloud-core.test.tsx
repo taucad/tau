@@ -321,8 +321,8 @@ describe('cloud surface', () => {
 });
 
 /* The root boundary under test, imported after the mocks. */
-const { CloudRootBoundary, fundedIdentity } = await import('#cloud/root-billing.adaptive.js');
-const { useCloudFinancialPurge } = await import('#cloud/financial-purge.adaptive.js');
+const { CloudRootBoundary, fundedIdentity } = await import('#cloud/root-billing.js');
+const { useCloudFinancialPurge } = await import('#cloud/financial-purge.js');
 
 class Catch extends Component<{ readonly children: ReactNode }, { readonly error: string | undefined }> {
   public static getDerivedStateFromError(error: Error): { error: string } {

@@ -9,21 +9,16 @@
  */
 const LOADER_FILE = 'apps/ui/app/cloud/cloud-entries.ts';
 
-/** A specifier that names Cloud code: a `#cloud/` boundary, or a `.cloud` or `.lazy` file under `app/cloud`. */
-const CLOUD_SPECIFIER = /^#cloud\/|(?:^|\/)cloud\/[^/]+\.(?:cloud|lazy)(?:\.js)?$/u;
+/** A specifier that names Cloud code: a `#cloud/` module, or a `.funded` or `.lazy` file under `app/cloud`. */
+const CLOUD_SPECIFIER = /^#cloud\/|(?:^|\/)cloud\/[^/]+\.(?:funded|lazy)(?:\.js)?$/u;
 
-/** A static specifier naming a `.cloud` implementation file. */
-const CLOUD_FILE = /\.cloud(?:\.js)?$/u;
+/** A static specifier naming a `.funded` Cloud implementation file. */
+const CLOUD_FILE = /\.funded(?:\.js)?$/u;
 
 /**
- * Files that may import a `.cloud` implementation statically: the pinned `cloud` files themselves, the Cloud chunk,
- * and the purge, which is Core in every build that has one (I5).
+ * Files that may import a `.funded` implementation statically: the funded files themselves and the Cloud chunk.
  */
-const STATIC_CLOUD_ALLOWED = [
-  /\.cloud\.tsx?$/u,
-  /\.lazy\.tsx?$/u,
-  /apps\/ui\/app\/cloud\/financial-purge\.adaptive\.ts$/u,
-];
+const STATIC_CLOUD_ALLOWED = [/\.funded\.tsx?$/u, /\.lazy\.tsx?$/u];
 
 /**
  * @param {string} filename
@@ -49,7 +44,7 @@ export const noCloudImportOutsideLoaderRule = {
       cloudImport:
         'Load Tau Cloud code through the one loader (`apps/ui/app/cloud/cloud-entries.ts`) and mount it with `CloudSurface`: it owns the error boundary, the local Suspense boundary and the import deadline (I8).',
       cloudStatic:
-        'A `.cloud` implementation is imported only by the Cloud chunk (`*.lazy.tsx`): a facade reads the port and never swaps its hook (BA13).',
+        'A `.funded` implementation is imported only by the Cloud chunk (`*.lazy.tsx`): a facade reads the port and never swaps its hook (BA13).',
       cloudLazy:
         '`lazy()` of Tau Cloud code renders from an unsettled import; mount it with `CloudSurface` from the loader instead (I8).',
     },

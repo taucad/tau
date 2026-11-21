@@ -155,9 +155,6 @@ export const usageSnapshotFixture = (
  * does, which is what makes "offline" mean both the origin and the API.
  */
 const billingApiStubScript = (stub: BillingApiStubPayload): void => {
-  const host = globalThis as unknown as { ENV?: Record<string, unknown> };
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- injected client environment key
-  host.ENV = { ...host.ENV, TAU_BILLING_ENVIRONMENT: stub.environment };
   const fetchFromNetwork = globalThis.fetch.bind(globalThis);
   const json = (body: unknown, status = 200): Response =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -191,6 +188,15 @@ const billingApiStubScript = (stub: BillingApiStubPayload): void => {
               updatedAt: '2026-01-01T00:00:00.000Z',
             },
           });
+    }
+    if (requestUrl.pathname === '/v1/deployment') {
+      /* The one build reads its API's answer (adaptive app deployment mode W12): this stub is a funded API. */
+      return json({
+        version: 1,
+        edition: 'cloud',
+        billing: { funded: true, environment: stub.environment },
+        maxAgeSeconds: 300,
+      });
     }
     if (requestUrl.pathname === '/v1/auth/sign-out') {
       return json({ success: true });
@@ -431,36 +437,6 @@ export const installUncachedViewOverride = async (): Promise<void> => {
  */
 export const formatInstantInPage = async (instant: string, surface?: 'primary' | 'secondary'): Promise<string> =>
   target.evaluate((value: string) => new Date(value).toLocaleString(), instant, surface);
-
-/** How the precache stored one of its documents. */
-export type CachedShellDocument = {
-  readonly redirected: boolean;
-  readonly status: number;
-  readonly url: string;
-};
-
-/**
- * Reads a precached document straight out of CacheStorage.
- *
- * A navigation request's redirect mode is `manual`, so a stored response whose
- * `redirected` flag is set can never be replayed to one.
- *
- * @param path - The document's precache URL, e.g. `/usage/index.html`.
- * @returns The stored response's identity, or `undefined` when it is absent.
- */
-export const readCachedShellDocument = async (path: string): Promise<CachedShellDocument | undefined> =>
-  target.evaluate(async (documentPath: string) => {
-    const names = await caches.keys();
-    const precache = names.find((name) => name.startsWith('tau-precache-'));
-    if (precache === undefined) {
-      return undefined;
-    }
-    const cache = await caches.open(precache);
-    const keys = await cache.keys();
-    const key = keys.find((request) => new URL(request.url).pathname === documentPath);
-    const stored = key === undefined ? undefined : await cache.match(key);
-    return stored === undefined ? undefined : { redirected: stored.redirected, status: stored.status, url: stored.url };
-  }, path);
 
 /** One entry of the precache list the build injected into the served worker. */
 export type PrecacheListEntry = { readonly url: string; readonly revision: string | null };

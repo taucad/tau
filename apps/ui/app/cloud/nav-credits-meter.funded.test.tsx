@@ -5,8 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactQuery from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@taucad/ui/components/dropdown-menu';
-import { NavCreditsMeter } from '#cloud/nav-billing.cloud.js';
-import { NavCreditsMeter as SelfHostNavCreditsMeter } from '#cloud/nav-billing.self-host.js';
+import { NavCreditsMeter } from '#cloud/nav-billing.funded.js';
+import { NavCreditsMeter as SelfHostNavCreditsMeter } from '#cloud/nav-billing.unfunded.js';
 
 const useCredits = vi.hoisted(() => vi.fn());
 const useEntitlements = vi.hoisted(() => vi.fn());

@@ -10,7 +10,7 @@ vi.mock('#hooks/use-chats.js', () => ({ useProjectChatUsage }));
 vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project_one' }) }));
 
-const { ChatDetailsUsage } = await import('#routes/w.$workspace.$project/chat-details-usage.self-host.js');
+const { ChatDetailsUsage } = await import('#routes/w.$workspace.$project/chat-details-usage.unfunded.js');
 
 describe('self-host chat usage', () => {
   it('delays the full transcript query for a hidden Details panel', () => {

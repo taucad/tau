@@ -19,12 +19,12 @@ import { SvgSpriteLoader } from '@taucad/ui-kit/icons/svg-sprite-loader';
 /* The funded surfaces (adaptive app deployment mode W5): this module resolves every `#` specifier as the `cloud`
  * ceiling does, so these are the Cloud implementations, mounted by their facades through `CloudSurface`. */
 /* oxlint-disable no-barrel-files/no-barrel-files -- the one Cloud chunk names the surfaces it carries. */
-export { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.cloud.js';
-export { CloudAccountClosure, CloudBillingSettings } from '#cloud/settings-billing.cloud.js';
-export { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.cloud.js';
-export { CommercialUpgradeLabel } from '#cloud/commercial-features.cloud.js';
-export { KernelCommercialBadge } from '#cloud/kernel-commerce.cloud.js';
-export { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+export { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.funded.js';
+export { CloudAccountClosure, CloudBillingSettings } from '#cloud/settings-billing.funded.js';
+export { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.funded.js';
+export { CommercialUpgradeLabel } from '#cloud/commercial-features.funded.js';
+export { KernelCommercialBadge } from '#cloud/kernel-commerce.funded.js';
+export { ChatModelSelector } from '#components/chat/chat-model-selector.funded.js';
 /* Credit leaves only: the facades render their own cards and tables in Core (gate G1, one-way dependency). */
 export {
   ProjectCreditsLine,

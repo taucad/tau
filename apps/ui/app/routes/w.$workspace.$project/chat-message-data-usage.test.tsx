@@ -6,6 +6,16 @@ import type { UsageData } from '@taucad/chat';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
+
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({

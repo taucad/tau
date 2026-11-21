@@ -99,30 +99,6 @@ describe('OfflineShell', () => {
     expect(register).toHaveBeenCalledExactlyOnceWith('/service-worker.js');
   });
 
-  it('should say so when the usage page cannot be saved for offline use', async () => {
-    readyState = 'complete';
-    let onMessage: ((event: MessageEvent) => void) | undefined;
-    Object.defineProperty(globalThis.navigator, 'serviceWorker', {
-      configurable: true,
-      value: {
-        register,
-        getRegistration,
-        addEventListener: (_type: string, listener: (event: MessageEvent) => void) => {
-          onMessage = listener;
-        },
-        removeEventListener: vi.fn(),
-      },
-    });
-
-    renderShell('/usage');
-    await settle();
-    act(() => {
-      onMessage?.(new MessageEvent('message', { data: { type: 'tau-service-worker', status: 'quota-exceeded' } }));
-    });
-
-    expect(document.body.textContent).toContain('Not enough storage to save this page for offline use.');
-  });
-
   /* The kill switch (TAU_SERVICE_WORKER_KILL_SWITCH=true): pages register nothing and ask an installed worker's
    * registration to fetch the retiring one, inside a project workspace too. */
   it('should only ask an installed registration for the retiring worker in a kill switch build', async () => {

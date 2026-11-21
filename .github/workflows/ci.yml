@@ -610,7 +610,7 @@ jobs:
           [lint-1, lint-2, typecheck-1, typecheck-2, build-1, build-2, test-1, test-2, test-3, test-4, test-5, test-6]
     env:
       # The build lanes' targets, in `nx affected` and the deal alike.
-      BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-critical-budget-adaptive check-static-shells check-server-output check-route-module-patch check-cadmpeg-engine-absence check-serve-ui-layer
+      BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch check-cadmpeg-engine-absence check-serve-ui-layer
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -734,13 +734,9 @@ jobs:
       # `desktop:build` dependencies stay serial here under the same `--parallel=1`.
       #
       # They also run `ui:check-critical-budget`, the critical-path budget (progressive loading
-      # guard G3): each route class's interactive tier in the self-host client build. Since the
-      # adaptive app deployment mode flip (W8) `ui:build` is `adaptive`, so that check measures the
-      # second web build, `ui:build-self-host` (`TAU_CLOUD_ENABLED=false` into `build-self-host/`),
-      # serial beside `ui:build` under the same `--parallel=1`. Its source guards (G1 lint, G2 graph
-      # test) run in the lint and test lanes. `ui:check-critical-budget-adaptive` is that charter's
-      # gate G1: it holds `ui:build` to the self-host entry and to `ui:build-self-host` on all three
-      # bounds. `ui:check-static-shells` (PL3) renders each static shell through that build's
+      # guard G3): each route class's interactive tier in `ui:build`, the one adaptive build (adaptive
+      # app deployment mode W12), against the `adaptive` entry. Its source guards (G1 lint, G2 graph
+      # test) run in the lint and test lanes. `ui:check-static-shells` (PL3) renders each static shell through that build's
       # server output: neutral and deterministic bytes, the function's own document, its build id
       # and headers, no rendered placeholder.
       #

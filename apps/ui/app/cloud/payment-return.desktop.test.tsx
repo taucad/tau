@@ -10,7 +10,7 @@ import { MemoryRouter } from 'react-router';
 import { toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pendingPaymentActions, rememberPendingPaymentAction } from '@taucad/billing-ui/lib/pending-payment-actions';
-import { DesktopPaymentFollowUp } from '#cloud/root-billing.cloud.js';
+import { DesktopPaymentFollowUp } from '#cloud/payment-return.js';
 
 const getPaymentAction = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/billing-ui/lib/billing-payment-client', () => ({

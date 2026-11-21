@@ -3,27 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveServiceWorkerKillSwitch,
   resolveTauBuildRelease,
-  resolveTauDeploymentCeiling,
   resolveUiBuildDirectory,
   resolveTauTelemetryHostCloud,
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
-
-describe('resolveTauDeploymentCeiling', () => {
-  it.each([
-    [undefined, 'adaptive'],
-    ['false', 'self-host'],
-    ['true', 'cloud'],
-    ['adaptive', 'adaptive'],
-  ])('resolves %s to %s', (value, expected) => {
-    expect(resolveTauDeploymentCeiling(value)).toBe(expected);
-  });
-
-  it('rejects non-canonical values', () => {
-    expect(() => resolveTauDeploymentCeiling('1')).toThrow('must be exactly true, false or adaptive');
-    expect(() => resolveTauDeploymentCeiling('Adaptive')).toThrow('must be exactly true, false or adaptive');
-  });
-});
 
 describe('resolveUiBuildDirectory', () => {
   it('defaults to build and takes one directory name', () => {

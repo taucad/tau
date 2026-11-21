@@ -4,10 +4,10 @@ import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
 
 /* Launch gate OBS-7: the release workflow passes the DSN from the `desktop` environment; other builds report nothing. */
-/* Main and preload carry no deployment ceiling (adaptive app deployment mode I12): the renderer resolves its own from
- * `TAU_CLOUD_ENABLED` in `ui:build:desktop`, and the Zoo close-code map is one neutral map. */
+/* Main and preload carry no display mode (adaptive app deployment mode I12): the renderer reads its API's deployment
+ * answer, and the Zoo close-code map is one neutral map. */
 const define = {
-  /* Runtime telemetry's own Cloud-host signal for main, independent of any billing ceiling. */
+  /* Runtime telemetry's own Cloud-host signal for main, independent of the display mode. */
   tauTelemetryHostCloudBuild: JSON.stringify(process.env['TAU_TELEMETRY_HOST'] === 'cloud'),
   tauSentryDsn: JSON.stringify(process.env['SENTRY_DSN'] ?? ''),
   /* The release workflow names one Sentry release per tag (`tau-desktop@<version>`); empty keeps the SDK default. */

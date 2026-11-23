@@ -41,20 +41,25 @@ const expectPartition = (projects: readonly string[], dealt: readonly string[][]
   expect(new Set(union).size).toBe(union.length);
 };
 
-// An era-D broad landing (blueprint F2): the measured heavy projects plus a spread of small ones.
+// An era-D broad landing (blueprint F2): the measured heavy projects plus a spread of small ones, and every whole
+// project the 2026-11-23 snapshot weighs.
 const broad = [
+  'agent-host',
   'agent-plugin',
   'agent-tools',
   'api-extractor',
   'bambu',
   'build123d',
+  'carvera',
   'chat',
   'cli',
   'desktop',
   'desktop-e2e',
   'docs',
   'host',
+  'opencascade',
   'picogk',
+  'replicad',
   'runtime',
   'scripts',
   'skills',
@@ -66,6 +71,7 @@ const broad = [
   'viewer',
   'warehouse',
   'workbench-panes',
+  'workspace-plugin',
   'www',
   'zoo',
 ];
@@ -82,11 +88,11 @@ describe('deal', () => {
   it('puts ui alone on a broad landing and keeps the other shards within one small project', () => {
     const dealt = dealAll(broad);
     expectPartition(broad, dealt);
-    expect(dealt.map((shard) => shard[0])).toEqual(['ui', 'host', 'build123d']);
+    expect(dealt.map((shard) => shard[0])).toEqual(['ui', 'replicad', 'host']);
     expect(dealt[0]).toEqual(['ui']);
     const loads = dealt.map((shard) => shard.reduce((sum, project) => sum + weightOf(project, snapshot), 0));
     // The ui suite alone sets the floor; the breadth splits evenly beside it.
-    expect(loads).toEqual([952, 498, 500]);
+    expect(loads).toEqual([921, 854, 862]);
     expect(Math.abs((loads[1] ?? 0) - (loads[2] ?? 0))).toBeLessThanOrEqual(snapshot.defaultSeconds);
   });
 
@@ -108,7 +114,7 @@ describe('deal', () => {
   it('weighs a project missing from the snapshot at the default', () => {
     expect(weightOf('brand-new-project', snapshot)).toBe(snapshot.defaultSeconds);
     expect(weightOf('constructor', snapshot)).toBe(snapshot.defaultSeconds);
-    expect(weightOf('cli', snapshot)).toBe(104);
+    expect(weightOf('cli', snapshot)).toBe(101);
     const dealt = dealAll(['brand-new-project', 'ui']);
     expect(dealt).toEqual([['ui'], ['brand-new-project'], []]);
   });
@@ -116,7 +122,7 @@ describe('deal', () => {
   it('ignores snapshot entries for renamed or deleted projects', () => {
     const dealt = dealAll(['ui-core', 'ui-e2e']);
     expectPartition(['ui-core', 'ui-e2e'], dealt);
-    expect(dealt).toEqual([['ui-core'], ['ui-e2e'], []]);
+    expect(dealt).toEqual([['ui-e2e'], ['ui-core'], []]);
   });
 
   it('spreads ui over the six test lanes as its shard tasks, which a broad landing deals in place of ui', () => {

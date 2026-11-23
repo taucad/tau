@@ -195,7 +195,7 @@ services:
     environment: *langfuse-env
 
   langfuse-postgres:
-    image: postgres:17
+    image: postgres:19
     container_name: tau-langfuse-postgres
     profiles: [langfuse]
     restart: unless-stopped

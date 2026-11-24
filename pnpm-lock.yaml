@@ -1037,6 +1037,7 @@ patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.75': 9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9
   '@aurigax-ai/ghostty-web@0.3.6': 1bbab4e853a356ff5fb48df64fd5321bc0bab76a59d0d77179a5b925cc0a87b9
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
+  '@react-router/dev@8.5.1': 86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996
   '@react-router/fs-routes@8.5.1': b44264b6c993f0838c896f37482192fdfb55b5ec1392fb69cb0ff380075432e3
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   react-router@8.5.1: de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53
@@ -1517,10 +1518,10 @@ importers:
         version: 2.0.0(@typescript-eslint/parser@8.71.2(eslint@9.32.0(jiti@2.7.0))(typescript@5.9.3))(eslint@9.32.0(jiti@2.7.0))(typescript@5.9.3)
       '@react-router/dev':
         specifier: 'catalog:'
-        version: 8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        version: 8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@react-router/fs-routes':
         specifier: 'catalog:'
-        version: 8.5.1(patch_hash=b44264b6c993f0838c896f37482192fdfb55b5ec1392fb69cb0ff380075432e3)(@react-router/dev@8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(typescript@5.9.3)
+        version: 8.5.1(patch_hash=b44264b6c993f0838c896f37482192fdfb55b5ec1392fb69cb0ff380075432e3)(@react-router/dev@8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(typescript@5.9.3)
       '@silvenon/vite-plugin-devtools-json':
         specifier: ^1.0.1
         version: 1.0.1(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -2301,7 +2302,7 @@ importers:
     devDependencies:
       '@react-router/dev':
         specifier: 'catalog:'
-        version: 8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        version: 8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.3(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -5471,7 +5472,7 @@ importers:
         version: 4.0.0(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@react-router/dev':
         specifier: 'catalog:'
-        version: 8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@7.0.2)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        version: 8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@7.0.2)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.3(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -5687,7 +5688,7 @@ importers:
     devDependencies:
       '@react-router/dev':
         specifier: 'catalog:'
-        version: 8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        version: 8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.3(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -32546,18 +32547,18 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@napi-rs/wasm-runtime@1.2.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
-    dependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
-      '@tybys/wasm-util': 0.10.4
-    optional: true
-
   '@napi-rs/wasm-runtime@1.2.5(@emnapi/core@2.0.0-alpha.3)(@emnapi/runtime@2.0.0-alpha.3)':
     dependencies:
       '@emnapi/core': 2.0.0-alpha.3
       '@emnapi/runtime': 2.0.0-alpha.3
       '@tybys/wasm-util': 0.10.4
+
+  '@napi-rs/wasm-runtime@1.2.7(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
+    dependencies:
+      '@emnapi/core': 1.11.2
+      '@emnapi/runtime': 1.11.2
+      '@tybys/wasm-util': 0.10.4
+    optional: true
 
   '@napi-rs/wasm-runtime@1.2.7(@emnapi/core@2.0.0-beta.3)(@emnapi/runtime@2.0.0-beta.3)':
     dependencies:
@@ -34820,7 +34821,7 @@ snapshots:
     dependencies:
       '@emnapi/core': 1.11.2
       '@emnapi/runtime': 1.11.2
-      '@napi-rs/wasm-runtime': 1.2.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
+      '@napi-rs/wasm-runtime': 1.2.7(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
     optional: true
 
   '@oxc-resolver/binding-win32-arm64-msvc@11.24.2':
@@ -36128,7 +36129,7 @@ snapshots:
       - tsx
       - yaml
 
-  '@react-router/dev@8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+  '@react-router/dev@8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/generator': 7.29.8
@@ -36161,7 +36162,7 @@ snapshots:
       - babel-plugin-macros
       - supports-color
 
-  '@react-router/dev@8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+  '@react-router/dev@8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/generator': 7.29.8
@@ -36194,7 +36195,7 @@ snapshots:
       - babel-plugin-macros
       - supports-color
 
-  '@react-router/dev@8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@7.0.2)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+  '@react-router/dev@8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@7.0.2)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/generator': 7.29.8
@@ -36243,9 +36244,9 @@ snapshots:
     optionalDependencies:
       typescript: 7.0.2
 
-  '@react-router/fs-routes@8.5.1(patch_hash=b44264b6c993f0838c896f37482192fdfb55b5ec1392fb69cb0ff380075432e3)(@react-router/dev@8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(typescript@5.9.3)':
+  '@react-router/fs-routes@8.5.1(patch_hash=b44264b6c993f0838c896f37482192fdfb55b5ec1392fb69cb0ff380075432e3)(@react-router/dev@8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(typescript@5.9.3)':
     dependencies:
-      '@react-router/dev': 8.5.1(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      '@react-router/dev': 8.5.1(patch_hash=86e3078c6a1fb1b68b7449039726334f5fcd7640514a672f32c78b2d468db996)(babel-plugin-macros@3.1.0)(react-router@8.5.1(patch_hash=de12d9d98d7258f314ca54e2b476cf2b06daaf269f9d1012efd4e8d36cd0aa53)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@5.9.3)(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       minimatch: 10.2.6
     optionalDependencies:
       typescript: 5.9.3

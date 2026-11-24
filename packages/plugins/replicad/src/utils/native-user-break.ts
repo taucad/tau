@@ -2,6 +2,7 @@ import type {
   OpenCascadeInstance,
   ReplicadBooleanBatchResult,
   ReplicadMeshData,
+  ReplicadPrototypeMeshData,
   ReplicadUserBreak,
   TopoDS_Shape,
   TopTools_ListOfShape,
@@ -13,7 +14,8 @@ type UserBreakHookHost = { replicadUserBreak?: () => boolean };
 
 /**
  * Let a superseded operation stop inside the long native calls Replicad makes: the batch boolean
- * (`fuse`, `cut`, `cutAll`, `intersect`) and the mesh extractor. The OCCT progress indicator polls
+ * (`fuse`, `cut`, `cutAll`, `intersect`), the mesh extractor and, where the build has it, the instancing
+ * extractor's `ExtractFaces`. The OCCT progress indicator polls
  * `oc.replicadUserBreak`, which asks the same `checkAbort()` the exception proxy calls before every
  * OpenCascade call, so a native call stops once the document's abort word moves instead of running
  * to the end. The plain entry points become their `...WithOptions` forms with the same arguments and
@@ -98,8 +100,29 @@ export function installNativeUserBreak(oc: OpenCascadeInstance): void {
   };
   extractor.extract = (shape: TopoDS_Shape, ...options: ExtractOptions) =>
     run<ReplicadMeshData>(() => extractWithOptions(shape, ...options, true, userBreak), neverStopped);
+
+  // The instancing extractor gained its break in 0.23.0-beta.4; on an older build it keeps running to the end.
+  const prototype = (oc as PrototypeBreakHost).ReplicadPrototypeMeshExtractor;
+  const extractFacesWithOptions = prototype?.ExtractFacesWithOptions;
+  if (prototype && typeof extractFacesWithOptions === 'function') {
+    prototype.ExtractFaces = (shape: TopoDS_Shape, ...options: ExtractOptions) =>
+      run<ReplicadPrototypeMeshData>(() => extractFacesWithOptions(shape, ...options, true, userBreak), neverStopped);
+  }
   /* oxlint-enable new-cap */
 }
+
+/* eslint-disable @typescript-eslint/naming-convention -- OCJS embind mirrors C++ PascalCase method names. */
+/** The prototype extractor's break entry point, which 0.23.0-beta.3 and earlier do not have. */
+type PrototypeBreakHost = {
+  ReplicadPrototypeMeshExtractor?: {
+    ExtractFaces: (shape: TopoDS_Shape, ...options: ExtractOptions) => ReplicadPrototypeMeshData;
+    ExtractFacesWithOptions?: (
+      shape: TopoDS_Shape,
+      ...options: [...ExtractOptions, clean: boolean, userBreak: ReplicadUserBreak]
+    ) => ReplicadPrototypeMeshData;
+  };
+};
+/* eslint-enable @typescript-eslint/naming-convention -- Restore Tau naming policy outside OCJS embind types. */
 
 /** `tolerance, angularTolerance, skipNormals` of the plain `ReplicadMeshExtractor.extract`. */
 type ExtractOptions = [tolerance: number, angularTolerance: number, skipNormals: boolean];

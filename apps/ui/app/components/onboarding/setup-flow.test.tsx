@@ -9,6 +9,7 @@ const flags = vi.hoisted(() => ({ onboarding: true, viewerControls: true, partsW
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: keyof typeof flags) => flags[flag],
   useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+  useFeatureGate: (flag: keyof typeof flags) => (flags[flag] ? 'open' : 'closed'),
 }));
 const kernels = vi.hoisted(() => ({
   host: 'browser' as 'browser' | 'desktop',

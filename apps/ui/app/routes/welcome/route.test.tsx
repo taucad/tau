@@ -23,9 +23,14 @@ vi.mock('#components/tour/tour-menu.js', () => ({ useTourReplay: () => undefined
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 
 /** A PostHog client that answers only when the test says so, as the real one does after its flags request. */
-const createPendingClient = (): { client: RemoteFlagClient; answer: (variants: Record<string, boolean>) => void } => {
+const createPendingClient = (): {
+  client: RemoteFlagClient;
+  answer: (variants: Record<string, boolean>) => void;
+  /** PostHog's `errorsLoading` callback: the request timed out on its retry too. */
+  failLoad: () => void;
+} => {
   let variants: Record<string, boolean> = {};
-  let callback: (() => void) | undefined;
+  let callback: Parameters<RemoteFlagClient['onFeatureFlags']>[0] | undefined;
   return {
     client: {
       featureFlags: { getFlagVariants: () => variants },
@@ -38,7 +43,10 @@ const createPendingClient = (): { client: RemoteFlagClient; answer: (variants: R
     },
     answer(next) {
       variants = next;
-      callback?.();
+      callback?.([], next, { errorsLoading: false });
+    },
+    failLoad() {
+      callback?.([], variants, { errorsLoading: true });
     },
   };
 };
@@ -118,5 +126,72 @@ describe('WelcomeRoute on a direct load', () => {
     expect(container.querySelector('[data-testid="home"]')).toBeNull();
     expect(container.querySelector('[data-testid="setup-flow"]')).toHaveTextContent('viewer');
     container.remove();
+  });
+});
+
+/*
+ * F2d: the served posthog-js gives up on `/flags` after a 3 s timeout and one retry and reports `errorsLoading`. That
+ * decides nothing about the visitor, so a deep link stays on its step (fails open), and once a step is shown no later
+ * answer sends the visitor home.
+ */
+describe('WelcomeRoute when the flag load fails', () => {
+  it('should show the requested step instead of redirecting home when the flag load fails', () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    render(app);
+
+    act(() => {
+      posthog.failLoad();
+    });
+
+    expect(screen.queryByTestId('home')).toBeNull();
+    expect(screen.getByTestId('setup-flow')).toHaveTextContent('viewer');
+  });
+
+  it('should stay on the step when a later PostHog refresh answers off after a failed load', () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    render(app);
+    act(() => {
+      posthog.failLoad();
+    });
+
+    act(() => {
+      posthog.answer({ onboarding: false });
+    });
+
+    expect(screen.queryByTestId('home')).toBeNull();
+    expect(screen.getByTestId('setup-flow')).toHaveTextContent('viewer');
+  });
+
+  it('should stay on the step when PostHog answers off after the step was shown', () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    render(app);
+    act(() => {
+      posthog.answer({ onboarding: true });
+    });
+    expect(screen.getByTestId('setup-flow')).toHaveTextContent('viewer');
+
+    act(() => {
+      posthog.answer({ onboarding: false });
+    });
+
+    expect(screen.queryByTestId('home')).toBeNull();
+    expect(screen.getByTestId('setup-flow')).toHaveTextContent('viewer');
+  });
+
+  it('should show no error, banner or retry when the flag load fails', () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    render(app);
+
+    act(() => {
+      posthog.failLoad();
+    });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });

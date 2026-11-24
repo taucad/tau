@@ -4,7 +4,11 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true, useFeatureState: () => 'on' }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => true,
+  useFeatureState: () => 'on',
+  useFeatureGate: () => 'open',
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
 const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));

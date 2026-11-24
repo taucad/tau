@@ -12,9 +12,14 @@ import { personRecordStores } from '#preferences/person-record.store.js';
  */
 
 /** A PostHog client that answers only when the test says so. */
-const createPendingClient = (): { client: RemoteFlagClient; answer: (variants: Record<string, boolean>) => void } => {
+const createPendingClient = (): {
+  client: RemoteFlagClient;
+  answer: (variants: Record<string, boolean>) => void;
+  /** PostHog's `errorsLoading` callback: the flags request failed. */
+  failLoad: () => void;
+} => {
   let variants: Record<string, boolean> = {};
-  let callback: (() => void) | undefined;
+  let callback: Parameters<RemoteFlagClient['onFeatureFlags']>[0] | undefined;
   return {
     client: {
       featureFlags: { getFlagVariants: () => variants },
@@ -27,7 +32,10 @@ const createPendingClient = (): { client: RemoteFlagClient; answer: (variants: R
     },
     answer(next) {
       variants = next;
-      callback?.();
+      callback?.([], next, { errorsLoading: false });
+    },
+    failLoad() {
+      callback?.([], variants, { errorsLoading: true });
     },
   };
 };
@@ -123,5 +131,57 @@ describe('prepareFirstProjectTour across a re-run of the analytics boundary', ()
     askForTour?.();
 
     expect(personRecordStores.onboarding.read().tour.wanted).toBe(true);
+  });
+});
+
+/*
+ * F2d: a failed flag load decides nothing, and PostHog keeps refreshing in the background. The one-shot request waits
+ * for a later answer instead of reading the failure as off (which would drop it) or as on (which would store a
+ * request for a flag nobody evaluated).
+ */
+describe('prepareFirstProjectTour when the flag load fails', () => {
+  it('should keep a waiting request through a failed load and ask once a later refresh turns onboarding on', async () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    const askForTour = await prepareFirstProjectTour(ports);
+    askForTour?.();
+
+    posthog.failLoad();
+    await settle();
+    expect(personRecordStores.onboarding.read().tour.wanted).toBeUndefined();
+
+    posthog.answer({ onboarding: true });
+    await settle();
+
+    expect(personRecordStores.onboarding.read().tour.wanted).toBe(true);
+  });
+
+  it('should keep the request for a first project created after a failed load', async () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    posthog.failLoad();
+
+    const askForTour = await prepareFirstProjectTour(ports);
+    askForTour?.();
+    await settle();
+    expect(personRecordStores.onboarding.read().tour.wanted).toBeUndefined();
+
+    posthog.answer({ onboarding: true });
+    await settle();
+
+    expect(personRecordStores.onboarding.read().tour.wanted).toBe(true);
+  });
+
+  it('should ask for nothing when a later refresh answers onboarding off', async () => {
+    const posthog = createPendingClient();
+    connectRemoteFlags(posthog.client);
+    posthog.failLoad();
+    const askForTour = await prepareFirstProjectTour(ports);
+    askForTour?.();
+
+    posthog.answer({ onboarding: false });
+    await settle();
+
+    expect(personRecordStores.onboarding.read().tour.wanted).toBeUndefined();
   });
 });

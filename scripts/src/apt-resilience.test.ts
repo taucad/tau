@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Subprocess environment keys must match infra-retry.sh variables. */
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -17,6 +17,11 @@ name: Timing budgets
 # spec's result as one comment on each owner issue (`metadata.owners`, spec to issue), and updates that comment
 # in place on later runs rather than adding another (scripts/src/timing-budget-report.ts).
 #
+# Field trace validation (formal-verification policy): every chat log the specs capture is validated against
+# ChatLog.tla, as the nightly validated them over its `test:e2e` shards. A job holds only its own spec's logs, so
+# `chat-logs` validates them once all the jobs end, per project: alone, a spec that opens no chat would fail the
+# empty-capture rule, and a known defect another spec exercises would read as fixed.
+#
 # TODO(D-DC17): once every spec here is green, the release gate (release-gate.yml) requires this lane. It does
 # not yet: the specs are red under their owner issues, and the lane has no authority until they are green.
 
@@ -51,6 +56,7 @@ jobs:
     outputs:
       suites: ${{ steps.suites.outputs.suites }}
       owners: ${{ steps.suites.outputs.owners }}
+      projects: ${{ steps.suites.outputs.projects }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -85,6 +91,7 @@ jobs:
         run: |
           # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON and drops Nx's log lines.
           # A target splits into `metadata.shards` jobs, each passing `--shard=<index>/<count>` to the target.
+          # Every slug starts `<project>--shard-`, which `chat-logs` downloads each project's logs by.
           set -euo pipefail
           suites='[]'
           owners='[]'
@@ -96,7 +103,7 @@ jobs:
               '. + [range(1; $shards + 1) as $i | {project: $project}
                 + if $shards > 1
                   then {shard: "\($i)/\($shards)", label: "\($project) \($i)/\($shards)", slug: "\($project)--shard-\($i)-of-\($shards)"}
-                  else {shard: "", label: $project, slug: $project}
+                  else {shard: "", label: $project, slug: "\($project)--shard-1-of-1"}
                   end]' <<< "$suites")
             owners=$(jq -c --arg project "$project" --argjson config "$config" --argjson target "$target" \
               '. + [$target.metadata.owners // {} | to_entries[] | {project: $project, root: $config.root, spec: .key, issue: .value}]' \
@@ -106,6 +113,8 @@ jobs:
           echo "Owner issues: $owners"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
           echo "owners=$owners" >> "$GITHUB_OUTPUT"
+          # The projects whose chat logs `chat-logs` validates once, across their jobs.
+          echo "projects=$(jq -c '[.[].project] | unique' <<< "$suites")" >> "$GITHUB_OUTPUT"
 
   budgets:
     name: Timing budget (${{ matrix.suite.label }})
@@ -167,6 +176,68 @@ jobs:
         with:
           name: vitest-browser-diagnostics-timing-budgets-${{ matrix.suite.slug }}
           path: out/test-results/vitest-browser
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the spec's chat logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-logs-${{ matrix.suite.slug }}
+          path: out/test-results/chat-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Field trace validation, as e2e-nightly.yml's `e2e-chat-logs` does for a sharded suite: every job's chat logs
+  # together, so the empty-capture and vanished-defect rules judge the nine specs as one suite. A superseded
+  # (cancelled) run validates nothing.
+  chat-logs:
+    name: Validate chat logs (${{ matrix.project }} timing budgets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [plan, budgets]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.suites != '[]' }}
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Download the jobs' chat logs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: chat-logs-${{ matrix.project }}--shard-*
+          path: out/test-results/chat-logs
+          merge-multiple: true
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
+
+      - name: Upload chat log verdicts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-log-verdicts-timing-budgets-${{ matrix.project }}
+          path: out/reports/formal
           if-no-files-found: ignore
           retention-days: 7
 

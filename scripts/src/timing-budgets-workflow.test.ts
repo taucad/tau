@@ -165,6 +165,48 @@ describe('timing-budgets.yml (D-DC17)', () => {
     expect(read('.github/workflows/timing-budgets.yml')).toContain('TODO(D-DC17)');
   });
 
+  it('should validate every spec chat logs against ChatLog.tla once all the jobs end, as the nightly did', () => {
+    const nightly = load(read('.github/workflows/e2e-nightly.yml')) as Workflow & {
+      readonly env?: Record<string, string>;
+    };
+    const nightlyStep = (job: string, name: string): Step | undefined =>
+      nightly.jobs[job]?.steps?.find((entry) => entry.name === name);
+    // The nightly's own rule for test:e2e: a suite that opens chats is validated (only SUITES_WITHOUT_CHAT is not).
+    expect(JSON.parse(nightly.env?.['SUITES_WITHOUT_CHAT'] ?? '[]')).not.toContain('test:e2e');
+    const upload = step('budgets', "Upload the spec's chat logs");
+    expect(upload?.if).toBe('always()');
+    expect(upload?.with).toMatchObject({
+      name: `chat-logs-${expression('matrix.suite.slug')}`,
+      path: 'out/test-results/chat-logs',
+    });
+    // Every slug starts `<project>--shard-`, sharded or not, so the download below finds every job's logs.
+    const plan = step('plan', 'List the affected timing-budget suites')?.run ?? '';
+    expect(plan).toContain(String.raw`slug: "\($project)--shard-\($i)-of-\($shards)"`);
+    expect(plan).toContain(String.raw`slug: "\($project)--shard-1-of-1"`);
+    expect(plan).toContain(`echo "projects=$(jq -c '[.[].project] | unique' <<< "$suites")" >> "$GITHUB_OUTPUT"`);
+    const chatLogs = workflow.jobs['chat-logs'];
+    expect(chatLogs?.needs).toEqual(['plan', 'budgets']);
+    expect(chatLogs?.if).toBe(
+      expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.suites != '[]'"),
+    );
+    expect(chatLogs?.strategy?.matrix?.['project']).toBe(expression('fromJSON(needs.plan.outputs.projects)'));
+    expect(step('chat-logs', "Download the jobs' chat logs")?.with).toEqual({
+      pattern: `chat-logs-${expression('matrix.project')}--shard-*`,
+      path: 'out/test-results/chat-logs',
+      'merge-multiple': true,
+    });
+    expect(step('chat-logs', 'Setup formal toolchains')).toMatchObject({
+      uses: './.github/actions/setup-formal',
+      with: { tools: 'tlc' },
+    });
+    expect(step('chat-logs', 'Validate captured chat logs')?.run).toBe(
+      nightlyStep('e2e-chat-logs', 'Validate captured chat logs')?.run,
+    );
+    expect(step('chat-logs', 'Setup formal toolchains')?.with).toEqual(
+      nightlyStep('e2e-chat-logs', 'Setup formal toolchains')?.with,
+    );
+  });
+
   it('should report to the owner issues from a finished run only, with the only write permission', () => {
     const { report } = workflow.jobs;
     expect(report?.needs).toEqual(['plan', 'budgets']);

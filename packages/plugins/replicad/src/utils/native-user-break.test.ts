@@ -37,15 +37,26 @@ const singleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc') as () => void;
-/** Collect, and give `FinalizationRegistry` callbacks their turns. */
-const collect = async (): Promise<void> => {
-  for (let round = 0; round < 4; round += 1) {
+/**
+ * Collect until `done` holds, at most `maxRounds` times, each round followed by a macrotask so
+ * `FinalizationRegistry` callbacks run.
+ *
+ * @param done - Whether collection has reached what the caller waits for.
+ * @param maxRounds - The upper bound on collections.
+ * @returns How many rounds ran.
+ */
+const collectUntil = async (done: () => boolean, maxRounds = 10): Promise<number> => {
+  for (let round = 1; round <= maxRounds; round += 1) {
     gc();
-    // oxlint-disable-next-line no-await-in-loop -- each round yields once so finalizers run
+    // oxlint-disable-next-line no-await-in-loop -- each round yields one macrotask so finalizers run
     await new Promise((resolve) => {
-      setTimeout(resolve, 5);
+      setTimeout(resolve, 0);
     });
+    if (done()) {
+      return round;
+    }
   }
+  return maxRounds;
 };
 
 /** A cut of twelve crossing cylinders from a fused body: about 3 s single-threaded on a cloud machine. */
@@ -255,12 +266,14 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
     try {
       // The wrapper is dropped; only its handle is kept, to see whether the finalizer freed it.
       const handles = Array.from({ length: 8 }, () => replicad.makeBox([0, 0, 0], [1, 1, 1]).wrapped);
+      // Every embind handle has `isDeleted`; the generated declarations leave it out.
+      const allFreed = (): boolean =>
+        handles.every((handle) => (handle as unknown as { isDeleted(): boolean }).isDeleted());
       Atomics.store(abortWord, 0, 1);
-      await collect();
+      await collectUntil(allFreed);
 
       expect(uncaught).toStrictEqual([]);
-      // Every embind handle has `isDeleted`; the generated declarations leave it out.
-      expect(handles.every((handle) => (handle as unknown as { isDeleted(): boolean }).isDeleted())).toBe(true);
+      expect(allFreed()).toBe(true);
     } finally {
       Atomics.store(abortWord, 0, 0);
       process.off('uncaughtException', record);

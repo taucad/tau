@@ -241,7 +241,18 @@ const valueTypeNames: ReadonlySet<string> = new Set([
  * callback that asks `isDeleted()`) still frees what it owns instead of throwing; a throw from a finalizer would also
  * be uncaught. Exceptions are still converted.
  */
-const ownershipMethodNames: ReadonlySet<string> = new Set(['delete', 'isDeleted', 'deleteLater', 'isAliasOf']);
+const ownershipMethods: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
+  'delete',
+  'isDeleted',
+  'deleteLater',
+  'isAliasOf',
+  // Embind aliases `Symbol.dispose` to `delete`, so `using` releases a handle the same way. Read by name: the
+  // disposal symbols are not in this package's ES2024 lib, and an older runtime may not define them.
+  ...(['dispose', 'asyncDispose'] as const).flatMap((name) => {
+    const symbol = (Symbol as unknown as Partial<Record<typeof name, symbol>>)[name];
+    return symbol === undefined ? [] : [symbol];
+  }),
+]);
 
 /**
  * Whether an Emscripten object is an OCCT value type that is returned without an exception proxy.
@@ -288,7 +299,7 @@ function createEmscriptenWrapper(
           return cached.wrapper;
         }
 
-        const ownership = typeof property === 'string' && ownershipMethodNames.has(property);
+        const ownership = ownershipMethods.has(property);
         const wrapper = function (this: unknown, ...methodArguments: unknown[]): unknown {
           if (!ownership) {
             checkAbort();

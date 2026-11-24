@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
 import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime/client';
 import type { ViewUpdateOutcome } from '@taucad/runtime/client';
@@ -36,6 +36,23 @@ const collect = async (): Promise<void> => {
 };
 
 type Options = { readonly computeReuse?: false; readonly computeReuseBytes?: number };
+
+/**
+ * Closes for every client a test opened. A test that times out keeps running in the background, and every client in
+ * this file shares one OpenCascade instance and one ledger: its builds would add handles to the next test's count. So
+ * each test's clients are closed after it, whether it passed, failed or timed out, before the next test starts.
+ */
+const openClients = new Set<() => Promise<void>>();
+afterEach(async () => {
+  const closes = [...openClients];
+  openClients.clear();
+  await Promise.all(closes.map(async (close) => close()));
+}, renderTimeout);
+/** Close `client` after the current test, or with the test that opened it. */
+const tracked = <Client extends { shutdown(): Promise<void> }>(client: Client): Client => {
+  openClients.add(async () => client.shutdown());
+  return client;
+};
 
 /** One live document over `source`; `build` renders a parameter set and digests the GLB. */
 const session = (source: string, options: Options = {}) => {
@@ -67,32 +84,51 @@ const session = (source: string, options: Options = {}) => {
   });
   type Document = ReturnType<typeof client.open>;
   let live: { document: Document; view: ReturnType<Document['view']> } | undefined;
+  let closed: Promise<void> | undefined;
+  /** The build in flight, settled: closing waits for it so it adds no handle after its test. */
+  let inFlight: Promise<void> = Promise.resolve();
+  const render = async (parameters: Readonly<Record<string, unknown>>): Promise<string> => {
+    if (live) {
+      await live.document.update({ parameters });
+    } else {
+      const document = client.open({ source: { path: 'main.ts' }, parameters, watch: false });
+      live = { document, view: document.view('model') };
+    }
+    const outcome = await live.view.rendering();
+    if (outcome.superseded || !outcome.rendering.success) {
+      throw new Error(`Render failed: ${JSON.stringify(outcome).slice(0, 2000)}`);
+    }
+    const artifact = asKnownArtifact(outcome.rendering.artifact);
+    if (artifact?.mimeType !== 'model/gltf-binary' || typeof artifact.content === 'string') {
+      throw new Error('Expected a GLB');
+    }
+    return createHash('sha256').update(artifact.content).digest('hex');
+  };
+  const close = async (): Promise<void> => {
+    closed ??= (async () => {
+      await inFlight;
+      live?.view.close();
+      live?.document.close();
+      await client.shutdown();
+    })();
+    return closed;
+  };
+  openClients.add(close);
   return {
     tierBytes,
     mainSpans,
     evicted: () => tierEvicted,
     async build(parameters: Readonly<Record<string, unknown>>): Promise<string> {
-      if (live) {
-        await live.document.update({ parameters });
-      } else {
-        const document = client.open({ source: { path: 'main.ts' }, parameters, watch: false });
-        live = { document, view: document.view('model') };
+      if (closed) {
+        throw new Error('The session is closed: its test has ended');
       }
-      const outcome = await live.view.rendering();
-      if (outcome.superseded || !outcome.rendering.success) {
-        throw new Error(`Render failed: ${JSON.stringify(outcome).slice(0, 2000)}`);
-      }
-      const artifact = asKnownArtifact(outcome.rendering.artifact);
-      if (artifact?.mimeType !== 'model/gltf-binary' || typeof artifact.content === 'string') {
-        throw new Error('Expected a GLB');
-      }
-      return createHash('sha256').update(artifact.content).digest('hex');
+      const built = render(parameters);
+      inFlight = (async () => {
+        await Promise.allSettled([built]);
+      })();
+      return built;
     },
-    async close(): Promise<void> {
-      live?.view.close();
-      live?.document.close();
-      await client.shutdown();
-    },
+    close,
   };
 };
 
@@ -293,16 +329,18 @@ describe('replicad release fallback', () => {
           }
           return shape;
         }`;
-      const client = createRuntimeClient({
-        transport: inProcessTransport({
-          runtime: defineRuntime({
-            kernels: [replicadKernel({ wasm: 'single', computeReuse: false })],
-            bundlers: [esbuildBundler()],
+      const client = tracked(
+        createRuntimeClient({
+          transport: inProcessTransport({
+            runtime: defineRuntime({
+              kernels: [replicadKernel({ wasm: 'single', computeReuse: false })],
+              bundlers: [esbuildBundler()],
+            }),
+            fileSystem: fromMemoryFs({ 'main.ts': memoVersion(0) }),
+            compute: { mode: 'memory' },
           }),
-          fileSystem: fromMemoryFs({ 'main.ts': memoVersion(0) }),
-          compute: { mode: 'memory' },
         }),
-      });
+      );
       const fallbacks: unknown[] = [];
       client.on('telemetry', (batch) => {
         for (const entry of batch.entries) {
@@ -351,16 +389,18 @@ describe('replicad release fallback', () => {
 
   /** A client over an in-memory `main.ts`; documents edit it by staging a new source. */
   const memoryClient = (source: string, options: Options) =>
-    createRuntimeClient({
-      transport: inProcessTransport({
-        runtime: defineRuntime({
-          kernels: [replicadKernel({ wasm: 'single', ...options })],
-          bundlers: [esbuildBundler()],
+    tracked(
+      createRuntimeClient({
+        transport: inProcessTransport({
+          runtime: defineRuntime({
+            kernels: [replicadKernel({ wasm: 'single', ...options })],
+            bundlers: [esbuildBundler()],
+          }),
+          fileSystem: fromMemoryFs({ 'main.ts': source }),
+          compute: { mode: 'memory' },
         }),
-        fileSystem: fromMemoryFs({ 'main.ts': source }),
-        compute: { mode: 'memory' },
       }),
-    });
+    );
   const rendered = (outcome: ViewUpdateOutcome<'model'>): string => {
     if (outcome.superseded) {
       return 'superseded';

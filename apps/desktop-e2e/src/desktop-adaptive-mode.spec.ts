@@ -55,11 +55,15 @@ type DeploymentProxy = {
   route: DeploymentRoute;
   /** How many times the shell asked the deployment route. */
   asked: number;
+  /** Every Tau Cloud read the shell made through the proxy (`/v1/projects`, billing, cloud agents), by path. */
+  readonly cloudReads: string[];
   payments: PaymentStubs | undefined;
   readonly close: () => Promise<void>;
 };
 
 const paymentActionPath = '/v1/billing/payment-actions';
+/** The API paths that read the account's Tau Cloud: its projects, its billing and its cloud agents (W9 R5). */
+const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud)(?:\/|$)/u;
 
 /** A manual top-up as the API reports it: opened in the browser, or fulfilled with its receipt. */
 const paymentAction = (stubs: PaymentStubs, state: 'redirect_required' | 'fulfilled'): string =>
@@ -109,6 +113,7 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     url: '',
     route: 'pass',
     asked: 0,
+    cloudReads: [],
     payments: undefined,
     close: async () => undefined,
   };
@@ -212,6 +217,9 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
   };
   const server: Server = createServer((incoming, outgoing) => {
     const requestUrl = new URL(incoming.url ?? '/', 'http://proxy');
+    if (tauCloudReadPath.test(requestUrl.pathname) && incoming.method !== 'OPTIONS') {
+      proxy.cloudReads.push(requestUrl.pathname);
+    }
     if (answerPayment(incoming, outgoing, requestUrl)) {
       return;
     }
@@ -362,6 +370,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       session = undefined;
       proxy.route = 'pass';
       proxy.asked = 0;
+      proxy.cloudReads.length = 0;
       proxy.payments = undefined;
     }
   });
@@ -563,12 +572,18 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     expect(current.application.windows().some((page) => page.url().endsWith('/recovery/index.html'))).toBe(false);
   });
 
-  it('shows no Cloud surface in safe mode, and never asks the route (D10)', async () => {
+  it('shows no Cloud surface in safe mode, and never asks the route or reads Tau Cloud (D10, W9 R5)', async () => {
     const { session: current } = await launch({ args: ['--safe-mode'] });
     await expectVisible(current.page.locator('[data-slot="safe-mode-bar"]'), launchTimeout);
+    /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read, and the library says so. */
+    await expectVisible(
+      current.page.getByText('Tau Cloud is off in safe mode', { exact: false }).first(),
+      launchTimeout,
+    );
     await openUsage(current);
     await expect.poll(async () => usageHeading(current).count(), { timeout: 10_000 }).toBe(0);
     expect(proxy.asked).toBe(0);
+    expect(proxy.cloudReads).toEqual([]);
   });
 
   it('refetches the balance when the window regains focus without hiding (D14)', async () => {

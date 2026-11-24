@@ -207,13 +207,18 @@ describe('native user break without a running abort', () => {
       CommonWithOptions: vi.fn(booleanAnswer),
     };
     const extractor = { meshWithOptions: vi.fn(meshAnswer), extractWithOptions: vi.fn(meshAnswer) };
+    const prototypeExtractor = { ExtractFaces: vi.fn(), ExtractFacesWithOptions: vi.fn(meshAnswer) };
     Object.assign(host, {
       ReplicadUserBreak: vi.fn(),
       ReplicadBooleanBatch: batch,
       ReplicadMeshExtractor: extractor,
+      ReplicadPrototypeMeshExtractor: prototypeExtractor,
     });
     installNativeUserBreak(host as unknown as OpenCascadeInstance);
-    return host as unknown as OpenCascadeInstance & { replicadUserBreak: () => boolean };
+    return host as unknown as OpenCascadeInstance & {
+      replicadUserBreak: () => boolean;
+      ReplicadPrototypeMeshExtractor: { ExtractFacesWithOptions: typeof prototypeExtractor.ExtractFacesWithOptions };
+    };
   };
   const list = undefined as unknown as TopTools_ListOfShape;
   const shape = undefined as unknown as TopoDS_Shape;
@@ -264,6 +269,47 @@ describe('native user break without a running abort', () => {
     expect(oc.ReplicadMeshExtractor.meshWithOptions).toHaveBeenCalledWith(shape, 0.1, 0.2, true, userBreak);
     expect(oc.ReplicadMeshExtractor.extractWithOptions).toHaveBeenCalledWith(shape, 0.1, 0.2, true, true, userBreak);
     expect(result.delete).not.toHaveBeenCalled();
+  });
+
+  it('routes the instancing extractor through its break entry point with the clean default', () => {
+    const oc = fakeOc({ mesh: () => 'prototype mesh' });
+    const userBreak = vi.mocked(oc.ReplicadUserBreak).mock.instances[0];
+
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFaces(shape, 0.1, 0.2, false)).toBe('prototype mesh');
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFacesWithOptions).toHaveBeenCalledWith(
+      shape,
+      0.1,
+      0.2,
+      false,
+      true,
+      userBreak,
+    );
+  });
+
+  it('throws the abort error when a break stops the instancing extractor', () => {
+    const oc = fakeOc({
+      mesh() {
+        Atomics.store(abortWord, 0, 1);
+        expect(oc.replicadUserBreak()).toBe(true);
+        throw new Error('ReplicadUserBreakError');
+      },
+    });
+
+    expect(() => oc.ReplicadPrototypeMeshExtractor.ExtractFaces(shape, 0.1, 0.2, false)).toThrow(RenderAbortedError);
+  });
+
+  it('keeps the plain instancing extractor on a build without its break entry point', () => {
+    const extractFaces = vi.fn();
+    const oc = {
+      ReplicadUserBreak: vi.fn(),
+      ReplicadBooleanBatch: { CutWithOptions: vi.fn(), FuseWithOptions: vi.fn(), CommonWithOptions: vi.fn() },
+      ReplicadMeshExtractor: { meshWithOptions: vi.fn(), extractWithOptions: vi.fn() },
+      ReplicadPrototypeMeshExtractor: { ExtractFaces: extractFaces },
+    } as unknown as OpenCascadeInstance;
+
+    installNativeUserBreak(oc);
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFaces).toBe(extractFaces);
+    expect(typeof (oc as unknown as { replicadUserBreak: unknown }).replicadUserBreak).toBe('function');
   });
 
   it('rethrows a native failure unchanged when nothing aborted', () => {

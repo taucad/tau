@@ -138,6 +138,36 @@ const turn = async (): Promise<void> =>
     setImmediate(resolve);
   });
 
+type TelemetryEntry = {
+  readonly name: string;
+  readonly startTime: number;
+  readonly duration: number;
+  readonly workerTimeOrigin: number;
+  readonly detail?: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * The render the worker was held in at a checkpoint (one render contains that instant), whether its pack had started
+ * (its `replicad.render-output` span had ended), and its outcome.
+ */
+const checkpointOf = (telemetry: readonly TelemetryEntry[], heldAt: number) => {
+  const startOf = (entry: TelemetryEntry): number => entry.workerTimeOrigin + entry.startTime;
+  const endOf = (entry: TelemetryEntry): number => startOf(entry) + entry.duration;
+  const renders = telemetry.filter(
+    (entry) => entry.name === 'kernel.render' && startOf(entry) <= heldAt && endOf(entry) >= heldAt,
+  );
+  const [held] = renders;
+  return {
+    renders: renders.length,
+    packStarted:
+      held !== undefined &&
+      telemetry.some(
+        (entry) => entry.name === 'replicad.render-output' && startOf(entry) >= startOf(held) && endOf(entry) <= heldAt,
+      ),
+    outcome: held?.detail?.['operation.outcome'],
+  };
+};
+
 /**
  * A runtime client whose Replicad kernel runs in `fixtures/replicad-ledger-worker.ts`, with that worker's ledger and
  * stop gate. `holdAtPackStart` makes the worker hold as the next GLB pack starts, until `release`.
@@ -243,15 +273,9 @@ describe('Replicad handle ledger over an interrupted drag', () => {
     computeReuse: boolean,
   ) => {
     const worker = openLedgerWorker(root, computeReuse);
-    let cancelled = 0;
-    let cancelledRenders = 0;
+    const telemetry: TelemetryEntry[] = [];
     worker.client.on('telemetry', ({ entries }) => {
-      for (const { name: span, detail } of entries) {
-        if (detail?.['operation.outcome'] === 'cancelled') {
-          cancelled += 1;
-          cancelledRenders += span === 'kernel.render' ? 1 : 0;
-        }
-      }
+      telemetry.push(...entries);
     });
     const document = worker.client.open({ source: { path: mainFile }, parameters: base, watch: false });
     // The client can stop only an operation whose progress notice it has read (see `qualify-arm.mts`).
@@ -283,6 +307,7 @@ describe('Replicad handle ledger over an interrupted drag', () => {
       const atBase: number[] = [];
       const bytes: string[] = [];
       let counted: LedgerCount | undefined;
+      const heldAt: number[] = [];
       for (let drag = 0; drag < dragCount; drag += 1) {
         // Out along the ladder and back to the base value; a frame lands while the last one is still running.
         const frames = [...values, ...values.toReversed().slice(1), 0];
@@ -298,6 +323,8 @@ describe('Replicad handle ledger over an interrupted drag', () => {
           // The update reaches the session, which signals the abort word, a few microtasks later.
           await turn();
         } finally {
+          // Taken while the worker cannot leave the held render: once released, it may stop that render at once.
+          heldAt.push(performance.timeOrigin + performance.now());
           worker.release();
         }
         for (const value of burst.slice(1)) {
@@ -312,7 +339,14 @@ describe('Replicad handle ledger over an interrupted drag', () => {
         counted = await worker.ask('count');
         atBase.push(counted!.live);
       }
-      return { atBase, bytes, counted: counted!, cancelled, cancelledRenders };
+      const cancelled = telemetry.filter(({ detail }) => detail?.['operation.outcome'] === 'cancelled').length;
+      return {
+        atBase,
+        bytes,
+        counted: counted!,
+        cancelled,
+        checkpoints: heldAt.map((at) => checkpointOf(telemetry, at)),
+      };
     } finally {
       worker.release();
       view.close();
@@ -334,7 +368,7 @@ describe('Replicad handle ledger over an interrupted drag', () => {
           await writeFile(join(root, path), content, 'utf8');
         }
         for (const computeReuse of [false, true]) {
-          const { atBase, bytes, counted, cancelled, cancelledRenders } = await dragArm(
+          const { atBase, bytes, counted, cancelled, checkpoints } = await dragArm(
             { mainFile: fixture.mainFile, root },
             drag,
             computeReuse,
@@ -346,8 +380,11 @@ describe('Replicad handle ledger over an interrupted drag', () => {
           );
           expect(counted.doubleDeletes).toBe(0);
           expect(cancelled, 'no frame was interrupted').toBeGreaterThan(0);
-          // Every checkpoint stopped a pack, after that frame's main() and tessellation made its handles.
-          expect(cancelledRenders, 'checkpointed packs stopped').toBeGreaterThanOrEqual(dragCount);
+          // Each drag's checkpointed render was held in its pack at the release, and was cancelled there, after that
+          // frame's main() and tessellation made its handles.
+          expect(checkpoints, `checkpointed renders ${JSON.stringify(checkpoints)}`).toStrictEqual(
+            Array.from({ length: dragCount }, () => ({ renders: 1, packStarted: true, outcome: 'cancelled' })),
+          );
           bytesByArm[computeReuse ? 'on' : 'off'] = bytes;
         }
       } finally {

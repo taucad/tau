@@ -9,6 +9,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { toast } from 'sonner';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
+import { installQueryRevalidation } from '#runtime/query-revalidation.js';
 
 /**
  * Toast a query error, unless the query handles its errors itself.
@@ -77,6 +78,9 @@ export const createRootQueryClient = (): QueryClient => {
   };
 
   configureSessionQueryDefaults(client);
+  /* W9 D1: reconnect and refocus revalidate every query, an offline launch included. The server has no window. */
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent on the server.
+  installQueryRevalidation(globalThis.window ?? undefined);
 
   return client;
 };

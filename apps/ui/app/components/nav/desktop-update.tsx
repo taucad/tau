@@ -69,7 +69,11 @@ export function DesktopUpdateControl({
   /* A blocked update is never quiet: the person is the only one who can fix the clock or reinstall (B25, B27). */
   const quiet =
     blockedReason === undefined &&
-    (phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed');
+    (phase === 'current' ||
+      phase === 'checking' ||
+      phase === 'offline' ||
+      phase === 'disabled' ||
+      phase === 'system-managed');
   if (quiet && !open) {
     return undefined;
   }
@@ -205,6 +209,7 @@ const titles: Readonly<Record<Phase, string>> = {
   ready: 'Update ready',
   available: 'Update available',
   error: 'Couldn’t update',
+  offline: 'Can’t check while offline',
   saving: 'Saving your work',
   'restart-blocked': 'Couldn’t restart',
   restarting: 'Restarting Tau',
@@ -224,6 +229,8 @@ const details: Readonly<Record<Phase, string>> = {
   /* Main retries on a backoff and checks again every few hours, so "later" holds. */
   /* `error` also covers a failed check (offline, say) and a failure before restarting. */
   error: 'Tau couldn’t check for or download an update. Your work isn’t affected, and Tau will try again later.',
+  /* W9 R6: an offline check is postponed, not failed; the network's return checks again. */
+  offline: 'Tau checks for updates again when you’re back online.',
   saving: 'Tau restarts as soon as everything is saved.',
   /* `prepareToInstall` refuses while work is unsaved or a machine still runs. */
   'restart-blocked':
@@ -243,6 +250,7 @@ const labels: Readonly<Record<Phase, string>> = {
   ready: 'Restart now',
   available: 'Download',
   error: 'Try again',
+  offline: 'Check again',
   saving: 'Restart now',
   'restart-blocked': 'Try again',
   restarting: 'Restart now',

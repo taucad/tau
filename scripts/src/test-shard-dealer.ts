@@ -1,31 +1,32 @@
 /**
  * Deal the affected projects with a `test` target across the CI test shards by measured duration.
  *
- * Each `test-<n>` lane of `ci.yml` pipes the same affected project list (a JSON array from
- * `nx show projects --affected --with-target test`) into this script and runs only the projects it prints for its
- * own shard. The deal is greedy longest-processing-time: projects sorted by weight, heaviest first, ties by name,
- * each to the shard with the least load so far, ties to the lowest shard. Every lane computes the same deal, so the
- * shards partition the selected set exactly. Weights are the uncached `test` seconds in the checked-in
- * `test-shard-durations.json` snapshot; a project the snapshot does not list weighs its `defaultSeconds`.
- * This replaced the test-file-count weights, which had turned the shards into a fixed routing table
- * (tau-brain `research/ci-decomposition-blueprint.md` F2 and Part 4; charter W2).
+ * Each `test-<n>` lane of `ci.yml` pipes the same affected unit list (a JSON array read from its
+ * `nx affected -t test --graph=<file>`) into this script, with that graph (`--graph <file> --targets test`), and runs
+ * only the units it prints for its own shard. Every lane computes the same deal, so the shards partition the selected
+ * set exactly. A unit weighs its `test` task and every task it depends on, from the checked-in
+ * `test-shard-durations.json` snapshot keyed by task id (see the graph deal below): a lane builds what its suites
+ * depend on whenever the build lanes have not cached it yet, which the test seconds alone left out (tau-brain
+ * `research/ci-decomposition-blueprint.md`, global review G5). Plain project weights replaced the test-file-count
+ * weights, which had turned the shards into a fixed routing table (same blueprint, F2 and Part 4; charter W2).
  *
  * A project that declares `test:shard-<n>` targets enters the `test-<n>` lanes' list as its `<project>:test:shard-<n>`
  * tasks in place of its name (`ui`: six tasks of its Vitest suite, CI throughput review ST-1), and the snapshot weighs
- * each task on its own, so one slow suite no longer sets a lane's floor.
+ * each task on its own, so one slow suite no longer sets a lane's floor. A graph of `test` alone does not hold those
+ * tasks, so each stands in for a slice of its project's `test` and carries what that depends on.
  *
  * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
  * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
  * (`pkgcheck-shard-durations.json`), and the `Viewer references` shards of `viewer-parity.yml` deal the parity
  * fixtures by measured capture seconds (`libs/tau-examples/fixtures/viewer-parity/capture-seconds.json`).
  *
- * `--graph <file> --targets <list>` deals projects whose tasks share dependencies (the `lint-<n>`, `typecheck-<n>`
- * and `build-<n>` lanes, tau-brain `research/ci-structural-decomposition-blueprint.md` ST-3). A project's unit is its
- * tasks for those targets in the Nx task graph (`nx … --graph=<file>`) and every task they depend on; the snapshot is
- * keyed by task id (`project:target`), and an unlisted task weighs `defaultSeconds` when it is one of the project's
- * own and nothing when it is only a dependency. Each unit goes to the shard whose load grows least, counting only
- * the tasks that shard does not run already, so `ui` and the `desktop` build its payload check depends on land
- * together. With disjoint units this is the plain deal.
+ * `--graph <file> --targets <list>` deals projects whose tasks share dependencies (the `lint-<n>`, `typecheck-<n>`,
+ * `build-<n>` and `test-<n>` lanes, tau-brain `research/ci-structural-decomposition-blueprint.md` ST-3). A project's
+ * unit is its tasks for those targets in the Nx task graph (`nx … --graph=<file>`) and every task they depend on, and
+ * a task id's unit (`project:target`) is that task and what it depends on; the snapshot is keyed by task id, and an
+ * unlisted task weighs `defaultSeconds` when it is one of the unit's own and nothing when it is only a dependency.
+ * Each unit goes to the shard whose load grows least, counting only the tasks that shard does not run already, so
+ * `ui` and the `desktop` build its payload check depends on land together. With disjoint units this is the plain deal.
  *
  * `--shards auto --max-shards <n> --shard-seconds <s>` lets the measured total choose the shard count: one shard per
  * `<s>` seconds, at least one and at most `<n>`. `--shard all` prints every non-empty shard as a JSON matrix,
@@ -193,8 +194,13 @@ type TaskGraphFile = {
   };
 };
 
-/** Each project's unit: its tasks for `targets` and every task those depend on; throws on a malformed graph. */
-export const unitsFromGraph = (raw: unknown, projects: readonly string[], targets: readonly string[]): Unit[] => {
+/**
+ * Each unit's tasks: a project's tasks for `targets` and every task those depend on, or a task id's (`project:target`)
+ * task and every task it depends on. A task id the graph does not hold (a `test:shard-<n>` task, which a graph of
+ * `test` alone leaves out) stands in for a slice of its project's tasks for `targets`: it runs itself and what those
+ * depend on, not those tasks. Throws on a malformed graph, or on a unit with neither.
+ */
+export const unitsFromGraph = (raw: unknown, names: readonly string[], targets: readonly string[]): Unit[] => {
   const graph = (typeof raw === 'object' && raw !== null ? raw : {}) as {
     readonly tasks?: Partial<TaskGraphFile['tasks']>;
   };
@@ -209,11 +215,8 @@ export const unitsFromGraph = (raw: unknown, projects: readonly string[], target
       own.set(task.target.project, [...(own.get(task.target.project) ?? []), id]);
     }
   }
-  return projects.map((project) => {
-    const roots = own.get(project);
-    if (roots === undefined) {
-      throw new Error(`graph file has no ${targets.join(', ')} task for ${project}`);
-    }
+  /** The roots and every task they depend on. */
+  const closure = (roots: readonly string[]): Set<string> => {
     const seen = new Set<string>(roots);
     const pending = [...roots];
     for (let task = pending.pop(); task !== undefined; task = pending.pop()) {
@@ -224,7 +227,27 @@ export const unitsFromGraph = (raw: unknown, projects: readonly string[], target
         }
       }
     }
-    return { name: project, tasks: [...seen].toSorted() };
+    return seen;
+  };
+  return names.map((name) => {
+    const colon = name.indexOf(':');
+    if (colon === -1) {
+      const roots = own.get(name);
+      if (roots === undefined) {
+        throw new Error(`graph file has no ${targets.join(', ')} task for ${name}`);
+      }
+      return { name, tasks: [...closure(roots)].toSorted() };
+    }
+    if (Object.hasOwn(tasks, name)) {
+      return { name, tasks: [...closure([name])].toSorted() };
+    }
+    const project = name.slice(0, colon);
+    const slices = own.get(project);
+    if (slices === undefined) {
+      throw new Error(`graph file has no task ${name} and no ${targets.join(', ')} task for ${project}`);
+    }
+    const depended = [...closure(slices)].filter((task) => !slices.includes(task));
+    return { name, tasks: [name, ...depended].toSorted() };
   });
 };
 
@@ -308,10 +331,13 @@ export const run = (
       graph === undefined
         ? projects.map((project) => ({ name: project, tasks: [project] }))
         : unitsFromGraph(JSON.parse(readFile(graph.file)), projects, graph.targets);
+    // A unit's own tasks weigh the default when the snapshot does not list them; a task only depended on, nothing.
     const own = new Set(
       graph === undefined
         ? projects
-        : projects.flatMap((project) => graph.targets.map((target) => `${project}:${target}`)),
+        : projects.flatMap((unit) =>
+            unit.includes(':') ? [unit] : graph.targets.map((target) => `${unit}:${target}`),
+          ),
     );
     const taskSeconds = (task: string): number =>
       Object.hasOwn(durations.seconds, task) ? durations.seconds[task]! : own.has(task) ? durations.defaultSeconds : 0;

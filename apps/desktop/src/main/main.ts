@@ -3072,6 +3072,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         return response.json() as Promise<unknown>;
       },
       installForProbe,
+      isOnline: () => net.isOnline(),
       onState: (snapshot) => {
         for (const window of appWindows()) {
           if (!window.isDestroyed() && trusted(window.webContents.mainFrame)) {

@@ -39,6 +39,6 @@ export default defineConfig({
     // One Electron app, one API, one exclusive port pair.
     fileParallelism: false,
     pool: 'forks',
-    reporters: ['default'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['default', 'github-actions'] : ['default'],
   },
 });

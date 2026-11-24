@@ -71,7 +71,7 @@ describe('Workbench first-checkout readiness', () => {
         <Component />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('region')).toHaveTextContent('Downloading project files');
+    expect(screen.getByRole('region')).toHaveTextContent('Downloading files…');
     expect(screen.getByRole('region')).toHaveAttribute('aria-busy', 'true');
     expect(mocks.machines).not.toHaveBeenCalled();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();
@@ -101,7 +101,7 @@ describe('Workbench first-checkout readiness', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('Machines unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('Downloading project files')).not.toBeInTheDocument();
+    expect(screen.queryByText('Downloading files…')).not.toBeInTheDocument();
     expect(mocks.machines).toHaveBeenCalledOnce();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();
   });

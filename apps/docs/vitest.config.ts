@@ -28,7 +28,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['*.test.ts', 'app/**/*.{test,spec}.{ts,tsx}'],
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     coverage: {
       reportsDirectory: '../../out/reports/coverage/apps/docs',
       provider: 'v8',

@@ -186,6 +186,11 @@ export type DesktopUpdaterOptions = {
   readonly schedule?: (callback: () => void, checkInterval: number) => unknown;
   /** One automatic retry after a failed check or download. Milliseconds, defaults to an unreferenced setTimeout. */
   readonly retry?: (callback: () => void, retryDelay: number) => unknown;
+  /**
+   * Whether this computer has a network. A check that fails while it has none is postponed quietly, not a failure:
+   * the network's return asks again (W9 report R6).
+   */
+  readonly isOnline?: () => boolean;
   /** Diagnostic selector in the installed channel; never an arbitrary URL. */
   readonly candidateTag?: string;
   /** Diagnostic constraint; selects no URL and cannot bypass the shipping feed or signature checks. */
@@ -322,6 +327,21 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     snapshot = { ...snapshot, version: undefined, releasePage: undefined };
     publish('error');
     retryLater();
+  };
+  /** A check that failed while offline is postponed, quietly: no failure, no retry; the network's return asks again. */
+  const postponeOffline = (error: unknown): void => {
+    log('info', 'updater.postponed', {
+      reason: 'offline',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    if (offered) {
+      /* An offer already on the card stays there. */
+      publish(moveRequired ? 'move-required' : 'available', moveRequired ? moveToApplicationsDetail : undefined);
+      return;
+    }
+    status = 'Tau can’t check for updates while offline. It checks again when you’re back online.';
+    snapshot = { ...snapshot, version: undefined, releasePage: undefined };
+    publish('offline');
   };
   const install = async (): Promise<void> => {
     if (installing || restarting) {
@@ -497,6 +517,10 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
       }
       return update;
     } catch (error) {
+      if (options.isOnline?.() === false) {
+        postponeOffline(error);
+        return offered;
+      }
       failed(error);
       return undefined;
     }

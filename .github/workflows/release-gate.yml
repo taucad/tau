@@ -231,7 +231,8 @@ jobs:
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
                 | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
-              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3 \
+                --graph "$RUNNER_TEMP/test-graph.json" --targets test)
               if [ -z "$shard" ]; then
                 echo "No test projects in this shard."
                 exit 0

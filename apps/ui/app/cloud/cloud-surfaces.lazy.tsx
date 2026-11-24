@@ -13,7 +13,7 @@ import { useAutoReloadEnabled } from '@taucad/billing-ui/hooks/use-auto-reload-e
 import { kernelConfigurations } from '@taucad/types/constants';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
-import paymentSpriteUrl from '@taucad/ui-kit/icons/generated/payment-sprite.svg?url';
+import paymentSpriteMarkup from '@taucad/ui-kit/icons/generated/payment-sprite.svg?raw';
 import { appendSvgSprite } from '@taucad/ui-kit/icons/svg-sprite-append';
 
 /* The funded surfaces (adaptive app deployment mode W5): this module resolves every `#` specifier as the `cloud`
@@ -61,12 +61,13 @@ export function CloudProviders({
 }
 
 /**
- * The payment artwork the billing surfaces draw (card brands); the base sprite is Core. Appended from code when the
- * chunk mounts: an inline loader script rendered here never ran, so the card brands were blank (W9 D3).
+ * The payment artwork the billing surfaces draw (card brands); the base sprite is Core. Bundled into this chunk at
+ * build time and appended from code when it mounts, with no request: an inline loader script rendered here never ran,
+ * so the card brands were blank (W9 D3).
  */
 export function PaymentSprite(): undefined {
   useEffect(() => {
-    void appendSvgSprite(paymentSpriteUrl);
+    appendSvgSprite('payment', paymentSpriteMarkup);
   }, []);
   return undefined;
 }

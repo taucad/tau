@@ -132,6 +132,25 @@ describe('desktop update control', () => {
     });
     expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
   });
+  /* W9 R6: an offline check is postponed, never "Couldn't update"; a check the person asked for says why. */
+  it('keeps a postponed offline check quiet, and names it when the person asked', async () => {
+    const source = fixture(Promise.resolve({ ...ready, phase: 'offline' }));
+    render(
+      <SidebarProvider defaultOpen={false}>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    await act(async () => {
+      await source.bridge.snapshot();
+    });
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t update')).not.toBeInTheDocument();
+    source.emit({ ...ready, phase: 'offline', revision: 3, requestId: 1 });
+    const titles = await screen.findAllByText('Can’t check while offline');
+    expect(titles.length).toBeGreaterThan(0);
+    expect(screen.queryByText('Couldn’t update')).not.toBeInTheDocument();
+  });
+
   it('should open manual checks and keep ordinary current state quiet', async () => {
     const source = fixture(Promise.resolve({ ...ready, phase: 'current' }));
     render(

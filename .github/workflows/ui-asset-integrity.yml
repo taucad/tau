@@ -69,8 +69,7 @@ jobs:
           ( while true; do echo "pressure $(date +%T) $(memory_pressure | tail -1)"; sleep 15; done ) &
           watcher=$!
           set +e
-          NX_VERBOSE_LOGGING=true /usr/bin/time -l pnpm nx build ui --outputStyle=static
-          code=$?
+          NX_VERBOSE_LOGGING=true /usr/bin/time -l pnpm nx build ui --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/ui-build.log"; code=${PIPESTATUS[0]}
           kill $watcher
           echo "--- crash reports"
           ls -la ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports 2>/dev/null | grep -iE "node|\.ips" || true
@@ -79,6 +78,8 @@ jobs:
             echo "=== $f"; head -c 6000 "$f"; echo
           done
           echo "--- end crash reports"
+          echo "--- ui:build errors"
+          grep -nE "error|Error|ERR_|build-lock:|Killed|exited with|signal" "$RUNNER_TEMP/ui-build.log" | grep -v "externalized for browser" | tail -40 || true
           log show --last 30m --predicate 'eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' --style compact 2>/dev/null | grep -i "node" | tail -20 || true
           echo "ui:build exit $code"
           exit $code

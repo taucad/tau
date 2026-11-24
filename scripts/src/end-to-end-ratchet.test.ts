@@ -92,14 +92,14 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     // The rows wait for it but never for its result: a row whose bundle it did not write builds it, as before.
     expect(lane?.if).not.toContain('queue-builds');
     // Each target names the one bundle the ui-e2e queue suites build, and nothing else.
-    const uiE2e = JSON.parse(read('apps/ui-e2e/project.json')) as {
+    const uiEndToEndProject = JSON.parse(read('apps/ui-e2e/project.json')) as {
       readonly targets: Record<string, { readonly executor?: string; readonly dependsOn?: readonly unknown[] }>;
     };
-    expect(uiE2e.targets['queue-build']).toMatchObject({
+    expect(uiEndToEndProject.targets['queue-build']).toMatchObject({
       executor: 'nx:noop',
       dependsOn: [{ projects: ['ui'], target: 'build' }],
     });
-    expect(uiE2e.targets['queue-build:serve']).toMatchObject({
+    expect(uiEndToEndProject.targets['queue-build:serve']).toMatchObject({
       executor: 'nx:noop',
       dependsOn: [{ projects: ['ui'], target: 'build:serve' }],
     });

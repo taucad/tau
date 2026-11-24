@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         node: ['24.20.0', '26.13.1']
-        round: [1, 2, 3]
+        round: [1, 2, 3, 4]
     timeout-minutes: 60
     env:
       NX_DAEMON: 'false'
@@ -69,9 +69,16 @@ jobs:
           ( while true; do echo "pressure $(date +%T) $(memory_pressure | tail -1)"; sleep 15; done ) &
           watcher=$!
           set +e
-          /usr/bin/time -l pnpm nx build ui --outputStyle=static
+          NX_VERBOSE_LOGGING=true /usr/bin/time -l pnpm nx build ui --outputStyle=static
           code=$?
           kill $watcher
+          echo "--- crash reports"
+          ls -la ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports 2>/dev/null | grep -iE "node|\.ips" || true
+          for f in ~/Library/Logs/DiagnosticReports/*node*.ips /Library/Logs/DiagnosticReports/*node*.ips; do
+            [ -f "$f" ] || continue
+            echo "=== $f"; head -c 6000 "$f"; echo
+          done
+          echo "--- end crash reports"
           log show --last 30m --predicate 'eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' --style compact 2>/dev/null | grep -i "node" | tail -20 || true
           echo "ui:build exit $code"
           exit $code

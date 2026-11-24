@@ -490,8 +490,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
 
       - name: Prepare current installed GeoSpec consumer
         run: |

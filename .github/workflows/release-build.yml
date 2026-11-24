@@ -362,8 +362,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
 
       - name: Check the packaging host
         run: |
@@ -1251,8 +1249,6 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
       # The candidate is still a draft, which this job's read-only token cannot
       # see: take the archive and download.json desktop-publish attached from the
       # run's artifacts, whose public R2 bytes desktop-mirror verified.

@@ -176,6 +176,7 @@ describe('ci.yml affected-only lanes', () => {
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
       'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
       'compute-qualify': { targets: ['compute-qualify-ci'] },
+      'node-floor': { tags: ['type:package'], targets: ['test'], pr: 'touched' },
     });
   });
 
@@ -241,6 +242,7 @@ describe('ci.yml affected-only lanes', () => {
       'formal-nightly',
       'e2e-queue',
       'compute-qualify',
+      'node-floor',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -551,6 +553,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       ['API', 'api', 'api'],
       ['BILLING', 'billing-e2e', 'billing'],
       ['COMPUTE_QUALIFY', 'compute-qualify', 'compute-qualify'],
+      ['NODE_FLOOR', 'node-floor', 'node-floor'],
     ] as const) {
       expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${output}`));
       expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
@@ -1265,7 +1268,7 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
       tags: ['ci:shell'],
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
-    replicad: { root: 'packages/plugins/replicad', type: 'lib' },
+    replicad: { root: 'packages/plugins/replicad', type: 'lib', tags: ['type:package'], targets: ['test'] },
     'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
@@ -1324,9 +1327,9 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
         },
       };
       writeFileSync(join(directory, 'fixture-graph.json'), JSON.stringify(graph));
-      // The plan deals the package checks with the dealer and its snapshot, which it reads from the checkout.
+      // The plan deals the package-check and Node floor shards with the dealer and their snapshots.
       mkdirSync(join(directory, 'scripts/src'), { recursive: true });
-      for (const file of ['test-shard-dealer.ts', 'pkgcheck-shard-durations.json']) {
+      for (const file of ['test-shard-dealer.ts', 'pkgcheck-shard-durations.json', 'test-shard-durations.json']) {
         copyFileSync(resolve(root, 'scripts/src', file), join(directory, 'scripts/src', file));
       }
       writeFileSync(join(directory, 'affected.json'), JSON.stringify(affected));
@@ -1485,6 +1488,94 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
       expect(gate?.run).toContain('if [ "$PKGCHECK_REQUIRED" = true ]; then test "$PKGCHECK_RESULT" = success; fi');
       expect(planScript).toContain(
         '--max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json',
+      );
+    });
+  });
+
+  describe('Node floor lane (node-26-ci-migration R2)', () => {
+    // Measured snapshot seconds: replicad 316, opencascade 76; revisions deals as its three shard tasks.
+    const published = (root: string, targets: readonly string[] = ['test']): Node => ({
+      root,
+      type: 'lib',
+      tags: ['type:package'],
+      targets,
+    });
+    const graphNodes: Record<string, Node> = {
+      ...nodes,
+      opencascade: published('packages/plugins/opencascade'),
+      revisions: published('packages/revisions', ['test', 'test:shard-1', 'test:shard-2', 'test:shard-3']),
+      unpublished: { root: 'libs/unpublished', type: 'lib', targets: ['test'] },
+      untested: published('packages/untested', ['build']),
+    };
+    type Shard = { readonly shard: number; readonly shards: number; readonly projects: string };
+    const shards = (outputs: Record<string, string>): Shard[] =>
+      JSON.parse(outputs['node-floor-shards'] ?? 'null') as Shard[];
+    const affected = [...everything, 'opencascade', 'revisions', 'unpublished', 'untested'];
+
+    it('should run every affected published package with a test, sharded packages as their shard tasks, in the queue', () => {
+      const { status, stderr, outputs } = plan('merge_group', { affected, files: ['package.json'], graphNodes });
+      expect(status, stderr).toBe(0);
+      expect(outputs['node-floor']).toBe('true');
+      const union = shards(outputs).flatMap(({ projects }) => projects.split(','));
+      expect(union.toSorted()).toEqual([
+        'opencascade',
+        'replicad',
+        'revisions:test:shard-1',
+        'revisions:test:shard-2',
+        'revisions:test:shard-3',
+      ]);
+      expect(new Set(union).size).toBe(union.length);
+      // 316 + 76 + 109 + 186 + 160 = 847 measured seconds at 600 s a shard: two jobs.
+      expect(shards(outputs).map(({ shard, shards: count }) => [shard, count])).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
+    });
+
+    it('should run only the published packages a pull request touches', () => {
+      const { status, stderr, outputs } = plan('pull_request', {
+        affected,
+        files: ['packages/plugins/opencascade/vitest.config.ts', 'packages/core/src/index.ts'],
+        graphNodes,
+      });
+      expect(status, stderr).toBe(0);
+      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'opencascade' }]);
+      const untouched = plan('pull_request', { affected, files: ['packages/core/src/index.ts'], graphNodes });
+      expect(untouched.status, untouched.stderr).toBe(0);
+      expect(untouched.outputs['node-floor']).toBe('false');
+      expect(untouched.outputs['node-floor-shards']).toBe('[]');
+    });
+
+    it('should run the floor shards and the package checks on Node 24 while setup-nx defaults to Node 26', () => {
+      const setupNx = load(read('.github/actions/setup-nx/action.yml')) as {
+        readonly inputs: Record<string, { readonly default?: string }>;
+      };
+      const ciNode = setupNx.inputs['node-version']?.default ?? '';
+      expect(ciNode).toMatch(/^26\.\d+\.\d+$/u);
+      const floorNodes = ['node-floor', 'pkgcheck'].map(
+        (job) =>
+          ci.jobs[job]?.steps?.find((step) => step.uses === './.github/actions/setup-nx')?.with?.['node-version'],
+      );
+      expect(floorNodes[0]).toMatch(/^24\.\d+\.\d+$/u);
+      expect(floorNodes[1]).toBe(floorNodes[0]);
+      // No other ci.yml job overrides setup-nx's Node.
+      const overrides = Object.entries(ci.jobs).flatMap(([name, job]) =>
+        (job.steps ?? []).some((step) => step.uses === './.github/actions/setup-nx' && step.with?.['node-version'])
+          ? [name]
+          : [],
+      );
+      expect(overrides.toSorted()).toEqual(['node-floor', 'pkgcheck']);
+    });
+
+    it('should gate every floor shard in the required check', () => {
+      const job = ci.jobs['node-floor'];
+      expect(job?.needs).toEqual(['plan']);
+      expect(job?.if).toBe(
+        expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.node-floor == 'true'"),
+      );
+      expect(job?.strategy?.matrix?.['shard']).toBe(expression('fromJSON(needs.plan.outputs.node-floor-shards)'));
+      expect(planScript).toContain(
+        '--max-shards 4 --shard-seconds 600 --durations scripts/src/test-shard-durations.json',
       );
     });
   });

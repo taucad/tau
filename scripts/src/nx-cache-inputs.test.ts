@@ -39,7 +39,8 @@ const declaredEnvironment = new Set(
 
 /*
  * Values that change no task output: the cache transport itself, pnpm's install check, the lane
- * name the affected-lane step uses to pick its command, and the
+ * name the affected-lane step uses to pick its command, the shard list the Node floor step reads to pick
+ * its projects (`UNITS`; the floor Node itself reaches the hash through `node --version`), and the
  * S3 conformance credentials, whose suite is switched on by the endpoint and bucket that are
  * declared (hashing credential material into a cache key is avoided on purpose).
  */
@@ -49,6 +50,7 @@ const notTaskInputs = new Set([
   'pnpm_config_verify_deps_before_run',
   'LANE',
   'BUILD_TARGETS',
+  'UNITS',
   'TAU_S3_CONFORMANCE_ACCESS_KEY_ID',
   'TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY',
 ]);
@@ -254,6 +256,18 @@ describe('nx cache inputs', () => {
     const imageNode = /^ARG NODE_VERSION=(\S+)$/mu.exec(read('apps/api/Dockerfile'))?.[1];
     expect(ciNode).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(imageNode).toBe(ciNode);
+  });
+
+  it('should keep every Node base of the API image on bookworm, the release its pinned git packages come from', () => {
+    // From Node 26 the plain `-slim` tag is trixie, so a bare `-slim` base would silently drop the deb12 git pins.
+    const dockerfile = read('apps/api/Dockerfile');
+    const bases = [...dockerfile.matchAll(/^FROM node:(\S+)/gmu)].map(([, image]) => image);
+    expect(bases).toHaveLength(2);
+    for (const image of bases) {
+      expect(image).toMatch(/^\$\{NODE_VERSION\}-bookworm-slim$/u);
+    }
+    expect(/^ARG GIT_VERSION=\S+\+deb12u\d+$/mu.test(dockerfile)).toBe(true);
+    expect(/^ARG GIT_LFS_VERSION=\S+\+deb12u\d+$/mu.test(dockerfile)).toBe(true);
   });
 
   /*

@@ -1191,6 +1191,8 @@ const config = [
       'apps/ui/app/workers/geospec-runner.impl.ts',
       'packages/runtime-testing/src/kernel-testing.utils.ts',
       'apps/runtime-e2e/src/benchmarks/**/*.{ts,tsx,mts,cts}',
+      // The worker entry of replicad-handle-ledger.test.ts: test-only code that runs the ledger in the kernel's thread.
+      'apps/runtime-e2e/src/fixtures/replicad-ledger-worker.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

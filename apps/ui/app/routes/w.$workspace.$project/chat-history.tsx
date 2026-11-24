@@ -242,11 +242,20 @@ function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'>
 
 type ChatHistoryProps = {
   readonly className?: string;
+  /** Classes for the pane's header row, such as the inset a host's fixed titlebar controls need. */
+  readonly headerClassName?: string;
+  /** Classes for the archived-chats view, which has no header row to take that inset. */
+  readonly archiveClassName?: string;
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
-export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ...props }: ChatHistoryProps) {
+export const ChatHistory = memo(function ({
+  isExpanded = true,
+  setIsExpanded,
+  archiveClassName,
+  ...props
+}: ChatHistoryProps) {
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -256,7 +265,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
   return isExpanded && isArchiveOpen ? (
     <FloatingPanel isOpen side='right' className={props.className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent className='min-h-0 overflow-hidden'>
+      <FloatingPanelContent className={cn('min-h-0 overflow-hidden', archiveClassName)}>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
     </FloatingPanel>
@@ -272,6 +281,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
 const ExpandedChatHistory = memo(function ({
   className,
+  headerClassName,
   isExpanded,
   setIsExpanded,
   formattedKeyCombination,
@@ -403,7 +413,7 @@ const ExpandedChatHistory = memo(function ({
             <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
               {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
               {/* The one header row: name, rename in place, chat menu, close. */}
-              <FloatingPanelContentHeader className='gap-1'>
+              <FloatingPanelContentHeader className={cn('gap-1', headerClassName)}>
                 <ChatTitleBar
                   closeButton={
                     <FloatingPanelClose

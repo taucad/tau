@@ -223,7 +223,17 @@ vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
-  FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  FloatingPanelContent: ({
+    children,
+    className,
+  }: {
+    readonly children: React.ReactNode;
+    readonly className?: string;
+  }) => (
+    <div data-slot='floating-panel-content' className={className}>
+      {children}
+    </div>
+  ),
   FloatingPanelContentHeader: ({
     children,
     className,
@@ -372,6 +382,14 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
+  /* The archive has no header row, so the host's titlebar clearance reaches its content instead. */
+  it('gives the archive the classes the host passes for it', () => {
+    archiveOpen = true;
+    render(<ChatHistory archiveClassName='pt-9' headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(screen.getByRole('region', { name: 'Archived chats' }).parentElement).toHaveClass('pt-9');
+  });
+
   it('skips hidden transcript and skill projections, then reveals current messages', () => {
     setMockMessages([message('u1', 'user')]);
     const view = render(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
@@ -404,6 +422,16 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(headers[0]).toHaveClass('gap-1');
     expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
     expect(container.querySelector('.sticky')).toBeNull();
+  });
+
+  /* The host's fixed titlebar controls sit over the header's leading edge; the inset must reach the header itself. */
+  it('gives its header row the classes the host passes for it', () => {
+    const { container } = render(<ChatHistory headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(container.querySelector('[data-slot=floating-panel-content-header]')).toHaveClass(
+      'gap-1',
+      'pl-(--titlebar-controls-width)',
+    );
   });
 
   /* PL6: the composer adopts only the native input its own project's placeholder served. */

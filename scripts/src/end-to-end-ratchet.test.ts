@@ -229,4 +229,17 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('should run no outside-state row nightly, whose home is the release gate (global review 2026-11-24, ruling 12)', () => {
+    const jobs = Object.entries(nightly.jobs);
+    const removed = new Set(['webgpu-hardware', 'desktop-e2e-live', 'live-github']);
+    expect(jobs.map(([id]) => id).filter((id) => removed.has(id))).toEqual([]);
+    const runs = jobs.flatMap(([, job]) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    for (const target of ['test:e2e:webgpu', 'test:e2e:desktop:live', 'test:e2e:live:github']) {
+      expect(
+        runs.filter((run) => run.includes(target)),
+        target,
+      ).toEqual([]);
+    }
+  });
 });

@@ -22,6 +22,8 @@ import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-them
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
+import { buildDeploymentSeedScript } from '#cloud/deployment-seed.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
 import { safeModeHref } from '#lib/boot-signals.js';
@@ -68,6 +70,11 @@ export type RootLoaderData = {
   readonly env: ClientEnvironment;
   /** Queries the server already answered (the model catalog), hydrated into the root `QueryClient`. */
   readonly queries?: DehydratedState;
+  /**
+   * The display mode the server rendered the document with, from its own ask of the page's API origin (adaptive app
+   * deployment mode W11). The same for every visitor of a deployment; none on a prerendered or static shell.
+   */
+  readonly deployment?: DeploymentModeSnapshot;
 };
 
 export function RootLayout({
@@ -104,7 +111,7 @@ export function RootLayout({
             <ThemeProvider>
               <ColorProvider>
                 <AppViewerEnvironment>
-                  <LayoutDocument env={data?.env ?? {}} documentChrome={documentChrome}>
+                  <LayoutDocument env={data?.env ?? {}} deployment={data?.deployment} documentChrome={documentChrome}>
                     <HarnessDocumentLoad />
                     {/* The error document's code block copies through a tooltip, so the tooltip host stays here. */}
                     <TooltipProvider>{children}</TooltipProvider>
@@ -121,10 +128,12 @@ export function RootLayout({
 
 function LayoutDocument({
   children,
+  deployment,
   documentChrome,
   env,
 }: {
   readonly children: ReactNode;
+  readonly deployment: DeploymentModeSnapshot | undefined;
   readonly documentChrome: ReactNode | undefined;
   readonly env: Partial<ClientEnvironment>;
 }): React.JSX.Element {
@@ -195,6 +204,11 @@ function LayoutDocument({
             __html: buildClientEnvScript(env),
           }}
         />
+        {deployment === undefined ? undefined : (
+          /* W11: the server's deployment answer, read by the client entry before hydration (`#cloud/deployment-seed`). */
+          /* oxlint-disable-next-line react/no-danger -- the same `<`-escaped JSON injection as the environment's */
+          <script dangerouslySetInnerHTML={{ __html: buildDeploymentSeedScript(deployment) }} />
+        )}
         <ObservabilityHarnessHydrationProbe pathname={location.pathname} search={location.search} />
         <SvgSpriteMount />
         {bootWatchdogScript === undefined ? undefined : (

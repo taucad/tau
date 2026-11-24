@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type * as RuntimeKernelModule from '@taucad/runtime/kernel';
@@ -802,17 +803,46 @@ describe('convertReplicadGeometriesToGltf with kept pack facts (N6)', () => {
   });
 });
 
+/**
+ * SHA-256 of a GLB without its `asset.generator`, which names the writing package's version and so changes on every
+ * release (as in `apps/runtime-e2e/src/bundler-parity.test.ts`): the JSON chunk re-serialized without it, then the
+ * BIN chunk as is.
+ */
+function digestGlbWithoutGenerator(glb: Uint8Array<ArrayBuffer>): string {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength))) as {
+    asset: { generator?: string };
+  };
+  delete json.asset.generator;
+  const binStart = 20 + jsonLength;
+  const binLength = binStart < glb.byteLength ? view.getUint32(binStart, true) : 0;
+  const bin = glb.subarray(binStart + 8, binStart + 8 + binLength);
+  return createHash('sha256').update(JSON.stringify(json)).update(bin).digest('hex');
+}
+
 describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', () => {
   const parts = (count: number): GeometryReplicad[] =>
     Array.from({ length: count }, (_, index) => createSimpleGeometry({ name: `Part ${index}` }));
 
-  it('should poll the abort word before each part and before writing', () => {
+  it('should poll the abort word before each part, before writing, and in the writer', () => {
     abort.polls = 0;
     abort.abortAfter = Number.POSITIVE_INFINITY;
 
     convertReplicadGeometriesToGltf({ geometries: parts(3) });
 
-    expect(abort.polls).toBe(4);
+    // Three parts and the write, then the writer's poll before each of the three nodes and before serializing.
+    expect(abort.polls).toBe(8);
+  });
+
+  it('should stop inside the writer once a supersede lands after the last pack poll', () => {
+    abort.polls = 0;
+    abort.abortAfter = 4;
+
+    expect(() => convertReplicadGeometriesToGltf({ geometries: parts(3) })).toThrow(/superseding/u);
+    // The pack's four polls passed; the writer's first poll stopped the write.
+    expect(abort.polls).toBe(5);
+    abort.abortAfter = Number.POSITIVE_INFINITY;
   });
 
   it('should stop between parts once a later operation supersedes the render', () => {
@@ -828,7 +858,12 @@ describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', 
   it('should pack the same bytes while nothing aborts', () => {
     abort.abortAfter = Number.POSITIVE_INFINITY;
     const geometries = parts(2);
+    const glb = convertReplicadGeometriesToGltf({ geometries });
 
-    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(convertReplicadGeometriesToGltf({ geometries }));
+    // The digest of these two parts' GLB as packed on main at 63b2560f81, before any change to the pack: a change
+    // to the packed bytes fails here instead of changing both sides of a comparison.
+    expect(digestGlbWithoutGenerator(glb)).toBe('f65646d5bd832a51d3fe79c9c772bcf7326e088cad407cbd910a14b50f159a0d');
+    // And packing is deterministic: a second pack of the same parts gives the same bytes.
+    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(glb);
   });
 });

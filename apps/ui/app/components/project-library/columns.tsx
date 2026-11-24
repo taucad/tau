@@ -2,7 +2,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
 import { NavLink, useNavigation } from 'react-router';
 import type { ReactNode } from 'react';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';

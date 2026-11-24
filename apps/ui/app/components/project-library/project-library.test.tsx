@@ -13,12 +13,12 @@ import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
 import { PhoneTopBarContext } from '#components/layout/page-header.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
-import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
+import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
 import type {
   ProjectDiscoveryConflict,
   WorkspaceBindingRepairGroup,
-} from '@taucad/files-ui/runtime/project-library-storage';
+} from '@taucad/project-library/runtime/project-library-storage';
 
 const routerContent = createContext<React.ReactNode>(null);
 
@@ -214,6 +214,8 @@ const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
     isFetching: false,
     /* Paused: offline, react-query holds the request, so the listing is neither settled, fetching nor failed. */
     isPaused: false,
+    /* W9 R5: safe mode, which makes no Tau Cloud read. */
+    isSafeMode: false,
     current: [] as CloudProject[],
     openOverride: undefined as ((entry: CloudProject) => Promise<void>) | undefined,
     retry: vi.fn(),
@@ -227,10 +229,16 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCloudProjects: () => ({
     projects: cloudListing.current,
-    isSettled: !cloudListing.isFetching && !cloudListing.isFailed && !cloudListing.isPaused,
+    isSettled: !cloudListing.isSafeMode && !cloudListing.isFetching && !cloudListing.isFailed && !cloudListing.isPaused,
     isFailed: cloudListing.isFailed,
     isFetching: cloudListing.isFetching,
-    cloud: cloudListing.isFailed ? 'failed' : cloudListing.isFetching ? 'fetching' : 'ready',
+    cloud: cloudListing.isSafeMode
+      ? 'safe-mode'
+      : cloudListing.isFailed
+        ? 'failed'
+        : cloudListing.isFetching
+          ? 'fetching'
+          : 'ready',
     retry: cloudListing.retry,
   }),
 }));
@@ -275,6 +283,7 @@ describe('ProjectLibrary', () => {
     cloudListing.isFailed = false;
     cloudListing.isFetching = false;
     cloudListing.isPaused = false;
+    cloudListing.isSafeMode = false;
     cloudListing.openOverride = undefined;
   });
 
@@ -1585,6 +1594,16 @@ describe('ProjectLibrary', () => {
       expect(region).toBeEmptyDOMElement();
       expect(region).not.toHaveClass('empty:hidden');
       expect(region).toHaveClass('sr-only');
+    });
+
+    /* W9 R5 (operator ruling): safe mode reads no Tau Cloud, and the slot says so, with no Retry. */
+    it('says Tau Cloud is off in safe mode, with no Retry', () => {
+      cloudListing.isSafeMode = true;
+      const slot = renderSlot();
+      expect(
+        within(slot.header()).getByText('Tau Cloud is off in safe mode. Showing projects on this device.'),
+      ).toHaveAttribute('role', 'status');
+      expect(within(slot.header()).queryByRole('button', { name: 'Try loading cloud projects again' })).toBeNull();
     });
 
     /* D21 round 7: offline, Retry cannot help, so it is not offered, even while a Retry's request hangs. */

@@ -26,7 +26,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import { CardFooter, CardHeader } from '@taucad/ui/components/card';
 import { isCloudProjectPending, getCloudDeletionState } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 
 /** A project only Tau Cloud holds, as a library row (D20). @public */
 export type CloudOnlyRow = CloudProject & {

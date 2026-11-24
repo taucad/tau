@@ -22,7 +22,7 @@ import {
   useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
 import { useProject } from '#hooks/use-project.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';

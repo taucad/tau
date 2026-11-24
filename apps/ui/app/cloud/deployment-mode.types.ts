@@ -43,6 +43,3 @@ export type DeploymentModeSnapshot =
     }>
   | Readonly<{ state: 'unfunded'; basis: DeploymentModeBasis }>
   | Readonly<{ state: 'unknown'; problem: DeploymentModeProblem }>;
-
-/** The build's ceiling (D1): which modes it can show. @public */
-export type DeploymentCeiling = 'cloud' | 'self-host' | 'adaptive';

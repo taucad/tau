@@ -5,7 +5,13 @@
  * its own, importing only the cache names, named without "worker" because the server output check takes a chunk named
  * after a worker for a worker bundle (`check-server-output.mts`).
  */
-import { assetCacheName, cachePrefix, preFixAssetCacheName, retiredCachePrefix } from '#offline/pwa-messages.js';
+import {
+  assetCacheName,
+  cachePrefix,
+  preFixAssetCacheName,
+  retiredCachePrefix,
+  stateCacheName,
+} from '#offline/pwa-messages.js';
 
 /**
  * Whether a Cache Storage cache is the retired `/usage` worker's (`tau-offline-shell-<version>`), which the web app's
@@ -29,6 +35,7 @@ export const isWorkerCache = (name: string): boolean =>
   name.startsWith(`${cachePrefix}-runtime-`) ||
   name === assetCacheName ||
   name === preFixAssetCacheName ||
+  name === stateCacheName ||
   isRetiredWorkerCache(name);
 
 /**

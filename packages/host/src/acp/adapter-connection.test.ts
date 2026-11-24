@@ -76,6 +76,14 @@ describe('ACP adapter connection', () => {
         params: { sessionId: 'session', prompt: [{ type: 'text', text: 'Do work' }] },
       });
       await flush();
+      /* A failed call reads its stderr tail after two event-loop turns (`stderrWrittenBefore`). */
+      for (let turn = 0; turn < 2; turn++) {
+        // oxlint-disable-next-line no-await-in-loop -- one event-loop turn at a time, as the connection takes them.
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      await flush();
       expect(written).toHaveBeenCalledTimes(1);
       expect(signal).toHaveBeenCalledWith('SIGKILL');
       expect(events).toContainEqual({ type: 'adapterExited', stderr: 'adapter pipe closed' });

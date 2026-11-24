@@ -28,7 +28,7 @@ import {
   findLastMeaningfulPartIndex,
   isActivityPartActive,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
-import { AtReferenceChip } from '@taucad/files-ui/components/chat/at-reference-chip';
+import { AtReferenceChip } from '@taucad/chat-surfaces/components/chat/at-reference-chip';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
 import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';

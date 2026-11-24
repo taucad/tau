@@ -1,4 +1,4 @@
-import { Component, Suspense, useEffect, useSyncExternalStore } from 'react';
+import { Component, Suspense, use, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ComponentType, ErrorInfo, ReactNode } from 'react';
 import { useOptionalFinancialSession } from '@taucad/billing-ui/providers/financial-session-provider';
 import { reportUiError } from '#lib/error-reporting.js';
@@ -58,6 +58,31 @@ function CloudRendering<Module>({
   );
 }
 
+/**
+ * A Cloud surface's content beneath its boundaries: the Cloud rendering once the chunk is loaded. A surface the server
+ * rendered as Cloud (W11) mounts it before then, and it suspends until the chunk settles, so React keeps the server's
+ * markup while hydrating instead of replacing it with the fallback. A failed chunk renders the fallback.
+ */
+function CloudContent<Module>({
+  loader,
+  fallback,
+  render,
+}: Readonly<{ loader: CloudLoader<Module>; fallback: ReactNode; render: (module: Module) => ReactNode }>): ReactNode {
+  const state = useSyncExternalStore(loader.subscribe, loader.state, loader.state);
+  if (state.status === 'loaded') {
+    return <CloudRendering module={state.module} render={render} />;
+  }
+  if (state.status === 'failed') {
+    return fallback;
+  }
+  use(loader.preload());
+  return fallback;
+}
+
+/* True on the server and while hydrating, false in a client render: React reads the server snapshot for both. */
+const serverSnapshot = (): boolean => true;
+const clientSnapshot = (): boolean => false;
+
 /** What {@link CloudSurface} takes. @public */
 export type CloudSurfaceProps<Module> = Readonly<{
   /** The entry's loader; none while the surface has no Cloud chunk (the W2 skeleton). */
@@ -98,22 +123,34 @@ export function CloudSurface<Module>({
     loader?.state ?? idleState,
     loader?.state ?? idleState,
   );
+  /* W11: a surface the server rendered as Cloud keeps that markup while its chunk loads, through hydration; one that
+   * turns funded on the client shows the fallback until its chunk is loaded. Decided once, at mount. */
+  const isServerOrHydrating = useSyncExternalStore(noSubscription, clientSnapshot, serverSnapshot);
+  const [keepsServerCloud] = useState(isServerOrHydrating && enabled);
   useEffect(() => {
     if (enabled) {
       loader?.load();
     }
   }, [enabled, loader]);
-  if (!enabled || state.status !== 'loaded') {
+  /* The same element while its inputs are: the re-render that ends hydration (the snapshot above turning `false`) then
+   * leaves a still-suspended boundary alone, where new children would make React drop the server's markup. */
+  const cloud = useMemo(
+    () =>
+      loader === undefined ? undefined : (
+        <CloudSurfaceBoundary key={identityKey} fallback={fallback}>
+          <Suspense fallback={fallback}>
+            <CloudContent loader={loader} fallback={fallback} render={render} />
+          </Suspense>
+        </CloudSurfaceBoundary>
+      ),
+    [fallback, identityKey, loader, render],
+  );
+  const awaitsChunk = keepsServerCloud && state.status !== 'failed';
+  if (!enabled || cloud === undefined || (state.status !== 'loaded' && !awaitsChunk)) {
     // oxlint-disable-next-line react/jsx-no-useless-fragment -- turns the fallback node into an element for typed callers.
     return <>{fallback}</>;
   }
-  return (
-    <CloudSurfaceBoundary key={identityKey} fallback={fallback}>
-      <Suspense fallback={fallback}>
-        <CloudRendering module={state.module} render={render} />
-      </Suspense>
-    </CloudSurfaceBoundary>
-  );
+  return cloud;
 }
 
 /**

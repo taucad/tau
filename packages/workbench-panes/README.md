@@ -15,6 +15,8 @@ The viewer chrome around the panes is shared too, so the Tau app's viewer and th
 | `@taucad/workbench-panes/shell/viewer-header-actions`         | `ViewerHeaderActions`, `ViewerHeaderActionsProps`, `ViewerHeaderPane`                                                                        | The header cluster: host `leading` actions, Share and Export (folding to icons below `@xl/viewer`), then a hairline and the `trailing` control.                                                                                                                                                                                                   |
 | `@taucad/workbench-panes/components/workbench-tab`            | `WorkbenchTab`, `WorkbenchTabProps`                                                                                                          | One tab: glyph, fading title, close glyph and full-title tooltip. `as: 'button'` is a complete `role="tab"` that shrinks to 48 px with its siblings; `as: 'div'` is content inside a tab dockview owns.                                                                                                                                           |
 
+`@taucad/workbench-panes/components/format-badge` re-exports `FormatBadge` and `FormatFileIcon` from `@taucad/ui/components/format-badge`, where they now live. Import them from `@taucad/ui`; the Export pane draws `FormatFileIcon` when its host passes no `FileIcon`.
+
 The selected part is the model interaction machine's first selected component; a host keeps no copy of it. Render the stage inside the host's `GraphicsProvider`, `KeyboardProvider` and `TooltipProvider`.
 
 ```tsx

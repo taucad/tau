@@ -2,7 +2,8 @@
 /* oxlint-disable typescript/no-restricted-types -- `ServiceWorkerRegistration.waiting` and `installing` are `null` when absent; the double models the platform. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { activateIfBuildMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import type { ReportedBuildFloor } from '#lib/build-identity.js';
+import { activateIfBuildMessageType, buildFloorMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 
 import {
   failedInstallLimit,
@@ -40,7 +41,7 @@ const setVerdict = (next: ServerVerdict): void => {
 const createRegistration = (): {
   registration: ServiceWorkerRegistration;
   waiting: { postMessage: ReturnType<typeof vi.fn> } | null;
-  active: { scriptURL: string } | null;
+  active: { scriptURL: string; postMessage?: ReturnType<typeof vi.fn> } | null;
   update: ReturnType<typeof vi.fn>;
   unregister: ReturnType<typeof vi.fn>;
   installNewWorker: () => void;
@@ -49,7 +50,7 @@ const createRegistration = (): {
   const updateListeners: Array<() => void> = [];
   const state = {
     waiting: null as { postMessage: ReturnType<typeof vi.fn> } | null,
-    active: null as { scriptURL: string } | null,
+    active: null as { scriptURL: string; postMessage?: ReturnType<typeof vi.fn> } | null,
     installing: null as EventTarget | null,
   };
   const update = vi.fn().mockResolvedValue(undefined);
@@ -345,6 +346,73 @@ describe('startServiceWorker', () => {
 
     expect(current.unregister).not.toHaveBeenCalled();
     stop();
+  });
+});
+
+describe('the build floor relay (FP2)', () => {
+  const reported = { floor: undefined as ReportedBuildFloor | undefined, listeners: new Set<() => void>() };
+  const buildFloor = {
+    readReportedBuildFloor: () => reported.floor,
+    subscribeReportedBuildFloor: (listener: () => void) => {
+      reported.listeners.add(listener);
+      return () => {
+        reported.listeners.delete(listener);
+      };
+    },
+  };
+  const report = (floor: ReportedBuildFloor): void => {
+    reported.floor = floor;
+    for (const listener of reported.listeners) {
+      listener();
+    }
+  };
+
+  beforeEach(() => {
+    reported.floor = undefined;
+    reported.listeners.clear();
+  });
+
+  it('should hand the active worker each floor the page’s own build check reports, once per change', async () => {
+    const active = { scriptURL: 'https://tau.new/service-worker.js', postMessage: vi.fn() };
+    current.active = active;
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus, buildFloor });
+    await vi.runAllTimersAsync();
+    // Nothing asked yet: nothing to hand on.
+    expect(active.postMessage).not.toHaveBeenCalled();
+
+    report(1_795_000_000_000);
+    report(1_795_000_000_000);
+    report('none');
+
+    expect(active.postMessage.mock.calls).toStrictEqual([
+      [{ type: buildFloorMessageType, minBuildId: 1_795_000_000_000 }],
+      [{ type: buildFloorMessageType, minBuildId: undefined }],
+    ]);
+    stop();
+  });
+
+  it('should hand on a floor reported before the registration was found', async () => {
+    const active = { scriptURL: 'https://tau.new/service-worker.js', postMessage: vi.fn() };
+    current.active = active;
+    reported.floor = 7;
+    const stop = startServiceWorker({ inWorkspace: true, verdict, onInstallStatus, buildFloor });
+    await vi.runAllTimersAsync();
+
+    expect(active.postMessage).toHaveBeenCalledExactlyOnceWith({ type: buildFloorMessageType, minBuildId: 7 });
+    stop();
+  });
+
+  it('should send no request of its own for the floor', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    current.active = { scriptURL: 'https://tau.new/service-worker.js', postMessage: vi.fn() };
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus, buildFloor });
+    await vi.runAllTimersAsync();
+    report(7);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    stop();
+    vi.unstubAllGlobals();
   });
 });
 

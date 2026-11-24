@@ -32,20 +32,16 @@ type PayloadFile = {
   group: string;
 };
 
-/** A renderer's deployment ceiling. @public */
-export type DesktopCeiling = 'cloud' | 'self-host' | 'adaptive';
-
 type ModuleChunk = { fileName: string; moduleIds: string[]; imports: string[]; forwardingOnly: boolean };
 type ModuleAsset = { fileName: string; sourcePath: string; sha256: string };
 
 /** Physical files and emitted ownership evidence, with ASAR counted once. */
 export type PayloadInventory = {
   /**
-   * The renderer's deployment ceiling (adaptive app deployment mode I12), read from its module graph: the
-   * `deployment-ceiling.*` file it carries, else `adaptive` when any `*.adaptive.*` module is present; absent when the
-   * graph names neither (a pinned build whose ceiling module was folded away).
+   * Whether the renderer carries the display-mode owner (`apps/ui/app/runtime/deployment.machine.ts`, adaptive app
+   * deployment mode D2): the one build decides funded or not from its API's deployment answer (W12).
    */
-  ceiling?: DesktopCeiling;
+  deploymentOwner?: boolean;
   files: PayloadFile[];
   chunks: ModuleChunk[];
   assets: ModuleAsset[];
@@ -324,7 +320,7 @@ export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
   return (
     /apps\/ui\/app\/root\.tsx(?:\?|$)/u.test(path) ||
     /apps\/ui\/app\/components\/(?:cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(path) ||
-    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
+    /apps\/ui\/app\/(?:hooks\/use-privacy-choices|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
       path,
     ) ||
     /apps\/ui\/app\/(?:offline\/|routes\/legal(?:\.|\/)|routes\/_index\/(?:route|legacy-landing|marketing-landing)\.tsx(?:\?|$))/u.test(
@@ -499,37 +495,19 @@ const inspectForwardingChunk = async (options: {
 };
 
 /**
- * The ceiling a renderer's module graph was built for.
+ * Whether a renderer's module graph carries the display-mode owner.
  *
  * @param moduleIds - Every module id in the renderer's emitted graph.
- * @returns The ceiling, or `undefined` when the graph cannot tell.
- * @throws When the graph holds more than one ceiling.
+ * @returns `true` when the owner's machine is in the graph.
  */
-export const desktopCeilingOf = (moduleIds: readonly string[]): DesktopCeiling | undefined => {
-  const normalized = moduleIds.map((id) => id.replaceAll('\\', '/'));
-  const named = new Set(
-    normalized.flatMap(
-      (id) => /(?:^|\/)apps\/ui\/app\/cloud\/deployment-ceiling\.(cloud|self-host|adaptive)\.ts$/u.exec(id)?.[1] ?? [],
-    ),
-  );
-  if (named.size > 1) {
-    throw new Error(`The renderer holds more than one deployment ceiling: ${[...named].sort().join(', ')}`);
-  }
-  const [ceiling] = named;
-  if (ceiling !== undefined) {
-    return ceiling as DesktopCeiling;
-  }
-  return normalized.some((id) => /(?:^|\/)apps\/ui\/app\/.+\.adaptive\.tsx?$/u.test(id)) ? 'adaptive' : undefined;
-};
+export const carriesDeploymentOwner = (moduleIds: readonly string[]): boolean =>
+  moduleIds.some((id) => /(?:^|\/)apps\/ui\/app\/runtime\/deployment\.machine\.ts$/u.test(id.replaceAll('\\', '/')));
 
-/** Record the renderer's ceiling on the inventory, and a violation when it is not the one expected. */
-const recordCeiling = (inventory: PayloadInventory, expected: DesktopCeiling | undefined): void => {
-  const ceiling = desktopCeilingOf(inventory.chunks.flatMap((chunk) => chunk.moduleIds));
-  if (ceiling !== undefined) {
-    inventory.ceiling = ceiling;
-  }
-  if (expected !== undefined && ceiling !== expected) {
-    inventory.violations.push(`Renderer deployment ceiling is ${ceiling ?? 'unknown'}, expected ${expected}`);
+/** Record whether the renderer carries the owner, and a violation when it must and does not. */
+const recordDeploymentOwner = (inventory: PayloadInventory, required: boolean): void => {
+  inventory.deploymentOwner = carriesDeploymentOwner(inventory.chunks.flatMap((chunk) => chunk.moduleIds));
+  if (required && !inventory.deploymentOwner) {
+    inventory.violations.push('Renderer carries no display-mode owner (apps/ui/app/runtime/deployment.machine.ts)');
   }
 };
 
@@ -542,8 +520,8 @@ export const inspectDesktopPayload = async (options: {
   archive?: string;
   /** Language server stages; defaults to this checkout's `out/` stages. */
   stagedLanguageServers?: StagedLanguageServers;
-  /** The ceiling the renderer must carry; a different or unknown one is a violation. */
-  expectedCeiling?: DesktopCeiling;
+  /** The renderer must carry the display-mode owner; one without it is a violation. */
+  expectDeploymentOwner?: boolean;
 }): Promise<PayloadInventory> => {
   const workspaceRoot = resolve(import.meta.dirname, '../../..');
   const inventory: PayloadInventory = {
@@ -888,7 +866,7 @@ export const inspectDesktopPayload = async (options: {
   if (wasmBytes > approvedWasmBytes) {
     inventory.violations.push(`Renderer WASM budget exceeded: ${wasmBytes} bytes`);
   }
-  recordCeiling(inventory, options.expectedCeiling);
+  recordDeploymentOwner(inventory, options.expectDeploymentOwner === true);
   inventory.files.sort((left, right) => `${left.scope}/${left.path}`.localeCompare(`${right.scope}/${right.path}`));
   inventory.violations = [...new Set(inventory.violations)].sort();
   return inventory;
@@ -905,19 +883,15 @@ const main = async (): Promise<void> => {
       output: { type: 'string' },
       'source-revision': { type: 'string' },
       'report-only': { type: 'boolean', default: false },
-      'expect-ceiling': { type: 'string' },
+      'expect-deployment-owner': { type: 'boolean', default: false },
     },
   });
-  const expectedCeiling = values['expect-ceiling'];
-  if (expectedCeiling !== undefined && !['cloud', 'self-host', 'adaptive'].includes(expectedCeiling)) {
-    throw new Error('--expect-ceiling must be cloud, self-host or adaptive');
-  }
   const inventory = await inspectDesktopPayload({
     renderer: resolve(values.renderer),
     host: resolve(values.host),
     ...(values.app ? { app: resolve(values.app) } : {}),
     ...(values.archive ? { archive: resolve(values.archive) } : {}),
-    ...(expectedCeiling === undefined ? {} : { expectedCeiling: expectedCeiling as DesktopCeiling }),
+    expectDeploymentOwner: values['expect-deployment-owner'],
   });
   const report = JSON.stringify(
     {
@@ -934,7 +908,7 @@ const main = async (): Promise<void> => {
     await writeFile(resolve(values.output), `${report}\n`);
   }
   process.stdout.write(
-    `${JSON.stringify({ ceiling: inventory.ceiling, totals: inventory.totals, violations: inventory.violations }, undefined, 2)}\n`,
+    `${JSON.stringify({ deploymentOwner: inventory.deploymentOwner, totals: inventory.totals, violations: inventory.violations }, undefined, 2)}\n`,
   );
   if (!values['report-only'] && inventory.violations.length > 0) {
     process.exitCode = 1;

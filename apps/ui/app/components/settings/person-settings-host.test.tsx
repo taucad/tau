@@ -22,11 +22,13 @@ const state = vi.hoisted(() => ({
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture: state.capture }) }));
 vi.mock('#telemetry/platform-class.js', () => ({ osClass: () => state.os }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => flag === 'viewerControls' && state.viewerControls,
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && state.viewerControls ? 'on' : 'off'),
   subscribeFeatureFlags: () => () => undefined,
 }));
 vi.mock('#flags/feature-flags.js', () => ({
-  isFeatureEnabled: (flag: string) => flag === 'viewerControls' && state.viewerControls,
+  isFeatureEnabled: () => false,
+  readFeatureState: (flag: string) => (flag === 'viewerControls' && state.viewerControls ? 'on' : 'off'),
 }));
 
 const { PersonSettingsHost } = await import('#components/settings/person-settings-host.js');

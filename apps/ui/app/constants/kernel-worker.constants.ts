@@ -18,8 +18,11 @@ const markKernelWorkerStart = (): void => {
 
 export type DefaultKernelId = RuntimeKernels<typeof runtime>[number]['id'];
 
-// SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`.
-const createDefaultRuntimeWorker = (): Worker => {
+type OnWorkerCodeLoadFailure = Parameters<KernelOptionsFactory>[0]['onWorkerCodeLoadFailure'];
+
+// SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`. FP10: its owner hears its code
+// failing to load before the transport closes the channel.
+const createDefaultRuntimeWorker = (onCodeLoadFailure: OnWorkerCodeLoadFailure) => (): Worker => {
   markKernelWorkerStart();
   return reportWorkerFailures(
     createModuleWorker(
@@ -28,13 +31,13 @@ const createDefaultRuntimeWorker = (): Worker => {
           name: 'tau-ui-runtime-worker',
           type: 'module',
         }),
-      { name: 'runtime' },
+      { name: 'runtime', ...(onCodeLoadFailure === undefined ? {} : { onCodeLoadFailure }) },
     ),
     'kernel',
   );
 };
 
-const createDebugRuntimeWorker = (): Worker => {
+const createDebugRuntimeWorker = (onCodeLoadFailure: OnWorkerCodeLoadFailure) => (): Worker => {
   markKernelWorkerStart();
   return reportWorkerFailures(
     createModuleWorker(
@@ -43,7 +46,7 @@ const createDebugRuntimeWorker = (): Worker => {
           name: 'tau-ui-runtime-debug-worker',
           type: 'module',
         }),
-      { name: 'runtime-debug' },
+      { name: 'runtime-debug', ...(onCodeLoadFailure === undefined ? {} : { onCodeLoadFailure }) },
     ),
     'kernel',
   );
@@ -93,10 +96,15 @@ export const sizeComputeBinding = (
  * is constructed with everything it needs up-front, preserving the
  * runtime invariant that `client.connect()` takes no arguments.
  */
-export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, runtimeConfig, compute }) => ({
+export const createDefaultKernelOptions: KernelOptionsFactory = ({
+  fileSystem,
+  runtimeConfig,
+  compute,
+  onWorkerCodeLoadFailure,
+}) => ({
   config: runtimeConfig,
   transport: webWorkerTransport({
-    createWorker: createDefaultRuntimeWorker,
+    createWorker: createDefaultRuntimeWorker(onWorkerCodeLoadFailure),
     fileSystem,
     compute: sizeComputeBinding(compute, runtimeConfig.memoryConstrained),
   }),
@@ -114,7 +122,7 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
   ...createDefaultKernelOptions(deps),
   config: deps.runtimeConfig,
   transport: webWorkerTransport({
-    createWorker: createDebugRuntimeWorker,
+    createWorker: createDebugRuntimeWorker(deps.onWorkerCodeLoadFailure),
     devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
     compute: sizeComputeBinding(deps.compute, deps.runtimeConfig.memoryConstrained),

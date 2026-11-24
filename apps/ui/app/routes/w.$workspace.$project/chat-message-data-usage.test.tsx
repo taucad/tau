@@ -2,11 +2,32 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type * as AskDeadline from '#lib/ask-deadline.js';
 import type { UsageData } from '@taucad/chat';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+import { receiptDeadlines } from '#routes/w.$workspace.$project/chat-receipt-credits.js';
+
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
 
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
+
+/* One ask deadline is 5 s in the app; these rows run it at 50 ms. */
+vi.mock('#lib/ask-deadline.js', async (importOriginal) => {
+  const actual: typeof AskDeadline = await importOriginal();
+  return {
+    ...actual,
+    createAskDeadlines: (timer?: AskDeadline.AskDeadlineTimer) => actual.createAskDeadlines(timer, 50),
+  };
+});
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   unknownIconId: 'unknown',
@@ -125,6 +146,7 @@ function renderUsage(usageParts: UsageData[], userId: string | undefined = 'user
 
 afterEach(() => {
   cleanup();
+  receiptDeadlines.cancel();
   recordBillingRevisionMinimum.mockClear();
   vi.unstubAllGlobals();
 });
@@ -165,8 +187,8 @@ describe('ChatMessageDataUsage', () => {
   });
 
   /* B4 R4/R5: a receipt answering for another account, another environment or
-   * another operation is refused outright, so the turn stays Pending rather
-   * than rendering somebody else's charge. */
+   * another operation is refused outright, so the turn has no answer (checking,
+   * then "can't check", I15) rather than rendering somebody else's charge. */
   it.each([
     ['another owner', { ownerId: 'other' }],
     ['another environment', { environment: 'staging' }],
@@ -176,9 +198,29 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/Tau credits: Pending/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: Can’t check/u)).toBeInTheDocument();
     });
     expect(screen.queryByLabelText(/Tau credits: 1/)).not.toBeInTheDocument();
+  });
+
+  /* W9 D2 (R4, I15): a receipt with no answer is "Can't check" after one ask deadline, with a Retry that rereads it. */
+  it('says it cannot check after the deadline, and its Retry rereads the receipt', async () => {
+    stubReceipts({});
+    renderUsage([usagePart({ operationId: 'op1' })]);
+    const trigger = await screen.findByRole('button', { name: /Tau credits: Can’t check/u });
+
+    act(() => {
+      trigger.focus();
+    });
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    stubReceipts({ op1: terminalReceipt('op1', '12345') });
+    act(() => {
+      retry.click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Tau credits: 1$/u)).toBeInTheDocument();
+    });
   });
 
   /* V6: the transcript is history. An external agent's turn names that agent

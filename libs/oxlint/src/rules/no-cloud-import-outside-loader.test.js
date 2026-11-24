@@ -10,7 +10,7 @@ const ruleTester = new RuleTester({
 });
 
 const loader = 'apps/ui/app/cloud/cloud-entries.ts';
-const facade = 'apps/ui/app/cloud/settings-billing.adaptive.tsx';
+const facade = 'apps/ui/app/cloud/settings-billing.tsx';
 const route = 'apps/ui/app/routes/usage/route.tsx';
 
 describe('no-cloud-import-outside-loader', () => {
@@ -43,19 +43,14 @@ describe('no-cloud-import-outside-loader', () => {
           code: "const load = () => import('#cloud/cloud-surfaces.lazy.js');",
         },
         {
-          name: 'the Cloud chunk imports a .cloud hook',
+          name: 'the Cloud chunk imports a .funded hook',
           filename: 'apps/ui/app/cloud/cloud-surfaces.lazy.tsx',
-          code: "import { useCommercialFeatures } from '#cloud/commercial-features.cloud.js';",
-        },
-        {
-          name: 'the purge is Core',
-          filename: 'apps/ui/app/cloud/financial-purge.adaptive.ts',
-          code: "export { useCloudFinancialPurge } from '#cloud/financial-purge.cloud.js';",
+          code: "import { useCommercialFeatures } from '#cloud/commercial-features.funded.js';",
         },
         {
           name: 'files outside the app',
           filename: 'apps/libs/billing-ui/src/index.ts',
-          code: "const load = () => import('#cloud/x.cloud.js');",
+          code: "const load = () => import('#cloud/x.funded.js');",
         },
       ],
       invalid: [
@@ -66,21 +61,21 @@ describe('no-cloud-import-outside-loader', () => {
           errors: [{ messageId: 'cloudImport' }],
         },
         {
-          name: 'a route importing a .cloud file by path',
+          name: 'a route importing a .funded file by path',
           filename: route,
-          code: "const load = () => import('../../cloud/settings-billing.cloud.js');",
+          code: "const load = () => import('../../cloud/settings-billing.funded.js');",
           errors: [{ messageId: 'cloudImport' }],
         },
         {
-          name: 'a facade importing a .cloud hook statically (BA13)',
+          name: 'a facade importing a .funded hook statically (BA13)',
           filename: facade,
-          code: "import { useCommercialFeatures } from '#cloud/commercial-features.cloud.js';",
+          code: "import { useCommercialFeatures } from '#cloud/commercial-features.funded.js';",
           errors: [{ messageId: 'cloudStatic' }],
         },
         {
-          name: 'a route re-exporting a .cloud module',
+          name: 'a route re-exporting a .funded module',
           filename: route,
-          code: "export { CloudBillingSettings } from '#cloud/settings-billing.cloud.js';",
+          code: "export { CloudBillingSettings } from '#cloud/settings-billing.funded.js';",
           errors: [{ messageId: 'cloudStatic' }],
         },
         {

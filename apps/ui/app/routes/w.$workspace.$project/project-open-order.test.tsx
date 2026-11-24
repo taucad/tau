@@ -24,7 +24,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '@taucad/files-ui/runtime/project-library';
+import type { ProjectRouteAccess } from '@taucad/project-library/runtime/project-library';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionWiring } from '#services/sessions-store.js';
@@ -547,7 +547,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => ({
   ...(await importOriginal<typeof SidebarStatusModule>()),
   useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
 }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false, useFeatureState: () => 'off' }));
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({
   MobileProjectTopBar: () => null,
 }));

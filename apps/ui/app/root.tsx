@@ -4,7 +4,6 @@ import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { staleBuildMiddleware } from '#lib/stale-build-navigation.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { isOfflineShellPath } from '#lib/static-paths.js';
 import { isStaticShellPath } from '#lib/route-classes.js';
 import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
@@ -16,6 +15,9 @@ import { RootCommandPaletteItems } from '#root-command-items.js';
 import { DeferredExampleCommandPaletteItems } from '#components/nav/deferred-example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 import { prefetchModelCatalog, prefetchShellModelCatalog } from '#lib/model-catalog.server.js';
+import { readDeploymentSeed } from '#lib/deployment-seed.server.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { cloudSurfaces } from '#cloud/cloud-entries.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 import type { Route } from './+types/root.js';
 
@@ -61,15 +63,28 @@ export async function loader({ url, context }: Route.LoaderArgs) {
   /* B4: `url` is the page's URL; `request.url` is `/<path>.data?_routes=…` on a client navigation or revalidation. */
   /* P2: nothing here reads the visitor. Theme, sidebar, project count, flags, preferences and consent are client facts
    * (`#lib/client-facts`), applied before first paint by the head script, so the document is the same for everyone. */
-  /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document; a static shell
-   * (PL3) carries the build's catalog, stamped so its bytes do not depend on the build's clock. */
+  /* R3: the model catalog is in the first paint. A static shell (PL3) carries the build's catalog, stamped so its bytes
+   * do not depend on the build's clock. */
   /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
-  const queries = isOfflineShellPath(url.pathname)
-    ? undefined
-    : timeModelCatalogRead(context, isStaticShellPath(url.pathname) ? prefetchShellModelCatalog : prefetchModelCatalog);
+  const isStaticShell = isStaticShellPath(url.pathname);
+  const queries = timeModelCatalogRead(context, isStaticShell ? prefetchShellModelCatalog : prefetchModelCatalog);
+  const env = await getClientEnvironment();
+  /* W11: a server-rendered page starts from the server's own deployment answer, so funded Cloud UI is in the document.
+   * A prerendered or static shell is the same for every deployment and carries none, nor does a safe-mode page (D10);
+   * a failure, a timeout or no API origin is none, and the client resolves as before (I15). */
+  const isPrerender = process.env['IS_RR_BUILD_REQUEST'] === 'yes';
+  const [dehydrated, deployment] = await Promise.all([
+    queries,
+    isPrerender || isStaticShell || isSafeModeRequested(url.search) ? undefined : readDeploymentSeed(env.TAU_API_URL),
+  ]);
+  if (deployment?.state === 'funded') {
+    /* The server renders funded Cloud UI from the loaded chunk; once per process, a failure renders the fallback. */
+    await cloudSurfaces.preload();
+  }
   return {
-    env: await getClientEnvironment(),
-    queries: await queries,
+    env,
+    queries: dehydrated,
+    ...(deployment === undefined ? {} : { deployment }),
   };
 }
 
@@ -79,8 +94,7 @@ export async function loader({ url, context }: Route.LoaderArgs) {
  * the server before the URL changes (U23). The client's own catalog query keeps the catalog fresh, through its
  * `staleTime` and `refetchInterval`.
  *
- * The default is kept for submissions, an explicit revalidation of the same URL, and leaving the offline shell path
- * (its neutral prerendered document has no real root data). The offline shell path itself never revalidates the root.
+ * The default is kept for submissions and an explicit revalidation of the same URL.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
@@ -88,13 +102,8 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   formMethod,
   defaultShouldRevalidate,
 }) => {
-  if (isOfflineShellPath(nextUrl.pathname)) {
-    return false;
-  }
   const isClientNavigation =
-    formMethod === undefined &&
-    !isOfflineShellPath(currentUrl.pathname) &&
-    (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
+    formMethod === undefined && (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
   return isClientNavigation ? false : defaultShouldRevalidate;
 };
 

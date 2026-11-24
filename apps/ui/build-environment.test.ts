@@ -3,32 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveServiceWorkerKillSwitch,
   resolveTauBuildRelease,
-  resolveTauDeploymentCeiling,
   resolveUiBuildDirectory,
   resolveTauTelemetryHostCloud,
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 
-describe('resolveTauDeploymentCeiling', () => {
-  it.each([
-    [undefined, 'self-host'],
-    ['false', 'self-host'],
-    ['true', 'cloud'],
-    ['adaptive', 'adaptive'],
-  ])('resolves %s to %s', (value, expected) => {
-    expect(resolveTauDeploymentCeiling(value)).toBe(expected);
-  });
-
-  it('rejects non-canonical values', () => {
-    expect(() => resolveTauDeploymentCeiling('1')).toThrow('must be exactly true, false or adaptive');
-    expect(() => resolveTauDeploymentCeiling('Adaptive')).toThrow('must be exactly true, false or adaptive');
-  });
-});
-
 describe('resolveUiBuildDirectory', () => {
   it('defaults to build and takes one directory name', () => {
     expect(resolveUiBuildDirectory(undefined)).toBe('build');
-    expect(resolveUiBuildDirectory('build-adaptive')).toBe('build-adaptive');
+    expect(resolveUiBuildDirectory('build-self-host')).toBe('build-self-host');
     expect(() => resolveUiBuildDirectory('../elsewhere')).toThrow('one directory name');
   });
 });

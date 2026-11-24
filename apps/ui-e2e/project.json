@@ -94,7 +94,7 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. service-worker-boot.test.ts holds the web app's service worker on the boot path to the rule that a worker never makes the app fail where no worker would (Brain research/pl7-service-worker-staging-defects-blueprint.md, red-first rows): a request only the worker makes fails, a precached shell names a file the live deploy no longer serves, a successor's install cannot fetch an entry, the kill switch over a stalled worker, and navigations stay the browser's own. PL7 staging defects FP9 adds rows on one live build whose server drops one chunk's connection once (failNext): a chunk the page needs reloads an untouched page into the same build, and the chat panel's decorative spinner degrades instead of taking the panel down. Both groups joined this queue suite by operator decision 7 of that blueprint, outside the five-nightly ratchet, with 20 consecutive green runs recorded in their pull requests. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. service-worker-boot.test.ts holds the web app's service worker on the boot path to the rule that a worker never makes the app fail where no worker would (Brain research/pl7-service-worker-staging-defects-blueprint.md, red-first rows): a request only the worker makes fails, a precached shell names a file the live deploy no longer serves, a successor's install cannot fetch an entry, the kill switch over a stalled worker, and navigations stay the browser's own. PL7 staging defects FP9 adds rows on one live build whose server drops one chunk's connection once (failNext): a chunk the page needs reloads an untouched page into the same build, and the chat panel's decorative spinner degrades instead of taking the panel down. The staging verification of 2026-11-21 adds rows on the same server: the kernel's runtime worker whose script or static import fails is replaced (and past the page's bound the viewer offers Reload), a route module failing during a client navigation reloads into its destination, and the part preview code failing leaves the shared model route standing. Both groups joined this queue suite by operator decision 7 of that blueprint, outside the five-nightly ratchet, with 20 consecutive green runs recorded in their pull requests. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",
@@ -278,7 +278,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Cloud-build load tier (lane A0.11): the loading rows a self-host build cannot show, because it has no billing fence and asks for /v1/projects only for a project on the Tau remote (N1, H7, N2, H6 and the U1 session discriminator). Like test:e2e:live, the first command builds the cloud UI variant (TAU_CLOUD_ENABLED=true is a build-time input of ui:build) and global-setup.ts starts the UI only. No API runs and no secret is needed: src/support/cloud-stand-ins.ts answers get-session, /v1/projects and /v1/agents by interception for a signed-in stand-in owner with one Tau-remote project, and holds an answer when a row forces its defect. TAU_BILLING_ENVIRONMENT gives the billing fence an identity to gate on. TAU_E2E_CLOUD_LOAD=true runs the cloud-only blocks of the two specs, which every other tier skips, and the name pattern (cloud-load-gate.spec.ts's block, home-load-gate.spec.ts's N1 and H7 cases) keeps home-load-gate.spec.ts's self-host cases out of this tier. Its rows pin known defects (cloudDefectRow): each is a plain test that passes while its defect assertion fails, records that failure as a notice annotation naming the defect, and fails if the assertion passes (the defect no longer reproduces: flip expectedFailure) or anything else faults. The verbose and github-actions reporters print each standing defect's notice (locally under the row, and as a workflow annotation in CI). --retry 0: a row runs once, so a sampled pass is never retried into a reading. Arguments reach only the vitest command. Its own PORT keeps it from reusing a self-host server another e2e target started."
+        "description": "Cloud-build load tier (lane A0.11): the loading rows an unfunded deployment cannot show, because it has no billing fence and asks for /v1/projects only for a project on the Tau remote (N1, H7, N2, H6 and the U1 session discriminator). Like test:e2e:live, the first command builds the one adaptive UI (adaptive app deployment mode W12) and global-setup.ts starts the UI only. No API runs and no secret is needed: src/support/cloud-stand-ins.ts answers get-session, /v1/projects, /v1/agents and a funded /v1/deployment by interception for a signed-in stand-in owner with one Tau-remote project, and holds an answer when a row forces its defect. TAU_E2E_CLOUD_LOAD=true runs the cloud-only blocks of the two specs, which every other tier skips, and the name pattern (cloud-load-gate.spec.ts's block, home-load-gate.spec.ts's N1 and H7 cases) keeps home-load-gate.spec.ts's self-host cases out of this tier. Its rows pin known defects (cloudDefectRow): each is a plain test that passes while its defect assertion fails, records that failure as a notice annotation naming the defect, and fails if the assertion passes (the defect no longer reproduces: flip expectedFailure) or anything else faults. The verbose and github-actions reporters print each standing defect's notice (locally under the row, and as a workflow annotation in CI). --retry 0: a row runs once, so a sampled pass is never retried into a reading. Arguments reach only the vitest command. Its own PORT keeps it from reusing a self-host server another e2e target started."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
@@ -290,8 +290,6 @@
         "env": {
           "PORT": "3021",
           "TAU_E2E_CLOUD_LOAD": "true",
-          "TAU_CLOUD_ENABLED": "true",
-          "TAU_BILLING_ENVIRONMENT": "development",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
@@ -302,21 +300,21 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Adaptive web tier (adaptive app deployment mode charter W7): the first command builds the adaptive UI (`ui:build-adaptive`, `TAU_CLOUD_ENABLED=adaptive` into apps/ui/build-adaptive) and global-setup.ts serves that directory through production-server.ts (TAU_E2E_UI_BUILD_DIRECTORY). No API runs: the cloud stand-ins answer the signed-in session, and each row of src/adaptive-web.spec.ts answers GET /v1/deployment funded or unfunded, holds it, or blocks or stalls the Cloud chunk, which the spec finds in the build's module-id manifest. Every other tier skips the spec. Its own PORT keeps it from reusing a server another e2e target started."
+        "description": "Adaptive web tier (adaptive app deployment mode charter W7): the first command builds the UI, `adaptive` since the flip (W8), and global-setup.ts serves it. No API runs: the cloud stand-ins answer the signed-in session, and each row of src/adaptive-web.spec.ts answers GET /v1/deployment funded or unfunded, holds it, or blocks or stalls the Cloud chunk, which the spec finds in the build's module-id manifest. Every other tier skips the spec. Its own PORT keeps it from reusing a server another e2e target started."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
           {
-            "command": "pnpm --dir ../.. exec nx run ui:build-adaptive",
+            "command": "pnpm --dir ../.. exec nx run ui:build",
             "forwardAllArgs": false
           },
           "vitest run --config vitest.config.ts --project chromium --retry 0 src/adaptive-web.spec.ts"
         ],
         "env": {
           "PORT": "3023",
-          "TAU_E2E_UI_BUILD_DIRECTORY": "build-adaptive",
+          "TAU_E2E_ADAPTIVE_TIER": "true",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"

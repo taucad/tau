@@ -19,7 +19,8 @@
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
-    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
+    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
+    "apps/ui/app/machines/cad.machine.ts"
   ],
   "rows": [
     {
@@ -831,6 +832,15 @@
       "owner": "W6"
     },
     {
+      "id": "REVISIONS-RETIRE-BOUND",
+      "bound": "A rebridge's replaced revisions client waits at most 30 s (revisionsRetireBound) for its requests under way, then its close rejects them PROJECT_HOST_CLOSED; a revision-port request has no timeout of its own (#2748 review)",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "}, retireWithin)",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "outside this charter: the revisions-ui owner (revision-port requests that reject when the revision root's port dies, so a retired client settles on the root's answer or its death)"
+    },
+    {
       "id": "D16",
       "bound": "A parameter actor's last write when its desktop, daemon or tau mcp host closes (10 s)",
       "site": "packages/host/src/parameter-actors.ts",
@@ -1386,6 +1396,14 @@
       "token": "replacement.replacementDelay",
       "class": "Backoff",
       "owner": "PL7 staging defects FP10"
+    },
+    {
+      "id": "UI-CAD-WORKER-REPLACEMENT-BACKOFF",
+      "bound": "Kernel runtime worker whose code failed to load: the CAD unit starts the next one at once, then after 1 s; at most 3 failures in 10 min, past which the page's own stale-build recovery decides and the viewer offers Reload",
+      "site": "apps/ui/app/machines/cad.machine.ts",
+      "token": "workerReplacementDelay",
+      "class": "Backoff",
+      "owner": "PL7 staging defects FP10 (staging verification 2026-11-21)"
     }
   ]
 }

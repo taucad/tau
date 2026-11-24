@@ -3,8 +3,15 @@ import { MemoryRouter } from 'react-router';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { PostHog } from 'posthog-js';
-import { disconnectRemoteFlags, readRemoteFlagStatus } from '#flags/remote-flags.js';
+import type { PostHog, PostHogConfig } from 'posthog-js';
+import { readFeatureState } from '#flags/feature-flags.js';
+import {
+  connectRemoteFlags,
+  disconnectRemoteFlags,
+  readRemoteFlagStatus,
+  subscribeRemoteFlags,
+} from '#flags/remote-flags.js';
+import { clearPostHogStorage } from '#lib/posthog.lib.js';
 import { PostHogAnalyticsProvider } from '#providers/posthog-analytics-provider.js';
 
 const sdk = vi.hoisted(() => ({ loadsOnInit: false, current: undefined as unknown }));
@@ -15,6 +22,7 @@ client.init.mockImplementation(() => {
   return client;
 });
 client.onFeatureFlags.mockReturnValue(() => undefined);
+Object.defineProperty(client, 'featureFlags', { value: { getFlagVariants: () => ({ onboarding: true }) } });
 client.has_opted_out_capturing.mockReturnValue(false);
 sdk.current = client;
 vi.mock('posthog-js', () => ({
@@ -60,6 +68,69 @@ describe('flag status on admission', () => {
       expect(readRemoteFlagStatus()).toBe(expected);
     });
     expect(client.onFeatureFlags).toHaveBeenCalledTimes(loadsOnInit ? 1 : 0);
+    view.unmount();
+  });
+});
+
+/*
+ * F2c: releasing the client is not a decision. An effect re-run or a remount while analytics stay admitted must never
+ * make a PostHog-backed flag read off, and a host that has not read its decision yet decides nothing.
+ */
+describe('flag state across re-runs and remounts', () => {
+  const answerAtOnce = (): void => {
+    client.onFeatureFlags.mockImplementation((listener) => {
+      listener(['onboarding'], { onboarding: true }, { errorsLoading: false });
+      return () => undefined;
+    });
+  };
+
+  it('never reads onboarding off when the admission effect re-runs or the boundary remounts', async () => {
+    sdk.loadsOnInit = true;
+    (client as { __loaded: boolean }).__loaded = false;
+    answerAtOnce();
+    const boundary = (key: string, sdkOptions: Partial<PostHogConfig>): React.JSX.Element => (
+      <MemoryRouter>
+        <PostHogAnalyticsProvider key={key} isActive options={sdkOptions} isReplayEnabled={false}>
+          <span />
+        </PostHogAnalyticsProvider>
+      </MemoryRouter>
+    );
+    const view = render(boundary('a', options));
+    await waitFor(() => {
+      expect(readFeatureState('onboarding')).toBe('on');
+    });
+    const seen: string[] = [];
+    const unsubscribe = subscribeRemoteFlags(() => {
+      seen.push(readFeatureState('onboarding'));
+    });
+
+    view.rerender(boundary('a', {}));
+    view.rerender(boundary('b', {}));
+    await waitFor(() => {
+      expect(client.onFeatureFlags.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    unsubscribe();
+    expect(seen).not.toContain('off');
+    expect(readFeatureState('onboarding')).toBe('on');
+    view.unmount();
+    client.onFeatureFlags.mockReset();
+    client.onFeatureFlags.mockReturnValue(() => undefined);
+  });
+
+  it('decides nothing while the host has not read its decision', () => {
+    connectRemoteFlags({ onFeatureFlags: () => undefined });
+    vi.mocked(clearPostHogStorage).mockClear();
+
+    const view = render(
+      <PostHogAnalyticsProvider isActive={undefined} options={options} isReplayEnabled={false}>
+        <span />
+      </PostHogAnalyticsProvider>,
+      { wrapper: MemoryRouter },
+    );
+
+    expect(readRemoteFlagStatus()).toBe('pending');
+    expect(clearPostHogStorage).not.toHaveBeenCalled();
     view.unmount();
   });
 });

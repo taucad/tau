@@ -841,6 +841,40 @@ export const subscribeGenuineFailures = (listener: (failure: unknown) => void): 
   return genuineFailureTopic.subscribe(drain);
 };
 
+/** What this module reads of React Router's data router, which the framework keeps on `window`. */
+type NavigatingRouter = {
+  readonly state: {
+    readonly navigation: {
+      readonly location?: { readonly pathname: string; readonly search: string; readonly hash: string };
+      readonly formMethod?: string;
+    };
+  };
+  createHref(location: { readonly pathname: string; readonly search: string; readonly hash: string }): string;
+};
+
+/**
+ * Load this page into a new realm (PL7 staging verification 2026-11-21, row 5): during a client navigation the URL
+ * still names the page being left, and the code that failed may be the destination's, so the document load goes to the
+ * destination, as the React Router patch's own route-module recovery does (TAU-UI-S,
+ * `tools/pnpm/patches/react-router@8.5.1.patch`); the two then agree on where the page lands. With no GET navigation in
+ * flight (a back/forward one has already moved the URL), it reloads the page.
+ */
+const reloadIntoNewRealm = (): void => {
+  const router = (globalThis as { readonly __reactRouterDataRouter?: NavigatingRouter }).__reactRouterDataRouter;
+  const navigation = router?.state.navigation;
+  const isGet = navigation?.formMethod === undefined || navigation.formMethod.toUpperCase() === 'GET';
+  const destination =
+    router !== undefined && navigation?.location !== undefined && isGet
+      ? router.createHref(navigation.location)
+      : undefined;
+  const { pathname, search, hash } = globalThis.location;
+  if (destination !== undefined && destination !== `${pathname}${search}${hash}`) {
+    globalThis.location.assign(destination);
+    return;
+  }
+  globalThis.location.reload();
+};
+
 const getPageRecovery = (): StaleBuildRecovery => {
   pageRecovery ??= createStaleBuildRecovery({
     buildId,
@@ -851,9 +885,7 @@ const getPageRecovery = (): StaleBuildRecovery => {
       readReplacingBuild: readSupersedingBuildId,
     },
     storage: readSessionStorage(),
-    reload: () => {
-      globalThis.location.reload();
-    },
+    reload: reloadIntoNewRealm,
     // A lone tab keeps writing until the user reloads; other bundles stop it through `build-skew`'s own channel.
     onSuperseded: offerReload,
     reportToErrorTracker: (failure) => {

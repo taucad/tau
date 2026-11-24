@@ -42,7 +42,7 @@ import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
- * The root file manager's facade the project library runs on (D15 ruling, A2). It satisfies files-ui's structural
+ * The root file manager's facade the project library runs on (D15 ruling, A2). It satisfies project-library's structural
  * `ProjectLibraryFileManager`, which the moved storage calls and observations read, and adds what the app's commands,
  * route access and workspace commands read: route verification, adoption, the scoped storage and duplicate reads.
  *

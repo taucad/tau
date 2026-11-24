@@ -31,6 +31,8 @@
 @source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../libs/ui-kit/src';
 @source '../../../libs/chat-ui/src';
+@source '../../../libs/chat-surfaces/src';
+@source '../../../libs/project-library/src';
 @source '../../../libs/project-workspace/src';
 @source '../../../libs/files-ui/src';
 @source '../../../libs/editor-ui/src';

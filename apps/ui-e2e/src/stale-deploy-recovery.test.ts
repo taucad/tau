@@ -45,12 +45,14 @@
  * a Chromium other than Playwright's pinned revision.
  */
 // @vitest-environment node
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
-import { prepareDeploys, startDeployServer } from './support/two-deploys.ts';
+import { clientRoot, prepareDeploys, startDeployServer } from './support/two-deploys.ts';
 import type { DeployServer, Deploys } from './support/two-deploys.ts';
 // oxlint-enable no-restricted-imports
 
@@ -485,5 +487,186 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);
     // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
     expect(live.requestCount(agentWorkerScript)).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+  /*
+   * PL7 staging verification of 2026-11-21 (Brain `research/artifacts/pl7-service-worker-staging-defects-blueprint/
+   * runs/2026-11-21-staging-verification/`, row 5). The kernel's runtime worker is built by the one factory, but its
+   * owner, the CAD unit, met only a closed channel: no new worker, the viewer showed "Channel closed" and offered nothing.
+   */
+  const sharedModel = '/s/builtin~replicad.bench-vise';
+  const runtimeWorkerScript = /^\/assets\/runtime\.worker-[\w-]+\.js$/u;
+  /** The runtime worker's static import of replicad: the first replicad chunk its module graph asks for. */
+  const replicadChunk = /^\/assets\/replicad-[\w-]+\.js$/u;
+
+  /** The runtime worker's requests, for a failure's message. */
+  const workerRequests = (live: DeployServer): string =>
+    JSON.stringify(
+      live.requests
+        .filter((request) => /replicad|runtime\.worker/u.test(request.path))
+        .map((request) => `${request.destination ?? ''} ${request.path}`),
+    );
+
+  /** After its code failed to load, a new runtime worker starts and the viewer is not left dead, with no reload. */
+  const expectReplacedRuntimeWorker = async (page: Page, live: DeployServer, failures: string[]): Promise<void> => {
+    try {
+      await expect.poll(() => live.requestCount(runtimeWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+    } catch (error) {
+      throw new Error(
+        `No new runtime worker after its code failed to load (requests ${workerRequests(live)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    // The new worker loads what the failed one could not.
+    await expect.poll(() => live.requestCount(replicadChunk), { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(3000);
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
+  };
+
+  it('should replace the kernel runtime worker when its script fails to load once, with no reload and no dead viewer', async () => {
+    const { page, live, failures } = await open();
+    const failed = live.failNext(runtimeWorkerScript);
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await failed;
+
+    await expectReplacedRuntimeWorker(page, live, failures);
+  }, 120_000);
+
+  /* The browser aborts the import once, as the staging run did: a server-side fault does not fail it, since Chromium
+   * fetches a module worker's static import again within the same worker after a reset or a 404. */
+  it('should replace the kernel runtime worker when its static replicad import fails to load once, with no reload', async () => {
+    const { page, live, failures } = await open();
+    let aborted = false;
+    const abortedOnce = Promise.withResolvers<void>();
+    await context?.route(
+      (url) => replicadChunk.test(url.pathname),
+      async (route) => {
+        if (aborted) {
+          await route.continue();
+          return;
+        }
+        aborted = true;
+        await route.abort('connectionreset');
+        abortedOnce.resolve();
+      },
+    );
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await abortedOnce.promise;
+
+    await expectReplacedRuntimeWorker(page, live, failures);
+  }, 120_000);
+
+  it('should offer Reload in the viewer, never a dead "Channel closed", once new runtime workers failed too', async () => {
+    const { page, live } = await open();
+    // The page replaces the worker up to its bound (three failures in ten minutes), then hands the failure on.
+    void live.failNext(runtimeWorkerScript, { count: 3 });
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    // The page was worked on, so the page's own recovery offers the reload instead of taking it.
+    await page.mouse.click(1, 1);
+
+    const reload = page
+      .getByRole('region', { name: 'Model viewer unavailable' })
+      .getByRole('button', { name: 'Reload', exact: true });
+    try {
+      await reload.waitFor({ timeout: 60_000 });
+    } catch (error) {
+      throw new Error(
+        `No Reload offered (runtime worker requests ${String(live.requestCount(runtimeWorkerScript))}); viewer says ${JSON.stringify(await page.getByRole('main').textContent())}`,
+        { cause: error },
+      );
+    }
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(live.requestCount(runtimeWorkerScript)).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
+  /* Row 5, `/convert` early: a static dependency of the destination's route module fails during a client navigation
+   * within the auto-reload window. The page's reload must land on the destination, as the route loader's own does,
+   * not on the page the navigation left. */
+  it('should reload into the destination when its route module fails to load during a client navigation', async () => {
+    const { page, live, failures } = await open();
+    await page.goto(`${live.origin}/`, { waitUntil: 'load' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const failed = live.failNext(/^\/assets\/cad-viewer-[\w-]+\.js$/u, { dest: 'script' });
+    /* The destination's document takes a moment, as a deployed edge's does (staging: the page's build check answered
+     * first). Locally it would commit before any other reload could start, and hide which reload the page takes. */
+    await context?.route(
+      (url) => url.pathname === '/convert',
+      async (route) => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1500);
+        });
+        await route.continue();
+      },
+    );
+
+    await page.evaluate(() => {
+      const router = (
+        globalThis as unknown as { readonly __reactRouterDataRouter: { navigate: (to: string) => Promise<void> } }
+      ).__reactRouterDataRouter;
+      void router.navigate('/convert');
+    });
+    await failed;
+
+    try {
+      await expect.poll(() => live.documents.length, { timeout: 30_000 }).toBe(2);
+    } catch (error) {
+      throw new Error(
+        `No document load after the failed route module (documents ${JSON.stringify(live.documents)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname).toBe('/convert');
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+  }, 120_000);
+
+  /** The chunk that holds the part thumbnail service, found by a string of its own: its name follows the bundler. */
+  const thumbnailServiceChunk = (): RegExp => {
+    const assets = join(clientRoot, 'assets');
+    const file = readdirSync(assets).find(
+      (name) => name.endsWith('.js') && readFileSync(join(assets, name), 'utf8').includes('part-webp-q'),
+    );
+    if (file === undefined) {
+      expect.fail('no built chunk holds the part thumbnail service');
+    }
+    return new RegExp(`^/assets/${file.replaceAll('.', String.raw`\.`)}$`, 'u');
+  };
+
+  /* Row 5, `part-gallery`: part previews and the part gallery are optional, so the chunk that holds them failing once
+   * degrades them instead of taking down the viewer that imports them, and with it the route. */
+  it('should keep the shared model route when the part preview code fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const chunk = thumbnailServiceChunk();
+    // Opened as a document, so no idle prefetch from another page has the chunk in the HTTP cache first.
+    void live.failNext(chunk);
+    /* Worked on from the start, as the staging tab was: the page offers a reload instead of taking one, so only the
+     * route itself can stay standing. The page's recovery counts any input, whoever dispatched it, once its listeners
+     * are in place, which the entry's own import decides. */
+    await page.addInitScript(() => {
+      const input = setInterval(() => {
+        globalThis.dispatchEvent(new Event('pointerdown'));
+      }, 50);
+      setTimeout(() => {
+        clearInterval(input);
+      }, 5000);
+    });
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'load' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+
+    expect(
+      await page.getByRole('heading', { name: 'Something went wrong' }).count(),
+      `part preview chunk requests: ${String(live.requestCount(chunk))}; module load errors: ${JSON.stringify(failures)}`,
+    ).toBe(0);
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
   }, 120_000);
 });

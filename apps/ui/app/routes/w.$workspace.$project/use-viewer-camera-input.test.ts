@@ -12,7 +12,8 @@ import { useViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-c
 
 const flags = vi.hoisted(() => ({ viewerControls: true }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'viewerControls' ? flags.viewerControls : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && flags.viewerControls ? 'on' : 'off'),
 }));
 
 afterEach(() => {

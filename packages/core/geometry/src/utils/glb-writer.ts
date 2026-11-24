@@ -97,6 +97,12 @@ export type GlbInput = GlbResources & {
    * instead of refused.
    */
   trustedGeometry?: boolean;
+  /**
+   * Called before each node is laid out and once more before the scene is serialized, so a caller can stop a long
+   * write by throwing (for example a cooperative abort check). The writer has no state of its own to leave behind,
+   * and it never changes the output; the copy into the final buffer that follows the last call is not covered.
+   */
+  checkpoint?: () => void;
   extras?: JSONObject;
   extensions?: GlbInputExtensions;
   extensionsUsed?: string[];
@@ -720,6 +726,7 @@ function buildGltf(input: GlbInput): GltfLayout {
   }
 
   for (const node of input.nodes) {
+    input.checkpoint?.();
     if (node.matrix !== undefined) {
       validateMatrix(node.matrix);
     }
@@ -974,6 +981,7 @@ function buildGltf(input: GlbInput): GltfLayout {
  */
 export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
   const { json, binByteLength, writeBin } = buildGltf(input);
+  input.checkpoint?.();
 
   const jsonString = JSON.stringify(json);
   const jsonBytes = new TextEncoder().encode(jsonString);
@@ -1031,6 +1039,7 @@ export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
  */
 export function writeGltfJson(input: GlbInput): Uint8Array<ArrayBuffer> {
   const { json, binByteLength, writeBin } = buildGltf(input);
+  input.checkpoint?.();
   const binBuffer = new Uint8Array(binByteLength);
   writeBin(binBuffer, 0);
 

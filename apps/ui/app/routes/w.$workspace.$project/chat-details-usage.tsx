@@ -1,21 +1,21 @@
+import type { ComponentProps } from 'react';
+import { FundedSurface } from '#cloud/cloud-surface.js';
+import { ChatDetailsUsage as SelfHostChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.unfunded.js';
 import { ChatDetailsUsageTable } from '#routes/w.$workspace.$project/chat-details-usage-table.js';
-import { ProjectCreditsLine } from '#routes/w.$workspace.$project/chat-receipt-credits.js';
 
-/**
- * The project's chat usage: tokens per class from the chat records, and the credits taken from the funded operations'
- * own receipts. The table is Core (`chat-details-usage-table.tsx`) and the credits line is the Cloud-only receipt leaf,
- * so an adaptive build's facade renders the same table with the line from the Cloud chunk (gate G1).
- *
- * @param props - Whether the chat records are read.
- * @returns The usage panel, or nothing when the project has no recorded usage.
- */
-export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolean } = {}):
-  | React.JSX.Element
-  | undefined {
+/** The chat's usage: Core's table, with the credits line from the Cloud chunk while funded (gate G1). */
+export function ChatDetailsUsage(
+  props: ComponentProps<typeof SelfHostChatDetailsUsage> = {},
+): React.JSX.Element | undefined {
   return (
-    <ChatDetailsUsageTable
-      isEnabled={enabled}
-      credits={(operationIds) => <ProjectCreditsLine operationIds={operationIds} />}
+    <FundedSurface
+      fallback={<SelfHostChatDetailsUsage {...props} />}
+      render={(cloud) => (
+        <ChatDetailsUsageTable
+          isEnabled={props.enabled ?? true}
+          credits={(operationIds) => <cloud.ProjectCreditsLine operationIds={operationIds} />}
+        />
+      )}
     />
   );
 }

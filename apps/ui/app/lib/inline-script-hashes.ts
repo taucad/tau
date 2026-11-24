@@ -9,7 +9,8 @@
  *
  * Not listed, because their source is not fixed: the client environment script (`window.ENV`, which carries the build
  * id and the site's environment, so it differs per deploy), the icon sprite loader (`buildSvgSpriteScript`, which
- * carries the build's hashed sprite URLs), React Router's own inline scripts (the router context, its stream and the
+ * carries the build's hashed sprite URLs), the deployment seed (`buildDeploymentSeedScript`, the server's deployment
+ * answer, on function documents only), React Router's own inline scripts (the router context, its stream and the
  * route-module loader carry loader data and build asset URLs, so they differ per build and, on function documents, per
  * request) and React's streaming runtime (`$RC`, `$RB`, which differ with the document's Suspense boundaries).
  *
@@ -33,7 +34,7 @@ export const tauInlineScriptHashes = {
   /** The new-project page's name-field focus script (`focusProjectNameScript`). */
   focusProjectName: "'sha256-krFFxd6XBrbV2JhsS5gQwSQO5RrhqFDZXtxHkLZLXyc='",
   /** The web boot watchdog (`buildBootWatchdogScript`, `#lib/boot-watchdog`), in every web document's `<body>`. */
-  bootWatchdog: "'sha256-7BgXcQaeUX5P2UvGhA2S48xQx4epYFduQuuZhLSLOik='",
+  bootWatchdog: "'sha256-Id/EjSWPx38VoGQvRvNO89Zip49g1CGd4TYDJphe3is='",
 } as const;
 
 /** The name of one listed inline script. */

@@ -5,7 +5,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { ReasoningUIPart } from 'ai';
 import { ChatMessageReasoning, reasoningDurationMs } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 
-vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer-chat', () => ({
+vi.mock('@taucad/chat-surfaces/components/markdown/markdown-viewer-chat', () => ({
   MarkdownViewerChat({
     children,
     isStreaming,

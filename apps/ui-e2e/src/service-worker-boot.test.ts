@@ -9,8 +9,9 @@
  * since the HTTP cache would answer the worker's fetch of any other before the server could fail it:
  *
  * - **Rows 1 and 3, a request only the worker makes fails** (D1). A content blocker's rule that exempts scripts
- *   (EasyList Cookie List, `-cookie-consent-$~script`) lets the page load `use-cookie-consent-<hash>.js` as a script and
- *   blocks the same URL fetched by a worker, whose requests carry `Sec-Fetch-Dest: empty`. Row 1 removes the chunk from
+ *   (EasyList Cookie List, `-cookie-consent-$~script`) let the page load `use-cookie-consent-<hash>.js` as a script and
+ *   blocked the same URL fetched by a worker, whose requests carry `Sec-Fetch-Dest: empty`. FP6 renamed that module
+ *   (`use-privacy-choices`); the rows fail the same chunk as a stand-in for any one a blocker refuses the worker. Row 1 removes the chunk from
  *   the earlier worker's precache, as for a worker from before the chunk joined the interactive tier; the page loaded
  *   the chunk before the worker took it, so its fault is a Playwright `route` (the row only reloads, which the worker
  *   answers network first anyway). Row 3 is two real builds, the next one with the chunk and everything naming it
@@ -25,6 +26,9 @@
  * - **Row 8, a navigation stays a navigation** (D15): under the worker, the server sees the browser's own navigation,
  *   never a request the worker re-issued. Chrome keeps `Sec-Fetch-Mode: navigate` on a navigation the worker passes to
  *   `fetch`, but sends it as `Sec-Fetch-Dest: empty`.
+ * - **FP2, cache-first shells bounded by the server's build floor**: a returning visitor at or above `minBuildId` opens
+ *   the cached shell; below a floor the page's build check handed the worker, the first online navigation is the live
+ *   build; offline the precached shell opens whatever the floor.
  *
  * The page must mount within the boot watchdog's deadline (`boot-watchdog.ts`, 20 s), and online with no failed
  * `/assets/*` request. Rows 1 and 3 have a control without the fault that passes on the same harness. Row 5 (a pre-fix
@@ -61,7 +65,9 @@ import type { BootState, Deploy, DeployServer, Deploys, ReturningVisitor } from 
 const bootDeadline = 20_000;
 
 /** The interactive-tier chunk the script-exempting blocker rule matches. */
-const blockedChunk = /^\/assets\/use-cookie-consent-[\w-]+\.js$/u;
+// FP6 renamed the chunk the rule matched (now `use-privacy-choices`, which no known rule matches); the rows fail the same
+// interactive-tier chunk as a stand-in for any chunk a blocker refuses to the worker alone.
+const blockedChunk = /^\/assets\/use-privacy-choices-[\w-]+\.js$/u;
 
 /** A request the page's worker makes: it has no destination. */
 const workerOnly = ['empty'];
@@ -136,7 +142,7 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
     const chunk = entries.find((entry) => blockedChunk.test(entry.url));
     if (chunk === undefined) {
       expect.fail(
-        'the build precaches no use-cookie-consent chunk: pick another interactive-tier chunk for these rows',
+        'the build precaches no use-privacy-choices chunk: pick another interactive-tier chunk for these rows',
       );
     }
     return chunk.url;
@@ -557,6 +563,189 @@ describe('the web app’s service worker on the boot path (PL7 staging stall)', 
       await expect
         .poll(async () => readWorkerState(page), { timeout: 30_000, interval: 250 })
         .toMatchObject({ registered: false, caches: ['another-app'] });
+    }, 180_000);
+  });
+
+  describe('recovery before mount (FP5)', () => {
+    it('should mount the app when the strip’s Reload is pressed in a page a pre-fix worker stalls', async () => {
+      const { same } = requireDeploys();
+      // No deploy: the browser keeps the pre-fix worker, and every reload of its own stalls again (D5).
+      const { page } = await stallUnderPreFixWorker(same.workers.scripts.next);
+      failedAssets = [];
+      const reloaded = page.waitForEvent('load', { timeout: 30_000 });
+      await page.locator('#tau-boot-strip [data-boot-action=reload]').click();
+      await reloaded;
+      const state = await waitForMount(page);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(same.previousBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('should answer safe mode from the network and leave the worker', async () => {
+      const { same } = requireDeploys();
+      const { page, live } = await openUnderWorker(same, same.workers.scripts);
+      const response = await page.goto(`${live.origin}/?safe=1`, { waitUntil: 'commit' });
+      expect(response?.fromServiceWorker()).toBe(false);
+      await waitForMount(page);
+      await expect
+        .poll(async () => readWorkerState(page), { timeout: 30_000, interval: 250 })
+        .toMatchObject({ registered: false, caches: [] });
+      /* The worker still controls this page, but writes nothing after safe mode stopped it: a lazy chunk the person
+       * loads well after the page settled (here `/usage`, against a funded API) is not cached again, whatever the
+       * timing (FP5, adaptive app deployment mode W12 rework). */
+      await page.route(/\/v1\/deployment(?:\?|$)/u, async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: { 'access-control-allow-origin': live.origin, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            version: 1,
+            edition: 'cloud',
+            billing: { funded: true, environment: 'development' },
+            maxAgeSeconds: 300,
+          }),
+        });
+      });
+      await page.waitForTimeout(15_000);
+      const lateChunks: string[] = [];
+      page.on('request', (request) => {
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith('/assets/') && pathname.endsWith('.js')) {
+          lateChunks.push(pathname);
+        }
+      });
+      await page.evaluate(async () => {
+        const router = (
+          globalThis as unknown as { __reactRouterDataRouter: { navigate: (path: string) => Promise<void> } }
+        ).__reactRouterDataRouter;
+        await router.navigate('/usage');
+      });
+      await page.waitForURL(/\/usage$/u);
+      await page.waitForTimeout(5000);
+      expect(lateChunks.length, 'the in-app navigation loaded no lazy chunk').toBeGreaterThan(0);
+      expect(await readWorkerState(page)).toMatchObject({ registered: false, caches: [] });
+    }, 180_000);
+  });
+
+  describe('cache-first shells bounded by the server’s build floor (FP2)', () => {
+    /**
+     * The page's own build check (`installLiveBuildChecks`): restored from the back/forward cache, a page asks
+     * `/health/build`, and hands the floor in the answer to its worker. Dispatched rather than waited for, since the
+     * other triggers are five minutes visible or a minute hidden.
+     */
+    const askLiveBuild = async (page: Page): Promise<void> => {
+      await page.evaluate(() => {
+        globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      });
+    };
+
+    /** The floor the worker stored (`tau-state-v3`), read without creating its cache. */
+    const readStoredFloor = async (page: Page): Promise<string | undefined> => {
+      try {
+        return await page.evaluate(async () => {
+          const stored = await caches.match('/__tau/build-floor', { cacheName: 'tau-state-v3' });
+          return stored === undefined ? undefined : stored.text();
+        });
+      } catch {
+        // Between documents.
+        return undefined;
+      }
+    };
+
+    /**
+     * A returning visitor's two visits: the first installs the previous deploy's worker (and, with `floor`, the
+     * operator raises the floor above that build while it is live and the page's build check hands it to the worker);
+     * the next deploy goes live; the second visit opens a project, and its first navigation is the installed worker's
+     * to answer, from a worker started afresh.
+     */
+    const reopenAfterDeploy = async (
+      options: Readonly<{ floor?: boolean; offline?: boolean }> = {},
+    ): Promise<{
+      readonly state: BootState;
+      readonly fromCache: boolean;
+      readonly fromWorker: boolean;
+      readonly live: DeployServer;
+      readonly page: Page;
+    }> => {
+      const { same } = requireDeploys();
+      const live = await startDeployServer(
+        same.builds,
+        { shells: same.shells, workers: same.workers.scripts },
+        { hold: false, retain: true },
+      );
+      server = live;
+      visitor = createReturningVisitor(async (profile) =>
+        chromium.launchPersistentContext(profile, { executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] }),
+      );
+      await visitor.visit(async (page) => {
+        await page.goto(`${live.origin}/projects`, { waitUntil: 'networkidle' });
+        await waitForControllingWorker(page);
+        if (options.floor === true) {
+          // The operator's floor (`TAU_MIN_BUILD_ID`), read by both deploys' `/health/build` on every request.
+          process.env['TAU_MIN_BUILD_ID'] = String((deploys?.previousBuildId ?? 0) + 1);
+          await askLiveBuild(page);
+          await expect
+            .poll(async () => readStoredFloor(page), { timeout: 30_000, interval: 250 })
+            .toBe(process.env['TAU_MIN_BUILD_ID']);
+        }
+      });
+      live.deploy();
+      // Kept open, so a row can go on in the same visit.
+      const result = await visitor.visit(
+        async (page, context) => {
+          watch(page);
+          if (options.offline === true) {
+            await context.setOffline(true);
+          }
+          const response = await page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' });
+          const headers = await response?.allHeaders();
+          const state = await waitForMount(page);
+          return {
+            state,
+            fromCache: (headers?.['server-timing'] ?? '').includes('sw;desc=cache'),
+            fromWorker: response?.fromServiceWorker() === true,
+            page,
+          };
+        },
+        { keepOpen: true },
+      );
+      return { ...result, live };
+    };
+
+    afterEach(() => {
+      delete process.env['TAU_MIN_BUILD_ID'];
+    });
+
+    it('should open the cached shell at or above the floor with no document request first, then the next build once replaced', async () => {
+      const { same } = requireDeploys();
+      const { state, fromCache, page, live } = await reopenAfterDeploy();
+      expect(fromCache).toBe(true);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(same.previousBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+
+      // The page's build check finds the next deploy (`replaced`); the update rule activates the next worker, which
+      // the browser's update check on the open installed.
+      await askLiveBuild(page);
+      await expect.poll(async () => readNextWorker(page, same), { timeout: 60_000, interval: 500 }).toBe('active');
+      await page.goto(`${live.origin}/w/home/bracket-v2`, { waitUntil: 'commit' });
+      expect(await waitForMount(page)).toStrictEqual({
+        mounted: true,
+        stripShown: false,
+        buildId: String(same.nextBuildId),
+      });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('should open the live build on the first online navigation when the cached shell is below the floor the server reported', async () => {
+      const { same } = requireDeploys();
+      const { state, fromCache } = await reopenAfterDeploy({ floor: true });
+      expect(fromCache).toBe(false);
+      expect(state).toStrictEqual({ mounted: true, stripShown: false, buildId: String(same.nextBuildId) });
+      expect(failedAssets).toStrictEqual([]);
+    }, 180_000);
+
+    it('should open the precached shell offline whatever the floor', async () => {
+      const { state, fromWorker } = await reopenAfterDeploy({ floor: true, offline: true });
+      expect(fromWorker).toBe(true);
+      expect(state).toMatchObject({ mounted: true, stripShown: false });
     }, 180_000);
   });
 

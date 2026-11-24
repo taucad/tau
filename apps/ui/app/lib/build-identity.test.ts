@@ -3,9 +3,13 @@ import {
   askLiveBuild,
   buildIdentityPath,
   liveBuildIdTimeout,
+  parseBuildId,
   readBuildId,
   readBuildIdentity,
   readBuildRelease,
+  readReportedBuildFloor,
+  resolveMinBuildId,
+  subscribeReportedBuildFloor,
   unknownBuildRelease,
 } from '#lib/build-identity.js';
 
@@ -153,5 +157,70 @@ describe('askLiveBuild', () => {
     vi.stubGlobal('fetch', answer);
 
     await expect(askLiveBuild()).resolves.toBe('none');
+  });
+});
+
+describe('parseBuildId (FP2)', () => {
+  it.each([
+    [1_795_000_000_000, 1_795_000_000_000],
+    ['1795000000000', 1_795_000_000_000],
+  ])('should read %j as a build id', (value, expected) => {
+    expect(parseBuildId(value)).toBe(expected);
+  });
+
+  it.each([undefined, '', 'not-a-number', '-5', '1.5', ' 7', '@TAU_RETAINED', 0, -5, 1.5, Number.NaN, '1e3'])(
+    'should read %j as no build id',
+    (value) => {
+      expect(parseBuildId(value)).toBeUndefined();
+    },
+  );
+});
+
+describe('resolveMinBuildId (FP2)', () => {
+  it('should be the oldest retained build when the operator set no floor', () => {
+    expect(resolveMinBuildId({ operatorFloor: undefined, retainedFloor: '1795000000000' })).toBe(1_795_000_000_000);
+  });
+
+  it('should be the operator’s floor when no retained floor was stamped', () => {
+    expect(resolveMinBuildId({ operatorFloor: '1795000000000', retainedFloor: '@TAU_RETAINED' })).toBe(
+      1_795_000_000_000,
+    );
+  });
+
+  it('should be the larger of the operator’s floor and the oldest retained build', () => {
+    expect(resolveMinBuildId({ operatorFloor: '1795000000001', retainedFloor: '1795000000000' })).toBe(
+      1_795_000_000_001,
+    );
+    expect(resolveMinBuildId({ operatorFloor: '1795000000000', retainedFloor: '1795000000002' })).toBe(
+      1_795_000_000_002,
+    );
+  });
+
+  it('should be no floor when neither names a build', () => {
+    expect(resolveMinBuildId({ operatorFloor: '', retainedFloor: undefined })).toBeUndefined();
+  });
+});
+
+describe('the build floor the server reports (FP2)', () => {
+  it('should keep the minBuildId of the last whole answer and tell its subscribers', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeReportedBuildFloor(listener);
+    vi.stubGlobal('fetch', async () => Response.json({ buildId: 9, minBuildId: 7 }));
+    await askLiveBuild();
+    expect(readReportedBuildFloor()).toBe(7);
+
+    vi.stubGlobal('fetch', async () => Response.json({ buildId: 9 }));
+    await askLiveBuild();
+    expect(readReportedBuildFloor()).toBe('none');
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    // No whole answer: the last floor stands.
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await askLiveBuild();
+    expect(readReportedBuildFloor()).toBe('none');
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
   });
 });

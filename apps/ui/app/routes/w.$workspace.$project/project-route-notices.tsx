@@ -41,7 +41,7 @@ import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machine
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
-import type { PendingProjectRecoveryReason } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { PendingProjectRecoveryReason } from '@taucad/project-library/types/pending-project-operation.types';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
 export type NoticeActionRun = 'reopen' | 'restore' | 'retry' | 'back' | 'projects' | 'trash-view' | 'desktop';

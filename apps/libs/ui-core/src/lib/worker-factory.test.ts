@@ -106,6 +106,42 @@ describe('createModuleWorker', () => {
   });
 });
 
+describe('createModuleWorker, the worker’s owner (PL7 staging verification 2026-11-21, kernel runtime worker)', () => {
+  /* The owner of a worker whose transport only sees a closed channel learns why from the factory, before its own
+   * `error` listener (added after construction) closes the channel. */
+  it.each([
+    ['its script did not load (a bare error event)', (): Event => new Event('error')],
+    ['an import inside it failed', importFailed],
+  ])('should tell the owner once when %s, before the owner’s own error listener runs', (_case, failure) => {
+    const seen: string[] = [];
+    const onCodeLoadFailure = vi.fn((error: WorkerCodeLoadError) => {
+      seen.push(`owner:${error.worker}`);
+    });
+    const fake = new FakeWorker();
+    createModuleWorker(() => fake as unknown as Worker, { name: 'runtime', onCodeLoadFailure });
+    fake.addEventListener('error', () => {
+      seen.push('transport');
+    });
+
+    fake.dispatchEvent(failure());
+    fake.dispatchEvent(failure());
+
+    expect(onCodeLoadFailure).toHaveBeenCalledExactlyOnceWith(expect.any(WorkerCodeLoadError));
+    expect(seen[0]).toBe('owner:runtime');
+    expect(seen).toContain('transport');
+  });
+
+  it('should leave an uncaught error inside a running worker to the owner’s own listener', () => {
+    const onCodeLoadFailure = vi.fn();
+    const fake = new FakeWorker();
+    createModuleWorker(() => fake as unknown as Worker, { name: 'runtime', onCodeLoadFailure });
+
+    fake.dispatchEvent(new ErrorEvent('error', { message: 'Uncaught TypeError: x is undefined' }));
+
+    expect(onCodeLoadFailure).not.toHaveBeenCalled();
+  });
+});
+
 describe('isWorkerCodeLoadFailure', () => {
   it('should recognise the factory’s error and a coded error a protocol carried across', () => {
     expect(

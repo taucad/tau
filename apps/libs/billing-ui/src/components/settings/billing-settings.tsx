@@ -18,7 +18,7 @@ import {
   createPortalAction,
   followPaymentRedirect,
 } from '#lib/billing-payment-client.js';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCredits } from '#utils/credits.utils.js';
 import { CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { PaymentMethod } from '@taucad/ui-kit/components/payment-method';

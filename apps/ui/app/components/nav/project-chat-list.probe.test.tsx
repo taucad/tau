@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
-import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 const probeChatId = '00000000-0000-4000-8000-000000000000';

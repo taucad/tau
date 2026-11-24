@@ -401,9 +401,10 @@ function buildNodeFromReplicadGeometry({
  * length and node count.
  *
  * Packing makes no OpenCascade call, so the exception proxy never polls the abort word here. It polls before each
- * part and before writing: an edit that supersedes the render while it packs starts its build after one part
- * instead of after the whole GLB (P9c: 70 to 150 ms on planetary-gear-system). Outside an operation the poll does
- * nothing.
+ * part, before writing, and inside the writer before each node and before serializing, so an edit that supersedes
+ * the render while it packs stops it at the next poll instead of after the whole GLB (P9c: 70 to 150 ms on
+ * planetary-gear-system). The writer's final interval, serializing the JSON and copying the buffers, is not covered
+ * (about 20 ms on turbofan). Outside an operation the poll does nothing.
  *
  * @param options - Conversion inputs and output transform intent.
  * @returns GLTF blob
@@ -471,6 +472,7 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
     nodes,
     // The kernel's meshes have finite attributes by construction: the writer skips scanning them (catalogue N6).
     trustedGeometry: true,
+    checkpoint: checkAbort,
     images: options.images,
     textures: options.textures,
     samplers: options.samplers,

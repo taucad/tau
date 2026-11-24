@@ -67,7 +67,7 @@ import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-o
 import { createRevisionCompute } from '@taucad/revisions-ui/machines/revision-compute';
 import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
 import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
-import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
+import { systemSkillsOverlay } from '@taucad/agent-host-ui/workers/system-skills-overlay';
 import {
   createNodeFsPortBroker,
   servicesUnavailableCode,

@@ -202,7 +202,7 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: () => <div data-testid='chat-textarea' />,
 }));
 
-vi.mock('@taucad/files-ui/components/chat/at-reference-chip', () => ({
+vi.mock('@taucad/chat-surfaces/components/chat/at-reference-chip', () => ({
   AtReferenceChip: () => <span data-testid='at-reference-chip' />,
 }));
 

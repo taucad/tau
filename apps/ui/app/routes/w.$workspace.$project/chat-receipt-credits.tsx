@@ -1,12 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { Button } from '@taucad/ui/components/button';
+import { formatCredits } from '@taucad/billing-ui/utils/credits.utils';
 import type { UsageData } from '@taucad/chat';
 import { formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
 import type { WireOperationReceipt } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { recordBillingRevisionMinimum } from '@taucad/billing-ui/db/billing-snapshot-store';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { createAskDeadlines } from '#lib/ask-deadline.js';
 
 /*
  * The receipt reader, its helpers and the credit leaves the Cloud chunk carries (adaptive app deployment mode W5). A
@@ -15,11 +18,31 @@ import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
  * cards and tables in Core and take only these credit leaves from the chunk.
  */
 
-/** What the account's own authority says one funded operation cost. @public */
+/**
+ * What the account's own authority says one funded operation cost (W9 D2, R4; charter I15).
+ *
+ * - `pending` and `settled`: the API's answer.
+ * - `checking`: no answer yet, for at most one ask deadline.
+ * - `unavailable`: "Can't check", with Retry: the API answered that it cannot read the receipt, or no answer came
+ *   within the deadline (offline, signed out of billing, a failed or refused read). A late answer still resolves it.
+ *
+ * @public
+ */
 export type ReceiptCredit =
   | { readonly status: 'pending'; readonly authorizedMaxCreditAtoms: bigint }
   | { readonly status: 'settled'; readonly chargedCreditAtoms: bigint }
+  | { readonly status: 'checking' }
   | { readonly status: 'unavailable' };
+
+/** The receipts' person-visible waits, one deadline per operation (I15). @public */
+export const receiptDeadlines = createAskDeadlines();
+
+/** The receipts a surface reads, and its Retry. @public */
+export type ReceiptCredits = Readonly<{
+  credits: ReadonlyMap<string, ReceiptCredit>;
+  /** Ask again for every receipt without an answer, starting its deadline again. */
+  retry: () => void;
+}>;
 
 const creditOf = (receipt: WireOperationReceipt): ReceiptCredit => {
   switch (receipt.state) {
@@ -54,18 +77,20 @@ export const usageOperationIds = (usageParts: readonly UsageData[]): string[] =>
  * one owner holds the owner/environment check and the immutability rule. A
  * settled receipt never changes, so it is fetched once and cached; only a
  * pending operation is polled. A read that fails, or that answers for another
- * account or environment, yields no entry at all: the caller then shows
- * "Pending", never a zero and never a locally multiplied figure (B4 R2).
+ * account or environment, yields no answer: the operation reads `checking` for
+ * one ask deadline and then `unavailable` ("Can't check", with Retry), never a
+ * zero, never a locally multiplied figure (B4 R2) and never an open-ended
+ * "Pending" (I15). Only the API's own pending answer reads "Pending".
  *
  * ponytail: one GET per distinct unsettled operation. A batch
  * receipt endpoint is the upgrade path if a project's operation count ever
  * makes the fan-out visible.
  *
  * @param operationIds - Operations to resolve; duplicates are collapsed.
- * @returns Resolved credits by operation id.
+ * @returns Credits by operation id, one for every operation, and the Retry.
  * @public
  */
-export const useReceiptCredits = (operationIds: readonly string[]): ReadonlyMap<string, ReceiptCredit> => {
+export const useReceiptCredits = (operationIds: readonly string[]): ReceiptCredits => {
   const { apiBaseUrl, userId, environment } = useBillingSession();
   const queryClient = useQueryClient();
   const ids = [...new Set(operationIds)].sort();
@@ -96,7 +121,7 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReadonlyMap<
   /* One query for the set, each receipt cached under its own key: a terminal receipt is immutable and read from the
    * cache, and only a pending or unread one is fetched again (`useQueries` is not used, so the Cloud chunk shares no
    * query module with a route chunk, gate G1). */
-  const { data } = useQuery<ReadonlyMap<string, WireOperationReceipt>>({
+  const { data, refetch } = useQuery<ReadonlyMap<string, WireOperationReceipt>>({
     queryKey: ['billing', 'operations', apiBaseUrl, userId, environment, ids],
     enabled: signedIn && ids.length > 0,
     refetchInterval: ({ state }) =>
@@ -124,25 +149,58 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReadonlyMap<
       return new Map(read.filter((entry) => entry !== undefined));
     },
   });
+  /* The operations with no answer wait one deadline each; the timers live in the module store, and the layout effect
+   * only says which waits are on screen. */
+  const unanswered = ids.filter((operationId) => data?.get(operationId) === undefined);
+  const unansweredKey = JSON.stringify(unanswered);
+  useLayoutEffect(() => {
+    for (const operationId of JSON.parse(unansweredKey) as string[]) {
+      receiptDeadlines.start(operationId);
+    }
+  }, [unansweredKey]);
+  const readExpired = useCallback(
+    () =>
+      (JSON.parse(unansweredKey) as string[]).filter((operationId) => receiptDeadlines.expired(operationId)).join(' '),
+    [unansweredKey],
+  );
+  const expired = new Set(
+    useSyncExternalStore(receiptDeadlines.subscribe, readExpired, () => '')
+      .split(' ')
+      .filter(Boolean),
+  );
+  const retry = useCallback(() => {
+    for (const operationId of ids) {
+      const state = data?.get(operationId)?.state;
+      if (state === undefined || state === 'unavailable') {
+        receiptDeadlines.restart(operationId);
+      }
+    }
+    void refetch();
+  }, [data, ids, refetch]);
   const credits = new Map<string, ReceiptCredit>();
   for (const operationId of ids) {
     const receipt = data?.get(operationId);
-    if (receipt) {
-      credits.set(operationId, creditOf(receipt));
-    }
+    credits.set(
+      operationId,
+      receipt === undefined ? { status: expired.has(operationId) ? 'unavailable' : 'checking' } : creditOf(receipt),
+    );
   }
-  return credits;
+  return { credits, retry };
 };
 
-/** Settled credits plus the operations still without one. @public */
-export type ReceiptTotal = { readonly creditAtoms: bigint; readonly pending: number };
+/** Settled credits plus the operations still without one, by why. @public */
+export type ReceiptTotal = {
+  readonly creditAtoms: bigint;
+  /** The API says these are still settling. */
+  readonly pending: number;
+  /** No answer yet, inside the deadline. */
+  readonly checking: number;
+  /** "Can't check" (I15). */
+  readonly unavailable: number;
+};
 
 /**
- * Sums only the receipts that actually resolved.
- *
- * ponytail: an `unavailable` receipt counts as pending. Separating the two in
- * an aggregate label is the upgrade path if authority reads start failing
- * often; the per-message detail already names the difference.
+ * Sums only the receipts that actually resolved, and counts the rest by why.
  *
  * @param operationIds - Operations the surface is totalling.
  * @param credits - Resolved receipts from {@link useReceiptCredits}.
@@ -155,27 +213,58 @@ export const sumReceiptCredits = (
 ): ReceiptTotal => {
   let creditAtoms = 0n;
   let pending = 0;
+  let checking = 0;
+  let unavailable = 0;
   for (const operationId of new Set(operationIds)) {
     const credit = credits.get(operationId);
-    if (credit?.status === 'settled') {
-      creditAtoms += credit.chargedCreditAtoms;
-      continue;
+    switch (credit?.status) {
+      case 'settled': {
+        creditAtoms += credit.chargedCreditAtoms;
+        break;
+      }
+      case 'pending': {
+        pending += 1;
+        break;
+      }
+      case 'unavailable': {
+        unavailable += 1;
+        break;
+      }
+      case 'checking':
+      case undefined: {
+        checking += 1;
+        break;
+      }
     }
-    pending += 1;
   }
-  return { creditAtoms, pending };
+  return { creditAtoms, pending, checking, unavailable };
 };
 
+/** The words a receipt with no figure reads as (I15). @public */
+export const receiptWaitCopy = { pending: 'Pending', checking: 'Checking', unavailable: 'Can’t check' } as const;
+
 /** Short credit summary used by every chat surface's badge or footer. @public */
-export const formatReceiptTotal = ({ creditAtoms, pending }: ReceiptTotal): string => {
-  if (pending === 0) {
+export const formatReceiptTotal = ({ creditAtoms, pending, checking, unavailable }: ReceiptTotal): string => {
+  /* The worst wait names the label: a stated "can't check" before a check in flight before the API's own pending. */
+  const wait: keyof typeof receiptWaitCopy = unavailable > 0 ? 'unavailable' : checking > 0 ? 'checking' : 'pending';
+  const count = { unavailable, checking, pending }[wait];
+  if (count === 0) {
     return formatCreditAtomsDisplay(creditAtoms);
   }
   if (creditAtoms === 0n) {
-    return 'Pending';
+    return receiptWaitCopy[wait];
   }
-  return `${formatCreditAtomsDisplay(creditAtoms)} · ${String(pending)} pending`;
+  return `${formatCreditAtomsDisplay(creditAtoms)} · ${String(count)} ${receiptWaitCopy[wait].toLowerCase()}`;
 };
+
+/** The Retry beside a "Can't check" receipt (I15). */
+function ReceiptRetry({ onRetry }: { readonly onRetry: () => void }): React.JSX.Element {
+  return (
+    <Button variant='outline' size='xs' className='ml-2' onClick={onRetry}>
+      Retry
+    </Button>
+  );
+}
 
 /**
  * The credits a set of operations was charged, as one short label (W5): the leaf the chat details and the agents list
@@ -193,17 +282,22 @@ export function ReceiptCreditsSummary({
   /** What a build or mode without credits shows instead; unused here. */
   readonly fallback?: ReactNode;
 }): React.JSX.Element {
-  const credits = useReceiptCredits(operationIds);
-  const summary = formatReceiptTotal(sumReceiptCredits(operationIds, credits));
+  const { credits, retry } = useReceiptCredits(operationIds);
+  const total = sumReceiptCredits(operationIds, credits);
+  const summary = formatReceiptTotal(total);
   return (
-    <span aria-label={`Tau credits: ${summary}`} className={className}>
-      {summary}
-    </span>
+    <>
+      <span aria-label={`Tau credits: ${summary}`} className={className}>
+        {summary}
+      </span>
+      {total.unavailable > 0 ? <ReceiptRetry onRetry={retry} /> : undefined}
+    </>
   );
 }
 
 /**
  * The per-turn credits line as text, handed to the caller's own usage card: "Not billed" when no operation was funded.
+ * A "Can't check" line comes with its Retry.
  *
  * @param props - The turn's funded operations, and the card that shows the text.
  * @returns The card.
@@ -213,12 +307,14 @@ export function ReceiptCreditsText({
   children,
 }: {
   readonly operationIds: readonly string[];
-  readonly children: (summary: string) => ReactNode;
+  readonly children: (summary: string, retry: (() => void) | undefined) => ReactNode;
 }): ReactNode {
-  const credits = useReceiptCredits(operationIds);
-  return children(
-    operationIds.length === 0 ? 'Not billed' : formatReceiptTotal(sumReceiptCredits(operationIds, credits)),
-  );
+  const { credits, retry } = useReceiptCredits(operationIds);
+  if (operationIds.length === 0) {
+    return children('Not billed', undefined);
+  }
+  const total = sumReceiptCredits(operationIds, credits);
+  return children(formatReceiptTotal(total), total.unavailable > 0 ? retry : undefined);
 }
 
 /**
@@ -228,8 +324,9 @@ export function ReceiptCreditsText({
  * @returns The line.
  */
 export function ProjectCreditsLine({ operationIds }: { readonly operationIds: readonly string[] }): React.JSX.Element {
-  const credits = useReceiptCredits(operationIds);
+  const { credits, retry } = useReceiptCredits(operationIds);
   const total = sumReceiptCredits(operationIds, credits);
+  const { checking, unavailable } = total;
   return (
     <p className='border-t px-3 py-2 text-xs text-muted-foreground'>
       {operationIds.length === 0 ? (
@@ -238,6 +335,9 @@ export function ProjectCreditsLine({ operationIds }: { readonly operationIds: re
         <>
           <span className='font-mono text-foreground'>{formatCredits(total.creditAtoms)}</span> charged
           {total.pending > 0 ? ` · ${String(total.pending)} pending` : ''}
+          {checking > 0 ? ` · ${String(checking)} checking` : ''}
+          {unavailable > 0 ? ` · ${String(unavailable)} can’t check` : ''}
+          {unavailable > 0 ? <ReceiptRetry onRetry={retry} /> : undefined}
         </>
       )}
     </p>

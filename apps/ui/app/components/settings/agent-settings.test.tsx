@@ -3,6 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { AgentSettings } from '#components/settings/agent-settings.js';
 
+/* A funded deployment (adaptive app deployment mode W12): the one build shows these surfaces from the API's answer. */
+vi.mock('#cloud/use-deployment-mode.js', () => ({
+  useDeploymentMode: () => ({ state: 'funded', basis: 'confirmed', environment: 'development' }),
+  useRetryDeploymentMode: () => () => undefined,
+}));
+
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockSetShowModelCost = vi.fn();

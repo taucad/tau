@@ -38,7 +38,7 @@ export type RouteDelivery = 'static-shell' | 'prerendered' | 'function' | 'cdn-s
  * - `cache-first`: from the precache, so an installed visitor opens the class with no request and offline. A reload, or
  *   a newer worker installing or waiting, asks the network first instead, so a reload never lands on a replaced deploy.
  * - `network-first`: the network, answered from the precache when it fails or has not answered within the worker's
- *   bound (the offline usage page, B5).
+ *   bound.
  *
  * A class without one is never answered by the worker: its documents, data requests and everything else pass through.
  */
@@ -176,15 +176,6 @@ export const routeClasses: readonly RouteClass[] = [
   projectClass,
   homeClass,
   {
-    id: 'offline-shell',
-    label: 'offline shell',
-    // The neutral account document the service worker reopens offline (B5 R2); cloud builds only, like its route.
-    delivery: 'prerendered',
-    path: '/usage',
-    routes: ['usage'],
-    worker: 'network-first',
-  },
-  {
     id: 'public-file',
     label: 'public files',
     delivery: 'prerendered',
@@ -219,6 +210,8 @@ export const routeClasses: readonly RouteClass[] = [
       'plugins',
       'projects_',
       'projects_.new',
+      /* Function-rendered from the server's deployment answer (adaptive app deployment mode W11, W12). */
+      'usage',
       'w.$workspace.$project_.preview',
       'welcome',
       'workflows',

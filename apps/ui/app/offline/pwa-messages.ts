@@ -23,6 +23,9 @@ export const precacheNamePart = `precache-${cacheVersion}`;
 /** The runtime cache the worker fills with immutable files on first use (`service-worker-routing.ts`). */
 export const assetCacheName = `${cachePrefix}-assets-${cacheVersion}`;
 
+/** The worker's own small state: the last build floor (`minBuildId`) a page handed it from the server (FP2). */
+export const stateCacheName = `${cachePrefix}-state-${cacheVersion}`;
+
 /** The pre-fix worker's asset cache, which it filled on first use with a fetch of its own. */
 export const preFixAssetCacheName = `${cachePrefix}-assets`;
 
@@ -43,6 +46,18 @@ export const skipWaitingMessageType = 'SKIP_WAITING';
  * (`buildId`): a page already on the waiting worker's build loses nothing by its activation, so it never waits (FP3).
  */
 export const activateIfBuildMessageType = 'tau-activate-if-build';
+
+/**
+ * `type` of the message a page sends its active worker with the build floor (`minBuildId`, absent for none) its own
+ * `/health/build` check found (FP2): the worker keeps it and serves the cached shells of a build below it only offline.
+ */
+export const buildFloorMessageType = 'tau-build-floor';
+
+/**
+ * `type` of the message a page in safe mode sends the worker that controls it (FP5): stop writing caches for the rest
+ * of its life. The worker answers on the message's port once no write of its own can follow.
+ */
+export const stopCachingMessageType = 'tau-stop-caching';
 
 /** `type` of every message the worker posts to its pages. */
 export const serviceWorkerMessageType = 'tau-service-worker';

@@ -1,15 +1,15 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { cloudStandInCommands } from '#support/cloud-stand-ins.js';
 
 /**
- * The adaptive web build (adaptive app deployment mode charter W7, `ui-e2e:test:e2e:adaptive`): `TAU_CLOUD_ENABLED=
- * adaptive` served from `apps/ui/build-adaptive`. The page decides funded or not from the API's `GET /v1/deployment`
+ * The adaptive web build (adaptive app deployment mode charter W7, `ui-e2e:test:e2e:adaptive`): `ui:build`, `adaptive`
+ * since the flip (W8). The page decides funded or not from the API's `GET /v1/deployment`
  * answer, after first paint, and nothing it shows waits for that answer.
  *
  * No API runs: the cloud stand-ins answer the signed-in session and refuse every other API path, and each row gives
- * the deployment route its own answer, holds it, or leaves it refused. Other tiers serve a pinned build and skip.
+ * the deployment route its own answer, holds it, or leaves it refused. Other tiers skip these rows.
  */
 
 type AdaptiveCommands = {
@@ -21,11 +21,14 @@ type AdaptiveCommands = {
   uiReleaseTargetRequests(): Promise<void>;
   uiStartObservedRequests(): Promise<void>;
   uiReadObservedRequests(settle?: boolean): Promise<readonly string[]>;
+  uiStartSeededServer(answer: 'funded' | 'unfunded' | 'blackholed'): Promise<string>;
+  uiStopSeededServers(): Promise<void>;
+  uiFetchDocument(url: string): Promise<{ status: number; html: string; milliseconds: number }>;
 };
 
 const commands = target.commands as unknown as AdaptiveCommands;
 const cloud = cloudStandInCommands(target.commands);
-/** Only the adaptive tier serves `build-adaptive`; every other tier serves a pinned build and skips these rows. */
+/** Only the adaptive tier runs these rows: it answers the deployment route itself and has no API behind it. */
 const adaptiveTier = await commands.uiIsAdaptiveTier();
 const deploymentPattern = String.raw`/v1/deployment(?:\?|$)`;
 const apiOrigin = 'http://localhost:4000';
@@ -45,7 +48,7 @@ const cloudChunkRequested = async (paths: readonly string[]): Promise<boolean> =
 };
 
 describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
-  test('asks for the Cloud chunk once the answer is funded, and has no /usage (D8)', async () => {
+  test('asks for the Cloud chunk once the answer is funded, and shows /usage (D8, W12)', async () => {
     await cloud.uiInstallCloudStandIns();
     await commands.uiRouteDeploymentAnswer('funded');
     const chunks = await commands.uiCloudChunkPaths();
@@ -53,8 +56,29 @@ describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
     await commands.uiStartObservedRequests();
     await home();
     await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    /* W9 D3: the Cloud chunk's payment artwork reaches the document, so a card brand (`<use href="#visa">`, as the
+     * Add credits dialog and the Billing payment-method row draw it) renders with a size. */
+    await expect
+      .poll(
+        async () =>
+          target.evaluate(() => {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', '70');
+            svg.setAttribute('height', '48');
+            const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+            use.setAttribute('href', '#visa');
+            svg.append(use);
+            document.body.append(svg);
+            const { width } = use.getBBox();
+            svg.remove();
+            return document.querySelector('symbol#visa') !== null && width > 0;
+          }),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    /* One build (W12): `/usage` is in the web manifest and shows the usage page while funded. */
     await target.navigate('/usage');
-    await target.expectVisible(selectors.getByText(/not found/iu).first(), 30_000);
+    await target.expectVisible(selectors.getByRole('heading', { name: 'Tau usage' }), 30_000);
   });
 
   test('never asks for the Cloud chunk against an unfunded answer', async () => {
@@ -152,5 +176,188 @@ describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
     await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
     await commands.uiReleaseTargetRequests();
     await target.expectVisible(selectors.getByCss('[aria-label="Ask Tau to build anything..."]').first(), 30_000);
+  });
+});
+
+/** A function-rendered page: Home and the project route are static shells on the deployed site, and carry no seed. */
+const functionPage = '/w/acme/demo';
+const seedPattern = /window\.__tauDeploymentSeed = (\{[^<]*\})/u;
+
+const documentSeed = (html: string): unknown => {
+  const match = seedPattern.exec(html);
+  return match?.[1] === undefined ? undefined : (JSON.parse(match[1]) as unknown);
+};
+
+/** Record console errors and page errors from the first script on, for the hydration-parity check (T-BA14). */
+const recordPageErrors = async (): Promise<void> => {
+  await target.addInitScript(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { tauHydrationErrors: string[] }).tauHydrationErrors = seen;
+    const original = console.error.bind(console);
+    console.error = (...values: unknown[]) => {
+      seen.push(values.map(String).join(' '));
+      original(...values);
+    };
+    globalThis.addEventListener('error', (event) => {
+      seen.push(String(event.message));
+    });
+  });
+};
+
+const hydrationErrors = async (): Promise<readonly string[]> => {
+  const errors = await target.evaluate(
+    () => (globalThis as unknown as { tauHydrationErrors: string[] }).tauHydrationErrors,
+  );
+  return errors.filter((message) => /hydrat|did not match|#418|#423|#425/iu.test(message));
+};
+
+describe.skipIf(!adaptiveTier)('server-supplied first snapshot (W11, T-BA14 extended)', () => {
+  afterEach(async () => {
+    await commands.uiStopSeededServers();
+  });
+
+  test('renders a funded document with the funded snapshot, hydrates it without a mismatch and loads the Cloud chunk', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(page.status).toBe(200);
+    expect(documentSeed(page.html)).toEqual({ state: 'funded', basis: 'confirmed', environment: 'development' });
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    await target.delay(settleWindow);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('renders an unfunded document with the unfunded snapshot, hydrates it without a mismatch and loads no Cloud code', async () => {
+    const origin = await commands.uiStartSeededServer('unfunded');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(documentSeed(page.html)).toEqual({ state: 'unfunded', basis: 'confirmed' });
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await target.delay(settleWindow);
+    expect(await cloudChunkRequested(chunks)).toBe(false);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('renders within the server deadline with the route blackholed, with no snapshot, and the client resolves (I15)', async () => {
+    const origin = await commands.uiStartSeededServer('blackholed');
+    const page = await commands.uiFetchDocument(`${origin}${functionPage}`);
+    expect(page.status).toBe(200);
+    expect(page.milliseconds).toBeLessThan(5000);
+    expect(documentSeed(page.html)).toBeUndefined();
+    const chunks = await commands.uiCloudChunkPaths();
+    await recordPageErrors();
+    await commands.uiStartObservedRequests();
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await target.delay(settleWindow);
+    expect(await cloudChunkRequested(chunks)).toBe(false);
+    expect(await hydrationErrors()).toEqual([]);
+  });
+
+  test('carries no snapshot on a static-shell path such as Home', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}/`);
+    expect(page.status).toBe(200);
+    expect(documentSeed(page.html)).toBeUndefined();
+  });
+});
+
+/** Navigate inside the loaded app, as a link click does: the router's own navigation, no document request. */
+const navigateInApp = async (path: string): Promise<void> => {
+  await target.evaluate(async (to: string) => {
+    const router = (globalThis as unknown as { __reactRouterDataRouter: { navigate: (path: string) => Promise<void> } })
+      .__reactRouterDataRouter;
+    await router.navigate(to);
+  }, path);
+};
+
+const usageHeading = selectors.getByRole('heading', { name: 'Tau usage' });
+const notFoundHeading = selectors.getByRole('heading', { name: 'Page not found' });
+
+describe.skipIf(!adaptiveTier)('/usage on the one web build (W12 ruling 1)', () => {
+  afterEach(async () => {
+    await commands.uiStopSeededServers();
+  });
+
+  test('renders the usage page against a funded API, in the server HTML on a direct load and after an in-app navigation', async () => {
+    const origin = await commands.uiStartSeededServer('funded');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.status).toBe(200);
+    expect(page.html).toMatch(/<h1[^>]*>Tau usage/u);
+    expect(documentSeed(page.html)).toEqual({ state: 'funded', basis: 'confirmed', environment: 'development' });
+    await recordPageErrors();
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(usageHeading, 60_000);
+    expect(await hydrationErrors()).toEqual([]);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(usageHeading, 30_000);
+  });
+
+  test('shows not-found against an unfunded API, on a direct load and after an in-app navigation', async () => {
+    const origin = await commands.uiStartSeededServer('unfunded');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.html).toMatch(/<h1[^>]*>Page not found/u);
+    await recordPageErrors();
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(notFoundHeading, 60_000);
+    expect(await hydrationErrors()).toEqual([]);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(notFoundHeading, 30_000);
+  });
+
+  test('checks, then says it cannot check with a Retry, against a blackholed route (I15), on both loads', async () => {
+    const origin = await commands.uiStartSeededServer('blackholed');
+    const page = await commands.uiFetchDocument(`${origin}/usage`);
+    expect(page.milliseconds).toBeLessThan(5000);
+    expect(page.html).toContain('Checking this server');
+    const cannotCheck = selectors.getByText('Can’t check this server’s billing right now.');
+    await target.navigate(`${origin}/usage`);
+    await target.expectVisible(cannotCheck, 30_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Retry' }), 5000);
+    await target.navigate(`${origin}${functionPage}`);
+    await target.expectVisible(selectors.getByRole('main'), 60_000);
+    await navigateInApp('/usage');
+    await target.expectVisible(cannotCheck, 30_000);
+  });
+});
+
+describe.skipIf(!adaptiveTier)('prerendered shells (W12 ruling 2)', () => {
+  test('moves no content when a late funded answer shows the Cloud surfaces on Home', async () => {
+    await cloud.uiInstallCloudStandIns();
+    await commands.uiRouteDeploymentAnswer('funded');
+    await commands.uiDelayTargetRequests(deploymentPattern, 'until-released');
+    const chunks = await commands.uiCloudChunkPaths();
+    await commands.uiStartObservedRequests();
+    await home();
+    await target.delay(settleWindow);
+    await target.evaluate(() => {
+      const shifts: number[] = [];
+      (globalThis as unknown as { tauLayoutShifts: number[] }).tauLayoutShifts = shifts;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as Array<PerformanceEntry & { value: number; hadRecentInput: boolean }>) {
+          if (!entry.hadRecentInput) {
+            shifts.push(entry.value);
+          }
+        }
+      }).observe({ type: 'layout-shift' });
+    });
+    await commands.uiReleaseTargetRequests();
+    await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    await target.delay(settleWindow);
+    const shifted = await target.evaluate(() =>
+      (globalThis as unknown as { tauLayoutShifts: number[] }).tauLayoutShifts.reduce((sum, value) => sum + value, 0),
+    );
+    expect(shifted).toBe(0);
   });
 });

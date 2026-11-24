@@ -4,17 +4,25 @@ import {
   answerNavigation,
   installMessage,
   isCachedOnFirstUse,
+  isSafeModeNavigation,
+  isShellInBounds,
   navigationCandidate,
+  readBuildFloorMessage,
   workerClasses,
 } from '#offline/service-worker-routing.js';
-import { activateIfBuildMessageType, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import {
+  activateIfBuildMessageType,
+  buildFloorMessageType,
+  serviceWorkerMessageType,
+  skipWaitingMessageType,
+} from '#offline/pwa-messages.js';
 import type { NavigationCandidate, RequestFacts } from '#offline/service-worker-routing.js';
+import { safeModeHref } from '#lib/boot-signals.js';
 
 const origin = 'https://tau.new';
 const projectDocument = '/w/__shell/__shell/index.html';
 const homeDocument = '/__shell/home/index.html';
-const usageDocument = '/usage/index.html';
-const precached = new Set([projectDocument, homeDocument, usageDocument]);
+const precached = new Set([projectDocument, homeDocument]);
 const isPrecached = (document: string): boolean => precached.has(document);
 
 const navigation = (path: string, overrides: Partial<RequestFacts> = {}): RequestFacts => ({
@@ -34,13 +42,12 @@ const candidateFor = (path: string, overrides?: Partial<RequestFacts>): Navigati
 };
 
 describe('the worker classes', () => {
-  it('should answer the project shell, the Home shell and the usage page from their built documents', () => {
+  it('should answer the project shell and the Home shell from their built documents', () => {
     expect(
       workerClasses.map(({ routeClass, delivery, document }) => ({ id: routeClass.id, delivery, document })),
     ).toStrictEqual([
       { id: 'project', delivery: 'cache-first', document: projectDocument },
       { id: 'home', delivery: 'cache-first', document: homeDocument },
-      { id: 'offline-shell', delivery: 'network-first', document: usageDocument },
     ]);
   });
 });
@@ -52,8 +59,6 @@ describe('navigationCandidate', () => {
     ['/w/acme/proj_01HZ%20x', 'project'],
     ['/', 'home'],
     ['/?source=pwa', 'home'],
-    ['/usage', 'offline-shell'],
-    ['/usage/', 'offline-shell'],
   ])('should take the navigation to %s for the %s class', (path, id) => {
     expect(candidateFor(path).workerClass.routeClass.id).toBe(id);
   });
@@ -74,6 +79,8 @@ describe('navigationCandidate', () => {
     '/health/build',
     '/projects',
     '/settings',
+    // `/usage` is function-rendered since the offline usage shell was retired (adaptive app deployment mode W12).
+    '/usage',
     '/s/published-model',
     '/manifest.webmanifest',
   ])('should leave the navigation to %s to the browser', (path) => {
@@ -89,22 +96,33 @@ describe('navigationCandidate', () => {
   });
 
   it('should leave a class to the browser when its document is not in this worker’s precache', () => {
-    // A self-host build has no `/usage` route, so its worker precaches no usage document.
-    expect(navigationCandidate(navigation('/usage'), origin, (document) => document !== usageDocument)).toBeUndefined();
+    expect(navigationCandidate(navigation('/'), origin, (document) => document !== homeDocument)).toBeUndefined();
   });
 });
 
 describe('answerNavigation', () => {
   const answer = (
     path: string,
-    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string }> = {},
+    facts: Partial<{ tauEntry: string; updatePending: boolean; cache: string; shellInBounds: boolean }> = {},
   ): ReturnType<typeof answerNavigation> =>
     answerNavigation({
       candidate: candidateFor(path),
       request: navigation(path, facts.cache === undefined ? {} : { cache: facts.cache }),
       tauEntry: facts.tauEntry,
       updatePending: facts.updatePending ?? false,
+      shellInBounds: facts.shellInBounds ?? true,
     });
+
+  it('should ask the network first for a cache-first class while its shells are out of bounds (FP2)', () => {
+    expect(answer('/w/home/bracket-v2', { shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: projectDocument,
+    });
+    expect(answer('/', { tauEntry: 'app', shellInBounds: false })).toStrictEqual({
+      kind: 'network-first',
+      document: homeDocument,
+    });
+  });
 
   it('should open a project from the precached shell, cache-first', () => {
     expect(answer('/w/home/bracket-v2')).toStrictEqual({ kind: 'cache-first', document: projectDocument });
@@ -135,10 +153,6 @@ describe('answerNavigation', () => {
     expect(answer('/', { tauEntry: 'website' })).toStrictEqual({ kind: 'network' });
     expect(answer('/?website', { tauEntry: 'app' })).toStrictEqual({ kind: 'network' });
     expect(answer('/?utm_source=launch&ref=hn')).toStrictEqual({ kind: 'network' });
-  });
-
-  it('should answer the usage page network-first, whatever the cache mode', () => {
-    expect(answer('/usage')).toStrictEqual({ kind: 'network-first', document: usageDocument });
   });
 });
 
@@ -202,5 +216,62 @@ describe('activatesWorker (FP3)', () => {
     for (const data of [undefined, null, 'SKIP_WAITING', { type: 'other' }]) {
       expect(activatesWorker(data, 7)).toBe(false);
     }
+  });
+});
+
+describe('isSafeModeNavigation (FP5)', () => {
+  it('should know the safe-mode link the strip and the error document send', () => {
+    expect(isSafeModeNavigation(new URL(safeModeHref, origin).href)).toBe(true);
+    expect(isSafeModeNavigation(`${origin}/w/home/bracket?safe=1`)).toBe(true);
+  });
+
+  it('should leave every other navigation to the worker’s rules', () => {
+    for (const url of [`${origin}/`, `${origin}/?safe=0`, `${origin}/?unsafe=1`, 'not a url']) {
+      expect(isSafeModeNavigation(url), url).toBe(false);
+    }
+  });
+});
+
+describe('isShellInBounds (FP2)', () => {
+  const buildId = 1_795_000_000_000;
+
+  it('should hold the shells while the server has reported no floor, whatever the build', () => {
+    expect(isShellInBounds({ buildId, floor: undefined })).toBe(true);
+    expect(isShellInBounds({ buildId: 0, floor: undefined })).toBe(true);
+  });
+
+  it('should hold the shells of a build at or above the floor, and not those of a build below it', () => {
+    expect(isShellInBounds({ buildId, floor: buildId })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId - 1 })).toBe(true);
+    expect(isShellInBounds({ buildId, floor: buildId + 1 })).toBe(false);
+  });
+
+  it('should not hold the shells of an unknown build (0) once a floor is reported', () => {
+    expect(isShellInBounds({ buildId: 0, floor: 1 })).toBe(false);
+  });
+});
+
+describe('readBuildFloorMessage (FP2)', () => {
+  it('should read the floor a page relays from the server', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: 1_795_000_000_000 })).toStrictEqual({
+      minBuildId: 1_795_000_000_000,
+    });
+  });
+
+  it('should read a relayed answer that names no floor as none', () => {
+    expect(readBuildFloorMessage({ type: buildFloorMessageType })).toStrictEqual({ minBuildId: undefined });
+    expect(readBuildFloorMessage({ type: buildFloorMessageType, minBuildId: undefined })).toStrictEqual({
+      minBuildId: undefined,
+    });
+  });
+
+  it.each([
+    ['another message', { type: skipWaitingMessageType }],
+    ['no object', 'tau-build-floor'],
+    ['a floor that is no build id', { type: buildFloorMessageType, minBuildId: -5 }],
+    ['a fractional floor', { type: buildFloorMessageType, minBuildId: 1.5 }],
+    ['a floor as text', { type: buildFloorMessageType, minBuildId: '1795000000000' }],
+  ])('should ignore %s', (_label, data) => {
+    expect(readBuildFloorMessage(data)).toBeUndefined();
   });
 });

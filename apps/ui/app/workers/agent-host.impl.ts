@@ -59,22 +59,22 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
-import { createResidentPlacement } from '@taucad/ui-core/workers/agent-host-placement';
-import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import { createResidentPlacement } from '@taucad/agent-host-ui/workers/agent-host-placement';
+import { createPortRevisionsClient } from '@taucad/agent-host-ui/workers/agent-host-revisions';
 import {
   guardLargeObjectFiles,
   guardLargeObjectKernel,
   pendingPathsUnsupportedCode,
-} from '@taucad/ui-core/lib/large-object-guard';
+} from '@taucad/agent-host-ui/lib/large-object-guard';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { createWorkerEvidence } from '@taucad/ui-core/workers/agent-host-evidence';
+import { createWorkerEvidence } from '@taucad/agent-host-ui/workers/agent-host-evidence';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
+import { systemSkillsOverlay } from '@taucad/agent-host-ui/workers/system-skills-overlay';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type ProjectFileSystemBridge = Pick<
@@ -215,6 +215,11 @@ const bridgeReadyBound = 15_000;
 /** How long a parameter actor may take to finish its last write when the host closes (D15). Milliseconds. */
 const parameterCloseBound = 10_000;
 /**
+ * How long a rebridge's replaced revisions client may wait on its requests before it is closed and they reject
+ * `PROJECT_HOST_CLOSED`: a bridge call's own default bound. Milliseconds.
+ */
+const revisionsRetireBound = 30_000;
+/**
  * Milliseconds the agent's runtime may sit with no tool call or open document
  * before its worker is terminated; the next tool call starts a fresh one. A
  * turn's tool calls land well inside it, so only the gaps between turns pay a
@@ -281,21 +286,75 @@ const openProjectBridges = async (ports: Pick<AgentHostProjectProvide, 'fileSyst
   return { fileSystem, projectRoot, durability };
 };
 
+const disposeBridge = (bridge: ProjectFileSystemBridge): void => {
+  bridge.dispose();
+};
+
 /**
  * One object whose far end `swap` replaces in place (RV1-F1): holders keep `view`, and each call reaches the current
- * target, read at call time.
+ * target, read at call time. A call keeps the target it started on, so `retire` finishes a replaced target only once
+ * its calls under way settle, or once `retireWithin` has passed when given, and `close` finishes every target now.
+ *
+ * @param initial - The first target.
+ * @param finish - Releases a target: a bridge proxy's `dispose`, a revisions client's `close`.
+ * @param options - `retireWithin`: milliseconds a retired target's calls may take before it is finished anyway, for a
+ * target whose calls carry no bound of their own; its `finish` must then reject them.
+ * @returns The view holders keep, and the slot's swap, retire and close.
+ * @internal
  */
 // oxlint-disable-next-line typescript/no-restricted-types -- a Proxy target is any object; these are bridge proxies.
-const swappable = <Target extends object>(
+export const swappable = <Target extends object>(
   initial: Target,
-): Readonly<{ view: Target; swap: (next: Target) => Target }> => {
+  finish: (target: Target) => void,
+  options?: Readonly<{ retireWithin?: number }>,
+): Readonly<{ view: Target; swap: (next: Target) => Target; retire: (target: Target) => void; close: () => void }> => {
   let current = initial;
+  /* Calls each target has under way, and the replaced targets still waiting for theirs to settle, each with the
+   * expiry that finishes it anyway when `retireWithin` is given. */
+  const pending = new Map<Target, number>();
+  const retiring = new Map<Target, ReturnType<typeof setTimeout> | undefined>();
+  const finishRetired = (target: Target): void => {
+    if (!retiring.has(target)) {
+      return;
+    }
+    clearTimeout(retiring.get(target));
+    retiring.delete(target);
+    finish(target);
+  };
+  const settled = (target: Target): void => {
+    const left = (pending.get(target) ?? 1) - 1;
+    if (left > 0) {
+      pending.set(target, left);
+      return;
+    }
+    pending.delete(target);
+    finishRetired(target);
+  };
+  /* The caller's own promise, so it settles as the target's call did, after the target is counted settled. */
+  const underway = async (target: Target, call: Promise<unknown>): Promise<unknown> => {
+    try {
+      return await call;
+    } finally {
+      settled(target);
+    }
+  };
   const view = new Proxy(initial, {
     get: (_target, key) => {
       const value: unknown = Reflect.get(current, key);
       return typeof value === 'function'
-        ? (...args: unknown[]): unknown =>
-            Reflect.apply(Reflect.get(current, key) as (...parameters: unknown[]) => unknown, current, args)
+        ? (...args: unknown[]): unknown => {
+            const target = current;
+            const result: unknown = Reflect.apply(
+              Reflect.get(target, key) as (...parameters: unknown[]) => unknown,
+              target,
+              args,
+            );
+            if (result instanceof Promise) {
+              pending.set(target, (pending.get(target) ?? 0) + 1);
+              return underway(target, result);
+            }
+            return result;
+          }
         : value;
     },
   });
@@ -305,6 +364,35 @@ const swappable = <Target extends object>(
       const previous = current;
       current = next;
       return previous;
+    },
+    /* A call already under way finishes on the target it started on: a replaced target is finished once its calls
+     * settle, not under them (a turn's first read raced a recovery rebridge and was cut off `CHANNEL_CLOSED`). */
+    retire: (target) => {
+      if (!pending.has(target)) {
+        finish(target);
+        return;
+      }
+      /* A peer that never answers would hold the target, its port and its callers forever: past the bound the
+       * target's own `finish` rejects the calls still waiting (#2748 review). */
+      const retireWithin = options?.retireWithin;
+      retiring.set(
+        target,
+        retireWithin === undefined
+          ? undefined
+          : setTimeout(() => {
+              finishRetired(target);
+            }, retireWithin),
+      );
+    },
+    close: () => {
+      const retired = [...retiring.keys()];
+      for (const retireExpiry of retiring.values()) {
+        clearTimeout(retireExpiry);
+      }
+      retiring.clear();
+      for (const target of [current, ...retired]) {
+        finish(target);
+      }
     },
   };
 };
@@ -663,13 +751,13 @@ const composeProjectHost = async (
       : ({ mode: 'memory' } as const);
   const bridges = await openProjectBridges(provide);
   /* Every holder below keeps these views, so a rebridge reaches all of them (RV1-F1). */
-  const fileSystemSlot = swappable(bridges.fileSystem);
-  const projectRootSlot = swappable(bridges.projectRoot);
+  const fileSystemSlot = swappable(bridges.fileSystem, disposeBridge);
+  const projectRootSlot = swappable(bridges.projectRoot, disposeBridge);
   const fileSystem = fileSystemSlot.view;
   const projectRoot = projectRootSlot.view;
   opened(() => {
-    fileSystem.dispose();
-    projectRoot.dispose();
+    fileSystemSlot.close();
+    projectRootSlot.close();
   });
   const storageBackend = provide.projectStorage.backend;
   const durability = await resolveWorkerDurability(storageBackend, bridges.durability);
@@ -747,9 +835,18 @@ const composeProjectHost = async (
     return { createFileSystemBridgePort };
   });
   const revisionsSlot =
-    provide.revisionsPort === undefined ? undefined : swappable(createPortRevisionsClient(provide.revisionsPort));
+    provide.revisionsPort === undefined
+      ? undefined
+      : swappable(
+          createPortRevisionsClient(provide.revisionsPort),
+          (client) => {
+            client.close();
+          },
+          /* A revision request has no timeout of its own, unlike a bridge call: a peer gone quiet is bounded here. */
+          { retireWithin: revisionsRetireBound },
+        );
   const revisions = revisionsSlot?.view;
-  opened(() => revisions?.close());
+  opened(() => revisionsSlot?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(executorView),
     runtimeConfig,
@@ -1073,9 +1170,12 @@ const composeProjectHost = async (
         }
         throw error;
       }
-      const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
+      const replaced = [
+        [fileSystemSlot, fileSystemSlot.swap(next.fileSystem)],
+        [projectRootSlot, projectRootSlot.swap(next.projectRoot)],
+      ] as const;
       if (ports.revisionsPort !== undefined && revisionsSlot !== undefined) {
-        revisionsSlot.swap(createPortRevisionsClient(ports.revisionsPort)).close();
+        revisionsSlot.retire(revisionsSlot.swap(createPortRevisionsClient(ports.revisionsPort)));
       } else {
         ports.revisionsPort?.close();
       }
@@ -1092,8 +1192,8 @@ const composeProjectHost = async (
         actor.send({ type: 'close' });
       }
       parameterActors.clear();
-      for (const proxy of replaced) {
-        proxy.dispose();
+      for (const [slot, proxy] of replaced) {
+        slot.retire(proxy);
       }
     },
     drain: async (signal) => {
@@ -1155,12 +1255,12 @@ const composeProjectHost = async (
         failures.push(error);
       });
       imageService.dispose();
-      revisions?.close();
+      revisionsSlot?.close();
       placement.close();
       runtimeClient.terminate();
       computeConnection?.dispose();
-      fileSystem.dispose();
-      projectRoot.dispose();
+      fileSystemSlot.close();
+      projectRootSlot.close();
       if (failures.length > 0) {
         throw new AggregateError(failures, 'The project host could not release every resource.');
       }

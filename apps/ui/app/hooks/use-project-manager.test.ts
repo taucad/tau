@@ -4,6 +4,7 @@ import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
+import { disconnectRemoteFlags } from '#flags/remote-flags.js';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -30,15 +31,15 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type {
   PendingProjectOperation,
   PendingProjectStorage,
-} from '@taucad/files-ui/types/pending-project-operation.types';
-import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
+} from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
+import type { ConnectedWorkspace } from '@taucad/project-library/runtime/project-library-workspace';
 import type {
   CreateProjectOptions,
   ProjectLibraryChatSessions,
-} from '@taucad/files-ui/runtime/project-library-commands';
-import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+} from '@taucad/project-library/runtime/project-library-commands';
+import type { ProjectListing } from '@taucad/project-library/runtime/project-library-storage';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -558,7 +559,7 @@ vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
 }));
 
-vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({
@@ -685,6 +686,14 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
   attachmentFiles.set(`/.tau/composers/new-project/attachments/${hash}.${extension}`, bytes);
   return storedRef({ hash, mediaType, ...(filename === undefined ? {} : { filename }) });
 };
+
+/*
+ * No analytics boundary runs here, so the PostHog-backed flags would stay unknown for the whole file and every
+ * create would read the listing for the first-project tour. Settle them as a host without analytics does.
+ */
+beforeEach(() => {
+  disconnectRemoteFlags();
+});
 
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {

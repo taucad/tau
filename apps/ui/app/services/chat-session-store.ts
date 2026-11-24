@@ -82,7 +82,7 @@ import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_int
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
-import type { CommitCancelledDraftRestoreInput } from '@taucad/files-ui/types/chat-storage.types';
+import type { CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
@@ -95,7 +95,7 @@ import {
   recordModelPendingAutoResume,
   recordProviderUnavailableAutoResume,
   recordRateLimitAutoResume,
-} from '@taucad/ui-core/utils/run-auto-resume';
+} from '@taucad/chat-ui/utils/run-auto-resume';
 import {
   chatProjectionLogic,
   selectAttentionRow,

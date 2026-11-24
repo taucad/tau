@@ -22,7 +22,10 @@ describe('desktop route manifest', () => {
     expect(manifest).toContain('auth.$');
     expect(manifest).toContain('home-surface.desktop.tsx');
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');
-    expect(manifest).not.toContain('../../app/routes/usage/');
+  });
+
+  it('should carry /usage, which guards itself by the display mode (D8)', () => {
+    expect(JSON.stringify(routes)).toContain('../../app/routes/usage/');
   });
 
   /* The `tau://` contract main loads against (R4). `/i/*` is a server redirect,

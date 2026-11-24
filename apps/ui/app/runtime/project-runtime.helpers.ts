@@ -20,7 +20,7 @@ import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils'
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import type { QueryClient } from '@tanstack/react-query';
 import type { Chat } from '@taucad/chat';
-import type { ChatStorage } from '@taucad/files-ui/types/chat-storage.types';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { chatsLanded, chatsOpen } from '#hooks/use-project-availability.js';
 

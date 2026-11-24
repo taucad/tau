@@ -64,6 +64,7 @@
     "./components/drawer": "./src/components/drawer.tsx",
     "./components/dropdown-menu": "./src/components/dropdown-menu.tsx",
     "./components/field": "./src/components/field.tsx",
+    "./components/format-badge": "./src/components/format-badge.tsx",
     "./components/heading": "./src/components/heading.tsx",
     "./components/heading.variants": "./src/components/heading.variants.ts",
     "./components/highlight-text": "./src/components/highlight-text.tsx",
@@ -261,6 +262,11 @@
         "types": "./dist/components/field.d.mts",
         "import": "./dist/components/field.mjs",
         "default": "./dist/components/field.mjs"
+      },
+      "./components/format-badge": {
+        "types": "./dist/components/format-badge.d.mts",
+        "import": "./dist/components/format-badge.mjs",
+        "default": "./dist/components/format-badge.mjs"
       },
       "./components/heading": {
         "types": "./dist/components/heading.d.mts",
@@ -602,6 +608,9 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
+    "@taucad/nx": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/culori": "^4.0.1",

@@ -12,7 +12,7 @@ import type { Project, ProjectManifest } from '@taucad/types';
 import type {
   PendingProjectOperation,
   PendingProjectStorage,
-} from '@taucad/files-ui/types/pending-project-operation.types';
+} from '@taucad/project-library/types/pending-project-operation.types';
 
 const sourceProject: Project = createProjectFixture({
   id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
@@ -146,7 +146,7 @@ const mockDuplicate = vi.fn<
   return pendingDuplicate;
 });
 
-vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

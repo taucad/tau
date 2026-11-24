@@ -36,11 +36,21 @@ vi.mock('#routes/w.$workspace.$project/chat-history.js', async () => {
   const { useContext } = await import('react');
   const { handOffRevealContext } = await import('#components/hand-off/hand-off-store.js');
   return {
-    ChatHistory: function ChatHistory({ className }: { readonly className?: string }) {
+    ChatHistory: function ChatHistory({
+      className,
+      headerClassName,
+      archiveClassName,
+    }: {
+      readonly className?: string;
+      readonly headerClassName?: string;
+      readonly archiveClassName?: string;
+    }) {
       /* Whether the composer may adopt the frame's native input yet (PL6). */
       const isRevealed = useContext(handOffRevealContext);
       return (
         <div className={className} data-testid='chat-lane' data-hand-off-revealed={String(isRevealed)}>
+          <div data-testid='chat-lane-header' className={headerClassName} />
+          <div data-testid='chat-lane-archive' className={archiveClassName} />
           <textarea aria-label='Chat message' />
         </div>
       );
@@ -415,10 +425,20 @@ describe('ChatInterfaceDesktop', () => {
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {
     sidebar.open = false;
     renderDesktop();
-    expect(await screen.findByTestId('chat-lane')).toHaveClass(
-      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width)',
-      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+    expect(await screen.findByTestId('chat-lane-header')).toHaveClass(
+      'pl-(--titlebar-controls-width)',
+      '[app-region:no-drag]',
     );
+    // The archived-chats view has no header row, so it starts below the controls' row instead.
+    expect(screen.getByTestId('chat-lane-archive')).toHaveClass('pt-9');
+  });
+
+  it('leaves the chat header and archive at their own insets while the sidebar holds the controls', async () => {
+    sidebar.open = true;
+    renderDesktop();
+    expect(await screen.findByTestId('chat-lane-header')).toHaveClass('pl-1');
+    expect(screen.getByTestId('chat-lane-header')).not.toHaveClass('pl-(--titlebar-controls-width)');
+    expect(screen.getByTestId('chat-lane-archive')).not.toHaveClass('pt-9');
   });
 
   it('reserves fixed-control space inside the viewer header without shifting its border', async () => {

@@ -11,15 +11,18 @@ import {
   isServableRuntimePath,
   mapWithConcurrency,
   parseServedAssetsIndex,
+  planBuildRetention,
   planRetention,
+  readOwnBuildId,
   retainPreviousAssets,
   retainedGenerationsCap,
   retentionWindow,
   servedAssetsIndexFileName,
   servedAssetsIndexSchema,
   servedRuntimesIndexFileName,
+  stampRetainedBuildFloor,
 } from '#scripts/retain-previous-assets.mts';
-import type { ServedAsset, ServedAssetsIndex } from '#scripts/retain-previous-assets.mts';
+import type { ServedAsset, ServedAssetsIndex, ServedBuild } from '#scripts/retain-previous-assets.mts';
 
 const integrityOf = (bytes: string | Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
@@ -726,5 +729,234 @@ describe('runtime index compatibility', () => {
 
     expect(result.runtimes.assets).toStrictEqual([]);
     expect(result.retained).toBe(1);
+  });
+});
+
+describe('retention by time (FP2)', () => {
+  const day = 24 * 60 * 60_000;
+
+  it('should keep a retired build’s assets for 30 days', () => {
+    expect(retentionWindow).toBe(30 * day);
+  });
+
+  it('should still serve a retired asset 29 days after it left the live build', async () => {
+    const retiredAt = now - 29 * day;
+    const live = await startLiveDeploy(
+      { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1' },
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 5, retiredAt },
+      ]),
+    );
+    const client = await createClient({ 'assets/route-NEW2.js': 'new2' });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
+
+    expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
+    const { assets } = await readIndex(client);
+    expect(assets).toContainEqual({
+      path: 'assets/route-OLD1.js',
+      integrity: integrityOf('old1'),
+      generation: 6,
+      retiredAt,
+    });
+  });
+
+  it('should drop a retired asset once it left the live build more than 30 days ago', () => {
+    const stale = indexOf([
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 5, retiredAt: now - 30 * day - 1 },
+    ]);
+    expect(planRetention(stale, new Set(), { now })).toStrictEqual([]);
+  });
+});
+
+describe('the oldest retained build (FP2)', () => {
+  const ownBuildId = 1_795_000_000_000;
+  const day = 24 * 60 * 60_000;
+
+  it('should keep the builds whose assets it keeps, by the same rule, one generation older', () => {
+    const builds: readonly ServedBuild[] = [
+      { buildId: 1_794_900_000_000, generation: 0 },
+      { buildId: 1_794_800_000_000, generation: 4, retiredAt: now - 3 * day },
+      { buildId: 1_794_700_000_000, generation: 5, retiredAt: now - 31 * day },
+    ];
+    expect(planBuildRetention(builds, ownBuildId, { now })).toStrictEqual([
+      { buildId: 1_794_900_000_000, generation: 1, retiredAt: now },
+      { buildId: 1_794_800_000_000, generation: 5, retiredAt: now - 3 * day },
+    ]);
+  });
+
+  it('should keep the live build at its age when the same build is deployed again', () => {
+    const builds: readonly ServedBuild[] = [{ buildId: 1_794_900_000_000, generation: 0 }];
+    expect(planBuildRetention(builds, ownBuildId, { now, shouldAge: false })).toStrictEqual(builds);
+  });
+
+  it('should drop a build past the generation cap like its assets', () => {
+    const builds: readonly ServedBuild[] = [
+      { buildId: 1_794_900_000_000, generation: retainedGenerationsCap, retiredAt: now },
+    ];
+    expect(planBuildRetention(builds, ownBuildId, { now })).toStrictEqual([]);
+  });
+
+  it('should record the builds it serves and report the oldest as the floor', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
+      {
+        ...indexOf([
+          { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+          { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1, retiredAt: now - day },
+          { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2, retiredAt: now - 31 * day },
+        ]),
+        builds: [
+          { buildId: 1_794_900_000_000, generation: 0 },
+          { buildId: 1_794_800_000_000, generation: 1, retiredAt: now - day },
+          { buildId: 1_794_700_000_000, generation: 2, retiredAt: now - 31 * day },
+        ],
+      },
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(1_794_800_000_000);
+    const { builds } = await readIndex(client);
+    expect(builds).toStrictEqual([
+      { buildId: ownBuildId, generation: 0 },
+      { buildId: 1_794_900_000_000, generation: 1, retiredAt: now },
+      { buildId: 1_794_800_000_000, generation: 2, retiredAt: now - day },
+    ]);
+  });
+
+  it('should keep the floor above a build it dropped even when an older build stays (a rollback)', async () => {
+    // Build A (older id) went live after B: B left the live build first, and leaves retention first.
+    const live = await startLiveDeploy(
+      { 'assets/route-A.js': 'a' },
+      {
+        ...indexOf([
+          { path: 'assets/route-A.js', integrity: integrityOf('a'), generation: 0 },
+          { path: 'assets/route-B.js', integrity: integrityOf('b'), generation: 2, retiredAt: now - 31 * day },
+        ]),
+        builds: [
+          { buildId: 1_794_800_000_000, generation: 0 },
+          { buildId: 1_794_900_000_000, generation: 2, retiredAt: now - 31 * day },
+        ],
+      },
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(1_794_900_000_001);
+    const index = await readIndex(client);
+    expect(index.builds).toStrictEqual([
+      { buildId: ownBuildId, generation: 0 },
+      { buildId: 1_794_800_000_000, generation: 1, retiredAt: now },
+    ]);
+    expect(index.droppedBuildFloor).toBe(1_794_900_000_001);
+  });
+
+  it('should carry the floor above every dropped build into later deploys', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-A.js': 'a' },
+      {
+        ...indexOf([{ path: 'assets/route-A.js', integrity: integrityOf('a'), generation: 0 }]),
+        builds: [{ buildId: 1_794_800_000_000, generation: 0 }],
+        droppedBuildFloor: 1_794_900_000_001,
+      },
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(1_794_900_000_001);
+    const { droppedBuildFloor } = await readIndex(client);
+    expect(droppedBuildFloor).toBe(1_794_900_000_001);
+  });
+
+  it('should refuse a live index whose dropped-build floor is malformed', () => {
+    expect(() =>
+      parseServedAssetsIndex({ ...indexOf([]), builds: [], droppedBuildFloor: -1 }, 'the live index'),
+    ).toThrow('malformed dropped-build floor');
+  });
+
+  it('should report this build as the floor when the live index records no builds, never an older one', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      now,
+      buildId: ownBuildId,
+    });
+
+    expect(result.floor).toBe(ownBuildId);
+  });
+
+  it('should report this build as the floor when retention is skipped, since it serves no other', async () => {
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const result = await retainPreviousAssets({
+      clientDirectory: client,
+      origin: 'http://127.0.0.1:9',
+      skip: true,
+      now,
+      buildId: ownBuildId,
+    });
+    expect(result.floor).toBe(ownBuildId);
+  });
+
+  it('should report no floor and record no builds when this build’s id is unknown', async () => {
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: undefined, now });
+    expect(result.floor).toBeUndefined();
+    const { builds } = await readIndex(client);
+    expect(builds).toBeUndefined();
+  });
+
+  it('should refuse a live index whose build records are malformed', () => {
+    expect(() =>
+      parseServedAssetsIndex({ ...indexOf([]), builds: [{ buildId: -1, generation: 0 }] }, 'the live index'),
+    ).toThrow('malformed build');
+  });
+
+  it('should read this build’s id from the record the build writes beside its output', async () => {
+    const build = await createClient({ 'sentry-release': 'tau-ui@1795000000000\n' });
+    await expect(readOwnBuildId(build)).resolves.toBe(ownBuildId);
+    const unknown = await createClient({});
+    await expect(readOwnBuildId(unknown)).resolves.toBeUndefined();
+  });
+
+  it('should stamp the floor over the placeholder in the server graph, keeping every byte offset', async () => {
+    const build = await createClient({
+      'server/index.js': 'const a = "@TAU_RETAINED";\nconst b = 1;\n',
+      'server/assets/other.js': 'const c = 2;\n',
+    });
+
+    await expect(stampRetainedBuildFloor(build, ownBuildId)).resolves.toStrictEqual(['index.js']);
+    const stamped = await readFile(join(build, 'server/index.js'), 'utf8');
+    expect(stamped).toBe('const a = "1795000000000";\nconst b = 1;\n');
+  });
+
+  it('should refuse to stamp a server graph that holds no placeholder', async () => {
+    const build = await createClient({ 'server/index.js': 'const a = 1;\n' });
+    await expect(stampRetainedBuildFloor(build, ownBuildId)).rejects.toThrow('placeholder');
   });
 });

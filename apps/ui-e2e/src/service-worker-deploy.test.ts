@@ -170,11 +170,14 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
     expect(live.documents).toStrictEqual(['previous']);
 
     // The server names the next build, as to a tab restored from the back/forward cache; `build-skew` takes its word
-    // after three answers.
+    // after three answers. The server counts an answer when it sends it, before the page has read it: the page holds
+    // the verdict once its sidebar offers the update, which in a lone tab turns on with `replaced` itself. Navigating
+    // any earlier is an ordinary client navigation on the build the page loaded (nightly 2026-11-24).
     await page.evaluate(() => {
       globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     });
     await expect.poll(() => live.buildChecks(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+    await page.getByRole('button', { name: 'Update ready' }).waitFor({ state: 'attached', timeout: 30_000 });
     await page.evaluate(() => {
       const router = (
         globalThis as unknown as {
@@ -184,9 +187,14 @@ describe('the web app’s service worker across a deploy (PL7)', () => {
       void router.navigate('/projects');
     });
 
-    await expect
-      .poll(async () => readBuildIdOf(page).catch(() => undefined), { timeout: 30_000 })
-      .toBe(String(deploys?.nextBuildId));
+    // A document load: Playwright's own waits span the page between documents and stay bounded. `page.evaluate` has no
+    // bound (it waits as long as the page does not answer), and `expect.poll` never abandons an attempt in flight.
+    await page.waitForURL((url) => url.pathname === '/projects', { timeout: 30_000 });
+    await page.waitForFunction(
+      (nextBuildId) => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID === nextBuildId,
+      String(deploys?.nextBuildId),
+      { timeout: 30_000, polling: 250 },
+    );
     expect(new URL(page.url()).pathname).toBe('/projects');
     expect(live.documents).toStrictEqual(['previous', 'next']);
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);

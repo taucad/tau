@@ -1,7 +1,7 @@
 /**
  * The page side of the web app's service worker that every document carries (progressive loading PL7): when to start
- * the registration (`pwa-registration.ts`, loaded on demand, so the interactive tier carries only this), and
- * the last install outcome it heard, which the offline usage notice shows (`offline-shell.tsx`).
+ * the registration (`pwa-registration.ts`, loaded on demand, so the interactive tier carries only this), and safe
+ * mode's departure from it.
  *
  * **When.** Once the page has loaded and the main thread is idle, so the precache download never competes with the
  * requests a first visit needs. Inside a project workspace the registration only attaches to a worker an earlier page
@@ -18,10 +18,11 @@
  */
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { Topic } from '@taucad/events';
 import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import type { ServiceWorkerInstallStatus } from '#offline/pwa-messages.js';
+import { readReportedBuildFloor, subscribeReportedBuildFloor } from '#lib/build-identity.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { stopCachingMessageType } from '#offline/pwa-messages.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -70,30 +71,6 @@ export const checkForRetiringWorker = async (): Promise<void> => {
 /** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
 export const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
 
-let installStatus: ServiceWorkerInstallStatus | undefined;
-const installStatusTopic = new Topic<void>({ name: 'service-worker-install-status' });
-
-/**
- * Record an install outcome the worker or the registration reported.
- *
- * @param status - The outcome.
- */
-const setInstallStatus = (status: ServiceWorkerInstallStatus): void => {
-  installStatus = status;
-  installStatusTopic.emit();
-};
-
-/** The last install outcome this page heard: an install or quota failure is shown, never swallowed. */
-export const readInstallStatus = (): ServiceWorkerInstallStatus | undefined => installStatus;
-
-/**
- * Subscribe to {@link readInstallStatus}.
- *
- * @param listener - Called after each change.
- * @returns Unsubscribes.
- */
-export const subscribeInstallStatus = (listener: () => void): (() => void) => installStatusTopic.subscribe(listener);
-
 /**
  * Run `start` once the page has loaded and the main thread is idle.
  *
@@ -126,6 +103,64 @@ const afterLoadAndIdle = (start: () => void): (() => void) => {
   };
 };
 
+/** How long safe mode waits for the controlling worker to confirm it has stopped writing caches. Milliseconds. */
+export const stopCachingTimeoutMilliseconds = 10_000;
+
+/**
+ * Ask the worker that controls this page to stop writing caches for the rest of its life (FP5), and wait for its
+ * answer: it comes once no write of the worker can follow. A worker that predates the message never answers; the
+ * wait then ends at the timeout.
+ *
+ * @param worker - The controlling worker.
+ * @param timeoutMilliseconds - The longest wait.
+ * @returns Whether the worker confirmed.
+ */
+export const stopWorkerCaching = async (
+  worker: Pick<ServiceWorker, 'postMessage'>,
+  timeoutMilliseconds = stopCachingTimeoutMilliseconds,
+): Promise<boolean> => {
+  const channel = new MessageChannel();
+  try {
+    return await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve(false);
+      }, timeoutMilliseconds);
+      channel.port1.addEventListener('message', () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+      channel.port1.start();
+      worker.postMessage({ type: stopCachingMessageType }, [channel.port2]);
+    });
+  } finally {
+    channel.port1.close();
+  }
+};
+
+/**
+ * Safe mode (`?safe=1`) under a worker: stop the controlling worker's cache writes, unregister every registration and
+ * then delete the worker caches, so the next load reaches the network as if no worker were there (FP5). The worker
+ * keeps controlling this page until it navigates, but writes nothing more, so the one sweep is final. A page in safe
+ * mode registers nothing.
+ */
+export const leaveServiceWorker = async (): Promise<void> => {
+  try {
+    const { controller } = globalThis.navigator.serviceWorker;
+    if (controller !== null) {
+      await stopWorkerCaching(controller);
+    }
+    const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(async (registration) => registration.unregister()));
+    if ('caches' in globalThis) {
+      // Loaded here, off Home's critical tier: only a page in safe mode needs it.
+      const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
+      await deleteOrphanWorkerCaches(globalThis.caches);
+    }
+  } catch {
+    // Storage refused: the next safe-mode load tries again.
+  }
+};
+
 /**
  * Start the service worker's registration from a page's document chrome (`offline-shell.tsx` and its self-host
  * variant) once the page is idle, and restart it when the visitor leaves or enters a project workspace.
@@ -135,6 +170,11 @@ export function useServiceWorker(): void {
   const inWorkspace = isWorkspacePath(pathname);
   useEffect(() => {
     if (!('serviceWorker' in globalThis.navigator)) {
+      return;
+    }
+    if (isSafeModeRequested(globalThis.location.search)) {
+      // async-iife: bootstrap -- leaving the worker must never block safe mode's view.
+      void leaveServiceWorker();
       return;
     }
     if (isServiceWorkerRetiredBuild()) {
@@ -157,7 +197,9 @@ export function useServiceWorker(): void {
             stop = startServiceWorker({
               inWorkspace,
               verdict: { readServerVerdict, subscribeServerVerdict, queryLiveBuild },
-              onInstallStatus: setInstallStatus,
+              buildFloor: { readReportedBuildFloor, subscribeReportedBuildFloor },
+              /* No page shows the install outcome since the offline usage shell was retired (W12). */
+              onInstallStatus: () => undefined,
               buildId,
             });
           }

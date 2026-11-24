@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
 /* eslint-disable @typescript-eslint/naming-convention -- The fakes mirror OCJS embind's C++ PascalCase members. */
+import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OpenCascadeInstance, TopoDS_Shape, TopTools_ListOfShape } from 'replicad-opencascadejs';
@@ -146,10 +147,32 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
   let plainCut: number;
   /** Milliseconds. */
   let plainMesh: number;
+  /** Milliseconds. */
+  let plainPrototypeMesh: number;
+  let plainPrototypeHash: string;
+  // One shape for both sides of the parity check: the face groups carry each face's identity hash.
+  let paritySphere: replicad.Solid;
   const shapeHash = (shape: replicad.Shape3D): string => oc.ReplicadBinaryBrep.IdentityHash(shape.wrapped);
   // About 167k triangles and 6 s unstopped: bounded, unlike a finer tolerance.
   const sphereMesh = (sphere: replicad.Solid) => (): unknown =>
     sphere.mesh({ tolerance: 0.003, angularTolerance: 0.1 });
+
+  // The instancing extractor's mesh of a located sphere, hashed over every array it returns.
+  const prototypeMesh = (sphere: replicad.Solid, tolerance: number) => (): string => {
+    const raw = oc.ReplicadPrototypeMeshExtractor.ExtractFaces(sphere.wrapped, tolerance, 0.1, false);
+    try {
+      const memory = (oc as unknown as { wasmMemory: WebAssembly.Memory }).wasmMemory.buffer;
+      const hash = createHash('sha256');
+      hash.update(new Uint8Array(memory, raw.getVerticesPtr(), raw.getVerticesSize() * 8));
+      hash.update(new Uint8Array(memory, raw.getNormalsPtr(), raw.getNormalsSize() * 8));
+      hash.update(new Uint8Array(memory, raw.getTrianglesPtr(), raw.getTrianglesSize() * 4));
+      hash.update(new Uint8Array(memory, raw.getFaceGroupsPtr(), raw.getFaceGroupsSize() * 4));
+      return hash.digest('hex');
+    } finally {
+      raw.delete();
+    }
+  };
+  const locatedSphere = (): replicad.Solid => replicad.makeSphere(50).translate([5, -3, 2]);
 
   beforeAll(async () => {
     oc = await initOcct(singleWasmUrl, await loadReplicadSingleWasm());
@@ -159,6 +182,9 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
     plainCutHash = shapeHash(cut.value);
     plainCut = cut.elapsed;
     plainMesh = timed(sphereMesh(replicad.makeSphere(50))).elapsed;
+    paritySphere = locatedSphere();
+    plainPrototypeHash = prototypeMesh(paritySphere, 0.05)();
+    plainPrototypeMesh = timed(prototypeMesh(locatedSphere(), 0.003)).elapsed;
     installNativeUserBreak(oc);
   }, 120_000);
 
@@ -186,6 +212,56 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
     expect(error).toBeInstanceOf(RenderAbortedError);
     expect(latency).toBeLessThan(stopShare * (plainMesh - abortDelay));
   });
+
+  it('stops a superseded instancing mesh long before the unwired mesh would finish', async () => {
+    const abortDelay = 200;
+    const { error, latency } = await measureStop(prototypeMesh(locatedSphere(), 0.003), abortDelay);
+
+    console.info(
+      `N1 stop latency, prototype sphere mesh, single: ${latency.toFixed(1)} ms; unwired ${plainPrototypeMesh.toFixed(0)} ms`,
+    );
+    expect(error).toBeInstanceOf(RenderAbortedError);
+    expect(latency).toBeLessThan(stopShare * (plainPrototypeMesh - abortDelay));
+  });
+
+  it('gives the same instancing mesh as the plain entry point when the abort word never moves', () => {
+    expect(prototypeMesh(paritySphere, 0.05)()).toBe(plainPrototypeHash);
+  });
+
+  it('stops a cut whose break arrives after the Boolean finished, before SimplifyResult', () => {
+    const plate = replicad.makeBox([0, 0, 0], [40, 40, 6]);
+    const holes = [10, 20, 30].map((x) => replicad.makeCylinder(3, 10, [x, 20, -2]));
+    const host = oc as OpenCascadeInstance & { replicadUserBreak: () => boolean };
+    const hook = host.replicadUserBreak;
+    let polls = 0;
+    let breakAt = Number.POSITIVE_INFINITY;
+    host.replicadUserBreak = () => {
+      polls += 1;
+      if (polls >= breakAt) {
+        Atomics.store(abortWord, 0, 1);
+      }
+      return hook();
+    };
+    try {
+      // Single-threaded the polls come in a fixed order, and a simplifying cut asks once more after the Boolean.
+      const countPolls = (simplify: boolean): number => {
+        polls = 0;
+        plate.cutAll(holes, { simplify });
+        return polls;
+      };
+      const simplified = countPolls(true);
+      expect(simplified).toBe(countPolls(false) + 1);
+
+      // Break only at that last poll: the Boolean has finished, so the stop must come from the check before
+      // SimplifyResult, and it throws the abort error as a break inside the Boolean does.
+      polls = 0;
+      breakAt = simplified;
+      expect(() => plate.cutAll(holes, { simplify: true })).toThrow(RenderAbortedError);
+      expect(polls).toBe(simplified);
+    } finally {
+      host.replicadUserBreak = hook;
+    }
+  });
 });
 
 describe('native user break without a running abort', () => {
@@ -207,13 +283,18 @@ describe('native user break without a running abort', () => {
       CommonWithOptions: vi.fn(booleanAnswer),
     };
     const extractor = { meshWithOptions: vi.fn(meshAnswer), extractWithOptions: vi.fn(meshAnswer) };
+    const prototypeExtractor = { ExtractFaces: vi.fn(), ExtractFacesWithOptions: vi.fn(meshAnswer) };
     Object.assign(host, {
       ReplicadUserBreak: vi.fn(),
       ReplicadBooleanBatch: batch,
       ReplicadMeshExtractor: extractor,
+      ReplicadPrototypeMeshExtractor: prototypeExtractor,
     });
     installNativeUserBreak(host as unknown as OpenCascadeInstance);
-    return host as unknown as OpenCascadeInstance & { replicadUserBreak: () => boolean };
+    return host as unknown as OpenCascadeInstance & {
+      replicadUserBreak: () => boolean;
+      ReplicadPrototypeMeshExtractor: { ExtractFacesWithOptions: typeof prototypeExtractor.ExtractFacesWithOptions };
+    };
   };
   const list = undefined as unknown as TopTools_ListOfShape;
   const shape = undefined as unknown as TopoDS_Shape;
@@ -264,6 +345,47 @@ describe('native user break without a running abort', () => {
     expect(oc.ReplicadMeshExtractor.meshWithOptions).toHaveBeenCalledWith(shape, 0.1, 0.2, true, userBreak);
     expect(oc.ReplicadMeshExtractor.extractWithOptions).toHaveBeenCalledWith(shape, 0.1, 0.2, true, true, userBreak);
     expect(result.delete).not.toHaveBeenCalled();
+  });
+
+  it('routes the instancing extractor through its break entry point with the clean default', () => {
+    const oc = fakeOc({ mesh: () => 'prototype mesh' });
+    const userBreak = vi.mocked(oc.ReplicadUserBreak).mock.instances[0];
+
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFaces(shape, 0.1, 0.2, false)).toBe('prototype mesh');
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFacesWithOptions).toHaveBeenCalledWith(
+      shape,
+      0.1,
+      0.2,
+      false,
+      true,
+      userBreak,
+    );
+  });
+
+  it('throws the abort error when a break stops the instancing extractor', () => {
+    const oc = fakeOc({
+      mesh() {
+        Atomics.store(abortWord, 0, 1);
+        expect(oc.replicadUserBreak()).toBe(true);
+        throw new Error('ReplicadUserBreakError');
+      },
+    });
+
+    expect(() => oc.ReplicadPrototypeMeshExtractor.ExtractFaces(shape, 0.1, 0.2, false)).toThrow(RenderAbortedError);
+  });
+
+  it('keeps the plain instancing extractor on a build without its break entry point', () => {
+    const extractFaces = vi.fn();
+    const oc = {
+      ReplicadUserBreak: vi.fn(),
+      ReplicadBooleanBatch: { CutWithOptions: vi.fn(), FuseWithOptions: vi.fn(), CommonWithOptions: vi.fn() },
+      ReplicadMeshExtractor: { meshWithOptions: vi.fn(), extractWithOptions: vi.fn() },
+      ReplicadPrototypeMeshExtractor: { ExtractFaces: extractFaces },
+    } as unknown as OpenCascadeInstance;
+
+    installNativeUserBreak(oc);
+    expect(oc.ReplicadPrototypeMeshExtractor.ExtractFaces).toBe(extractFaces);
+    expect(typeof (oc as unknown as { replicadUserBreak: unknown }).replicadUserBreak).toBe('function');
   });
 
   it('rethrows a native failure unchanged when nothing aborted', () => {

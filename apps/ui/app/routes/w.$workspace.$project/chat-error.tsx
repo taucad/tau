@@ -14,7 +14,7 @@ import { cardOf, pageHeadlineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
   autoResumableProviderUnavailableCode,
   nextProviderUnavailableRetry,
-} from '@taucad/ui-core/utils/run-auto-resume';
+} from '@taucad/chat-ui/utils/run-auto-resume';
 import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';

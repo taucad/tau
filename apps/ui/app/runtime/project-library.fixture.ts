@@ -1,8 +1,8 @@
 /**
- * A root file facade for tests of the app's project library: files-ui's `testRootFiles`, typed by the app's facade.
+ * A root file facade for tests of the app's project library: project-library's `testRootFiles`, typed by the app's facade.
  */
-import { testRootFiles as testLibraryRootFiles } from '@taucad/files-ui/runtime/project-library.fixture';
-import type { TestRootFiles as TestLibraryRootFiles } from '@taucad/files-ui/runtime/project-library.fixture';
+import { testRootFiles as testLibraryRootFiles } from '@taucad/project-library/runtime/project-library.fixture';
+import type { TestRootFiles as TestLibraryRootFiles } from '@taucad/project-library/runtime/project-library.fixture';
 import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 
 /** A root file facade whose value a test sets. @public */

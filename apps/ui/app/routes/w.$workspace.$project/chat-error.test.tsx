@@ -15,9 +15,19 @@ import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machin
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
-import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
+
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();

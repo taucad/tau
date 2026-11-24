@@ -6,6 +6,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ComponentProps, ReactNode } from 'react';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
+
 /* The meta block renders the model from the chat-scoped `Chat.activeExecution`
  * (via `useChatSelector(state => state.activeExecution)`) — never by reverse-
  * scanning message metadata. These tests moved here from the status row the
@@ -245,7 +255,8 @@ describe('ChatOptionsMeta — receipt credits', () => {
     renderMeta();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: 1 · 1 pending')).toBeInTheDocument();
+      /* The failed read is a check in flight for one ask deadline, then "can't check" (I15), never "pending". */
+      expect(screen.getByLabelText('Tau credits: 1 · 1 checking')).toBeInTheDocument();
     });
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });

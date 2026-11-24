@@ -1,6 +1,6 @@
 # replicad API index
 
-replicad 1.2.1-beta.0 · 862 symbols · extracted by TypeScript 5.9.3.
+replicad 1.2.1-beta.1 · 862 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 

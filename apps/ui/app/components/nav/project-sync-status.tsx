@@ -5,8 +5,17 @@ import { Loader } from '@taucad/ui/components/loader';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { sidebarRowButtonClass } from '#components/nav/sidebar-row.js';
+import { projectOpenCopy, withEllipsis } from '#lib/project-open-copy.js';
+import type { ProjectOpenStep } from '#lib/project-open-copy.js';
 
 type SyncIndicator = Readonly<{ label: string; detail: string; kind: 'busy' | 'offline' | 'attention' }>;
+
+/** A running open step, in the open's own words ({@link projectOpenCopy}). */
+const openStepIndicator = (step: ProjectOpenStep): SyncIndicator => ({
+  label: withEllipsis(projectOpenCopy[step].label),
+  detail: projectOpenCopy[step].helper,
+  kind: 'busy',
+});
 
 function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boolean): SyncIndicator | undefined {
   if (sync?.state === 'conflicted') {
@@ -47,10 +56,10 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return failure;
   }
   if (sync?.pullPhase === 'fetching') {
-    return { label: 'Downloading files…', detail: 'Bringing this project to this device.', kind: 'busy' };
+    return openStepIndicator('downloading');
   }
   if (sync?.pullPhase === 'applying') {
-    return { label: 'Preparing files…', detail: 'Getting your files ready to open.', kind: 'busy' };
+    return openStepIndicator('preparing');
   }
   if (sync?.chats === 'failed') {
     return {
@@ -63,10 +72,10 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return { label: 'Loading chats…', detail: 'Files are ready. Your chats are still loading.', kind: 'busy' };
   }
   if (isCloudPending && sync?.hasAppliedRemote) {
-    return { label: 'Preparing files…', detail: 'Getting your files ready to open.', kind: 'busy' };
+    return openStepIndicator('preparing');
   }
   if (isCloudPending) {
-    return { label: 'Opening project…', detail: 'Your files will appear when they are ready.', kind: 'busy' };
+    return openStepIndicator('connecting');
   }
   if (sync?.state === 'checking') {
     return { label: 'Checking for changes…', detail: 'Checking for new changes.', kind: 'busy' };

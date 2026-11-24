@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
 /* eslint-disable @typescript-eslint/naming-convention -- The fakes mirror OCJS embind's C++ PascalCase members. */
+import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OpenCascadeInstance, TopoDS_Shape, TopTools_ListOfShape } from 'replicad-opencascadejs';
@@ -146,10 +147,32 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
   let plainCut: number;
   /** Milliseconds. */
   let plainMesh: number;
+  /** Milliseconds. */
+  let plainPrototypeMesh: number;
+  let plainPrototypeHash: string;
+  // One shape for both sides of the parity check: the face groups carry each face's identity hash.
+  let paritySphere: replicad.Solid;
   const shapeHash = (shape: replicad.Shape3D): string => oc.ReplicadBinaryBrep.IdentityHash(shape.wrapped);
   // About 167k triangles and 6 s unstopped: bounded, unlike a finer tolerance.
   const sphereMesh = (sphere: replicad.Solid) => (): unknown =>
     sphere.mesh({ tolerance: 0.003, angularTolerance: 0.1 });
+
+  // The instancing extractor's mesh of a located sphere, hashed over every array it returns.
+  const prototypeMesh = (sphere: replicad.Solid, tolerance: number) => (): string => {
+    const raw = oc.ReplicadPrototypeMeshExtractor.ExtractFaces(sphere.wrapped, tolerance, 0.1, false);
+    try {
+      const memory = (oc as unknown as { wasmMemory: WebAssembly.Memory }).wasmMemory.buffer;
+      const hash = createHash('sha256');
+      hash.update(new Uint8Array(memory, raw.getVerticesPtr(), raw.getVerticesSize() * 8));
+      hash.update(new Uint8Array(memory, raw.getNormalsPtr(), raw.getNormalsSize() * 8));
+      hash.update(new Uint8Array(memory, raw.getTrianglesPtr(), raw.getTrianglesSize() * 4));
+      hash.update(new Uint8Array(memory, raw.getFaceGroupsPtr(), raw.getFaceGroupsSize() * 4));
+      return hash.digest('hex');
+    } finally {
+      raw.delete();
+    }
+  };
+  const locatedSphere = (): replicad.Solid => replicad.makeSphere(50).translate([5, -3, 2]);
 
   beforeAll(async () => {
     oc = await initOcct(singleWasmUrl, await loadReplicadSingleWasm());
@@ -159,6 +182,9 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
     plainCutHash = shapeHash(cut.value);
     plainCut = cut.elapsed;
     plainMesh = timed(sphereMesh(replicad.makeSphere(50))).elapsed;
+    paritySphere = locatedSphere();
+    plainPrototypeHash = prototypeMesh(paritySphere, 0.05)();
+    plainPrototypeMesh = timed(prototypeMesh(locatedSphere(), 0.003)).elapsed;
     installNativeUserBreak(oc);
   }, 120_000);
 
@@ -185,6 +211,21 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
     console.info(`N1 stop latency, sphere mesh, single: ${latency.toFixed(1)} ms; unwired ${plainMesh.toFixed(0)} ms`);
     expect(error).toBeInstanceOf(RenderAbortedError);
     expect(latency).toBeLessThan(stopShare * (plainMesh - abortDelay));
+  });
+
+  it('stops a superseded instancing mesh long before the unwired mesh would finish', async () => {
+    const abortDelay = 200;
+    const { error, latency } = await measureStop(prototypeMesh(locatedSphere(), 0.003), abortDelay);
+
+    console.info(
+      `N1 stop latency, prototype sphere mesh, single: ${latency.toFixed(1)} ms; unwired ${plainPrototypeMesh.toFixed(0)} ms`,
+    );
+    expect(error).toBeInstanceOf(RenderAbortedError);
+    expect(latency).toBeLessThan(stopShare * (plainPrototypeMesh - abortDelay));
+  });
+
+  it('gives the same instancing mesh as the plain entry point when the abort word never moves', () => {
+    expect(prototypeMesh(paritySphere, 0.05)()).toBe(plainPrototypeHash);
   });
 });
 

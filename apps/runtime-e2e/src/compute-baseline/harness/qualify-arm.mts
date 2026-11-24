@@ -63,7 +63,10 @@ const { values } = parseArgs({
     label: { type: 'string', default: '' },
     /** in-process (default) | worker: a real worker thread; the abort scenario always uses it. */
     transport: { type: 'string', default: 'in-process' },
-    /** abort: supersede this many ms after the superseded build's main() starts (default: at once). */
+    /**
+     * abort: supersede this many ms after the targeted phase (main() or the GLB pack) starts. 0 (the default) holds
+     * the worker at the phase start until the supersede is issued.
+     */
     abortAfter: { type: 'string' },
     /** abort: how many supersede trials to measure. */
     trials: { type: 'string', default: '2' },
@@ -584,8 +587,12 @@ const run = async () => {
             const span = target === 'main' ? 'kernel.execute' : 'replicad.render-output';
             const operation = target === 'main' ? 'evaluate' : 'render';
             const landed = Promise.all([phaseEnd(span), progressPhase(document, operation)]);
-            Atomics.store(gate, 1, 0);
-            Atomics.store(gate, 0, gateCodes[target]);
+            // A delayed supersede lands `delay` ms into the targeted phase, so the worker runs on instead of holding:
+            // held, the phase would not start until the supersede was issued.
+            if (delay === 0) {
+              Atomics.store(gate, 1, 0);
+              Atomics.store(gate, 0, gateCodes[target]);
+            }
             released = undefined;
             let committed: Promise<unknown> = Promise.resolve();
             const pending = document.update({ parameters: frame(first) });
@@ -648,7 +655,8 @@ const run = async () => {
           // The superseded render's outcome: `cancelled` when packing stopped at the supersede.
           supersededRender: render?.detail?.['operation.outcome'],
           renderAfterIssueMs: render ? +(endOf(render) - issued).toFixed(1) : undefined,
-          // How the worker left the gate: `ok` once the arm released it, `timed-out` if it never did.
+          // How the worker left the gate: `ok` once the arm released it, `timed-out` if it never did. Absent for a
+          // delayed trial, which does not hold the worker.
           released,
           packParts: render
             ? byStart('replicad.mesh-to-gltf').find(

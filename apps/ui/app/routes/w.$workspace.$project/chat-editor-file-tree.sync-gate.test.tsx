@@ -165,7 +165,7 @@ describe('the Files tree while the open pull is running', () => {
 
     renderTree();
 
-    expect(screen.getByRole('region', { name: 'Downloading project files' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Downloading files…' })).toBeInTheDocument();
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 

@@ -1,9 +1,8 @@
-import { cloudOpenAccountReason } from '#lib/tau-cloud-intent.js';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
+import type { LargeObjectsFacet } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
@@ -24,16 +23,7 @@ import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { createModelWaitReporter } from '#lib/model-wait-reporting.js';
-
-const messages = {
-  connecting: ['Opening project…', 'Opening this project on this device.'],
-  downloading: ['Downloading project files', 'Your model will open when its files are ready.'],
-  preparing: ['Preparing files…', 'Getting your files ready to open.'],
-  offline: ['You’re offline', 'This project isn’t on this device yet. Go online, then try again.'],
-  failed: ['Couldn’t open this project', 'The download didn’t finish. Try again.'],
-  account: ['Sign in to continue', cloudOpenAccountReason],
-  ready: ['Project files ready', ''],
-} satisfies Record<ProjectAvailability, readonly [string, string]>;
+import { projectFilesCopy } from '#lib/project-open-copy.js';
 
 /**
  * How far a large-object download is, as the viewer says it.
@@ -216,46 +206,6 @@ export function ProjectSyncPlaceholder({ state }: { readonly state: ModelAvailab
   }
   return <ProjectFilesPlaceholder state={state} />;
 }
-
-/**
- * What the project placeholder says: the failure's own class where it names one, so a refused push or a conflicted
- * pull never reads as a download that did not finish.
- *
- * @param state - The project's availability.
- * @param status - The revision status the failure's class is read from.
- * @returns The title and the description.
- */
-export const projectFilesCopy = (
-  state: ProjectAvailability,
-  status: Pick<RevisionStatusProjection, 'remote' | 'sync'> | undefined,
-): readonly [string, string] => {
-  if (state !== 'failed') {
-    return messages[state];
-  }
-  const reason = status?.remote.reason ?? status?.sync.reason;
-  if (reason === 'forbidden' || reason === 'notFound') {
-    return ['Project unavailable', 'Your access may have changed. Open History to review the backup.'];
-  }
-  if (reason === 'unauthorized') {
-    return ['Sign in to continue', 'Sign in again to finish opening this project. Open History to sign in.'];
-  }
-  if (reason === 'rejected') {
-    return ['Couldn’t back up this project', 'Changes from this device weren’t backed up. Open History to see why.'];
-  }
-  if (status?.sync.state === 'conflicted') {
-    return [
-      'Needs your decision',
-      'This project changed here and somewhere else. Open History to choose what to keep.',
-    ];
-  }
-  if (reason === 'quota') {
-    return [
-      'Storage needs attention',
-      'The download could not finish because a storage limit was reached. Open History for details.',
-    ];
-  }
-  return messages.failed;
-};
 
 /**
  * Try again for an open that could not go on: authorise the remote again, pull now, or connect it, whichever the remote

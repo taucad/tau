@@ -11,6 +11,8 @@ export type DesktopUpdateSnapshot = {
     | 'ready'
     | 'available'
     | 'error'
+    /** A check postponed because this computer is offline: quiet, and checked again when the network returns. */
+    | 'offline'
     | 'saving'
     | 'restart-blocked'
     | 'restarting'

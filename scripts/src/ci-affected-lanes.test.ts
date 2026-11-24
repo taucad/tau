@@ -1518,8 +1518,8 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
       expect(outputs['node-floor']).toBe('true');
       const union = shards(outputs).flatMap(({ projects }) => projects.split(','));
       expect(union.toSorted()).toEqual([
-        'opencascade',
-        'replicad',
+        'opencascade:test',
+        'replicad:test',
         'revisions:test:shard-1',
         'revisions:test:shard-2',
         'revisions:test:shard-3',
@@ -1539,7 +1539,7 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
         graphNodes,
       });
       expect(status, stderr).toBe(0);
-      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'opencascade' }]);
+      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'opencascade:test' }]);
       const untouched = plan('pull_request', { affected, files: ['packages/core/src/index.ts'], graphNodes });
       expect(untouched.status, untouched.stderr).toBe(0);
       expect(untouched.outputs['node-floor']).toBe('false');
@@ -2037,8 +2037,12 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
     // A row the deal does not know runs nothing; a deal over more shards than rows drops their projects.
     expect(rows).toEqual(Array.from({ length: rows.length }, (_, index) => `test-${index + 1}`));
     expect(rows.length).toBeGreaterThanOrEqual(4);
-    expect(script).toContain(
-      `node scripts/src/test-shard-dealer.ts --shard "\${LANE#test-}" --shards ${String(rows.length)})`,
+    expect(script).toMatch(
+      new RegExp(
+        String.raw`node scripts/src/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards ${String(rows.length)} \\\n\s+` +
+          String.raw`--graph "\$RUNNER_TEMP/test-graph\.json" --targets test\)`,
+        'u',
+      ),
     );
     expect(uiTargets.length).toBeGreaterThanOrEqual(4);
   });
@@ -2065,6 +2069,12 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
               Object.keys(projects).flatMap((name) => [
                 [`${name}:test`, { target: { project: name, target: 'test' } }],
                 [`${name}:copy-assets`, { target: { project: name, target: 'copy-assets' } }],
+              ]),
+            ),
+            dependencies: Object.fromEntries(
+              Object.keys(projects).flatMap((name) => [
+                [`${name}:test`, [`${name}:copy-assets`]],
+                [`${name}:copy-assets`, []],
               ]),
             ),
           },

@@ -1017,7 +1017,14 @@ function ProjectCardSkeleton(): React.JSX.Element {
 }
 
 /** What the Projects header's slot says about Tau Cloud in words, instead of a wait (P-k). */
-type CloudNotice = 'offline' | 'failed';
+type CloudNotice = 'offline' | 'safe-mode' | 'failed';
+
+/** The notices said in words alone, with no Retry: nothing a retry could change. */
+const quietNoticeCopy: Partial<Record<CloudNotice, string>> = {
+  offline: 'Offline. Showing projects on this device.',
+  /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read. */
+  'safe-mode': 'Tau Cloud is off in safe mode. Showing projects on this device.',
+};
 
 /**
  * Offline while the listing has not answered (it is held until the browser is back online), or failed.
@@ -1034,6 +1041,9 @@ function cloudNoticeOf({
   readonly isCloudSettled: boolean;
   readonly cloud: CloudListingState;
 }): CloudNotice | undefined {
+  if (cloud === 'safe-mode') {
+    return 'safe-mode';
+  }
   if (!isOnline && !isCloudSettled) {
     return 'offline';
   }
@@ -1072,7 +1082,7 @@ function cloudRetryOf({
   /** The listing's last answer was a failure and nothing has answered since. */
   readonly isFailureUnanswered: boolean;
 }): CloudRetry | undefined {
-  if (notice === 'offline') {
+  if (notice !== undefined && quietNoticeCopy[notice] !== undefined) {
     return undefined;
   }
   if (notice === 'failed' || isFailureUnanswered || wait?.isAnnounced === true || wait?.followsFailure === true) {
@@ -1127,6 +1137,7 @@ function LibraryStatusSlot({
   readonly hold?: Readonly<{ hideDelay: string; onEnd: () => void }>;
   readonly children: ReactNode;
 }): React.JSX.Element {
+  const quietCopy = notice === undefined ? undefined : quietNoticeCopy[notice];
   return (
     <div
       data-slot='project-library-status'
@@ -1145,17 +1156,19 @@ function LibraryStatusSlot({
       {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
       {/* Never `display: none`, even empty: a live region must be in the tree before its words arrive. Out of the
           flow while it shows nothing, it adds no gap. */}
-      <span role='status' className={cn('min-w-0 truncate', notice !== 'offline' && 'sr-only')}>
-        {notice === 'offline' ? 'Offline. Showing projects on this device.' : announcement}
+      <span role='status' className={cn('min-w-0 truncate', quietCopy === undefined && 'sr-only')}>
+        {quietCopy ?? announcement}
       </span>
-      {notice === 'offline' ? null : notice === 'failed' ? (
-        <span role='alert' className='flex min-w-0 items-center gap-1.5'>
-          <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
-          <span className='truncate'>Couldn’t load cloud projects</span>
-        </span>
-      ) : (
-        children
-      )}
+      {quietCopy === undefined ? (
+        notice === 'failed' ? (
+          <span role='alert' className='flex min-w-0 items-center gap-1.5'>
+            <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
+            <span className='truncate'>Couldn’t load cloud projects</span>
+          </span>
+        ) : (
+          children
+        )
+      ) : null}
       {/* Last in the slot, so the same element stays while the words before it change. */}
       {retry === undefined ? null : (
         <Button

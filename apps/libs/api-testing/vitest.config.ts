@@ -24,7 +24,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['default'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/apps/libs/api-testing',

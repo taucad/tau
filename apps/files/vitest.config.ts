@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    reporters: ['default'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/apps/files',

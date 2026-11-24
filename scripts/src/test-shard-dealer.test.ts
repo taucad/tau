@@ -27,6 +27,9 @@ const table = (seconds: Record<string, number>, defaultSeconds = 10): DurationTa
 const dealAll = (projects: readonly string[], durations: DurationTable = snapshot, shards = 3): string[][] =>
   deal(projects, shards, durations);
 
+/** A project's `test` task id, as the snapshot keys it. */
+const testOf = (project: string): string => `${project}:test`;
+
 /** The `test:shard-<n>` tasks of ui, which the `test-<n>` lanes deal in place of `ui` (CI throughput review ST-1). */
 const uiShards = Object.keys(
   (JSON.parse(readFileSync(resolve(root, 'apps/ui/project.json'), 'utf8')) as { targets: Record<string, unknown> })
@@ -42,7 +45,7 @@ const expectPartition = (projects: readonly string[], dealt: readonly string[][]
 };
 
 // An era-D broad landing (blueprint F2): the measured heavy projects plus a spread of small ones, and every whole
-// project the 2026-11-23 snapshot weighs.
+// project the 2026-11-23 snapshot weighs. The plain deals below weigh their `test` tasks (`broadTests`).
 const broad = [
   'agent-host',
   'agent-plugin',
@@ -75,6 +78,7 @@ const broad = [
   'www',
   'zoo',
 ];
+const broadTests = broad.map((project) => testOf(project));
 
 describe('deal', () => {
   it('returns empty shards for an empty selection', () => {
@@ -82,14 +86,14 @@ describe('deal', () => {
   });
 
   it('puts a single project on the first shard', () => {
-    expect(dealAll(['ui'])).toEqual([['ui'], [], []]);
+    expect(dealAll(['ui:test'])).toEqual([['ui:test'], [], []]);
   });
 
   it('puts ui alone on a broad landing and keeps the other shards within one small project', () => {
-    const dealt = dealAll(broad);
-    expectPartition(broad, dealt);
-    expect(dealt.map((shard) => shard[0])).toEqual(['ui', 'replicad', 'host']);
-    expect(dealt[0]).toEqual(['ui']);
+    const dealt = dealAll(broadTests);
+    expectPartition(broadTests, dealt);
+    expect(dealt.map((shard) => shard[0])).toEqual(['ui:test', 'replicad:test', 'host:test']);
+    expect(dealt[0]).toEqual(['ui:test']);
     const loads = dealt.map((shard) => shard.reduce((sum, project) => sum + weightOf(project, snapshot), 0));
     // The ui suite alone sets the floor; the breadth splits evenly beside it.
     expect(loads).toEqual([921, 854, 862]);
@@ -103,7 +107,7 @@ describe('deal', () => {
   });
 
   it('is independent of input order', () => {
-    expect(dealAll([...broad].reverse())).toEqual(dealAll(broad));
+    expect(dealAll([...broadTests].reverse())).toEqual(dealAll(broadTests));
   });
 
   it('breaks weight ties by name and load ties by the lowest shard', () => {
@@ -114,19 +118,19 @@ describe('deal', () => {
   it('weighs a project missing from the snapshot at the default', () => {
     expect(weightOf('brand-new-project', snapshot)).toBe(snapshot.defaultSeconds);
     expect(weightOf('constructor', snapshot)).toBe(snapshot.defaultSeconds);
-    expect(weightOf('cli', snapshot)).toBe(101);
-    const dealt = dealAll(['brand-new-project', 'ui']);
-    expect(dealt).toEqual([['ui'], ['brand-new-project'], []]);
+    expect(weightOf('cli:test', snapshot)).toBe(101);
+    const dealt = dealAll(['brand-new-project:test', 'ui:test']);
+    expect(dealt).toEqual([['ui:test'], ['brand-new-project:test'], []]);
   });
 
   it('ignores snapshot entries for renamed or deleted projects', () => {
-    const dealt = dealAll(['ui-core', 'ui-e2e']);
-    expectPartition(['ui-core', 'ui-e2e'], dealt);
-    expect(dealt).toEqual([['ui-e2e'], ['ui-core'], []]);
+    const dealt = dealAll(['ui-core:test', 'ui-e2e:test']);
+    expectPartition(['ui-core:test', 'ui-e2e:test'], dealt);
+    expect(dealt).toEqual([['ui-e2e:test'], ['ui-core:test'], []]);
   });
 
   it('spreads ui over the six test lanes as its shard tasks, which a broad landing deals in place of ui', () => {
-    const units = [...broad.filter((project) => project !== 'ui'), ...uiShards];
+    const units = [...broadTests.filter((task) => task !== 'ui:test'), ...uiShards];
     const dealt = dealAll(units, snapshot, 6);
     expectPartition(units, dealt);
     const loads = dealt.map((shard) => shard.reduce((sum, unit) => sum + weightOf(unit, snapshot), 0));
@@ -144,18 +148,21 @@ describe('deal', () => {
   });
 
   it('honours another shard count', () => {
-    const dealt = dealAll(broad, snapshot, 2);
+    const dealt = dealAll(broadTests, snapshot, 2);
     expect(dealt).toHaveLength(2);
-    expectPartition(broad, dealt);
+    expectPartition(broadTests, dealt);
   });
 });
 
 describe('parseDurations', () => {
-  it('accepts the checked-in snapshot and its project names are real projects', () => {
-    // A `project:test:shard-<k>` unit is a split-by-file part (its project's test-shards.test.ts checks it); every
-    // whole project the snapshot weighs must still be a test project.
-    for (const project of Object.keys(snapshot.seconds).filter((unit) => !unit.includes(':'))) {
-      expect(broad).toContain(project);
+  it('accepts the checked-in snapshot and its test tasks are real test projects', () => {
+    // Every key is a task id. A `project:test:shard-<k>` unit is a split-by-file part (its project's
+    // test-shards.test.ts checks it); every whole project's `test` the snapshot weighs must still be a test project.
+    for (const task of Object.keys(snapshot.seconds)) {
+      expect(task).toMatch(/^[^:]+:.+$/u);
+    }
+    for (const task of Object.keys(snapshot.seconds).filter((unit) => unit.endsWith(':test'))) {
+      expect(broadTests).toContain(task);
     }
     // Every shard task of ui is weighed, so the deal never falls back to the default for them.
     for (const task of uiShards) {
@@ -237,13 +244,42 @@ const buildSeconds = table(
 );
 const buildProjects = ['ui', 'desktop', 'docs', 'cli', 'runtime', 'host'];
 
+// The test lanes' shape (CI decomposition global review G5): `cli:test` needs builds a test lane runs uncached, and
+// two suites share a prepare task; `ui` enters as shard tasks the graph of `test` does not hold.
+const testGraph = taskGraph({
+  'cli:test': ['cli:build'],
+  'cli:build': ['runtime:build'],
+  'host:test': ['runtime:build'],
+  'ui-e2e:test': ['csharp-language:prepare'],
+  'csharp-language:test': ['csharp-language:prepare'],
+  'ui:test': ['ui:copy-assets'],
+  'docs:test': [],
+});
+const testSeconds = table(
+  {
+    'cli:test': 100,
+    'cli:build': 120,
+    'runtime:build': 30,
+    'host:test': 200,
+    'ui-e2e:test': 17,
+    'csharp-language:test': 10,
+    'csharp-language:prepare': 40,
+    'ui:test:shard-1': 200,
+    'ui:test:shard-2': 200,
+    'docs:test': 150,
+  },
+  10,
+);
+
 describe('dealUnits', () => {
   const seconds = (task: string): number => weightOf(task, buildSeconds);
 
   it('deals disjoint units exactly as the plain deal does', () => {
-    const units = broad.map((project) => ({ name: project, tasks: [project] }));
+    const units = broadTests.map((task) => ({ name: task, tasks: [task] }));
     for (const shards of [1, 2, 3, 4]) {
-      expect(dealUnits(units, shards, (task) => weightOf(task, snapshot)).dealt).toEqual(deal(broad, shards, snapshot));
+      expect(dealUnits(units, shards, (task) => weightOf(task, snapshot)).dealt).toEqual(
+        deal(broadTests, shards, snapshot),
+      );
     }
   });
 
@@ -290,6 +326,18 @@ describe('unitsFromGraph', () => {
   it('refuses a project without a lane task and a file without a task graph', () => {
     expect(() => unitsFromGraph(buildGraph, ['ghost'], buildTargets)).toThrow(/no build, check-desktop-payload task/u);
     expect(() => unitsFromGraph({ graph: {} }, ['ui'], buildTargets)).toThrow(/no task graph/u);
+  });
+
+  it('gives a task id its task and what it depends on, and a shard task the graph lacks its project test dependencies', () => {
+    expect(unitsFromGraph(testGraph, ['cli', 'ui-e2e:test', 'ui:test:shard-1'], ['test'])).toEqual([
+      { name: 'cli', tasks: ['cli:build', 'cli:test', 'runtime:build'] },
+      { name: 'ui-e2e:test', tasks: ['csharp-language:prepare', 'ui-e2e:test'] },
+      // A graph of `test` lacks ui:test:shard-1: it runs what ui:test depends on, not ui:test itself.
+      { name: 'ui:test:shard-1', tasks: ['ui:copy-assets', 'ui:test:shard-1'] },
+    ]);
+    expect(() => unitsFromGraph(testGraph, ['ghost:test:shard-1'], ['test'])).toThrow(
+      /no task ghost:test:shard-1 and no test task for ghost/u,
+    );
   });
 });
 
@@ -379,19 +427,78 @@ describe('run with a graph', () => {
   it('fails on a project the graph does not hold', () => {
     expect(run(args('1'), '["ghost"]', read).code).toBe(1);
   });
+
+  it('weighs the tasks a test unit depends on, so the test lanes balance what they run (global review G5)', () => {
+    const testFiles = new Map([
+      ['test-graph.json', JSON.stringify(testGraph)],
+      ['test.json', JSON.stringify(testSeconds)],
+    ]);
+    const units = ['cli', 'host', 'ui-e2e', 'csharp-language', 'ui:test:shard-1', 'ui:test:shard-2', 'docs'];
+    const lanes = ['1', '2', '3'].map((shard) =>
+      run(
+        [
+          '--shard',
+          shard,
+          '--shards',
+          '3',
+          '--durations',
+          'test.json',
+          '--graph',
+          'test-graph.json',
+          '--targets',
+          'test',
+        ],
+        JSON.stringify(units),
+        (path) => testFiles.get(path) ?? '',
+      ),
+    );
+    expect(lanes.map(({ code }) => code)).toEqual([0, 0, 0]);
+    const dealt = lanes.map(({ output }) => output.split(','));
+    expectPartition(units, dealt);
+    // The deal before: each unit weighs its own test seconds alone.
+    const plain = deal(
+      units,
+      3,
+      table(
+        Object.fromEntries(
+          units.map((unit) => [unit, weightOf(unit.includes(':') ? unit : `${unit}:test`, testSeconds)]),
+        ),
+      ),
+    );
+    expectPartition(units, plain);
+    /** The seconds of the longest lane: every task its units run, once. */
+    const graphUnits = unitsFromGraph(testGraph, units, ['test']);
+    const longest = (lanesOf: readonly string[][]): number =>
+      Math.max(
+        ...lanesOf.map((lane) => {
+          const tasks = new Set(graphUnits.filter(({ name }) => lane.includes(name)).flatMap(({ tasks }) => tasks));
+          return [...tasks].reduce((sum, task) => sum + (testSeconds.seconds[task] ?? 0), 0);
+        }),
+      );
+    // Test seconds alone weigh cli at 100 s and put its 150 s of builds beside a 200 s ui shard; counted, cli weighs
+    // 250 s, and the two suites that need csharp-language:prepare share its lane, which prepares it once.
+    expect(plain[1]).toEqual(['ui:test:shard-1', 'cli']);
+    expect(longest(plain)).toBe(450);
+    expect(dealt).toEqual([
+      ['cli', 'ui-e2e', 'csharp-language'],
+      ['host', 'docs'],
+      ['ui:test:shard-1', 'ui:test:shard-2'],
+    ]);
+    expect(longest(dealt)).toBe(400);
+  });
 });
 
 describe('run', () => {
-  const input = JSON.stringify(broad);
+  const input = JSON.stringify(broadTests);
 
   it('prints each shard, and the shards together are the selected set', () => {
     const outputs = [1, 2, 3].map((shard) => run(['--shard', String(shard)], input));
     for (const { code } of outputs) {
       expect(code).toBe(0);
     }
-    expect(outputs[0]?.output.split(',')[0]).toBe('ui');
+    expect(outputs[0]?.output.split(',')[0]).toBe('ui:test');
     expectPartition(
-      broad,
+      broadTests,
       outputs.map(({ output }) => output.split(',')),
     );
   });
@@ -445,8 +552,20 @@ describe('ci.yml', () => {
     .flatMap((job) => job.steps ?? [])
     .find((step) => step.name === "Run the lane's tasks")?.run;
 
-  it('deals the test lanes with this script', () => {
-    expect(lanes).toMatch(/node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards 6/u);
+  it('deals the test lanes with this script, from the test graph with the tasks they depend on', () => {
+    expect(lanes).toMatch(
+      /node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards 6 \\\n\s+--graph "\$RUNNER_TEMP\/test-graph\.json" --targets test\)/u,
+    );
+  });
+
+  it('names only tasks of real projects in the test snapshot', () => {
+    const projects = execFileSync('git', ['ls-files', '*project.json'], { cwd: root, encoding: 'utf8' })
+      .split('\n')
+      .filter((file) => file.endsWith('/project.json'))
+      .map((file) => (JSON.parse(readFileSync(resolve(root, file), 'utf8')) as { name?: string }).name);
+    for (const task of Object.keys(snapshot.seconds)) {
+      expect(projects).toContain(task.slice(0, task.indexOf(':')));
+    }
   });
 
   it('deals the package checks in the plan with this script and their own snapshot, as many shards as they need', () => {

@@ -18,6 +18,7 @@ import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
+import { useRuntimeSafeMode } from '#hooks/use-runtime-safe-mode.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
@@ -473,7 +474,8 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
  *
  * @public
  */
-export type CloudListingState = 'fetching' | 'ready' | 'failed';
+/** `safe-mode`: this page load makes no Tau Cloud read (W9 R5, operator ruling). */
+export type CloudListingState = 'fetching' | 'ready' | 'failed' | 'safe-mode';
 
 /**
  * The listing's state from its query.
@@ -512,6 +514,8 @@ export const useCloudProjects = (
   const account = useRevisionSessionUser()?.id;
   const queryClient = useQueryClient();
   const awaitsSession = useListingAwaitsSession(queryClient, account);
+  /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read, the deletion recovery the listing runs included. */
+  const isSafeMode = useRuntimeSafeMode();
   useSyncExternalStore(
     (listener) => deletionTopic.subscribe(listener),
     () => deletionRevision,
@@ -547,7 +551,7 @@ export const useCloudProjects = (
       overlayDeletionReceipts(query.state.data ?? [], account).some((entry) => entry.cloudState === 'deleting')
         ? 3000
         : false,
-    enabled: (options?.enabled ?? true) && !awaitsSession,
+    enabled: (options?.enabled ?? true) && !awaitsSession && !isSafeMode,
     retry: (failureCount, error) => !isPersonRetry.current && retryCloudListing(failureCount, error),
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
@@ -561,10 +565,13 @@ export const useCloudProjects = (
     isSettled: isSuccess,
     isFailed: isError,
     isFetching,
-    cloud: selectCloudListingState({ isError, isFetching }),
+    cloud: isSafeMode ? 'safe-mode' : selectCloudListingState({ isError, isFetching }),
     /* A person's Retry (K-c) is one new request, even while an earlier one hangs: that one is dropped silently, so
        the listing reads as fetching throughout, and the new one asks with no retries of its own. */
     retry: async () => {
+      if (isSafeMode) {
+        return;
+      }
       void queryClient
         .getQueryCache()
         .find({ queryKey: cloudProjectsQueryKeyFor(account), exact: true })

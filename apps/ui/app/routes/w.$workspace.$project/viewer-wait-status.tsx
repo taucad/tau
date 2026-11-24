@@ -10,6 +10,7 @@ import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-sta
 import { useFileCheckSlow, useLargeObjects } from '#hooks/use-project-availability.js';
 import type { ModelAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
+import { projectFilesCopy, projectOpenCopy } from '#lib/project-open-copy.js';
 import {
   isModelFilesWait,
   isProjectFilesFailure,
@@ -17,7 +18,6 @@ import {
   ModelFilesRetry,
   modelFilesFailure,
   ProjectFilesAction,
-  projectFilesCopy,
   useProjectOpenRetry,
   useStageWaitStart,
 } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
@@ -50,16 +50,6 @@ export const isRunningViewerWait = (wait: ViewerWait | undefined): wait is Runni
  * fast open shows the pill alone. Milliseconds from the stage's wait start.
  */
 export const captionDelayMilliseconds = 3000;
-
-/** The pill's words for a project open: the project status control's (`projectSyncIndicator`), without the ellipsis. */
-const projectWaitLabels = {
-  connecting: 'Opening project',
-  downloading: 'Downloading files',
-  preparing: 'Preparing files',
-} as const;
-
-/** What the caption says once a download has run past the slow mark. */
-const slowDownloadCaption = 'Check your connection, then try again.';
 
 type WaitDelayStyle = React.CSSProperties & Partial<Record<`--${string}`, string>>;
 
@@ -98,7 +88,7 @@ function pillLabel(wait: RunningViewerWait, isSlowCheck: boolean): string {
   if (wait === 'filesChecking') {
     return isSlowCheck ? 'Still checking model files' : 'Checking model files';
   }
-  return projectWaitLabels[wait];
+  return projectOpenCopy[wait].label;
 }
 
 /**
@@ -113,12 +103,12 @@ function captionFor(wait: RunningViewerWait, facet: LargeObjectsFacet | undefine
   if (wait === 'downloading' || wait === 'files') {
     return facet === undefined
       ? wait === 'downloading'
-        ? 'Bringing this project to this device.'
+        ? projectOpenCopy.downloading.helper
         : undefined
       : largeObjectsProgressText(facet);
   }
   if (wait === 'preparing') {
-    return 'Getting your files ready to open.';
+    return projectOpenCopy.preparing.helper;
   }
   return undefined;
 }
@@ -218,7 +208,7 @@ function ViewerWaitCaption({
           className='wait-after-slow'
           style={slowDownload.style}
         >
-          {slowDownloadCaption}
+          {projectOpenCopy.downloading.slowHelper}
         </span>
       )}
     </p>
@@ -289,7 +279,7 @@ export function ViewerWaitStatus({
               startedAt={startedAt}
               label={pillLabel(shownWait, isSlowCheck)}
               /* The pill's own slow swap, moved from the open's mark to the download's, so the pill never restarts. */
-              slowLabel={isDownloading ? 'Still downloading files' : undefined}
+              slowLabel={isDownloading ? projectOpenCopy.downloading.slowLabel : undefined}
               className={isDownloading ? downloadSlowWordsClasses : undefined}
               progress={downloadProgress(shownWait, facet)}
             />

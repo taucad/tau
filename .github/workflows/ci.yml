@@ -461,14 +461,14 @@ jobs:
           pkgcheck_shards=$(echo "$pkgcheck_projects" | node scripts/src/test-shard-dealer.ts --shard all --shards auto \
             --max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json)
           echo "Package-check shards: $pkgcheck_shards"
-          # Node floor shards (`node-floor`): the lane's packages, a package with `test:shard-<n>` targets entered as
-          # those tasks as in the test lanes, dealt by measured uncached test seconds into one shard per 600 s, at most
-          # four, as the package checks are.
+          # Node floor shards (`node-floor`): the lane's packages as their `<project>:test` tasks (the snapshot's keys),
+          # a package with `test:shard-<n>` targets as those tasks instead, as in the test lanes, dealt by measured
+          # uncached test seconds into one shard per 600 s, at most four, as the package checks are.
           node_floor_units=$(jq -c --argjson projects "$(jq -c '."node-floor"' <<< "$lanes")" '
             .graph.nodes as $nodes
             | [$projects[] as $project
                | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
-               | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else $project end]' "$RUNNER_TEMP/graph.json")
+               | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else "\($project):test" end]' "$RUNNER_TEMP/graph.json")
           node_floor_shards=$(echo "$node_floor_units" | node scripts/src/test-shard-dealer.ts --shard all --shards auto \
             --max-shards 4 --shard-seconds 600 --durations scripts/src/test-shard-durations.json)
           echo "Node floor shards: $node_floor_shards"
@@ -728,8 +728,9 @@ jobs:
       # instead of building it twice. A task another shard's project also depends on may run in both; Nx caches it.
       #
       # The six test shards split the affected projects with a `test` target by
-      # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
-      # duration snapshot). The project list comes from the graph at run time,
+      # measured uncached seconds of their tests and the tasks those depend on, from the same graph
+      # (scripts/src/test-shard-dealer.ts --graph and its duration snapshot, CI decomposition global
+      # review G5). The project list comes from the graph at run time,
       # never from this file: one `nx affected -t test --graph=<file>` writes the affected
       # `test` tasks and the project graph (each project's tags and targets) without running
       # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
@@ -813,10 +814,14 @@ jobs:
                 | [$projects[] as $project
                    | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
                    | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else $project end]' "$RUNNER_TEMP/test-graph.json")
-              # Every lane deals the same list heaviest first to the lightest shard by
-              # duration, so the shards partition it and the slowest suites land apart.
+              # Every lane deals the same list heaviest first by duration, so the shards partition it and the
+              # slowest suites land apart. A unit weighs its own task and every task it depends on (`--graph`,
+              # durations keyed by task), counted once per shard: a lane runs the builds and prepare tasks its
+              # suites need uncached whenever the build lanes have not cached them yet (`cli:test`'s forty builds
+              # took 137 s in queue run 45350462131), and units that share them land together.
               # `--shards` is the number of `test-<n>` rows in the matrix above.
-              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 6)
+              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 6 \
+                --graph "$RUNNER_TEMP/test-graph.json" --targets test)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
@@ -1059,8 +1064,8 @@ jobs:
           set -o pipefail
           node --version
           echo "Shard projects and tasks: $UNITS"
-          projects=$(tr ',' '\n' <<< "$UNITS" | grep -v ':' | paste -sd, - || true)
-          tasks=$(tr ',' '\n' <<< "$UNITS" | grep ':' || true)
+          projects=$(tr ',' '\n' <<< "$UNITS" | grep -E '^[^:]+:test$' | cut -d: -f1 | paste -sd, - || true)
+          tasks=$(tr ',' '\n' <<< "$UNITS" | grep -vE '^[^:]+:test$' || true)
           status=0
           if [ -n "$projects" ]; then
             pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream || status=1

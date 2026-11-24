@@ -32,7 +32,7 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     testTimeout: 300_000,
     hookTimeout: 300_000,
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     // Gaxios + google-auth-library run `await import('node-fetch')` at request
     // time. Vitest's vite-node module runner resolves dynamic imports relative
     // to the *test file*, not the importer, which means `node-fetch` (a direct

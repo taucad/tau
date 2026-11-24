@@ -9,7 +9,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     env: {
       // The support modules name the run at import; unit tests never write a run directory.
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

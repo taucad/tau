@@ -22,7 +22,7 @@ export default defineConfig({
       reportsDirectory: '../../out/reports/coverage/apps/runtime-e2e',
     },
     maxWorkers: 4,
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     projects: [
       {
         extends: true,

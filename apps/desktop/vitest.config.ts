@@ -29,7 +29,7 @@ export default defineConfig({
     execArgv: process.versions.v8.startsWith('13.')
       ? ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc']
       : [],
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/apps/desktop',

@@ -495,7 +495,7 @@ export const replicadKernel = defineKernel({
   sourceIdentity: 'bundle',
   builtinPackages: {
     replicad: replicadPackage,
-    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.4' },
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '1.2.1-beta.0' },
   },
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text

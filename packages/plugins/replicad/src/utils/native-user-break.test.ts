@@ -227,6 +227,41 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
   it('gives the same instancing mesh as the plain entry point when the abort word never moves', () => {
     expect(prototypeMesh(paritySphere, 0.05)()).toBe(plainPrototypeHash);
   });
+
+  it('stops a cut whose break arrives after the Boolean finished, before SimplifyResult', () => {
+    const plate = replicad.makeBox([0, 0, 0], [40, 40, 6]);
+    const holes = [10, 20, 30].map((x) => replicad.makeCylinder(3, 10, [x, 20, -2]));
+    const host = oc as OpenCascadeInstance & { replicadUserBreak: () => boolean };
+    const hook = host.replicadUserBreak;
+    let polls = 0;
+    let breakAt = Number.POSITIVE_INFINITY;
+    host.replicadUserBreak = () => {
+      polls += 1;
+      if (polls >= breakAt) {
+        Atomics.store(abortWord, 0, 1);
+      }
+      return hook();
+    };
+    try {
+      // Single-threaded the polls come in a fixed order, and a simplifying cut asks once more after the Boolean.
+      const countPolls = (simplify: boolean): number => {
+        polls = 0;
+        plate.cutAll(holes, { simplify });
+        return polls;
+      };
+      const simplified = countPolls(true);
+      expect(simplified).toBe(countPolls(false) + 1);
+
+      // Break only at that last poll: the Boolean has finished, so the stop must come from the check before
+      // SimplifyResult, and it throws the abort error as a break inside the Boolean does.
+      polls = 0;
+      breakAt = simplified;
+      expect(() => plate.cutAll(holes, { simplify: true })).toThrow(RenderAbortedError);
+      expect(polls).toBe(simplified);
+    } finally {
+      host.replicadUserBreak = hook;
+    }
+  });
 });
 
 describe('native user break without a running abort', () => {

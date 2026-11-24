@@ -79,6 +79,16 @@ describe('metadata-only stats (I3)', () => {
     expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt']).success).toBe(true);
     expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(head).success).toBe(true);
   });
+
+  it('accepts a scoped tree listing holding an unmeasured file beside a folder', () => {
+    const tree = fileSystemBridgeSchemas.calls.readScopedShallowDirectory.result;
+    const folder = { id: '/heatx', name: 'heatx', size: 0, mtimeMs: 0, children: [] };
+    const file = { id: '/.DS_Store', name: '.DS_Store', size: 6148, mtimeMs: 1 };
+    expect(tree.safeParse([folder, file]).success).toBe(true);
+    expect(tree.safeParse([folder, { ...file, contentKind: 'binary' }]).success).toBe(true);
+    expect(tree.safeParse([{ ...file, lineCount: 3 }]).success).toBe(false);
+    expect(tree.safeParse([{ ...folder, children: [file] }]).success).toBe(true);
+  });
 });
 
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:

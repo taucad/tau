@@ -105,3 +105,13 @@ export const projectFilesCopy = (
   }
   return messages.failed;
 };
+
+/**
+ * Joins a step's title and helper into one sentence pair for a screen reader, without a second stop after a title
+ * that already ends in "…" or ".".
+ *
+ * @param copy - The title and helper from `projectFilesCopy`.
+ * @returns The text a live region announces.
+ */
+export const announcementOf = ([title, helper]: readonly [string, string]): string =>
+  /[.…]$/u.test(title) ? `${title} ${helper}` : `${title}. ${helper}`;

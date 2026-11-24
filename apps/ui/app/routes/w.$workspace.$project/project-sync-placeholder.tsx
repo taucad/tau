@@ -23,7 +23,7 @@ import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { createModelWaitReporter } from '#lib/model-wait-reporting.js';
-import { projectFilesCopy } from '#lib/project-open-copy.js';
+import { announcementOf, projectFilesCopy } from '#lib/project-open-copy.js';
 
 /**
  * How far a large-object download is, as the viewer says it.
@@ -364,7 +364,7 @@ export function ProjectSyncAnnouncement(): React.JSX.Element {
   }, [client, isCloudOpenPending, state]);
   return (
     <div className='sr-only' role='status' aria-live='polite' aria-atomic='true'>
-      {state === 'ready' ? '' : projectFilesCopy(state, status).join('. ')}
+      {state === 'ready' ? '' : announcementOf(projectFilesCopy(state, status))}
     </div>
   );
 }

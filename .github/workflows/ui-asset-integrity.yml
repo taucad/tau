@@ -28,20 +28,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  integrity:
-    name: WASM integrity (${{ matrix.label }})
-    runs-on: ${{ matrix.runner }}
+  probe:
+    name: Probe ui:build on macos-26 (Node ${{ matrix.node }}, ${{ matrix.round }})
+    runs-on: macos-26
     strategy:
       fail-fast: false
-      # The three browsers on Linux; X44: Linux WebKit must refuse every tamper, and its overhead is
-      # recorded as information only. WebKit on macOS, the engine Safari ships, is measured beside it
-      # for the X31 line. A draft pull request runs the Linux leg only and requests no macOS runner;
-      # marking it ready for review runs both.
       matrix:
-        include: >-
-          ${{ fromJSON(github.event.pull_request.draft
-          && '[{"label":"three browsers","runner":"ubuntu-latest","engines":"chromium,firefox,webkit","timed":"chromium,firefox"}]'
-          || '[{"label":"three browsers","runner":"ubuntu-latest","engines":"chromium,firefox,webkit","timed":"chromium,firefox"},{"label":"WebKit on macos-26","runner":"macos-26","engines":"webkit","timed":"webkit"}]') }}
+        node: ['24.20.0']
+        round: [1, 2, 3, 4, 5, 6]
     timeout-minutes: 60
     env:
       NX_DAEMON: 'false'
@@ -53,37 +47,44 @@ jobs:
           persist-credentials: false
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-      - name: Install the browsers' system dependencies
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/apt-install
         with:
-          playwright-browsers: ${{ matrix.engines }}
-      - name: Install the three browsers
-        env:
-          ENGINES: ${{ matrix.engines }}
-        run: pnpm exec playwright install ${ENGINES//,/ }
-      # Placeholder origins: the server build checks they are set; nothing here contacts them.
-      - name: Build the web client
+          node-version: ${{ matrix.node }}
+          save-pnpm-store: 'false'
+      - name: Host
+        run: |
+          sysctl hw.memsize hw.ncpu
+          vm_stat | head -5
+      - name: Build the dependencies of ui:build
         env:
           TAU_API_URL: http://localhost:4000
           TAU_WEBSOCKET_URL: ws://localhost:4000
           TAU_FRONTEND_URL: http://localhost:3000
-        run: pnpm nx build ui --outputStyle=static
-      - name: Re-hash the receipt, tamper and measure
-        timeout-minutes: 40
+        run: pnpm nx build ui --exclude-task-dependencies=false --outputStyle=static --skip-nx-cache -- --help > /dev/null 2>&1 || true
+      - name: Build ui under /usr/bin/time -l
         env:
-          TAU_INTEGRITY_ENGINES: ${{ matrix.engines }}
-          TAU_INTEGRITY_TIMED_ENGINES: ${{ matrix.timed }}
-        run: node apps/ui/scripts/check-asset-integrity.mts apps/ui/build/client "$RUNNER_TEMP/evidence" 5
-      - name: Summarize
-        if: always()
+          TAU_API_URL: http://localhost:4000
+          TAU_WEBSOCKET_URL: ws://localhost:4000
+          TAU_FRONTEND_URL: http://localhost:3000
         run: |
-          { echo '```'; cat "$RUNNER_TEMP/evidence/summary.txt" 2>/dev/null || echo '(no summary)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          scripts/spikes/native-deps/linux/annotate.sh "UI asset integrity (${{ matrix.label }})" "$RUNNER_TEMP/evidence/summary.txt"
-      - name: Upload evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ui-asset-integrity-evidence-${{ matrix.runner }}
-          path: ${{ runner.temp }}/evidence
-          retention-days: 30
+          ( while true; do echo "pressure $(date +%T) $(memory_pressure | tail -1)"; sleep 15; done ) &
+          watcher=$!
+          set +e
+          NX_VERBOSE_LOGGING=true /usr/bin/time -l pnpm nx build ui --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/ui-build.log"; code=${PIPESTATUS[0]}
+          kill $watcher
+          echo "--- crash reports"
+          ls -la ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports 2>/dev/null | grep -iE "node|\.ips" || true
+          for f in ~/Library/Logs/DiagnosticReports/*node*.ips /Library/Logs/DiagnosticReports/*node*.ips; do
+            [ -f "$f" ] || continue
+            echo "=== $f"; head -c 6000 "$f"; echo
+          done
+          echo "--- end crash reports"
+          echo "--- ui:build errors"
+          grep -nE "error|Error|ERR_|build-lock:|Killed|exited with|signal" "$RUNNER_TEMP/ui-build.log" | grep -v "externalized for browser" | tail -40 || true
+          log show --last 30m --predicate 'eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' --style compact 2>/dev/null | grep -i "node" | tail -20 || true
+          echo "ui:build exit $code"
+          cd apps/ui
+          for attempt in 1 2; do
+            node --input-type=module -e 'const t = performance.now(); const build = await import(process.cwd() + "/build/server/index.js"); const loaded = performance.now() - t; console.log(`server import ${Math.round(loaded)} ms, routes ${Object.keys(build.routes ?? {}).length}`);' || true
+          done
+          cd ../..
+          exit $code

@@ -92,6 +92,7 @@
       "apps/ui/app/runtime/project-runtime.session.ts",
       "apps/ui/app/runtime/project-runtime.ts",
       "apps/ui/app/runtime/project-runtime.view-records.ts",
+      "apps/ui/app/runtime/query-revalidation.ts",
       "apps/ui/app/runtime/root-configuration.ts",
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",

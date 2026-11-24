@@ -82,4 +82,9 @@ jobs:
           grep -nE "error|Error|ERR_|build-lock:|Killed|exited with|signal" "$RUNNER_TEMP/ui-build.log" | grep -v "externalized for browser" | tail -40 || true
           log show --last 30m --predicate 'eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' --style compact 2>/dev/null | grep -i "node" | tail -20 || true
           echo "ui:build exit $code"
+          cd apps/ui
+          for attempt in 1 2; do
+            node --input-type=module -e 'const t = performance.now(); const build = await import(process.cwd() + "/build/server/index.js"); const loaded = performance.now() - t; console.log(`server import ${Math.round(loaded)} ms, routes ${Object.keys(build.routes ?? {}).length}`);' || true
+          done
+          cd ../..
           exit $code

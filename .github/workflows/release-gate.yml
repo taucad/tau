@@ -389,11 +389,11 @@ jobs:
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install chromium firefox webkit
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
 
       - name: Install Pandoc for reference conversion
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+          ./.tau-ci/.github/actions/apt-install/infra-retry.sh pandoc-download curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
           echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 

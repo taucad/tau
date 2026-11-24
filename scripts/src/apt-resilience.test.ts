@@ -189,6 +189,123 @@ describe('apt installs in workflows and composite actions', () => {
   });
 });
 
+/*
+ * FQ-3 / RT-6 (Brain `research/ci-flake-quarantine-blueprint.md`, #2792): the other infrastructure downloads (the
+ * Playwright browsers, Pandoc, pnpm through corepack and its install) retry through `infra-retry.sh` beside the
+ * installer, and every retry is an `infra-retry` annotation the CI health report counts. Never a test step.
+ */
+describe('infrastructure step retries in workflows and composite actions', () => {
+  const lists = stepLists();
+  const retried =
+    /(?:^|\s)(?:bash "\$GITHUB_ACTION_PATH\/\.\.\/apt-install\/|\.\/(?:\.tau-ci\/)?\.github\/actions\/apt-install\/)infra-retry\.sh (\S+) /u;
+
+  it('should install every Playwright browser and download Pandoc through infra-retry.sh', () => {
+    const bare: string[] = [];
+    let wrapped = 0;
+    for (const [where, steps] of lists) {
+      const sideLoaded = steps.some((step) => step.uses?.startsWith('./.tau-ci/') === true);
+      for (const step of steps) {
+        for (const line of (step.run ?? '').split('\n')) {
+          if (!/playwright install (?!-)|curl \S+ -o "\$RUNNER_TEMP\/pandoc\.deb"/u.test(line)) {
+            continue;
+          }
+          if (!retried.test(line)) {
+            bare.push(`${where}: ${line.trim()}`);
+            continue;
+          }
+          wrapped++;
+          // A job whose workspace is another commit runs the copy it side-loaded with the installer.
+          expect(line.includes('./.tau-ci/.github/actions/apt-install/infra-retry.sh'), `${where}: ${line}`).toBe(
+            sideLoaded,
+          );
+        }
+      }
+    }
+    expect(bare).toEqual([]);
+    expect(wrapped).toBeGreaterThanOrEqual(20);
+  });
+
+  it('should download pnpm and install dependencies through infra-retry.sh in setup-nx', () => {
+    const action = load(read('.github/actions/setup-nx/action.yml')) as Action;
+    const runs = (action.runs?.steps ?? []).map((step) => step.run ?? '');
+    expect(runs.some((run) => run.includes('infra-retry.sh" pnpm-download pnpm --version'))).toBe(true);
+    expect(runs.some((run) => run.includes('infra-retry.sh" pnpm-install pnpm install --frozen-lockfile'))).toBe(true);
+  });
+
+  it('should never retry a test step', () => {
+    const tests: string[] = [];
+    for (const [where, steps] of lists) {
+      for (const step of steps) {
+        const match = retried.exec(step.run ?? '');
+        if (
+          match &&
+          !['playwright-install', 'pandoc-download', 'pnpm-download', 'pnpm-install'].includes(match[1] ?? '')
+        ) {
+          tests.push(`${where}: ${match[1] ?? ''}`);
+        }
+      }
+    }
+    expect(tests).toEqual([]);
+  });
+});
+
+describe('infra-retry.sh', () => {
+  const retryScript = resolve(root, actionDirectory, 'infra-retry.sh');
+  const retry = (args: readonly string[], env: Record<string, string> = {}) => {
+    const result = spawnSync('bash', [retryScript, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, INFRA_RETRY_BACKOFF: '0', ...env },
+    });
+    return { status: result.status, output: `${result.stdout}${result.stderr}` };
+  };
+
+  it('should run a command that succeeds once, with no retry event', () => {
+    const { status, output } = retry(['demo', 'bash', '-c', 'echo fine']);
+    expect(status).toBe(0);
+    expect(output).not.toContain('infra-retry');
+  });
+
+  it('should retry with a stable signature per failed attempt and pass the first success', () => {
+    const counter = join(mkdtempSync(join(tmpdir(), 'tau-infra-retry-')), 'count');
+    const { status, output } = retry([
+      'playwright-install',
+      'bash',
+      '-c',
+      `n=$(( $(cat ${counter} 2>/dev/null || echo 0) + 1 )); echo $n > ${counter}; [ $n -ge 3 ] || { echo 'Error: read ECONNRESET'; exit 1; }`,
+    ]);
+    expect(status, output).toBe(0);
+    expect(output.match(/^::warning title=infra-retry::.*$/gmu)).toEqual([
+      '::warning title=infra-retry::playwright-install attempt 1 of 3 failed: connection-reset; retrying in 0s',
+      '::warning title=infra-retry::playwright-install attempt 2 of 3 failed: connection-reset; retrying in 0s',
+    ]);
+  });
+
+  it('should fail with the last status and an error event after every attempt fails', () => {
+    const { status, output } = retry(
+      ['pandoc-download', 'bash', '-c', 'echo "Could not resolve host: github.com"; exit 6'],
+      {
+        INFRA_RETRY_ATTEMPTS: '2',
+      },
+    );
+    expect(status).toBe(6);
+    expect(output).toContain('::warning title=infra-retry::pandoc-download attempt 1 of 2 failed: dns; retrying in 0s');
+    expect(output).toContain('::error title=infra-retry::pandoc-download failed after 2 attempts: dns');
+  });
+
+  it('should stop an attempt past its deadline and sign it as a timeout', () => {
+    const { status, output } = retry(['pnpm-install', 'sleep', '30'], {
+      INFRA_RETRY_ATTEMPTS: '1',
+      INFRA_RETRY_ATTEMPT_SECONDS: '1',
+    });
+    expect(status).toBe(124);
+    expect(output).toContain('::error title=infra-retry::pnpm-install failed after 1 attempts: timeout');
+  }, 30_000);
+
+  it('should refuse a command-less call', () => {
+    expect(retry(['demo']).status).toBe(1);
+  });
+});
+
 describe('apt-install.sh', () => {
   let sandbox: string;
 
@@ -276,6 +393,11 @@ describe('apt-install.sh', () => {
     expect(sources()).toContain('URIs: http://archive.ubuntu.com/ubuntu/');
     expect(sources()).not.toContain('mirror+file:');
     expect(output).toContain('Switching apt sources from the Azure mirror');
+    // Each retry is a job-level `infra-retry` event (FQ-3); the stub fails with no output, so the exit status signs it.
+    expect(output.match(/^::warning title=infra-retry::.*$/gmu)).toEqual([
+      '::warning title=infra-retry::apt-install attempt 1 of 4 failed: exit-1; retrying in 0s',
+      '::warning title=infra-retry::apt-install attempt 2 of 4 failed: exit-1; retrying in 0s',
+    ]);
   });
 
   it('should stop an apt-get call that stalls past its deadline and retry on the archive', () => {
@@ -357,6 +479,7 @@ describe('apt-install.sh', () => {
     expect(calls().filter((call) => call.endsWith(' update'))).toHaveLength(3);
     expect(calls().filter((call) => call === 'dpkg --configure -a')).toHaveLength(2);
     expect(output).toContain('::error::apt-get update and install socat failed after 3 attempts');
+    expect(output).toContain('::error title=infra-retry::apt-install failed after 3 attempts: exit-1');
   });
 
   it('should refuse to run with nothing to install', () => {

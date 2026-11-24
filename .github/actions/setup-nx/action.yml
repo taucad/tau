@@ -66,16 +66,13 @@ runs:
     # from the npm registry, and that is the flakiest network call here: in run
     # 41670839293 it reset mid-stream (`TypeError: terminated` / `read
     # ECONNRESET`) and took the job with it. Do the download in a step of its
-    # own, with retries, so a reset costs seconds instead of a CI round.
+    # own, with retries, so a reset costs seconds instead of a CI round. Each
+    # retry is an `infra-retry` event (`apt-install/infra-retry.sh`, FQ-3).
     - name: Download pnpm through corepack
       shell: bash
-      run: |
-        for attempt in 1 2 3; do
-          if pnpm --version; then exit 0; fi
-          echo "::warning title=corepack download failed::pnpm download attempt $attempt failed; retrying" >&2
-          sleep $((attempt * 5))
-        done
-        pnpm --version
+      env:
+        INFRA_RETRY_BACKOFF: '5 10'
+      run: bash "$GITHUB_ACTION_PATH/../apt-install/infra-retry.sh" pnpm-download pnpm --version
 
     - name: Get pnpm store directory
       shell: bash
@@ -115,34 +112,13 @@ runs:
     # Each attempt is also bounded in time: a cold install on `macos-26-intel` takes 5–11 minutes,
     # and three Intel jobs that stalled in this setup on 2026-11-16 (runs 43801415465 and
     # 43813916763) held it until the job's timeout or a lost runner. Outside Windows a watchdog ends
-    # an attempt's process group after `INSTALL_ATTEMPT_SECONDS`, so the next attempt runs instead.
+    # an attempt's process group after `INFRA_RETRY_ATTEMPT_SECONDS`, so the next attempt runs
+    # instead. Each retry is an `infra-retry` event (`apt-install/infra-retry.sh`, FQ-3).
     - name: Install dependencies
       env:
-        INSTALL_ATTEMPT_SECONDS: '900'
-      run: |
-        bounded() {
-          if [ "$RUNNER_OS" = Windows ] || ! command -v perl > /dev/null; then "$@"; return; fi
-          perl -e '
-            my $seconds = shift;
-            my $pid = fork() // die "fork: $!";
-            if ($pid == 0) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV or die "exec: $!"; }
-            local $SIG{ALRM} = sub {
-              print STDERR "::warning title=pnpm install stalled::no result after ${seconds}s; stopping this attempt\n";
-              kill "TERM", -$pid; sleep 10; kill "KILL", -$pid; waitpid($pid, 0); exit 124;
-            };
-            alarm $seconds;
-            waitpid($pid, 0);
-            exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
-          ' "$INSTALL_ATTEMPT_SECONDS" "$@"
-        }
-        for attempt in 1 2 3; do
-          bounded pnpm install --frozen-lockfile && exit 0
-          if [ "$attempt" -lt 3 ]; then
-            echo "::warning title=pnpm install failed::attempt $attempt failed; retrying" >&2
-            sleep $((attempt * 30))
-          fi
-        done
-        exit 1
+        INFRA_RETRY_ATTEMPT_SECONDS: '900'
+        INFRA_RETRY_BACKOFF: '30 60'
+      run: bash "$GITHUB_ACTION_PATH/../apt-install/infra-retry.sh" pnpm-install pnpm install --frozen-lockfile
       shell: bash
 
     # Every `pnpm nx` call goes through `nx-guard.ts`: it reruns a command once

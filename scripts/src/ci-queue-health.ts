@@ -142,6 +142,29 @@ export type CancelledWaste = {
   readonly unchecked: number;
 };
 
+/**
+ * One job-level infrastructure retry event: an `infra-retry` annotation that `.github/actions/apt-install/infra-retry.sh`
+ * (and `apt-install.sh`) write for each retried attempt of a setup step and for a step that ran out of attempts
+ * (Brain `research/ci-flake-quarantine-blueprint.md`, FQ-3 and RT-6).
+ */
+export type InfraRetryEvent = {
+  /** The setup step: `apt-install`, `playwright-install`, `pandoc-download`, `pnpm-download`, `pnpm-install`. */
+  readonly step: string;
+  /** The stable failure signature, e.g. `connection-failed`, `dpkg-interrupted`, `timeout`, `exit-100`. */
+  readonly signature: string;
+  /** True when the step failed every attempt (an error annotation), false for a retried attempt (a warning). */
+  readonly exhausted: boolean;
+};
+
+export type InfraRetryCount = {
+  readonly step: string;
+  readonly signature: string;
+  /** Retried attempts. */
+  readonly retries: number;
+  /** Steps that failed every attempt. */
+  readonly exhausted: number;
+};
+
 /** What a run was, from its jobs (see the module comment). */
 export type RunClass = 'success' | 'origin' | 'inherited' | 'victim' | 'other' | 'unfetched';
 
@@ -175,6 +198,11 @@ export type QueueHealthReport = {
   readonly jobs: readonly JobWait[];
   readonly runWait: RunWait;
   readonly cancelled: CancelledWaste;
+  /**
+   * Infrastructure step retries by step and signature, from the annotations the CLI fetched (the first failed job of
+   * each failed run), so retries in jobs that passed are not counted here.
+   */
+  readonly infraRetries: readonly InfraRetryCount[];
   /** Runs whose jobs were fetched, against finished runs; below 1 when the API request budget ran out. */
   readonly coverage: {
     readonly runsWithJobs: number;
@@ -334,12 +362,57 @@ export const classifyRuns = (evidence: readonly RunEvidence[]): Map<number, RunC
   return classes;
 };
 
+const infraRetryTitle = 'infra-retry';
+const infraRetryWarning = /^(\S+) attempt \d+ of \d+ failed: (\S+); retrying in \d+s$/u;
+const infraRetryError = /^(\S+) failed after \d+ attempts: (\S+)$/u;
+
+/** The `infra-retry` events among a job's annotations; any other annotation, or a message of another shape, is skipped. */
+export const infraRetryEvents = (annotations: readonly Annotation[]): InfraRetryEvent[] =>
+  annotations.flatMap((annotation) => {
+    if (annotation.title !== infraRetryTitle) {
+      return [];
+    }
+    const exhausted = annotation.annotation_level === 'failure';
+    const match = (exhausted ? infraRetryError : infraRetryWarning).exec(annotation.message.trim());
+    return match?.[1] && match[2] ? [{ step: match[1], signature: match[2], exhausted }] : [];
+  });
+
+/** Infrastructure retry events counted by step and signature, most frequent first. */
+export const countInfraRetries = (evidence: readonly RunEvidence[]): InfraRetryCount[] => {
+  const counts = new Map<string, { step: string; signature: string; retries: number; exhausted: number }>();
+  for (const { annotations } of evidence) {
+    for (const event of infraRetryEvents(annotations ?? [])) {
+      const key = `${event.step}\u0000${event.signature}`;
+      const entry = counts.get(key) ?? { step: event.step, signature: event.signature, retries: 0, exhausted: 0 };
+      if (event.exhausted) {
+        entry.exhausted += 1;
+      } else {
+        entry.retries += 1;
+      }
+      counts.set(key, entry);
+    }
+  }
+  return [...counts.values()].sort(
+    (a, b) =>
+      b.retries + b.exhausted - (a.retries + a.exhausted) ||
+      a.step.localeCompare(b.step) ||
+      a.signature.localeCompare(b.signature),
+  );
+};
+
 /**
- * The suites a failed job names. A failure-level annotation on a file (lint and typecheck problem matchers write
+ * The suites a failed job names. A setup step that failed every attempt (an `infra-retry` error) names the job's
+ * failure as infrastructure, `infrastructure: <step> (<signature>)`, before anything else. A failure-level annotation on a file (lint and typecheck problem matchers write
  * them) names the file and its rule. GitHub's own `Process completed with exit code 1.` sits on the `.github` path
  * and names nothing, so without a file annotation the failed step stands in for the suite.
  */
 export const failedSuites = (job: WorkflowJob, annotations: readonly Annotation[]): string[] => {
+  const infrastructure = infraRetryEvents(annotations)
+    .filter((event) => event.exhausted)
+    .map((event) => `infrastructure: ${event.step} (${event.signature})`);
+  if (infrastructure.length > 0) {
+    return [...new Set(infrastructure)];
+  }
   const named = annotations
     .filter((annotation) => annotation.annotation_level === 'failure' && annotation.path !== '.github')
     .map((annotation) => (annotation.title ? `${annotation.path} (${annotation.title})` : annotation.path));
@@ -639,6 +712,7 @@ export const buildReport = (input: {
     jobs: jobWaits(input.evidence),
     runWait: runWaits(input.evidence),
     cancelled: cancelledWaste(input.evidence),
+    infraRetries: countInfraRetries(input.evidence),
     coverage: {
       runsWithJobs: input.evidence.filter((entry) => entry.jobs && entry.run.status === 'completed').length,
       finishedRuns: counts.total - counts.unfinished,
@@ -702,6 +776,20 @@ export const renderMarkdown = (report: QueueHealthReport): string => {
   }
   if (report.failures.unattributed > 0) {
     lines.push('', `${report.failures.unattributed} origin failures had no failed job to attribute.`);
+  }
+  lines.push('', '### Infrastructure step retries', '');
+  if (report.infraRetries.length === 0) {
+    lines.push('No `infra-retry` events in the failed jobs whose annotations were read.');
+  } else {
+    lines.push(
+      'From the annotations of the first failed job of each failed run; retries in jobs that passed are not counted here.',
+      '',
+      '| Step | Signature | Retried attempts | Failed every attempt |',
+      '| --- | --- | ---: | ---: |',
+      ...report.infraRetries.map(
+        (entry) => `| ${cell(entry.step)} | ${cell(entry.signature)} | ${entry.retries} | ${entry.exhausted} |`,
+      ),
+    );
   }
   lines.push(
     '',

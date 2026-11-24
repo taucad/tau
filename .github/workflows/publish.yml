@@ -51,7 +51,7 @@ jobs:
         with:
           playwright-browsers: chromium
       - name: Install Chromium
-        run: pnpm exec playwright install chromium
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       # A native plugin's tau-plugin.json is published with the package; every URL it
       # pins must already serve exactly the pinned bytes (charter I13, DEL-20).

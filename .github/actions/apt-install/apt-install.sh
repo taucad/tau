@@ -12,7 +12,8 @@
 # Each attempt runs `apt-get update`, `apt-get install -y --download-only <arguments>` and then
 # `apt-get install -y <arguments>`, with apt's own per-fetch retries and timeouts and a deadline on
 # the two network steps. A failed attempt waits (exponential backoff), repairs an interrupted dpkg,
-# switches the runner's Azure mirror sources to the Ubuntu archive, and tries again.
+# switches the runner's Azure mirror sources to the Ubuntu archive, and tries again. Each retry writes an
+# `infra-retry` warning annotation with a stable signature (infra-retry.sh), which the CI health report counts.
 # When every attempt fails the script exits non-zero: nothing is skipped.
 #
 # With APT_INSTALL_PLAYWRIGHT_BROWSERS set, it then asks Playwright which system packages those
@@ -38,6 +39,10 @@
 #   1  Bad arguments, or apt or Playwright still failed after every attempt
 
 set -euo pipefail
+
+# infra_signature, infra_retry_event and infra_retry_exhausted: the job-level retry events FQ-3 counts.
+# shellcheck source=infra-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/infra-retry.sh"
 
 attempts="${APT_INSTALL_ATTEMPTS:-4}"
 backoff="${APT_INSTALL_BACKOFF_SECONDS:-15}"
@@ -134,20 +139,29 @@ use_fallback_sources() {
     "${files[@]}"
 }
 
+# Each failed attempt is a job-level `infra-retry` event with the signature of its output (infra-retry.sh).
 with_retries() {
-  local attempt=1 wait="$backoff"
-  until update_and_install "$@"; do
+  local attempt=1 wait="$backoff" status signature log
+  log=$(mktemp -t apt-install.XXXXXX)
+  while :; do
+    status=0
+    update_and_install "$@" 2>&1 | tee "$log" || status=${PIPESTATUS[0]}
+    [ "$status" -ne 0 ] || break
+    signature=$(infra_signature "$status" "$log")
     if [ "$attempt" -ge "$attempts" ]; then
       echo "::error::apt-get update and install $* failed after $attempt attempts" >&2
+      infra_retry_exhausted apt-install "$attempts" "$signature"
+      rm -f "$log"
       return 1
     fi
-    echo "::warning::apt attempt $attempt of $attempts failed; retrying in ${wait}s"
+    infra_retry_event apt-install "$attempt" "$attempts" "$signature" "$wait"
     sleep "$wait"
     repair_dpkg
     use_fallback_sources
     attempt=$((attempt + 1))
     wait=$((wait * 2))
   done
+  rm -f "$log"
 }
 
 # The packages `playwright install-deps --dry-run` reports missing; it exits 1 when it lists any.

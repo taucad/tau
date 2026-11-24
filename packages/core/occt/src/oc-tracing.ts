@@ -313,7 +313,7 @@ function createEmscriptenWrapper(
  * Constructors, instance methods and namespace functions check for a superseding abort before each call; static
  * class members (`oc.TopoDS.Face`, `oc.BRepBndLib.Add`) are not intercepted. In Replicad's builds the statics that
  * run long are the native batch Booleans and mesh extractors, which stop through the native user break instead;
- * every other static measured under 20 ms per call on four heavy models, and the loops that call them also make proxied
+ * every other static measured 18 ms or less per call on four heavy models, and the loops that call them also make proxied
  * instance calls, so an abort is still seen within one iteration.
  *
  * @template T - The concrete OC instance type from the calling kernel

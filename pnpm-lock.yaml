@@ -1025,8 +1025,8 @@ overrides:
   nx@22.7.12>smol-toml: 1.9.1
   oxfmt@0.39.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
-  replicad: npm:@taulabs/replicad@1.2.1-beta.0
-  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
+  replicad: npm:@taulabs/replicad@1.2.1-beta.1
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.4
   sockjs@0.3.24>uuid: 11.1.1
   vitest: 4.1.11
 
@@ -1413,11 +1413,11 @@ importers:
         specifier: 'catalog:'
         version: 11.1.2
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.4
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.4'
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -4670,8 +4670,8 @@ importers:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -6066,11 +6066,11 @@ importers:
         specifier: 'catalog:'
         version: 0.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.4
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.4'
       sharp:
         specifier: 'catalog:'
         version: 0.35.5(@types/node@26.6.5)
@@ -7504,11 +7504,11 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.3
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.3'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.4
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.4'
       source-map-js:
         specifier: 'catalog:'
         version: 1.2.2
@@ -7566,8 +7566,8 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(playwright@1.64.0)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -8471,8 +8471,8 @@ importers:
         specifier: 'catalog:'
         version: 0.6.0(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@1.2.1-beta.0
-        version: '@taulabs/replicad@1.2.1-beta.0'
+        specifier: npm:@taulabs/replicad@1.2.1-beta.1
+        version: '@taulabs/replicad@1.2.1-beta.1'
 
   packages/workbench:
     devDependencies:
@@ -16336,11 +16336,11 @@ packages:
     resolution: {integrity: sha512-jXQwh6NYfgpKh+eQMR/8hVYUuvbaH5zISD02T8o0atRQoV9w+4F8D7enfAYgejEJtbGJVr5J+/zzTzf7QJqgWw==}
     engines: {node: '>=20'}
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.3':
-    resolution: {integrity: sha512-9GeLIgJjKHgKX0wJwtW0Bntqq56Mqd8OFQ16bQwg2KIARIb4RPB0e8oo+oW3kszLsRsTBOtN5FxrWkhhXahJ0A==}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.4':
+    resolution: {integrity: sha512-VBTDbzGcC3Jcov2eA9pFJf9Tnl8lp/FfVUqxnwT2oHgAH1fpBQ5Y17NtRnebqMtFugMgwQHYox5cfdqZYu35lw==}
 
-  '@taulabs/replicad@1.2.1-beta.0':
-    resolution: {integrity: sha512-GQBXvhmyhH1tD5mnMcGbF59CTQhFExwuHKapu6oeTdobJFRlnFs9ejvr/LPJCjKCbGDYTrowIaRGZaXAWPLpSg==}
+  '@taulabs/replicad@1.2.1-beta.1':
+    resolution: {integrity: sha512-LNoFLB0UGw8f6zIx5CGjYu0hPNEJq1htH9Zo74HVqkN6RNdAsIku2lHwY1N8kmTFVVc1uYwaBZThBIdlVJniHg==}
 
   '@taulabs/three-viewport-gizmo@3.0.0-beta.5':
     resolution: {integrity: sha512-Y0dHCVeGg4N0eSjgzcGBUN0nISpNajIqglQRD15oQJWBJJGXvgpqk9QiTLtSbBPEVQ45quPAKJCKpqAVDBFaoQ==}
@@ -28840,18 +28840,23 @@ packages:
 
   yuku-analyzer@0.9.5:
     resolution: {integrity: sha512-wUPmylpfXlJAIOQ6F73kPbWii7LEeyPWx++NWlJ+6NihQbO/D1YeQQjMY4Lwqg2o1RKDCHQqBfgc4ZLs0eYs5A==}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-ast@0.8.7:
     resolution: {integrity: sha512-h6+4bDfyootiMB9vckk5uKo5r5j0GHrkr17FQTDNfEsFT3DWlN9uu1HJwQwc64pgmLCI945fWM3lbTIqxjT3GQ==}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-ast@0.9.5:
     resolution: {integrity: sha512-Q8qW8WwQnN5Cm0ZZivdRIfv0sRLTjUq0YumXJkw8CYN1aCdICH9rk4C47/4n6kA5EqDtlj+F608twoTSV2MwdQ==}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-codegen@0.8.7:
     resolution: {integrity: sha512-adwDZSh8oVDzhE6Du9PwVWxcOxeV0e2EVhUuMKWfhSY4wkrDq9eqixlxFF3l/XGUV1E7UFzhpz9393MUumkyNw==}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-parser@0.8.7:
     resolution: {integrity: sha512-vRD9nwt4L3aYpxNqeSC4WqLv58xrXef0Ong1Mc45CTXTIpvLafx7JO05sczmQZwdLEZvywrLOGdNC5+Rp5N1BQ==}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   zbsearch@4.0.1:
     resolution: {integrity: sha512-lmnEEnb93QQcNv7qARDr7jBVPxYdZbZ9XdZ0dbZ0qaOvGne4jJMW4fjwPfVaUKQXv3FNWvGbDwRDgyaSb1pc8w==}
@@ -37384,9 +37389,9 @@ snapshots:
       '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.5
       '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.5
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.3': {}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.4': {}
 
-  '@taulabs/replicad@1.2.1-beta.0':
+  '@taulabs/replicad@1.2.1-beta.1':
     dependencies:
       '@types/opentype.js': 1.3.10
       flatbush: 4.6.2

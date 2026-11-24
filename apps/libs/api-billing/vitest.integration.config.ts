@@ -27,7 +27,7 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     testTimeout: 300_000,
     hookTimeout: 300_000,
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     env: {
       ...forwardedEnv,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

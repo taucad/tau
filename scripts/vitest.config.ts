@@ -15,7 +15,7 @@ const selection =
 export default defineConfig({
   test: {
     environment: 'node',
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     ...selection,
     coverage: {
       provider: 'v8',

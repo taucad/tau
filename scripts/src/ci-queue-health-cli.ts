@@ -1,9 +1,10 @@
 /**
  * Weekly CI health report: the IO half (`ci-queue-health.ts` and `ci-flake-ledger.ts` hold the logic).
  *
- * Queue health: reads the `merge_group` runs of `ci.yml` created in the window, their jobs, the annotations of each
- * failed run's first failed job and whether each cancelled run's commit landed on `--branch` from the GitHub REST
- * API. Blueprint DC-21 (Brain `research/ci-decomposition-blueprint.md`, Part 5a, X7).
+ * Queue health: reads the `merge_group` runs of `ci.yml` created in the window, the jobs of every attempt, the
+ * annotations of each failed run's first failed job and whether each victim's commit landed on `--branch` from the
+ * GitHub REST API. Blueprint DC-21 (Brain `research/ci-decomposition-blueprint.md`, Part 5a, X7; global review
+ * ruling 9). A run whose jobs the API keeps refusing after the retries is reported as not fetched.
  *
  * Flakes (taucad/tau#1281): over `--flake-days`, pairs each failed lane job of a merge group or a push to
  * `--branch` with the next run of the same PR (or of the push sequence) that ran the job, confirms the pair through
@@ -14,10 +15,11 @@
  * `ci-queue-health.yml` runs it weekly and posts nothing.
  *
  * Usage: node scripts/src/ci-queue-health-cli.ts [--days 7] [--flake-days 14] [--out <path>] [--summary <file>]
- *          [--workflow ci.yml] [--event merge_group] [--max-requests 900] [--branch main]
+ *          [--workflow ci.yml] [--event merge_group] [--max-requests 5000] [--branch main]
  *          [--ledger scripts/src/flake-ledger.json]
  * Env: GITHUB_TOKEN (needs `actions: read`), GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
- * Exit codes: 0 report written (it may be partial when the request budget ran out); 1 API failure; 2 usage;
+ * Exit codes: 0 report written (it may be partial when the request budget ran out or a run's jobs were refused);
+ * 1 API failure listing the runs; 2 usage;
  * 3 report written and a flake needs someone: an unowned or expired repeat offender, ledger entry or marker.
  */
 import { execFileSync } from 'node:child_process';
@@ -33,6 +35,7 @@ import {
   fetchOrder,
   firstFailedJob,
   landedFromCompare,
+  latestAttempt,
   renderMarkdown,
   reportWindow,
   splitWindow,
@@ -62,7 +65,10 @@ const searchLimit = 1000;
 /** Requests left untouched when the rate limit runs low, so a rerun in the same hour can still start. */
 const rateReserve = 50;
 const concurrency = 4;
-const retries = 3;
+/** Retries of a 5xx, a rate-limit refusal or a network reset: 2 s doubling to 64 s, about two minutes in all. */
+const retries = 6;
+/** The longest wait a `retry-after` header may ask for before the request is given up. */
+const maximumRetryAfterSeconds = 120;
 
 type Client = {
   /** `owner/name`, the prefix of every path below `/repos`. */
@@ -79,8 +85,9 @@ const client = (options: { api: string; token: string; repository: string; maxRe
   let made = 0;
   let remaining = Number.POSITIVE_INFINITY;
   const request = async (path: string): Promise<Response> => {
-    // The API answers 502/503 now and then on job listings; retry those and network resets a bounded number
-    // of times (2 s, 4 s, 8 s) rather than lose the week's report.
+    // The API answers 502/503 now and then on job listings, sometimes several times running (run 45247664173
+    // lost the week's report to one listing after three quick retries); retry those, rate-limit refusals and
+    // network resets with a backoff that reaches a minute.
     for (let attempt = 1; ; attempt += 1) {
       made += 1;
       let response: Response | undefined;
@@ -106,11 +113,17 @@ const client = (options: { api: string; token: string; repository: string; maxRe
       if (response?.ok) {
         return response;
       }
-      if (response && (response.status < 500 || attempt > retries)) {
+      const retryAfter = Number(response?.headers.get('retry-after') ?? Number.NaN);
+      const limited =
+        response?.status === 429 || (response?.status === 403 && (Number.isFinite(retryAfter) || header === '0'));
+      if (response && ((response.status < 500 && !limited) || attempt > retries)) {
         throw new Error(`GET ${path}: GitHub API ${response.status}`);
       }
+      const backoff = 2000 * 2 ** (attempt - 1);
       // oxlint-disable-next-line no-await-in-loop -- the backoff is sequential by design
-      await sleep(2000 * 2 ** (attempt - 1));
+      await sleep(
+        Number.isFinite(retryAfter) ? Math.min(retryAfter, maximumRetryAfterSeconds) * 1000 + backoff : backoff,
+      );
     }
   };
   return {
@@ -161,7 +174,7 @@ const listJobs = async (github: Client, runId: number): Promise<WorkflowJob[]> =
   for (let page = 1; ; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
     const body = await github.get<{ total_count: number; jobs: WorkflowJob[] }>(
-      `/repos/${github.repository}/actions/runs/${runId}/jobs?filter=latest&per_page=100&page=${page}`,
+      `/repos/${github.repository}/actions/runs/${runId}/jobs?filter=all&per_page=100&page=${page}`,
     );
     jobs.push(...body.jobs);
     if (body.jobs.length === 0 || jobs.length >= body.total_count) {
@@ -171,8 +184,9 @@ const listJobs = async (github: Client, runId: number): Promise<WorkflowJob[]> =
 };
 
 /**
- * Whether a cancelled run's commit is reachable from `branch`. Undefined when the run names no commit or GitHub
- * refuses the compare (for example a commit it no longer has), so the report counts it as unchecked waste.
+ * Whether a victim's commit (a cancelled run with no failed job) is reachable from `branch`. Undefined for any other
+ * run, when the run names no commit or GitHub refuses the compare (for example a commit it no longer has), so the
+ * report counts it as unchecked.
  */
 const checkLanded = async (github: Client, run: WorkflowRun, branch: string): Promise<boolean | undefined> => {
   if (run.conclusion !== 'cancelled' || !run.head_sha || github.budget() <= 0) {
@@ -188,7 +202,7 @@ const checkLanded = async (github: Client, run: WorkflowRun, branch: string): Pr
   }
 };
 
-/** Jobs already fetched, by run id: the flake pass and the queue report share them. */
+/** Jobs of every attempt already fetched, by run id: the flake pass and the queue report share them. */
 type JobCache = Map<number, WorkflowJob[]>;
 
 const jobsOf = async (github: Client, cache: JobCache, runId: number): Promise<WorkflowJob[]> => {
@@ -211,19 +225,29 @@ const gather = async (options: {
   const evidence = new Map<number, RunEvidence>(runs.map((run) => [run.id, { run }]));
   const queue = fetchOrder(runs);
   let fetched = 0;
+  let refused = 0;
   const worker = async (): Promise<void> => {
     for (let run = queue.shift(); run && github.budget() > 0; run = queue.shift()) {
-      // oxlint-disable-next-line no-await-in-loop -- each worker takes one run at a time; four run in parallel
-      const jobs = await jobsOf(github, cache, run.id);
-      const culprit = run.conclusion === 'failure' ? firstFailedJob(jobs) : undefined;
+      let jobs: WorkflowJob[];
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each worker takes one run at a time; four run in parallel
+        jobs = await jobsOf(github, cache, run.id);
+      } catch (error) {
+        // One listing the API keeps refusing leaves that run unfetched (the report says partial), not the week.
+        refused += 1;
+        console.error(error instanceof Error ? error.message : String(error));
+        continue;
+      }
+      // A failed queue run concludes `cancelled` since the `Fail fast` jobs landed: its jobs say it failed.
+      const culprit = firstFailedJob(jobs);
       const annotations = culprit
         ? // oxlint-disable-next-line no-await-in-loop -- the annotations belong to the run just fetched
-          await github.get<Annotation[]>(
-            `/repos/${github.repository}/check-runs/${culprit.id}/annotations?per_page=100`,
-          )
+          await github
+            .get<Annotation[]>(`/repos/${github.repository}/check-runs/${culprit.id}/annotations?per_page=100`)
+            .catch(() => undefined)
         : undefined;
       // oxlint-disable-next-line no-await-in-loop -- the landing check belongs to the run just fetched
-      const landed = await checkLanded(github, run, branch);
+      const landed = culprit ? undefined : await checkLanded(github, run, branch);
       evidence.set(run.id, {
         run,
         jobs,
@@ -237,6 +261,9 @@ const gather = async (options: {
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));
+  if (refused > 0) {
+    console.error(`The API refused the jobs of ${refused} runs after ${retries} retries; they are reported unfetched`);
+  }
   return [...evidence.values()];
 };
 
@@ -330,22 +357,23 @@ const flakePass = async (options: {
 }): Promise<FlakeReport> => {
   const { github, cache, runs, window, ledger, now } = options;
   const tracked = runs.filter((run) => lineageOf(run) && run.status === 'completed');
+  // A failed merge-group run concludes `cancelled` (its `Fail fast` job cancels it), so its jobs decide.
   const failedRuns = tracked
-    .filter((run) => run.conclusion === 'failure')
+    .filter((run) => run.conclusion === 'failure' || run.conclusion === 'timed_out' || run.conclusion === 'cancelled')
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   await eachWithBudget(github, failedRuns, async (run) => {
-    await jobsOf(github, cache, run.id);
+    await jobsOf(github, cache, run.id).catch(() => undefined);
   });
   const evidenceOf = (): RunEvidence[] =>
     tracked.map((run) => {
       const jobs = cache.get(run.id);
-      return jobs ? { run, jobs } : { run };
+      return jobs ? { run, jobs: latestAttempt(jobs) } : { run };
     });
   const followUps = failedRuns
-    .filter((run) => failedLaneJobs(cache.get(run.id) ?? []).length > 0)
+    .filter((run) => failedLaneJobs(latestAttempt(cache.get(run.id) ?? [])).length > 0)
     .flatMap((run) => followUpsOf(evidenceOf(), run));
   await eachWithBudget(github, [...new Map(followUps.map((run) => [run.id, run])).values()], async (run) => {
-    await jobsOf(github, cache, run.id);
+    await jobsOf(github, cache, run.id).catch(() => undefined);
   });
   const pairing = pairFailures(evidenceOf());
   const flakes: FlakeEntry[] = [];
@@ -396,7 +424,8 @@ const main = async (args: readonly string[]): Promise<number> => {
         },
         workflow: { type: 'string', default: 'ci.yml' },
         event: { type: 'string', default: 'merge_group' },
-        'max-requests': { type: 'string', default: '900' },
+        // GitHub Enterprise Cloud gives GITHUB_TOKEN 15,000 requests an hour; the rate-limit reserve still applies.
+        'max-requests': { type: 'string', default: '5000' },
         branch: { type: 'string', default: 'main' },
         ledger: { type: 'string', default: 'scripts/src/flake-ledger.json' },
       },

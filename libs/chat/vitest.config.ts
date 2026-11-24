@@ -13,7 +13,7 @@ export default defineConfig({
       tsconfig: resolve(import.meta.dirname, 'tsconfig.spec.json'),
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/libs/chat',

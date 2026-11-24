@@ -158,6 +158,8 @@
 \* only the import moved. No action or verdict changes.
 \* DC-10 revisions-ui slice 2 (2026-11-18): `project-live-sessions.tsx` takes the `RevisionCommands` type from
 \* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
+\* Shared cloud-open copy (2026-11-24): `project-route.tsx` reads its "Opening project" aria-label from
+\* `#lib/project-open-copy`; only the label's source moved. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

@@ -7,6 +7,7 @@ import { formatFileSize } from '#components/geometry/converter/converter-utils.j
 import { Progress } from '@taucad/ui/components/progress';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
+import { projectOpenCopy, withEllipsis } from '#lib/project-open-copy.js';
 
 type ImportProcessingViewProperties = {
   readonly title: string;
@@ -109,7 +110,7 @@ export function ImportProcessingView({
         <div className='max-w-xl min-w-0 space-y-4'>
           <p className='font-mono text-sm break-all'>{title}</p>
           {isComplete ? (
-            <p className='text-sm'>Opening project…</p>
+            <p className='text-sm'>{withEllipsis(projectOpenCopy.connecting.label)}</p>
           ) : (
             <>
               <ol className='divide-y'>

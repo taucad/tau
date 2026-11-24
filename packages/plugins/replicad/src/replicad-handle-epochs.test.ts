@@ -25,13 +25,26 @@ const renderTimeout = 300_000;
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc') as () => void;
-/** Collect and let the finalization registry run, as an idle worker would between edits. */
-const collect = async (): Promise<void> => {
-  for (let round = 0; round < 4; round += 1) {
+const collectRounds = 4;
+/**
+ * Collect and let the finalization registry run, as an idle worker would between edits. Given the ledger, stop early
+ * once a round deletes no handle: nothing was finalized, so a further round has nothing new to collect.
+ * @param ledger - The ledger whose deletions show when collection has settled.
+ */
+const collect = async (ledger?: HandleLedger): Promise<void> => {
+  let deleted = ledger?.stats().deleted;
+  for (let round = 0; round < collectRounds; round += 1) {
     gc();
     await new Promise((resolve) => {
       setTimeout(resolve, 5);
     });
+    if (ledger) {
+      const now = ledger.stats().deleted;
+      if (round > 0 && now === deleted) {
+        return;
+      }
+      deleted = now;
+    }
   }
 };
 
@@ -288,12 +301,12 @@ describe('replicad release fallback', () => {
       try {
         await opened.build({ key: 1, tag: 0 });
         const ledger = ledgerOf();
-        await collect();
+        await collect(ledger);
         const before = ledger.snapshot();
         const alive: number[] = [];
         for (let step = 1; step <= 30; step += 1) {
           await opened.build({ key: (step % 3) + 1, tag: step });
-          await collect();
+          await collect(ledger);
           alive.push(ledger.since(before).length);
         }
         expect(executions(counter)).toBe(2);
@@ -697,13 +710,13 @@ describe('replicad build epochs', () => {
         try {
           const first = await opened.build({ key: 1 });
           const ledger = ledgerOf();
-          await collect();
+          await collect(ledger);
           const before = ledger.snapshot();
           const glbs: string[] = [];
           const alive: number[] = [];
           for (let step = 1; step <= 40; step += 1) {
             glbs.push(await opened.build({ key: step % 2 === 0 ? 1 : 2 }));
-            await collect();
+            await collect(ledger);
             alive.push(ledger.since(before).length);
           }
 
@@ -731,13 +744,13 @@ describe('replicad build epochs', () => {
     try {
       await opened.build({ size: 10 });
       const ledger = ledgerOf();
-      await collect();
+      await collect(ledger);
       const before = ledger.snapshot();
       const handles: number[] = [];
       const heaps: number[] = [];
       for (let step = 1; step <= 40; step += 1) {
         await opened.build({ size: 10 + step / 4 });
-        await collect();
+        await collect(ledger);
         handles.push(ledger.since(before).length);
         heaps.push(heapBytes());
       }

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type CameraControlsImpl from 'camera-controls';
-import { Raycaster, Scene, Vector3 } from 'three';
-import type { Camera } from 'three';
+import { Matrix4, PerspectiveCamera, Quaternion, Raycaster, Scene, Vector3 } from 'three';
+import type { Camera, Vector4, WebGLRenderer } from 'three';
+import { ViewportGizmo } from 'three-viewport-gizmo';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import type { RootState } from '@react-three/fiber';
@@ -13,6 +14,9 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
 import { asCameraActor } from '#graphics/graphics-camera.js';
 import type { CameraInputRouting, OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
+import { readViewportGizmoPose, viewportGizmoOptions } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /*
  * The orbit styles in a real browser (roll Finding 10, TA5): the view's camera is the graphics child presented by the
@@ -63,7 +67,7 @@ const poleView = {
   up: [1, 0, 0],
 } as const;
 
-/** A rolled view just off the pole, as far as the view cube tilts a top view off it. */
+/** A rolled view just off the pole (1.1e-3 rad), outside the camera's parallel guard: Turntable straightens it. */
 const nearPoleView = {
   ...cameraView,
   direction: [0.0011, 0, 1],
@@ -404,6 +408,93 @@ describe('orbit style in the browser (TA5)', () => {
     expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
     expect(largestStep(directions)).toBeLessThan(0.2);
     // The drag left the pole about the world up: the view is upright.
+    expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);
+    expect(roll(viewer)).toBeLessThan(1e-6);
+  });
+});
+
+/*
+ * TA carry-over 1: a top or bottom face click presents the pose the view cube reported, through the camera actor and
+ * the real `camera-controls`, in both orbit styles. The camera takes a view as near the pole as the cube keeps it, so
+ * nothing tilts it further off: the presented orientation is the cube's, and a Turntable drag from it stays upright.
+ */
+describe('view cube pole views through the controls (TA carry-over 1)', () => {
+  /** The renderer surface the cube reads while it builds; it never draws here. */
+  const renderer = {
+    domElement: document.createElement('canvas'),
+    getViewport: (target: Vector4) => target.set(0, 0, 800, 600),
+    getScissor: (target: Vector4) => target.set(0, 0, 800, 600),
+    getScissorTest: () => false,
+  } as unknown as WebGLRenderer;
+
+  const clickPole = async (viewer: Viewer, orbitStyle: OrbitStyle, sign: 1 | -1) => {
+    const camera = new PerspectiveCamera();
+    camera.up.copy(worldUp);
+    camera.position.set(...cameraView.direction);
+    camera.lookAt(0, 0, 0);
+    const style = readViewportGizmoStyle({
+      container: document.body,
+      colorScheme: 'light',
+      isHighContrast: false,
+      accentColor: '#008c7d',
+    });
+    const gizmo = new ViewportGizmo(
+      camera,
+      renderer,
+      viewportGizmoOptions({
+        style,
+        upDirection: 'z',
+        orbitStyle,
+        container: document.body,
+        placeTopRight: false,
+        size: 96,
+        styleConfig: resolveViewportGizmoStyleConfig({
+          gizmoStyle: 'cube',
+          colors: style,
+          radius: viewportGizmoMetrics.radius,
+        }),
+      }),
+    );
+    try {
+      const end = await gizmo.lookFrom(new Vector3(0, 0, sign), { animated: false });
+      const pose = readViewportGizmoPose({
+        pose: end.pose,
+        target: new Vector3(),
+        renderFrame: viewer.rig.renderFrame,
+        verticalSpan: cameraView.verticalSpan,
+      });
+      viewer.graphics.getSnapshot().context.cameraRef.send({ type: 'poseObserved', source: 'gizmo', ...pose });
+      viewer.settle();
+      return end.pose;
+    } finally {
+      gizmo.dispose();
+    }
+  };
+
+  it.each([
+    ['turntable', 1],
+    ['turntable', -1],
+    ['free', 1],
+    ['free', -1],
+  ] as const)('presents the %s cube’s pole view, side %d, as the cube reported it', async (orbitStyle, sign) => {
+    const viewer = mountViewer(orbitStyle);
+    const reported = await clickPole(viewer, orbitStyle, sign);
+    const view = readView(viewer);
+    expect(view.direction.angleTo(reported.direction)).toBeLessThan(1e-9);
+    expect(view.up.angleTo(reported.up)).toBeLessThan(1e-9);
+    // The native camera `camera-controls` wrote: the cube's orientation, roll included.
+    const cube = new Quaternion().setFromRotationMatrix(
+      new Matrix4().lookAt(reported.direction, new Vector3(), reported.up),
+    );
+    expect(viewer.rig.activeCamera.quaternion.angleTo(cube)).toBeLessThan(1e-6);
+  });
+
+  it('drags on upright from the cube’s top view in Turntable, down off the pole', async () => {
+    const viewer = mountViewer('turntable');
+    await clickPole(viewer, 'turntable', 1);
+    const directions = verticalDrag(viewer, { steps: 10, step: -12 });
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
+    expect(largestStep(directions)).toBeLessThan(0.2);
     expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);
     expect(roll(viewer)).toBeLessThan(1e-6);
   });

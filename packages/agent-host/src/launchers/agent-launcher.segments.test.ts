@@ -1598,6 +1598,30 @@ describe('a chat continued on a second device', () => {
       });
       return { root, launcher };
     };
+    /**
+     * Send a command to a run that has just paused, as the page sends it: the pause's own settlement (its
+     * `turn.finalized` row, then the placement acknowledgement) is still running for a moment after the `paused` row is
+     * readable, and a command that meets it is refused `CHAT_RUN_LIVE` `{ state: 'settling' }` (retry `wait`), so it is
+     * sent again, under a new command id, until the run has settled. How long that moment lasts depends on the host's
+     * scheduling: on Node 26 the `paused` row is readable before the settlement ends far more often than on Node 24.
+     */
+    const sendOnceSettled = async (
+      launcher: AgentLauncher,
+      command: Omit<Parameters<AgentLauncher['execute']>[0], 'commandId'>,
+    ): Promise<Awaited<ReturnType<AgentLauncher['execute']>>> =>
+      vi.waitFor(
+        async () => {
+          const answer = await launcher.execute({ ...command, commandId: key() } as Parameters<
+            AgentLauncher['execute']
+          >[0]);
+          expect(answer, JSON.stringify(answer)).not.toMatchObject({
+            code: 'CHAT_RUN_LIVE',
+            details: { state: 'settling' },
+          });
+          return answer;
+        },
+        { timeout: 3000, interval: 10 },
+      );
     const heartbeatCount = async (root: string): Promise<number> =>
       heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
 
@@ -1890,7 +1914,8 @@ describe('a chat continued on a second device', () => {
      */
     it('should refuse an approval, retryably, while another device’s segment cannot be read, even inside the paused run’s hold', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 60_000 });
-      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      /* The pause's settlement writes `turn.finalized` after `paused`; the rows this test counts start past it. */
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
       const unreadable = join(root, '.tau', 'chats', chatId, 'events', 'device-phone.jsonl');
       await mkdir(unreadable, { recursive: true });
       const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
@@ -1900,7 +1925,7 @@ describe('a chat continued on a second device', () => {
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
       } as const;
 
-      const refused = await launcher.execute(approve);
+      const refused = await sendOnceSettled(launcher, approve);
 
       expect(refused).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE', effect: 'not-applied' });
       expect(refusalOf('SEGMENTS_UNREADABLE').retry).toBe('wait');
@@ -1992,7 +2017,8 @@ describe('a chat continued on a second device', () => {
      */
     it('should refuse an approval of a paused run another device took over', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
-      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      /* The pause's settlement writes `turn.finalized` after `paused`; the rows this test counts start past it. */
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
       const at = new Date(Date.now() + 1000).toISOString();
       const phone = (sequence: number, runId: string, body: Record<string, unknown>): string =>
         `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId, ...body })}\n`;
@@ -2014,9 +2040,8 @@ describe('a chat continued on a second device', () => {
       );
       const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
 
-      const answer = await launcher.execute({
+      const answer = await sendOnceSettled(launcher, {
         type: 'resolve-interrupt',
-        commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
       });
 
@@ -2055,9 +2080,8 @@ describe('a chat continued on a second device', () => {
           phone(2, { type: 'run.lifecycle', state: 'completed' }),
       );
 
-      const approval = await launcher.execute({
+      const approval = await sendOnceSettled(launcher, {
         type: 'resolve-interrupt',
-        commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
       });
 
@@ -2135,9 +2159,8 @@ describe('a chat continued on a second device', () => {
     it('should say an abandoned foreign run’s turn in the first batch of a Resume that goes on past it', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
-      const approval = await launcher.execute({
+      const approval = await sendOnceSettled(launcher, {
         type: 'resolve-interrupt',
-        commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
       });
       expect(approval, JSON.stringify(approval)).toMatchObject({ status: 'applied' });

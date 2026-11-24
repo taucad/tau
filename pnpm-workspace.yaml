@@ -102,7 +102,7 @@ catalog:
   '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.223.0
   '@opentelemetry/sdk-node': ^0.223.0
-  '@oxc-node/core': ^0.0.35
+  '@oxc-node/core': ^1.0.2
   buffer: 6.0.3
   playwright: ^1.61.0
   '@pyroscope/nodejs': ^0.4.13

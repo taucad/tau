@@ -144,8 +144,15 @@ export const createShellCapture = (
   let failure: string | undefined;
   /* Writes run one at a time, in arrival order. */
   let writing: Promise<void> = Promise.resolve();
+  /* Set once `finish` starts: a reader that outlives a call `finish` stopped waiting for (an unconfirmed stop) must
+     never open the log after it, or that handle has no owner left to close it, and from Node 26 a handle garbage
+     collection closes is an uncaught `ERR_INVALID_STATE`. */
+  let finished = false;
 
   const write = (chunk: Uint8Array<ArrayBuffer>): void => {
+    if (finished) {
+      return;
+    }
     // oxlint-disable-next-line promise/prefer-await-to-then -- a serial chain: each write starts after the one before.
     writing = writing.then(async () => {
       if (failure !== undefined) {
@@ -189,6 +196,7 @@ export const createShellCapture = (
   };
 
   const finish = async (): Promise<ShellCapture> => {
+    finished = true;
     await writing;
     const total = tails.stdout.bytes + tails.stderr.bytes;
     const shares = inlineShares(tails.stdout.bytes, tails.stderr.bytes, inlineBytes);

@@ -57,6 +57,17 @@ describe('createShellCapture', () => {
     await expect(readFile(join(root, '.tau', 'offloaded-tool-results', 'shell', 'a.log'))).rejects.toThrow();
   });
 
+  it('opens no log for output that arrives after finish, so no handle is left unowned', async () => {
+    const capture = createShellCapture({ log: { root, name: 'late.log' }, inlineBytes: 4, retainedBytes: 64 });
+    await capture.drain('stdout', chunks('ok'));
+    const result = await capture.finish();
+    expect(result.log).toBeUndefined();
+    /* A reader that outlived an unconfirmed stop goes on past the inline budget after the capture finished. */
+    await capture.drain('stdout', chunks('late output past the budget'));
+    await capture.finish();
+    await expect(readFile(join(root, '.tau', 'offloaded-tool-results', 'shell', 'late.log'))).rejects.toThrow();
+  });
+
   it('retains up to the limit, counts what it drops, and shows the tail inline', async () => {
     const capture = createShellCapture({ log: { root, name: 'b.log' }, inlineBytes: 8, retainedBytes: 20 });
     await capture.drain('stdout', chunks('0123456789', 'abcdefghij', 'KLMNOPQRST'));

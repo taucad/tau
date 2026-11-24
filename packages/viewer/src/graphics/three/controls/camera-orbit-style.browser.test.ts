@@ -499,3 +499,57 @@ describe('view cube pole views through the controls (TA carry-over 1)', () => {
     expect(roll(viewer)).toBeLessThan(1e-6);
   });
 });
+
+/*
+ * TA carry-over 5, by roll rulings C, E and F: Free orbit is the trackball drag, so a keyboard orbit step turns as a
+ * drag of the same travel does, about the screen's axes, and goes on through both poles; Turntable keeps the world up
+ * as its axis, so its steps stop at the pole and stay upright, as its drag does.
+ */
+describe('keyboard orbit steps per orbit style (TA carry-over 5)', () => {
+  /** Holds one orbit arrow key down for `steps` steps, reading the view after each, as the viewer's shortcut does. */
+  const orbitSteps = (viewer: Viewer, direction: 'up' | 'down' | 'left' | 'right', steps: number): Vector3[] => {
+    const directions = [readView(viewer).direction];
+    for (let index = 0; index < steps; index += 1) {
+      viewer.graphics.send({ type: 'navigateCamera', step: { kind: 'orbit', direction } });
+      viewer.settle();
+      directions.push(readView(viewer).direction);
+    }
+    return directions;
+  };
+
+  it('stops Turntable steps at the pole, upright', () => {
+    const viewer = mountViewer('turntable');
+    const directions = orbitSteps(viewer, 'down', 24);
+    expect(poles(directions)).toEqual({ top: false, bottom: true });
+    expect(directions.at(-1)!.angleTo(directions.at(-2)!)).toBeLessThan(1e-6);
+    expect(roll(viewer)).toBeLessThan(1e-6);
+  });
+
+  it.each(['down', 'up'] as const)('turns Free orbit %s steps through both poles, one step at a time', (direction) => {
+    const viewer = mountViewer('free');
+    const directions = orbitSteps(viewer, direction, 24);
+    expect(poles(directions)).toEqual({ top: true, bottom: true });
+    // Every step is one step's turn: no clamp at a pole and no jump past it.
+    for (const [index, next] of directions.slice(1).entries()) {
+      expect(next.angleTo(directions[index]!)).toBeCloseTo(Math.PI / 12, 6);
+    }
+    // 24 steps of 15° make one full turn about the screen's horizontal axis: back to the start, upright again.
+    expect(directions.at(-1)!.angleTo(directions[0]!)).toBeLessThan(1e-6);
+    expect(lastSource(viewer)).toBe('input');
+  });
+
+  it('turns Free orbit side steps about the screen up, once steps have rolled it off the world up', () => {
+    const viewer = mountViewer('free');
+    orbitSteps(viewer, 'down', 6);
+    const screenUp = (): Vector3 => new Vector3(0, 1, 0).applyQuaternion(viewer.rig.activeCamera.quaternion);
+    const { direction } = readView(viewer);
+    const up = screenUp();
+    const directions = orbitSteps(viewer, 'left', 24);
+    // A side step keeps the screen up and turns the view about it: a full circle through the same up.
+    expect(screenUp().angleTo(up)).toBeLessThan(1e-6);
+    expect(directions.at(-1)!.angleTo(direction)).toBeLessThan(1e-6);
+    for (const next of directions) {
+      expect(Math.abs(next.dot(up))).toBeLessThan(1e-6);
+    }
+  });
+});

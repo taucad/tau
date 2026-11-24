@@ -55,8 +55,12 @@ runs:
           echo "corepack: $("$bin/corepack" --version 2>/dev/null || echo bundled) in $bin"
           exit 0
         fi
+        # Into this Node's own prefix, never npm's configured global one: on windows-2025 that is C:\npm\prefix,
+        # which already holds the image's `yarn` shim (EEXIST) and which no guest copies. A Windows Node keeps its
+        # global bins beside node.exe; elsewhere they go to <prefix>/bin.
+        if [ "$RUNNER_OS" = Windows ]; then prefix="$bin"; else prefix="$(dirname "$bin")"; fi
         for attempt in 1 2 3; do
-          if npm install --global --no-audit --no-fund corepack@0.35.0; then break; fi
+          if npm install --global --prefix "$prefix" --no-audit --no-fund corepack@0.35.0; then break; fi
           if [ "$attempt" -eq 3 ]; then exit 1; fi
           echo "::warning title=corepack install failed::attempt $attempt failed; retrying" >&2
           sleep $((attempt * 5))

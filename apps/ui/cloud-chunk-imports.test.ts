@@ -74,6 +74,8 @@ const toModule = (file: string): string => relative(appRoot, file).replaceAll('\
  * The Core modules the Cloud chunk's own code imports directly: the walk follows Cloud-only modules and stops at the
  * first Core module, which is where a shared chunk would start.
  */
+const cloudChunkFiles = new Set<string>([cloudEntry]);
+
 const coreImportsOfCloudChunk = (): Set<string> => {
   const seen = new Set<string>([cloudEntry]);
   const core = new Set<string>();
@@ -87,6 +89,7 @@ const coreImportsOfCloudChunk = (): Set<string> => {
       }
       seen.add(target);
       if (file === cloudEntry || isCloudOnly(toModule(target))) {
+        cloudChunkFiles.add(target);
         queue.push(target);
       } else {
         core.add(toModule(target));
@@ -113,5 +116,16 @@ describe('the Cloud chunk shares no module with a route chunk (gate G1)', () => 
     expect([...modules].filter((module) => !isCloudOnly(module) && !reviewedCoreModules.has(module)).sort()).toEqual(
       [],
     );
+  });
+});
+
+describe('the Cloud chunk loads its assets from code (W9 D3)', () => {
+  it('renders no inline loader script, which never runs once React inserts it on the client', () => {
+    coreImportsOfCloudChunk();
+    expect(
+      [...cloudChunkFiles]
+        .filter((file) => readFileSync(file, 'utf8').includes('@taucad/ui-kit/icons/svg-sprite-loader'))
+        .map((file) => toModule(file)),
+    ).toEqual([]);
   });
 });

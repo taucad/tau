@@ -36,6 +36,8 @@ vi.mock('#lib/posthog.lib.js', async (importOriginal) => ({
 /* One PostHog singleton for the file, as the provider keeps the first SDK module it loads. */
 const flags = vi.hoisted(() => ({
   variants: undefined as Record<string, boolean> | undefined,
+  /** Whether the last flags callback reported a failed load (`errorsLoading`). */
+  errorsLoading: false,
   listeners: new Set<() => void>(),
   client: undefined as unknown,
 }));
@@ -47,7 +49,7 @@ client.init.mockImplementation(() => {
 client.has_opted_out_capturing.mockReturnValue(false);
 client.onFeatureFlags.mockImplementation((listener) => {
   const callback = (): void => {
-    listener(Object.keys(flags.variants ?? {}), flags.variants ?? {}, { errorsLoading: false });
+    listener(Object.keys(flags.variants ?? {}), flags.variants ?? {}, { errorsLoading: flags.errorsLoading });
   };
   flags.listeners.add(callback);
   // As posthog-js does, a listener added once flags have loaded is called back at once.
@@ -69,8 +71,9 @@ vi.mock('posthog-js', () => ({
 const { WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js');
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 
-const answerFlags = (variants: Record<string, boolean>): void => {
+const answerFlags = (variants: Record<string, boolean>, errorsLoading = false): void => {
   flags.variants = variants;
+  flags.errorsLoading = errorsLoading;
   for (const listener of flags.listeners) {
     listener();
   }
@@ -116,6 +119,7 @@ afterEach(() => {
   document.body.replaceChildren();
   Cookies.remove(consentCookieName);
   flags.variants = undefined;
+  flags.errorsLoading = false;
   flags.listeners.clear();
   client.onFeatureFlags.mockClear();
   disconnectRemoteFlags();
@@ -163,6 +167,29 @@ describe('WelcomeRoute behind the real web analytics boundary', () => {
     await act(async () => {
       root.render(app('remounted'));
       await Promise.resolve();
+    });
+
+    expect(isHome(container)).toBe(false);
+    expect(container.querySelector('[data-testid="setup-flow"]')).toHaveTextContent('viewer');
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  /* F2d: posthog-js reports `errorsLoading` once `/flags` timed out on its retry too (3 s each, staging run). */
+  it('should show the requested step when the flag load fails, and keep it when a later refresh answers off', async () => {
+    Cookies.set(consentCookieName, JSON.stringify({ status: 'accepted', version: 1 }));
+    const { container, root } = await load();
+
+    act(() => {
+      answerFlags({}, true);
+    });
+
+    expect(isHome(container)).toBe(false);
+    expect(container.querySelector('[data-testid="setup-flow"]')).toHaveTextContent('viewer');
+
+    act(() => {
+      answerFlags({ onboarding: false });
     });
 
     expect(isHome(container)).toBe(false);

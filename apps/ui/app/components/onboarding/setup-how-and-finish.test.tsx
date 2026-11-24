@@ -8,6 +8,7 @@ const flags = vi.hoisted(() => ({ onboarding: true, viewerControls: true, partsW
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: keyof typeof flags) => flags[flag],
   useFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+  useFeatureGate: (flag: keyof typeof flags) => (flags[flag] ? 'open' : 'closed'),
 }));
 const host = vi.hoisted(() => ({ isDesktop: false }));
 vi.mock('#lib/build-target.js', () => ({ isDesktopTarget: () => host.isDesktop }));

@@ -67,7 +67,7 @@ const storeTourWanted = (): void => {
   }
 };
 
-/** Wait for `onboarding` to be known, then ask for the tour if it is on. */
+/** Wait for `onboarding` to be known (through a failed load, until a later refresh answers), then ask if it is on. */
 const askForTourOnceOnboardingIsKnown = async (): Promise<void> => {
   if (await whenFeatureKnown('onboarding')) {
     storeTourWanted();
@@ -91,7 +91,9 @@ const askForTourWhenOnboardingIsOn = (): void => {
  * The decision is one-shot: once the project exists it is no longer a first. A newcomer can create it before PostHog
  * has answered for `onboarding`, so a flag that is still unknown does not count as off: the workspace and session are
  * read as for an enabled flag, and the returned call stores the request once the flag is known to be on, against the
- * record as it is then (setup may have been skipped meanwhile).
+ * record as it is then (setup may have been skipped meanwhile). A failed flag load is unknown too: the request waits
+ * for PostHog's background refresh rather than being dropped (as off would) or stored for a flag nobody evaluated (as
+ * on would); if no answer comes while the page is open, nothing is stored.
  *
  * @param ports - The workspace and session reads.
  * @returns A function to call once the project exists, or `undefined` when nothing is to be stored.

@@ -22,6 +22,7 @@ import { buildId, queryLiveBuild, readServerVerdict, subscribeServerVerdict } fr
 import { isDesktopTarget } from '#lib/build-target.js';
 import { readReportedBuildFloor, subscribeReportedBuildFloor } from '#lib/build-identity.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { stopCachingMessageType } from '#offline/pwa-messages.js';
 
 /** Longest wait for an idle period after load before registering anyway. Milliseconds. */
 export const registerIdleLimit = 10_000;
@@ -67,9 +68,6 @@ export const checkForRetiringWorker = async (): Promise<void> => {
   }
 };
 
-/** How long after the page settles safe mode sweeps the worker caches a second time. Milliseconds. */
-export const safeModeResweepMilliseconds = 10_000;
-
 /** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
 export const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
 
@@ -105,39 +103,58 @@ const afterLoadAndIdle = (start: () => void): (() => void) => {
   };
 };
 
+/** How long safe mode waits for the controlling worker to confirm it has stopped writing caches. Milliseconds. */
+export const stopCachingTimeoutMilliseconds = 10_000;
+
 /**
- * Safe mode (`?safe=1`) under a worker: unregister every registration and delete the worker caches, so the next load
- * reaches the network as if no worker were there (FP5). A page in safe mode registers nothing.
+ * Ask the worker that controls this page to stop writing caches for the rest of its life (FP5), and wait for its
+ * answer: it comes once no write of the worker can follow. A worker that predates the message never answers; the
+ * wait then ends at the timeout.
+ *
+ * @param worker - The controlling worker.
+ * @param timeoutMilliseconds - The longest wait.
+ * @returns Whether the worker confirmed.
  */
-export const leaveServiceWorker = async (
-  settle: (sweep: () => void) => void = (sweep) => {
-    afterLoadAndIdle(() => {
-      sweep();
-      setTimeout(sweep, safeModeResweepMilliseconds);
-    });
-  },
-): Promise<void> => {
+export const stopWorkerCaching = async (
+  worker: Pick<ServiceWorker, 'postMessage'>,
+  timeoutMilliseconds = stopCachingTimeoutMilliseconds,
+): Promise<boolean> => {
+  const channel = new MessageChannel();
   try {
+    return await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve(false);
+      }, timeoutMilliseconds);
+      channel.port1.addEventListener('message', () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+      channel.port1.start();
+      worker.postMessage({ type: stopCachingMessageType }, [channel.port2]);
+    });
+  } finally {
+    channel.port1.close();
+  }
+};
+
+/**
+ * Safe mode (`?safe=1`) under a worker: stop the controlling worker's cache writes, unregister every registration and
+ * then delete the worker caches, so the next load reaches the network as if no worker were there (FP5). The worker
+ * keeps controlling this page until it navigates, but writes nothing more, so the one sweep is final. A page in safe
+ * mode registers nothing.
+ */
+export const leaveServiceWorker = async (): Promise<void> => {
+  try {
+    const { controller } = globalThis.navigator.serviceWorker;
+    if (controller !== null) {
+      await stopWorkerCaching(controller);
+    }
     const registrations = await globalThis.navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(async (registration) => registration.unregister()));
     if ('caches' in globalThis) {
       // Loaded here, off Home's critical tier: only a page in safe mode needs it.
       const { deleteOrphanWorkerCaches } = await import('#offline/pwa-caches.js');
       await deleteOrphanWorkerCaches(globalThis.caches);
-      /* The unregistered worker keeps controlling this page until it navigates, so a chunk the page loads later (a lazy
-       * route module, the idle warm-up) is cached again on first use. Sweep once the page has settled, and once more. */
-      if (globalThis.navigator.serviceWorker.controller !== null) {
-        settle(() => {
-          // async-iife: bootstrap -- a sweep that fails leaves what the next normal load's orphan cleanup deletes.
-          void (async () => {
-            try {
-              await deleteOrphanWorkerCaches(globalThis.caches);
-            } catch {
-              // Storage refused: as above.
-            }
-          })();
-        });
-      }
     }
   } catch {
     // Storage refused: the next safe-mode load tries again.

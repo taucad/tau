@@ -803,6 +803,24 @@ describe('convertReplicadGeometriesToGltf with kept pack facts (N6)', () => {
   });
 });
 
+/**
+ * SHA-256 of a GLB without its `asset.generator`, which names the writing package's version and so changes on every
+ * release (as in `apps/runtime-e2e/src/bundler-parity.test.ts`): the JSON chunk re-serialized without it, then the
+ * BIN chunk as is.
+ */
+function digestGlbWithoutGenerator(glb: Uint8Array<ArrayBuffer>): string {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength))) as {
+    asset: { generator?: string };
+  };
+  delete json.asset.generator;
+  const binStart = 20 + jsonLength;
+  const binLength = binStart < glb.byteLength ? view.getUint32(binStart, true) : 0;
+  const bin = glb.subarray(binStart + 8, binStart + 8 + binLength);
+  return createHash('sha256').update(JSON.stringify(json)).update(bin).digest('hex');
+}
+
 describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', () => {
   const parts = (count: number): GeometryReplicad[] =>
     Array.from({ length: count }, (_, index) => createSimpleGeometry({ name: `Part ${index}` }));
@@ -831,11 +849,9 @@ describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', 
     const geometries = parts(2);
     const glb = convertReplicadGeometriesToGltf({ geometries });
 
-    // The SHA-256 of these two parts' GLB as packed on main at 63b2560f81, before any change to the pack: a change
+    // The digest of these two parts' GLB as packed on main at 63b2560f81, before any change to the pack: a change
     // to the packed bytes fails here instead of changing both sides of a comparison.
-    expect(createHash('sha256').update(glb).digest('hex')).toBe(
-      'ea165658afade33d8e7f70a673456e8b652776106dfa31408c89906f6abc1907',
-    );
+    expect(digestGlbWithoutGenerator(glb)).toBe('f65646d5bd832a51d3fe79c9c772bcf7326e088cad407cbd910a14b50f159a0d');
     // And packing is deterministic: a second pack of the same parts gives the same bytes.
     expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(glb);
   });

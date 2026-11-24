@@ -806,13 +806,24 @@ describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', 
   const parts = (count: number): GeometryReplicad[] =>
     Array.from({ length: count }, (_, index) => createSimpleGeometry({ name: `Part ${index}` }));
 
-  it('should poll the abort word before each part and before writing', () => {
+  it('should poll the abort word before each part, before writing, and in the writer', () => {
     abort.polls = 0;
     abort.abortAfter = Number.POSITIVE_INFINITY;
 
     convertReplicadGeometriesToGltf({ geometries: parts(3) });
 
-    expect(abort.polls).toBe(4);
+    // Three parts and the write, then the writer's poll before each of the three nodes and before serializing.
+    expect(abort.polls).toBe(8);
+  });
+
+  it('should stop inside the writer once a supersede lands after the last pack poll', () => {
+    abort.polls = 0;
+    abort.abortAfter = 4;
+
+    expect(() => convertReplicadGeometriesToGltf({ geometries: parts(3) })).toThrow(/superseding/u);
+    // The pack's four polls passed; the writer's first poll stopped the write.
+    expect(abort.polls).toBe(5);
+    abort.abortAfter = Number.POSITIVE_INFINITY;
   });
 
   it('should stop between parts once a later operation supersedes the render', () => {

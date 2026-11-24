@@ -10,6 +10,7 @@ related:
   - docs/policy/geospec-policy.md
   - docs/research/typescript-overloads.md
   - docs/research/mesh-continuity-test-semantics.md
+  - docs/research/ci-flake-quarantine-blueprint.md
 ---
 
 # Testing Policy
@@ -411,6 +412,8 @@ Credentialed provider coverage and deterministic simulated coverage are separate
 
 For a non-trivial behavior fix, establish the smallest failing semantic check before its correction. Preserve applicable existing regression tests; remove tests only when their behavior is deliberately retired, not to hide a failure. Tests for a non-shipping feature are deleted or completed with that feature rather than permanently skipped. A reversible prose-only change does not need a new test.
 
+Never skip, disable or delete a test, or remove its assertions, to get green. A failing gating test stops gating only through a § 16.3 quarantine entry, and a quarantined test still runs and reports.
+
 Run the affected project typecheck for TypeScript changes. Verify changed UI behavior visually and changed runtime behavior through execution before claiming success; report unavailable checks as unverified. For an exact cross-pipeline byte contract, make the parity regression fail before changing the pipeline. Converter round trips compare the re-imported geometry to the declared reference model and investigate deviations instead of accepting format-specific drift.
 
 Streaming tests assert provider-neutral state and lifecycle outcomes. Do not lock shared tests to one provider's usage counts or incidental preamble ordering. Public typing changes need positive consumer fixtures and negative `@ts-expect-error` cases whose unexpected acceptance fails the typecheck. Upstream regression tests use parsed/structural assertions instead of regexes over source text.
@@ -421,7 +424,62 @@ Run coverage explicitly when validating coverage thresholds. A normal passing te
 
 ## 16. Root-Cause CI Failures Before Re-Running
 
-A CI or merge-queue failure in a project the change affects, including a crash with no failing assertion, is never re-queued or re-run to green first. Root-cause it, fix it in that PR or a prerequisite PR, and show the before/after evidence. Re-queue only a failure in a project the diff does not affect, with evidence that it also fails without the change. Do not knowingly land a flaky test on `main`.
+A CI or merge-queue failure in a project the change affects, including a crash with no failing assertion, is never re-queued or re-run to green by hand. Root-cause it, fix it in that PR or a prerequisite PR, and show the before/after evidence. Re-queue only a failure in a project the diff does not affect, with evidence that it also fails without the change. The only retry is the recorded one of § 16.2; nothing else re-runs a test, a task, a job or a queue entry.
+
+Thresholds marked **[O3: pending]** await the operator's bounds decision (O3 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md#decisions-for-the-operator)); the blueprint's proposed value is given beside each. Until the shared reporter and `validate-quarantine` enforce § 16.2–16.4, no test is quarantined, and the silent `retry: 2` in `ui-e2e` and `react-e2e` is the only exception to this section, pending its replacement by § 16.2.
+
+### 16.1 Definition of Green
+
+A task is green when every gating test passed, at most on its second attempt; every second-attempt pass is recorded; and every failing test that does not gate is named in a valid `quarantine.json` entry on the tested commit. A test that fails every attempt on one task hash is a failure whatever its history, so a retry never turns a deterministic regression green. The merge queue stays `ALLGREEN`: each entry's own merge commit must be green. A missing or unreadable outcome file, an entry that matches no test, or an expired entry fails the task or the validator; none counts as a pass.
+
+### 16.2 Recorded Retry
+
+| Rule                       | Requirement                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| One attempt more           | CI gives every Vitest test one in-process retry, set by the shared helper; no suite sets a higher count                         |
+| Recorded                   | A retried pass is written to the outcome record, the job summary and a warning annotation, and counts as a flake event          |
+| Own changes earn no credit | A test in a file the entry's diff changes, or a new test, gets no retry credit: its retried pass fails the task                 |
+| Budget                     | More than three retried passes in a task fail it; more than **[O3: pending]** in a run fail it (blueprint RT-4: five)           |
+| Under verification         | A test whose fix is being verified (§ 16.5) has no retry                                                                        |
+| Infrastructure steps       | Non-test steps (apt, downloads, browser install) retry up to three times with backoff, each retry recorded as a job-level event |
+| No other retry             | No task-level or job-level automatic re-run, no automatic re-queue, and no manual re-queue of an affected project               |
+
+A retried pass is debt, not a home: a test that keeps needing it is quarantined and fixed (§ 16.3). Changed and new test files run ten times with shuffled order on the pull request, capped at 5 minutes, and a failure there fails the pull request. Do not knowingly land a new or changed test that flakes.
+
+### 16.3 Quarantine
+
+A flake is a pass and a failure of one test on the same inputs (one Nx task hash, or a retry inside one execution). A test whose flake events meet the blueprint's entry rule (D3: two in its last 80 executions, or three in 230) is quarantined:
+
+- **Where.** One `quarantine.json` at the root of the project that owns the test, on `main`. Quarantine state never lives in a repository variable, an issue label or an outside service.
+- **Scope.** One test identity, optionally narrowed to a variant (browser, OS, target). Never a file, a suite or a project.
+- **Entry.** Each entry names the test, owner, issue, class, quarantine date, expiry date and evidence. The ledger job opens the entry's pull request; it lands through the merge queue without a human when `validate-quarantine` passes. Until it lands, § 16.2 carries the test.
+- **Effect.** The quarantined test runs in the same job as before; its failure is printed, annotated and recorded. Only the task's verdict ignores it.
+- **Who edits it.** Only the ledger job adds, releases or expires entries; a fix never touches them (§ 16.5).
+
+| Bound                    | Value                                                                  | When reached                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Entries in the workspace | **[O3: pending]** (blueprint: 20)                                      | No new quarantine; the flake keeps gating behind the retry                                          |
+| Entries per project      | **[O3: pending]** (blueprint: 5)                                       | The same, for that project                                                                          |
+| Age                      | **[O3: pending]** (blueprint: 14 days)                                 | **[O3: pending]** (blueprint: the entry is removed, the test gates again and the operator is paged) |
+| Renewal                  | **[O3: pending]** (blueprint: once, by a human, to 28 days in all)     | A further renewal fails validation                                                                  |
+| Return after release     | **[O3: pending]** (blueprint: within 30 days counts as the same entry) | Goes to the operator, not the agent                                                                 |
+
+### 16.4 Never-Quarantine Set
+
+Tests for money, data integrity, security boundaries and the formal models are never quarantined and always gate. `validate-quarantine` rejects an entry for them. A flake there pages the operator and starts an agent at once.
+
+### 16.5 Fixing and Releasing a Flake
+
+An agent reproduces, classifies and fixes the flake through the normal merge queue. The fix states its mechanism, the reproducing mode with its failure count before the fix, and at least 100 straight passes after it.
+
+| Fix                                                                                  | Landing                         |
+| ------------------------------------------------------------------------------------ | ------------------------------- |
+| Test-only, reproduced, with the stress proof and a green `validate-flake-fix`        | Auto-merges through the queue   |
+| Touches product code, widens a tolerance or loosens a matcher, or was not reproduced | Waits for the operator's review |
+
+A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry`, `testTimeout` or a per-test timeout, adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these.
+
+Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
 
 ## Summary Checklist
 
@@ -436,3 +494,4 @@ Before merging a test:
 - [ ] Mock factories are shared, not duplicated per test file
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
+- [ ] A flaky test is fixed at its cause, not skipped, slept on or given a longer timeout or more retries

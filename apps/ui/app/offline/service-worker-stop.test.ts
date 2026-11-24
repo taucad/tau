@@ -43,9 +43,9 @@ describe('createCachingStop (FP5)', () => {
   });
 
   it('should keep the stop for a restart of the worker, and forget it on a new install', async () => {
-    const indexedDB = new IDBFactory();
-    await createCachingStop(indexedDB).stop();
-    const restarted = createCachingStop(indexedDB);
+    const factory = new IDBFactory();
+    await createCachingStop(factory).stop();
+    const restarted = createCachingStop(factory);
     await restarted.ready;
     expect(restarted.isStopped()).toBe(true);
     const written: string[] = [];
@@ -54,10 +54,10 @@ describe('createCachingStop (FP5)', () => {
     });
     expect(written).toStrictEqual([]);
 
-    const installed = createCachingStop(indexedDB);
+    const installed = createCachingStop(factory);
     await installed.clear();
     expect(installed.isStopped()).toBe(false);
-    const next = createCachingStop(indexedDB);
+    const next = createCachingStop(factory);
     await next.ready;
     expect(next.isStopped()).toBe(false);
   });

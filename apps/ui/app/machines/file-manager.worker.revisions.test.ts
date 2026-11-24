@@ -120,7 +120,10 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus' | 'firstViewShown'> & {
+  extra: Pick<
+    WorkerRevisionRegistryOptions,
+    'servePlacement' | 'clock' | 'observeStatus' | 'firstViewShown' | 'safeMode'
+  > & {
     onCreatePort?: (telemetryConsent: () => ReportingConsent | undefined) => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
@@ -152,6 +155,7 @@ const harness = (
     mintFloor: 0,
     ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
     ...(extra.firstViewShown === undefined ? {} : { firstViewShown: extra.firstViewShown }),
+    ...(extra.safeMode === undefined ? {} : { safeMode: extra.safeMode }),
     createPort: (projectId, _credential, telemetryConsent) => {
       extra.onCreatePort?.(telemetryConsent);
       return wrapPort(
@@ -662,6 +666,70 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       },
       { timeout: 15_000 },
     );
+    await root.release();
+  });
+
+  /* W9 R5 (Principal ruling): safe mode, known when the worker is created, refuses every Tau Cloud leg before any
+   * request, states it, and never retries; a plain Git remote still syncs. */
+  it.each([
+    ['tau', 'refused, stated and never retried', false],
+    ['origin', 'synced as usual', true],
+  ] as const)('should leave a %s remote %s in safe mode', async (remoteName, _outcome, reaches) => {
+    const reached: string[] = [];
+    const fixture = harness(
+      ['alpha'],
+      (port) => ({
+        ...port,
+        listRemotes: async () => [
+          { name: remoteName, url: 'https://remote.test/project.git', kind: remoteName === 'tau' ? 'tau' : 'git' },
+        ],
+        listRemoteRefs: async () => {
+          reached.push('listRemoteRefs');
+          return [];
+        },
+        fetch: async () => {
+          reached.push('fetch');
+          return { refs: [] };
+        },
+        push: async (input) => {
+          reached.push('push');
+          const held = await port.listRefs('refs/heads');
+          return {
+            refs: input.refs.map((ref) => ({
+              name: ref.name,
+              status: 'updated',
+              head: held.find((entry) => entry.name === ref.name)?.head,
+            })),
+          };
+        },
+      }),
+      { safeMode: true },
+    );
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.ts', 'first');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    root.send({ command: 'saveRevision' });
+    const sync = () => alpha.frames.findLast((frame) => frame.type === 'status')?.status.sync;
+    if (reaches) {
+      await vi.waitFor(
+        () => {
+          expect(reached).toContain('push');
+        },
+        { timeout: 15_000 },
+      );
+      expect(sync()?.reason).not.toBe('safeMode');
+    } else {
+      await vi.waitFor(
+        () => {
+          expect(sync()?.reason).toBe('safeMode');
+        },
+        { timeout: 15_000 },
+      );
+      expect(sync()?.error).toBe('Tau Cloud is off in safe mode.');
+      await settle(40);
+      expect(reached).toEqual([]);
+    }
     await root.release();
   });
 

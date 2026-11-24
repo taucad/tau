@@ -2963,6 +2963,27 @@ describe('syncMachine', () => {
     busy.stop();
   });
 
+  it('W9 R5: safe mode fails after one push, is stated as safeMode and is never retried', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'push', {
+      error: Object.assign(new Error('Tau Cloud is off in safe mode.'), { code: 'REMOTE_SAFE_MODE' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+      reason: 'safeMode',
+      error: 'Tau Cloud is off in safe mode.',
+    });
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    harness.stop();
+  });
+
   it('L2-F9: the open pull has a finite fifteen-minute transfer deadline', () => {
     expect(machineModule.syncPullDeadlineMilliseconds).toBe(15 * 60_000);
   });

@@ -9,13 +9,12 @@
     "formal:logs": {},
     "test": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "metadata": {
-        "description": "Node-only suites: none of them serves apps/ui/build (ui-build-snapshot.test.ts builds a fixture tree in a temp directory), so this target builds no web UI variant and carries no env fixture. serve-ui-build.test.ts reads apps/ui/serve/build, which the ui:build:serve dependency produces and caches. The browser tiers below still build ui themselves."
+        "description": "Node-only suites that read no UI build: none of them serves apps/ui/build or apps/ui/serve/build (ui-build-snapshot.test.ts builds a fixture tree in a temp directory), so this target depends on no UI build and carries no env fixture, and a CI test lane that runs it builds no UI bundle. serve-ui-build.test.ts, which reads apps/ui/serve/build, runs in test:e2e:daemon-host, which already depends on ui:build:serve. The browser tiers below still build ui themselves."
       },
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
       }
     },
     "test:e2e:queue": {
@@ -236,10 +235,14 @@
     "test:e2e:daemon-host": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
+      "metadata": {
+        "description": "The `tau serve` daemon over the serve build that its ui:build:serve dependency writes to apps/ui/serve/build. First its bytes on the wire, from Node (src/support/serve-ui-build.test.ts: status, headers, the SPA fallback, the cadmpeg engines the daemon serves); then a real chat placed on the daemon in Chromium (src/daemon-agent-host.spec.ts), after ui:build. serve-ui-build.test.ts runs here rather than in test, so no CI test lane builds a UI bundle (CI decomposition global review, G5)."
+      },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
+          "pnpm --dir ../.. exec vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "pnpm --dir ../.. exec nx run ui:build",
           "vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
         ],

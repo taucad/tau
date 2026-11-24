@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type * as RuntimeKernelModule from '@taucad/runtime/kernel';
@@ -828,7 +829,14 @@ describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', 
   it('should pack the same bytes while nothing aborts', () => {
     abort.abortAfter = Number.POSITIVE_INFINITY;
     const geometries = parts(2);
+    const glb = convertReplicadGeometriesToGltf({ geometries });
 
-    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(convertReplicadGeometriesToGltf({ geometries }));
+    // The SHA-256 of these two parts' GLB as packed on main at 63b2560f81, before any change to the pack: a change
+    // to the packed bytes fails here instead of changing both sides of a comparison.
+    expect(createHash('sha256').update(glb).digest('hex')).toBe(
+      'ea165658afade33d8e7f70a673456e8b652776106dfa31408c89906f6abc1907',
+    );
+    // And packing is deterministic: a second pack of the same parts gives the same bytes.
+    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(glb);
   });
 });

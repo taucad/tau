@@ -55,11 +55,15 @@ type DeploymentProxy = {
   route: DeploymentRoute;
   /** How many times the shell asked the deployment route. */
   asked: number;
+  /** Every Tau Cloud read the shell made through the proxy (`/v1/projects`, billing, cloud agents), by path. */
+  readonly cloudReads: string[];
   payments: PaymentStubs | undefined;
   readonly close: () => Promise<void>;
 };
 
 const paymentActionPath = '/v1/billing/payment-actions';
+/** The API paths that read the account's Tau Cloud: its projects, its billing and its cloud agents (W9 R5). */
+const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud)(?:\/|$)/u;
 
 /** A manual top-up as the API reports it: opened in the browser, or fulfilled with its receipt. */
 const paymentAction = (stubs: PaymentStubs, state: 'redirect_required' | 'fulfilled'): string =>
@@ -109,6 +113,7 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     url: '',
     route: 'pass',
     asked: 0,
+    cloudReads: [],
     payments: undefined,
     close: async () => undefined,
   };
@@ -212,6 +217,9 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
   };
   const server: Server = createServer((incoming, outgoing) => {
     const requestUrl = new URL(incoming.url ?? '/', 'http://proxy');
+    if (tauCloudReadPath.test(requestUrl.pathname) && incoming.method !== 'OPTIONS') {
+      proxy.cloudReads.push(requestUrl.pathname);
+    }
     if (answerPayment(incoming, outgoing, requestUrl)) {
       return;
     }
@@ -259,7 +267,11 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
 
 type BootLedger = {
   readonly unhealthyCount: number;
-  readonly last?: { readonly mode: string; readonly stage: string; readonly deadlinePassed?: boolean };
+  readonly last?: {
+    readonly mode: string;
+    readonly stage: string;
+    readonly deadlinePassed?: boolean;
+  };
 };
 
 const readBootLedger = async (session: DesktopSession): Promise<BootLedger | undefined> => {
@@ -297,7 +309,9 @@ const pendingPaymentActionsKey = 'tau-pending-payment-actions';
 
 const readPendingActionIds = async (current: DesktopSession): Promise<string[]> =>
   current.page.evaluate((key) => {
-    const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{ actionId: string }>;
+    const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{
+      actionId: string;
+    }>;
     return entries.map((entry) => entry.actionId);
   }, pendingPaymentActionsKey);
 
@@ -356,6 +370,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       session = undefined;
       proxy.route = 'pass';
       proxy.asked = 0;
+      proxy.cloudReads.length = 0;
       proxy.payments = undefined;
     }
   });
@@ -443,6 +458,75 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     expect(stubs.reads.get(expiredId)).toBeUndefined();
   });
 
+  /* W9 D1 (research w9-desktop-acceptance-defects R1, R2; charter A2, A3). The renderer is taken offline the way the
+   * operating system takes it: requests fail (session emulation) and the page reads offline (`navigator.onLine`). */
+  it('shows the last-known person on an offline launch, then the user and Billing with no reload once the network returns', async () => {
+    const accountName = 'Tau Desktop Smoke';
+    const { session: first, token } = await launch({ preserveProfile: true });
+    await expectSignedIn(first.page);
+    const footerOf = (current: DesktopSession) =>
+      current.page.getByRole('button', { name: new RegExp(accountName, 'u') }).first();
+    /* Verified once online: the identity record is written. */
+    await expectVisible(footerOf(first), launchTimeout);
+
+    const firstProcess = first.application.process();
+    await first.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect
+      .poll(() => firstProcess.exitCode ?? firstProcess.signalCode, {
+        timeout: 60_000,
+      })
+      .not.toBeNull();
+    const { profileRoot } = first;
+    await first.close();
+    session = undefined;
+
+    const { session: second } = await launch({
+      relaunch: { profileRoot, token: token! },
+    });
+    const setOffline = async (offline: boolean): Promise<void> => {
+      await second.application.evaluate(async ({ session: electronSession }, isOffline) => {
+        electronSession.defaultSession.enableNetworkEmulation({
+          offline: isOffline,
+        });
+      }, offline);
+      await second.application.context().setOffline(offline);
+    };
+    await setOffline(true);
+    try {
+      await second.page.reload({ waitUntil: 'load' });
+      expect(await second.page.evaluate(() => navigator.onLine)).toBe(false);
+
+      /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
+      const footer = footerOf(second);
+      await expectVisible(footer, launchTimeout);
+      await expectVisible(composerOf(second.page), launchTimeout);
+      await footer.click();
+      const menu = second.page.getByRole('menu');
+      await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
+      expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
+      await second.page.evaluate(() => {
+        (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
+      });
+
+      /* The network returns: within A3's 10 s, with no reload, the session verifies and Billing appears. */
+      await setOffline(false);
+      await expect
+        .poll(async () => menu.getByText('Can’t reach Tau').count(), {
+          timeout: 10_000,
+        })
+        .toBe(0);
+      await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)$/u }), 10_000);
+      await expectVisible(footer, 10_000);
+      expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
+        true,
+      );
+    } finally {
+      await setOffline(false);
+    }
+  });
+
   it('shows the funded surfaces against a funded API, and /usage with the balance', async () => {
     const { session: current } = await launch();
     await expectSignedIn(current.page);
@@ -488,12 +572,18 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     expect(current.application.windows().some((page) => page.url().endsWith('/recovery/index.html'))).toBe(false);
   });
 
-  it('shows no Cloud surface in safe mode, and never asks the route (D10)', async () => {
+  it('shows no Cloud surface in safe mode, and never asks the route or reads Tau Cloud (D10, W9 R5)', async () => {
     const { session: current } = await launch({ args: ['--safe-mode'] });
     await expectVisible(current.page.locator('[data-slot="safe-mode-bar"]'), launchTimeout);
+    /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read, and the library says so. */
+    await expectVisible(
+      current.page.getByText('Tau Cloud is off in safe mode', { exact: false }).first(),
+      launchTimeout,
+    );
     await openUsage(current);
     await expect.poll(async () => usageHeading(current).count(), { timeout: 10_000 }).toBe(0);
     expect(proxy.asked).toBe(0);
+    expect(proxy.cloudReads).toEqual([]);
   });
 
   it('refetches the balance when the window regains focus without hiding (D14)', async () => {

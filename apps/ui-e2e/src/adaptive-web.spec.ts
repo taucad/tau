@@ -56,6 +56,26 @@ describe.skipIf(!adaptiveTier)('adaptive web build (W7)', () => {
     await commands.uiStartObservedRequests();
     await home();
     await expect.poll(async () => cloudChunkRequested(chunks), { timeout: 30_000 }).toBe(true);
+    /* W9 D3: the Cloud chunk's payment artwork reaches the document, so a card brand (`<use href="#visa">`, as the
+     * Add credits dialog and the Billing payment-method row draw it) renders with a size. */
+    await expect
+      .poll(
+        async () =>
+          target.evaluate(() => {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', '70');
+            svg.setAttribute('height', '48');
+            const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+            use.setAttribute('href', '#visa');
+            svg.append(use);
+            document.body.append(svg);
+            const { width } = use.getBBox();
+            svg.remove();
+            return document.querySelector('symbol#visa') !== null && width > 0;
+          }),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
     /* One build (W12): `/usage` is in the web manifest and shows the usage page while funded. */
     await target.navigate('/usage');
     await target.expectVisible(selectors.getByRole('heading', { name: 'Tau usage' }), 30_000);

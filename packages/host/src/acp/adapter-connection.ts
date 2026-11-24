@@ -35,6 +35,22 @@ import type {
 } from '#acp/acp-session.machine.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 
+/*
+ * Let stderr catch up with the reply that just failed. An adapter writes why it failed to stderr and then answers on
+ * stdout, but the two are separate pipes, read in whatever order the event loop polls them: when the error reply is
+ * handled first, the explanation is already in the stderr pipe and not yet read, and the failure carried no
+ * diagnostics (seen on CI under load). Each turn of the event loop polls every readable pipe, so after the turns below
+ * the bytes the adapter wrote before its reply have been read into the tail.
+ */
+const stderrWrittenBefore = async (): Promise<void> => {
+  for (let turn = 0; turn < 2; turn++) {
+    // oxlint-disable-next-line no-await-in-loop -- one poll phase per turn.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+};
+
 /* A failed call, as the machine reads it: its code, its message, and the stderr tail beside it. */
 const callError = (error: unknown, stderr: string): AcpCallError => {
   const code = isRecord(error) ? error['code'] : undefined;
@@ -193,6 +209,7 @@ export const createAdapterConnection = (
           answer: { method: command.method, result } as unknown as AcpAnswer,
         });
       } catch (error) {
+        await stderrWrittenBefore();
         send({
           type: 'callSettled',
           id,

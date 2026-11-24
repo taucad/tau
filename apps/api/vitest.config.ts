@@ -35,7 +35,7 @@ export default defineConfig({
       'dist/**',
       'out-tsc/**',
     ],
-    reporters: ['default'],
+    reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
     testTimeout: 120_000,
   },
 });

@@ -11,10 +11,13 @@ import { ChatMessageUsage, sumUsageTokens } from '@taucad/billing-ui/components/
 export function ChatMessageDataUsage({
   usageParts,
   credits,
+  onRetryCredits,
 }: {
   readonly usageParts: readonly UsageData[];
   /** The Tau credits line, when a funded mode supplies one. */
   readonly credits?: string | undefined;
+  /** The credits line's Retry, while it reads "Can't check" (I15). */
+  readonly onRetryCredits?: (() => void) | undefined;
 }): React.JSX.Element | undefined {
   const { resolveModel } = useModels();
   const lastUsage = usageParts.at(-1);
@@ -29,6 +32,7 @@ export function ChatMessageDataUsage({
       totals={sumUsageTokens(usageParts)}
       turns={usageParts.length}
       credits={credits}
+      onRetryCredits={onRetryCredits}
       reference={lastUsage.attemptId}
     />
   );

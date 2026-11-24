@@ -75,6 +75,7 @@ export function ChatMessageUsage({
   totals,
   turns,
   credits,
+  onRetryCredits,
   reference,
   vendorReports = [],
 }: {
@@ -85,6 +86,8 @@ export function ChatMessageUsage({
   readonly turns: number;
   /** Credit summary line; omitted entirely on self-host or when the user hides costs. */
   readonly credits?: string | undefined;
+  /** The credits line's Retry, while it reads "Can't check" (I15). */
+  readonly onRetryCredits?: (() => void) | undefined;
   readonly reference?: string | undefined;
   readonly vendorReports?: ReadonlyArray<NonNullable<UsageData['vendorReport']>> | undefined;
 }): React.JSX.Element {
@@ -159,6 +162,13 @@ export function ChatMessageUsage({
             </React.Fragment>
           ))}
         </dl>
+        {credits === undefined || onRetryCredits === undefined ? undefined : (
+          <div className='mt-2 flex justify-end'>
+            <Button variant='outline' size='xs' onClick={onRetryCredits}>
+              Retry
+            </Button>
+          </div>
+        )}
         <p className='mt-2 text-[11px] text-muted-foreground'>{breakdown}</p>
         {reference === undefined ? undefined : (
           <p className='mt-1 font-mono text-[11px] text-muted-foreground'>Reference {reference}</p>

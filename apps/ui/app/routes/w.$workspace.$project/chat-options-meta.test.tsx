@@ -255,7 +255,8 @@ describe('ChatOptionsMeta — receipt credits', () => {
     renderMeta();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: 1 · 1 pending')).toBeInTheDocument();
+      /* The failed read is a check in flight for one ask deadline, then "can't check" (I15), never "pending". */
+      expect(screen.getByLabelText('Tau credits: 1 · 1 checking')).toBeInTheDocument();
     });
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });

@@ -44,6 +44,7 @@ describe('ProjectSyncStatus', () => {
   it('should distinguish inbound, outgoing and recovery work without a three-second timeout', () => {
     expect(projectSyncIndicator(healthy, true)?.label).toBe('Preparing files…');
     expect(projectSyncIndicator(undefined, true)?.label).toBe('Opening project…');
+    expect(projectSyncIndicator(undefined, true)?.detail).toBe('Opening this project on this device.');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'fetching' }, false)?.label).toBe('Downloading files…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'applying' }, false)?.label).toBe('Preparing files…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'records', chats: 'loading' }, false)?.label).toBe(

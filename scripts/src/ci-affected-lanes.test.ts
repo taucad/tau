@@ -1946,8 +1946,12 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
     // A row the deal does not know runs nothing; a deal over more shards than rows drops their projects.
     expect(rows).toEqual(Array.from({ length: rows.length }, (_, index) => `test-${index + 1}`));
     expect(rows.length).toBeGreaterThanOrEqual(4);
-    expect(script).toContain(
-      `node scripts/src/test-shard-dealer.ts --shard "\${LANE#test-}" --shards ${String(rows.length)})`,
+    expect(script).toMatch(
+      new RegExp(
+        String.raw`node scripts/src/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards ${String(rows.length)} \\\n\s+` +
+          String.raw`--graph "\$RUNNER_TEMP/test-graph\.json" --targets test\)`,
+        'u',
+      ),
     );
     expect(uiTargets.length).toBeGreaterThanOrEqual(4);
   });
@@ -1974,6 +1978,12 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
               Object.keys(projects).flatMap((name) => [
                 [`${name}:test`, { target: { project: name, target: 'test' } }],
                 [`${name}:copy-assets`, { target: { project: name, target: 'copy-assets' } }],
+              ]),
+            ),
+            dependencies: Object.fromEntries(
+              Object.keys(projects).flatMap((name) => [
+                [`${name}:test`, [`${name}:copy-assets`]],
+                [`${name}:copy-assets`, []],
               ]),
             ),
           },

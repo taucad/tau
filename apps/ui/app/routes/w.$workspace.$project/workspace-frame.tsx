@@ -15,6 +15,7 @@ import {
   readWideFrameHint,
 } from '#lib/frame-hint.js';
 import type { FrameHintVariables, PhoneFrameHint, PhoneFrameHintVariables, WideFrameHint } from '#lib/frame-hint.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 import {
   MobileWorkbenchNavigationFrame,
   mobileWorkbenchNavigationHeight,
@@ -340,7 +341,7 @@ export function WorkspaceOpening(): React.JSX.Element {
     <span
       role='status'
       aria-busy='true'
-      aria-label='Opening project'
+      aria-label={projectOpenCopy.connecting.label}
       data-testid='workspace-opening'
       className='sr-only'
     />

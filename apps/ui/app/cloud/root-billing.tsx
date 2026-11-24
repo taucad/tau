@@ -1,6 +1,5 @@
 import { useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { useSession } from '@better-auth-ui/react';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 import type { BillingSession } from '@taucad/billing/hooks/billing-session';
 import {
@@ -8,7 +7,7 @@ import {
   FinancialSessionScope,
 } from '@taucad/billing-ui/providers/financial-session-provider';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
-import { authClient } from '#lib/auth-client.js';
+import { useIdentity } from '#hooks/use-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { ENV } from '#environment.config.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
@@ -61,9 +60,12 @@ export const fundedIdentity = (
     : undefined;
 
 function AdaptiveBillingSession({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const { data: session } = useSession(authClient);
+  /* The owner is the identity owner's (W9 R1): an offline launch keeps the last-known owner bound, so an
+   * offline-induced "no owner" never purges or remounts (D17), and a verified answer for the same owner changes
+   * nothing. */
+  const { user: owner } = useIdentity();
+  const ownerId = owner?.id;
   const mode = useDeploymentMode();
-  const ownerId = session?.user.id;
   // Desktop SPA prerender runs before preload supplies the runtime API configuration.
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent during desktop SPA prerender.
   const apiBaseUrl = isDesktopTarget() && globalThis.window === undefined ? undefined : ENV.TAU_API_URL;

@@ -1134,7 +1134,10 @@ const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((valu
       Array.isArray(node['children']) && node['children'].every((child) => fileTreeNodeSchema.safeParse(child).success)
     );
   }
+  /* Facts arrive only when already known (`StatContentMetadata`): an unmeasured file, as every raw provider
+   * listing gives, carries neither, and refusing it rejected a whole directory for one plain file. */
   return (
+    (node['contentKind'] === undefined && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'binary' && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'text' &&
       (node['lineCount'] === undefined || finiteNumberSchema.safeParse(node['lineCount']).success))

@@ -41,7 +41,7 @@ export default defineConfig({
       'src/graphics/three/utils/section-stencil-caps.browser.test.ts',
     ],
     fileParallelism: false,
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     testTimeout: 120_000,
     browser: {
       enabled: true,

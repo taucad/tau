@@ -17,10 +17,8 @@
  * have expired. Expected-failure markers in test sources carry the same owner and expiry (see
  * {@link scanExpectedFailureMarkers}).
  */
+import { requiredGateJob } from '#ci-queue-health.js';
 import type { RunEvidence, WorkflowJob, WorkflowRun } from '#ci-queue-health.js';
-
-/** The required gate (`affected` in `ci.yml`): it fails because a lane failed, so it is never the flake itself. */
-export const requiredGateJob = 'Run affected tasks';
 /** Two flakes of one key inside this many days make it a repeat offender (#1281). */
 export const repeatWindowDays = 14;
 /** The longest an owner may hold a ledger entry or an expected-failure marker before it must be renewed. */
@@ -52,9 +50,9 @@ export const lineageOf = (run: WorkflowRun): Lineage | undefined => {
 
 const failed = (conclusion: string | undefined): boolean => conclusion === 'failure' || conclusion === 'timed_out';
 
-/** The jobs of a run that failed on their own: every failed job except the required gate. */
+/** The jobs of a run that failed on their own: every failed job except the required gate and `Fail fast` jobs. */
 export const failedLaneJobs = (jobs: readonly WorkflowJob[]): WorkflowJob[] =>
-  jobs.filter((job) => failed(job.conclusion) && job.name !== requiredGateJob);
+  jobs.filter((job) => failed(job.conclusion) && job.name !== requiredGateJob && !job.name.startsWith('Fail fast'));
 
 const byCreation = (a: RunEvidence, b: RunEvidence): number =>
   a.run.created_at.localeCompare(b.run.created_at) || a.run.id - b.run.id;
@@ -120,7 +118,8 @@ export const pairFailures = (evidence: readonly RunEvidence[]): Pairing => {
   for (const runs of lineages(evidence).values()) {
     for (const [index, { run, jobs }] of runs.entries()) {
       const lineage = lineageOf(run);
-      if (!lineage || run.conclusion !== 'failure' || !jobs) {
+      // A failed merge-group run concludes `cancelled` (its `Fail fast` job cancels it): its failed jobs decide.
+      if (!lineage || run.conclusion === 'success' || !jobs) {
         continue;
       }
       for (const job of failedLaneJobs(jobs)) {

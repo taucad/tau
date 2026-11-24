@@ -2,11 +2,15 @@
 #
 # Queue rebuilds multiply the demand that causes every runner wait: when the head of the merge queue fails,
 # every group behind it is cancelled and rebuilt. Once a week this reads the `merge_group` runs of `ci.yml`
-# from the last 7 days through the jobs API and reports runs by conclusion, failed runs by the lane that
-# failed first and the suites it names (the table suite owners read), what the cancelled runs had spent, and
-# each job's runner-wait share. The Markdown goes to the job summary and the JSON to an artifact kept 90 days,
-# so Part 5a can be re-measured two weeks after DC-16 to DC-20 land. It reads only: no issues or comments
-# are posted, nothing is written to the Nx remote cache and no environment is used.
+# from the last 7 days and the jobs of every attempt through the jobs API, and reports runs by conclusion and
+# by class (a failed run is one with a failed job, since `Fail fast` makes it conclude `cancelled`; origin,
+# inherited and victim runs are counted apart, global review 2026-11-24 ruling 9), origin failures by the lane
+# that failed first and the suites it names (the table suite owners read; Vitest's `github-actions` reporter
+# names the tests), every attempt's runner minutes per class and of the cancelled runs, and each job's
+# runner-wait share. A 5xx is retried with a backoff of up to a minute; a run the API keeps refusing is
+# reported as not fetched rather than failing the report. The Markdown goes to the job summary and the JSON to
+# an artifact kept 90 days. It reads only: no issues or comments are posted, nothing is written to the Nx
+# remote cache and no environment is used.
 #
 # Monday 07:23 UTC: after the weekend's quiet queue, before the operator's week starts. The nightly watchdog
 # watches it as a weekly cron.

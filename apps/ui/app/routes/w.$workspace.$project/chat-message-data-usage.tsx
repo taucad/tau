@@ -23,7 +23,13 @@ export function ChatMessageDataUsage(
       fallback={<SelfHostChatMessageDataUsage {...props} />}
       render={(cloud) => (
         <cloud.ReceiptCreditsText operationIds={operationIds}>
-          {(summary) => <SelfHostChatMessageDataUsage {...props} credits={showCredits ? summary : undefined} />}
+          {(summary, retry) => (
+            <SelfHostChatMessageDataUsage
+              {...props}
+              credits={showCredits ? summary : undefined}
+              onRetryCredits={showCredits ? retry : undefined}
+            />
+          )}
         </cloud.ReceiptCreditsText>
       )}
     />

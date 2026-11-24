@@ -310,6 +310,12 @@ function createEmscriptenWrapper(
  * Wraps an OpenCASCADE instance with exception-only interception (no tracing overhead).
  * Use when OC tracing is disabled but the WASM build has exceptions enabled.
  *
+ * Constructors, instance methods and namespace functions check for a superseding abort before each call; static
+ * class members (`oc.TopoDS.Face`, `oc.BRepBndLib.Add`) are not intercepted. In Replicad's builds the statics that
+ * run long are the native batch Booleans and mesh extractors, which stop through the native user break instead;
+ * every other static measured under 20 ms per call on four heavy models, and the loops that call them also make proxied
+ * instance calls, so an abort is still seen within one iteration.
+ *
  * @template T - The concrete OC instance type from the calling kernel
  * @param oc - The raw OpenCascade instance to wrap
  * @returns A proxied instance that converts `WebAssembly.Exception` to `OcKernelError`

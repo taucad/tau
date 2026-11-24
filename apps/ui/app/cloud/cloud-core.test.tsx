@@ -19,12 +19,15 @@ import type { CloudLoader } from '#cloud/cloud-loader.js';
 import { CloudSurface } from '#cloud/cloud-surface.js';
 import { cloudPort } from '#cloud/cloud-port.js';
 import { reportBootStage, resetBootSignals } from '#lib/boot-signals.js';
+import { writeIdentityRecord } from '#hooks/use-identity.js';
 
 const pendingMode: DeploymentModeSnapshot = { state: 'unknown', problem: 'pending' };
 const harness = vi.hoisted(() => ({
   mode: undefined as DeploymentModeSnapshot | undefined,
   listeners: new Set<() => void>(),
   userId: undefined as string | undefined,
+  /* The session query has no answer: an offline launch, its check paused or failed. */
+  offline: false,
   purgeSavedUsage: vi.fn(async (_keep?: unknown) => undefined),
   reported: [] as unknown[],
 }));
@@ -44,7 +47,14 @@ vi.mock('#cloud/use-deployment-mode.js', async () => {
   };
 });
 vi.mock('@better-auth-ui/react', () => ({
-  useSession: () => ({ data: harness.userId === undefined ? undefined : { user: { id: harness.userId } } }),
+  useSession: () =>
+    harness.offline
+      ? { data: undefined, isSuccess: false, error: undefined }
+      : {
+          data: harness.userId === undefined ? null : { user: { id: harness.userId } },
+          isSuccess: true,
+          error: null,
+        },
 }));
 vi.mock('#providers/auth-provider.js', () => ({
   AuthConfigProvider: ({ children }: { children: ReactNode }): ReactNode => children,
@@ -73,6 +83,8 @@ const funded: DeploymentModeSnapshot = { state: 'funded', basis: 'confirmed', en
 beforeEach(() => {
   harness.mode = undefined;
   harness.userId = undefined;
+  harness.offline = false;
+  localStorage.clear();
   harness.reported.length = 0;
   harness.purgeSavedUsage.mockClear();
   resetBootSignals();
@@ -459,6 +471,84 @@ describe('adaptive root boundary', () => {
       </QueryClientProvider>,
     );
     expect(harness.purgeSavedUsage).not.toHaveBeenCalled();
+  });
+
+  /* W9 D1 (R1): an offline launch keeps the last-known owner, so an offline-induced "no owner" never purges or
+   * remounts (D17). */
+  describe('offline launch with a recorded owner (W9 R1, D17)', () => {
+    const rerender = (view: ReturnType<typeof mount>['view']): void => {
+      view.rerender(
+        <QueryClientProvider client={new QueryClient()}>
+          <Catch>
+            <CloudRootBoundary>
+              <Shell />
+            </CloudRootBoundary>
+          </Catch>
+        </QueryClientProvider>,
+      );
+    };
+    const keepsA = { environment: 'staging', ownerId: 'a' };
+    const launchOffline = async () => {
+      writeIdentityRecord({ id: 'a', name: 'A', email: 'a@example.test' });
+      harness.mode = funded;
+      harness.offline = true;
+      const mounted = mount();
+      await waitFor(() => {
+        expect(mounts.count).toBe(1);
+      });
+      return mounted;
+    };
+
+    it('should bind the recorded owner, keep its saved usage and tell no window to purge it', async () => {
+      const { posted } = await launchOffline();
+      expect(seen.at(-1)).toEqual({
+        apiBaseUrl: 'http://localhost:4000',
+        environment: 'staging',
+        userId: 'a',
+      });
+      expect(
+        harness.purgeSavedUsage.mock.calls.every(([keep]) => JSON.stringify(keep) === JSON.stringify(keepsA)),
+      ).toBe(true);
+      expect(harness.purgeSavedUsage).toHaveBeenCalledWith(keepsA);
+      expect(harness.purgeSavedUsage).not.toHaveBeenCalledWith(undefined);
+      expect(posted.every((message) => JSON.stringify(message) === JSON.stringify({ keep: keepsA }))).toBe(true);
+    });
+
+    it('should not remount, purge or tell a window when the network returns and the same owner verifies', async () => {
+      const { posted, view } = await launchOffline();
+      harness.purgeSavedUsage.mockClear();
+      posted.length = 0;
+
+      harness.offline = false;
+      harness.userId = 'a';
+      rerender(view);
+      expect(seen.at(-1)).toEqual({
+        apiBaseUrl: 'http://localhost:4000',
+        environment: 'staging',
+        userId: 'a',
+      });
+      expect(mounts.count).toBe(1);
+      expect(harness.purgeSavedUsage).not.toHaveBeenCalled();
+      expect(posted).toEqual([]);
+    });
+
+    it('should purge and remount once another owner verifies (D17 a)', async () => {
+      const { posted, view } = await launchOffline();
+      harness.purgeSavedUsage.mockClear();
+      posted.length = 0;
+
+      harness.offline = false;
+      harness.userId = 'b';
+      rerender(view);
+      await waitFor(() => {
+        expect(mounts.count).toBe(2);
+      });
+      expect(harness.purgeSavedUsage).toHaveBeenCalledWith({
+        environment: 'staging',
+        ownerId: 'b',
+      });
+      expect(posted).toEqual([{ keep: { environment: 'staging', ownerId: 'b' } }]);
+    });
   });
 
   it('should purge every saved usage on sign-out with the Cloud chunk never loaded (T-BA20, I5)', () => {

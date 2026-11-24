@@ -1,5 +1,5 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
-import { ChevronsUpDown, LogIn, LogOut, Settings } from 'lucide-react';
+import { ChevronsUpDown, CloudOff, LogIn, LogOut, Settings } from 'lucide-react';
 import { isValidElement } from 'react';
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 
@@ -15,6 +15,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
 import { UserView } from '#components/auth/user/user-view.js';
+import { useIdentity } from '#hooks/use-identity.js';
 /** Auth states a `UserButton` link can be visible in. */
 export type UserButtonLinkVisibility = 'authenticated' | 'unauthenticated' | 'always';
 
@@ -49,6 +50,9 @@ export type UserButtonProps = {
   /** Signed-in content shown under the account label, above the menu entries. */
   header?: ReactNode;
 };
+
+/** The quiet line an unverified identity carries in the menu (W9 R1). @public */
+export const cantReachTau = 'Can’t reach Tau';
 
 function renderUserLink(
   link: UserButtonLink | ReactElement,
@@ -89,7 +93,12 @@ export function UserButton({
 }: UserButtonProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, localization, plugins, Link } = useAuth();
 
-  const { data: session, isPending: isSessionPending } = useSession(authClient);
+  const { isPending: isSessionPending } = useSession(authClient);
+  /* The identity owner (W9 R1): an offline launch keeps the last-known person, so a failed check never reads as
+     signed out. Only a confirmed signed-out answer offers "Sign in". */
+  const identity = useIdentity();
+  const session = identity.user;
+  const isUnverified = identity.state === 'unverified';
   const isCompact = size === 'sm';
 
   const userLinks = links?.flatMap((link, index) => {
@@ -158,6 +167,12 @@ export function UserButton({
           <>
             <DropdownMenuLabel className='text-sm font-normal'>
               <UserView />
+              {isUnverified ? (
+                <p className='mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground'>
+                  <CloudOff aria-hidden className='size-3.5' />
+                  {cantReachTau}
+                </p>
+              ) : undefined}
             </DropdownMenuLabel>
 
             {header}

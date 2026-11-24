@@ -1,7 +1,8 @@
 'use client';
 
 import { useAuth, useSession } from '@better-auth-ui/react';
-import type { User } from 'better-auth';
+import { useIdentity } from '#hooks/use-identity.js';
+import type { IdentityUser } from '#hooks/use-identity.js';
 
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
@@ -11,16 +12,18 @@ export type UserViewProps = {
   className?: string;
   isCompact?: boolean;
   isPending?: boolean;
-  user?: User;
+  user?: Pick<IdentityUser, 'email' | 'image' | 'name'>;
 };
 
 export function UserView({ className, isCompact = false, isPending, user }: UserViewProps): React.JSX.Element {
   const { authClient } = useAuth();
-  const { data: session, isPending: sessionPending } = useSession(authClient, {
+  const { isPending: sessionPending } = useSession(authClient, {
     enabled: !user && !isPending,
   });
+  /* The identity owner's user: verified, or the last-known one while the session cannot be checked (W9 R1). */
+  const identity = useIdentity();
 
-  const resolvedUser = user ?? session?.user;
+  const resolvedUser = user ?? identity.user;
   /* While the session is unknown the row draws skeletons for the avatar and the name, at their final sizes. */
   const isUnknown = !resolvedUser && (isPending ?? sessionPending);
 

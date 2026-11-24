@@ -259,7 +259,11 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
 
 type BootLedger = {
   readonly unhealthyCount: number;
-  readonly last?: { readonly mode: string; readonly stage: string; readonly deadlinePassed?: boolean };
+  readonly last?: {
+    readonly mode: string;
+    readonly stage: string;
+    readonly deadlinePassed?: boolean;
+  };
 };
 
 const readBootLedger = async (session: DesktopSession): Promise<BootLedger | undefined> => {
@@ -297,7 +301,9 @@ const pendingPaymentActionsKey = 'tau-pending-payment-actions';
 
 const readPendingActionIds = async (current: DesktopSession): Promise<string[]> =>
   current.page.evaluate((key) => {
-    const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{ actionId: string }>;
+    const entries = JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{
+      actionId: string;
+    }>;
     return entries.map((entry) => entry.actionId);
   }, pendingPaymentActionsKey);
 
@@ -441,6 +447,75 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     /* Announced in an end state, so forgotten; the expired id was dropped without a read or an announcement. */
     await expect.poll(async () => readPendingActionIds(second), { timeout: 30_000 }).toEqual([]);
     expect(stubs.reads.get(expiredId)).toBeUndefined();
+  });
+
+  /* W9 D1 (research w9-desktop-acceptance-defects R1, R2; charter A2, A3). The renderer is taken offline the way the
+   * operating system takes it: requests fail (session emulation) and the page reads offline (`navigator.onLine`). */
+  it('shows the last-known person on an offline launch, then the user and Billing with no reload once the network returns', async () => {
+    const accountName = 'Tau Desktop Smoke';
+    const { session: first, token } = await launch({ preserveProfile: true });
+    await expectSignedIn(first.page);
+    const footerOf = (current: DesktopSession) =>
+      current.page.getByRole('button', { name: new RegExp(accountName, 'u') }).first();
+    /* Verified once online: the identity record is written. */
+    await expectVisible(footerOf(first), launchTimeout);
+
+    const firstProcess = first.application.process();
+    await first.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect
+      .poll(() => firstProcess.exitCode ?? firstProcess.signalCode, {
+        timeout: 60_000,
+      })
+      .not.toBeNull();
+    const { profileRoot } = first;
+    await first.close();
+    session = undefined;
+
+    const { session: second } = await launch({
+      relaunch: { profileRoot, token: token! },
+    });
+    const setOffline = async (offline: boolean): Promise<void> => {
+      await second.application.evaluate(async ({ session: electronSession }, isOffline) => {
+        electronSession.defaultSession.enableNetworkEmulation({
+          offline: isOffline,
+        });
+      }, offline);
+      await second.application.context().setOffline(offline);
+    };
+    await setOffline(true);
+    try {
+      await second.page.reload({ waitUntil: 'load' });
+      expect(await second.page.evaluate(() => navigator.onLine)).toBe(false);
+
+      /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
+      const footer = footerOf(second);
+      await expectVisible(footer, launchTimeout);
+      await expectVisible(composerOf(second.page), launchTimeout);
+      await footer.click();
+      const menu = second.page.getByRole('menu');
+      await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
+      expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
+      await second.page.evaluate(() => {
+        (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
+      });
+
+      /* The network returns: within A3's 10 s, with no reload, the session verifies and Billing appears. */
+      await setOffline(false);
+      await expect
+        .poll(async () => menu.getByText('Can’t reach Tau').count(), {
+          timeout: 10_000,
+        })
+        .toBe(0);
+      await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)$/u }), 10_000);
+      await expectVisible(footer, 10_000);
+      expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
+        true,
+      );
+    } finally {
+      await setOffline(false);
+    }
   });
 
   it('shows the funded surfaces against a funded API, and /usage with the balance', async () => {

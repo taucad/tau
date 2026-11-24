@@ -20,6 +20,7 @@ import {
   CircleDashed,
   CirclePause,
   CloudAlert,
+  CloudOff,
   FileDiff,
   GitMerge,
   History,
@@ -573,6 +574,10 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   }
   if (hasRevisionConflict(status)) {
     return { icon: GitMerge, tone: 'text-warning', mark: 'attention', sentence: conflictSentence(status, where) };
+  }
+  /* W9 R5: safe mode keeps Tau Cloud off for this launch; said calmly, with nothing to do here (a normal restart ends it). */
+  if (sync.state === 'failed' && sync.reason === 'safeMode') {
+    return { icon: CloudOff, tone: 'text-muted-foreground', mark: 'none', sentence: 'Tau Cloud is off in safe mode' };
   }
   const ask = where.role === 'revoked' ? undefined : backupAsk(status, where.isSignedOut);
   return ask === undefined

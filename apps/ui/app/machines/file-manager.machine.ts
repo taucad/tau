@@ -432,7 +432,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     if (!worker) {
       const homeBackend = await resolveHomeBackend();
       worker = reportWorkerFailures(
-        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend, { safeMode: context.safeMode }) }),
         'file-manager',
       );
       // A node-backed Home needs its provider host before the worker can mount

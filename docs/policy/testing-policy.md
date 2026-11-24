@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-09-30'
+updated: '2026-11-24'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -418,6 +418,10 @@ Streaming tests assert provider-neutral state and lifecycle outcomes. Do not loc
 Byte-locked file snapshots stay formatter-exempt. A serializer is appropriate only if its representation remains stable at the configured formatter width. Geometry export checks verify the declared exact-byte contract or export/re-import/re-mesh semantics; non-empty output alone does not establish correctness.
 
 Run coverage explicitly when validating coverage thresholds. A normal passing test target does not exercise them. Investigate denominator exclusions or generated-code distortion before changing a threshold, and keep dated measurements in evidence rather than permanent policy.
+
+## 16. Root-Cause CI Failures Before Re-Running
+
+A CI or merge-queue failure in a project the change affects, including a crash with no failing assertion, is never re-queued or re-run to green first. Root-cause it, fix it in that PR or a prerequisite PR, and show the before/after evidence. Re-queue only a failure in a project the diff does not affect, with evidence that it also fails without the change. Do not knowingly land a flaky test on `main`.
 
 ## Summary Checklist
 

@@ -14,7 +14,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { cloudPort } from '#cloud/cloud-port.js';
 import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
 import paymentSpriteUrl from '@taucad/ui-kit/icons/generated/payment-sprite.svg?url';
-import { SvgSpriteLoader } from '@taucad/ui-kit/icons/svg-sprite-loader';
+import { appendSvgSprite } from '@taucad/ui-kit/icons/svg-sprite-append';
 
 /* The funded surfaces (adaptive app deployment mode W5): this module resolves every `#` specifier as the `cloud`
  * ceiling does, so these are the Cloud implementations, mounted by their facades through `CloudSurface`. */
@@ -60,9 +60,15 @@ export function CloudProviders({
   );
 }
 
-/** The payment artwork the billing surfaces draw; the base sprite is Core. */
-export function PaymentSprite(): React.JSX.Element {
-  return <SvgSpriteLoader urls={[paymentSpriteUrl]} />;
+/**
+ * The payment artwork the billing surfaces draw (card brands); the base sprite is Core. Appended from code when the
+ * chunk mounts: an inline loader script rendered here never ran, so the card brands were blank (W9 D3).
+ */
+export function PaymentSprite(): undefined {
+  useEffect(() => {
+    void appendSvgSprite(paymentSpriteUrl);
+  }, []);
+  return undefined;
 }
 
 /**

@@ -30,6 +30,20 @@
         "description": "The merge-queue e2e ratchet: the suites of this project that passed five consecutive e2e-nightly runs (two before 2026-11-17). ci.yml's e2e-queue lane runs each one as its own job in the merge queue whenever this project is affected, and e2e-nightly.yml leaves every suite listed here out of its matrix. A suite joins by being added to dependsOn (a target of this project) once green on five consecutive nightlies, and never moves back. Running this target runs them all."
       }
     },
+    "queue-build": {
+      "executor": "nx:noop",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "metadata": {
+        "description": "The ui:build the queue suites restore (CI decomposition global review, ruling 6). ci.yml's queue-builds job runs it at the start of every merge-queue run and writes it to the remote cache, and the e2e-queue rows wait for that job, so test:e2e:non-isolated (dependsOn), test:e2e:deploy-skew and test:e2e:daemon-host (their first `nx run ui:build`) restore it instead of each building it. The rows still run ui:build themselves under their own env fixture: Nx restores this build only when the hash, every env input of ui:build included, is theirs, and builds otherwise. The queue job's environment is ci.yml's workflow env, whose TAU_*_URL values are the fixture's; TAU_CLOUD_ENABLED and the TAU_E2E_* fixture values are not ui:build inputs."
+      }
+    },
+    "queue-build:serve": {
+      "executor": "nx:noop",
+      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
+      "metadata": {
+        "description": "The ui:build:serve the queue suites restore (ruling 6, as queue-build): ci.yml's queue-builds job builds it once per merge-queue run, and test:e2e:daemon-host (dependsOn) restores it."
+      }
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],

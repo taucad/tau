@@ -2,6 +2,8 @@
 /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
 /* eslint-disable @typescript-eslint/naming-convention -- The fakes mirror OCJS embind's C++ PascalCase members. */
 import { createHash } from 'node:crypto';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { Worker } from 'node:worker_threads';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OpenCascadeInstance, TopoDS_Shape, TopTools_ListOfShape } from 'replicad-opencascadejs';
@@ -32,6 +34,19 @@ vi.mock('@taucad/runtime/kernel', async (importOriginal) => ({
 }));
 
 const singleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
+
+setFlagsFromString('--expose-gc');
+const gc = runInNewContext('gc') as () => void;
+/** Collect, and give `FinalizationRegistry` callbacks their turns. */
+const collect = async (): Promise<void> => {
+  for (let round = 0; round < 4; round += 1) {
+    gc();
+    // oxlint-disable-next-line no-await-in-loop -- each round yields once so finalizers run
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
+};
 
 /** A cut of twelve crossing cylinders from a fused body: about 3 s single-threaded on a cloud machine. */
 const longCut = (): { run: () => replicad.Shape3D; tools: number } => {
@@ -113,7 +128,10 @@ const measureStop = async (call: () => unknown, abortDelay: number): Promise<{ e
     stopError = error;
   }
   const stoppedAt = performance.timeOrigin + performance.now();
-  return { error: stopError, latency: stoppedAt - (await aborter.storedAt()) };
+  const storedAt = await aborter.storedAt();
+  // The superseded operation is over: nothing after it runs under the abort (as `clearAbortContext` does).
+  Atomics.store(abortWord, 0, 0);
+  return { error: stopError, latency: stoppedAt - storedAt };
 };
 
 /**
@@ -226,6 +244,27 @@ describe('native user break (N1)', { timeout: 120_000 }, () => {
 
   it('gives the same instancing mesh as the plain entry point when the abort word never moves', () => {
     expect(prototypeMesh(paritySphere, 0.05)()).toBe(plainPrototypeHash);
+  });
+
+  it('frees a collected wrapper without an uncaught abort while the abort word is set', async () => {
+    const uncaught: unknown[] = [];
+    const record = (error: unknown): void => {
+      uncaught.push(error);
+    };
+    process.on('uncaughtException', record);
+    try {
+      // The wrapper is dropped; only its handle is kept, to see whether the finalizer freed it.
+      const handles = Array.from({ length: 8 }, () => replicad.makeBox([0, 0, 0], [1, 1, 1]).wrapped);
+      Atomics.store(abortWord, 0, 1);
+      await collect();
+
+      expect(uncaught).toStrictEqual([]);
+      // Every embind handle has `isDeleted`; the generated declarations leave it out.
+      expect(handles.every((handle) => (handle as unknown as { isDeleted(): boolean }).isDeleted())).toBe(true);
+    } finally {
+      Atomics.store(abortWord, 0, 0);
+      process.off('uncaughtException', record);
+    }
   });
 });
 

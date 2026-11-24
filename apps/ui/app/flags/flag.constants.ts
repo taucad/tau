@@ -167,9 +167,23 @@ export type LocalFeatureFlagName = Exclude<FeatureFlagName, RemoteFeatureFlagNam
 
 /**
  * Whether a flag is on, off, or not known yet. `unknown` holds during the server render and hydration for every flag,
- * and for a {@link RemoteFeatureFlagName} until PostHog has answered or no answer will come.
+ * and for a {@link RemoteFeatureFlagName} until PostHog has answered or the host decided no answer will come. A failed
+ * flag load is `unknown` too: it decided nothing, so neither `on` nor `off` may follow from it.
  */
 export type FeatureFlagState = 'on' | 'off' | 'unknown';
+
+/**
+ * Why a flag is or is not known, for a gate that must stop waiting ({@link FeatureFlagState} folds the last two into
+ * `unknown`): `pending` while an answer is still coming, `failed` when it was due and did not arrive. Neither is a
+ * value; a later answer turns `failed` into `on` or `off`.
+ */
+export type FeatureFlagAnswer = 'on' | 'off' | 'pending' | 'failed';
+
+/**
+ * What a gate on a flag does: `waiting` while the answer is still coming, `open` on `on` or a failed load (it fails
+ * open), `closed` on an answered `off` before it ever opened. Once open it stays open.
+ */
+export type FeatureGate = 'waiting' | 'open' | 'closed';
 
 /**
  * Whether a registry name is a {@link RemoteFeatureFlagName}.

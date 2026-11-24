@@ -7,7 +7,7 @@ import { setupChromeCopy, setupFinishCopy, setupStepIds } from '#components/onbo
 import { parseSetupEntry, setupEntryParameter } from '#components/onboarding/setup-entry.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { useFeatureState } from '#flags/use-feature.js';
+import { useFeatureGate } from '#flags/use-feature.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useTourReplay } from '#components/tour/tour-menu.js';
@@ -25,7 +25,7 @@ export const handle: Handle = {
 };
 
 /**
- * Setup's frame while `onboarding` is not known yet: the header and a step's first rows, at their final size.
+ * Setup's frame while `onboarding`'s answer is still coming: the header and a step's first rows, at their final size.
  *
  * @returns The placeholder.
  */
@@ -70,21 +70,23 @@ const isSetupStepId = (value: string | undefined): value is SetupStepId =>
   value !== undefined && (setupStepIds as readonly string[]).includes(value);
 
 /**
- * Setup, behind `onboarding`. With the flag off the route sends the person home. Until the flag is known (the server
- * render, hydration, and on the client until PostHog has answered or no answer will come) it shows setup's frame:
- * redirecting then would send everyone who opens a setup link home before the flag arrives.
+ * Setup, behind `onboarding` (`useFeatureGate`). Until the answer arrives (the server render, hydration, and on the
+ * client until PostHog has answered or the host decided no answer will come) it shows setup's frame: redirecting then
+ * would send everyone who opens a setup link home before the flag arrives. An answered `off` sends the person home,
+ * but only before setup was shown. A failed flag load shows the requested step, with no error: it decided nothing, so
+ * the deep link fails open, and once shown no later answer takes the person away.
  */
 export default function WelcomeRoute(): React.JSX.Element {
-  const onboarding = useFeatureState('onboarding');
+  const onboarding = useFeatureGate('onboarding');
   const [searchParameters] = useSearchParams();
   const location = useLocation();
   const onOpenFolder = useOpenFolder();
   /* "Take it again" replays the tour in the most recently active project; with none it stays disabled. */
   const onReplayTour = useTourReplay();
-  if (onboarding === 'unknown') {
+  if (onboarding === 'waiting') {
     return <SetupPlaceholder />;
   }
-  if (onboarding === 'off') {
+  if (onboarding === 'closed') {
     return <Navigate to='/' replace />;
   }
   const step = searchParameters.get('step') ?? undefined;

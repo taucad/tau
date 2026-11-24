@@ -10,21 +10,31 @@
  * `useFeature` reads a local flag as a boolean. `useFeatureState` reads any
  * flag as `on`, `off` or `unknown`: `unknown` in the server render and while
  * hydrating, and for a PostHog-backed flag until PostHog has answered or no
- * answer will come. A PostHog-backed flag has only the three-valued reader, so a
- * guard that redirects, unmounts or writes on "off" cannot fire on "not known".
+ * answer will come; a failed flag load stays `unknown`. A PostHog-backed flag has
+ * only the three-valued reader, so a guard that redirects, unmounts or writes on
+ * "off" cannot fire on "not known". `useFeatureGate` gates a page on a flag: it
+ * waits, fails open on a failed load and, once open, stays open.
  */
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Topic } from '@taucad/events';
 import type {
+  FeatureFlagAnswer,
   FeatureFlagName,
   FeatureFlags,
   FeatureFlagState,
+  FeatureGate,
   LocalFeatureFlagName,
   LocalFeatureFlags,
 } from '#flags/flag.constants.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
-import { getAllFlags, readFeatureState, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
+import {
+  getAllFlags,
+  readFeatureAnswer,
+  readFeatureState,
+  setFlagOverrides,
+  resetFlagCache,
+} from '#flags/feature-flags.js';
 import { subscribeRemoteFlags } from '#flags/remote-flags.js';
 
 type FlagStore = {
@@ -53,6 +63,7 @@ const flagStore: FlagStore = {
 
 /** Nothing is known before the client has its own values: the server render and hydration. */
 const getServerFlagState = (): FeatureFlagState => 'unknown';
+const getServerFlagAnswer = (): FeatureFlagAnswer => 'pending';
 
 function refreshSnapshot(): void {
   resetFlagCache();
@@ -91,6 +102,35 @@ export function useFeature(flag: LocalFeatureFlagName): boolean {
  */
 export function useFeatureState(flag: FeatureFlagName): FeatureFlagState {
   return useSyncExternalStore(flagStore.subscribe, () => readFeatureState(flag), getServerFlagState);
+}
+
+/**
+ * Gate a page or step on a flag, for a consumer whose "off" cannot be undone (a redirect away from a deep link).
+ *
+ * - `waiting` in the server render, while hydrating, and while PostHog's answer is still coming: show a placeholder.
+ * - `closed` on an answered (or decided) `off` before the gate opened: act on it.
+ * - `open` on `on`, and on a failed flag load, which decided nothing about the visitor: the gate fails open, with no
+ *   error shown. The wait is therefore bounded by posthog-js giving up on `/flags` (its request timeout times one plus
+ *   its retries) or by the SDK failing to load.
+ *
+ * Once open, the gate stays open for the life of the component: a later answer (PostHog's background refresh after a
+ * failed load, or a re-evaluation) never closes what the person is already looking at.
+ *
+ * @param flag - The flag.
+ * @returns The gate.
+ */
+export function useFeatureGate(flag: FeatureFlagName): FeatureGate {
+  const answer = useSyncExternalStore(flagStore.subscribe, () => readFeatureAnswer(flag), getServerFlagAnswer);
+  const isOpenNow = answer === 'on' || answer === 'failed';
+  const [hasOpened, setHasOpened] = useState(false);
+  if (isOpenNow && !hasOpened) {
+    // Remember it across renders, so a later `off` cannot close the gate (React's "information from previous renders").
+    setHasOpened(true);
+  }
+  if (isOpenNow || hasOpened) {
+    return 'open';
+  }
+  return answer === 'off' ? 'closed' : 'waiting';
 }
 
 /**

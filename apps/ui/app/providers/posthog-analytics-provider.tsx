@@ -9,7 +9,7 @@ import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
-import { connectRemoteFlags, disconnectRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
+import { connectRemoteFlags, disconnectRemoteFlags, failRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
 import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
 import {
   connectAttachmentIntakeTelemetry,
@@ -175,8 +175,9 @@ function PostHogLifecycle({
       try {
         posthog = await loadSdk();
       } catch {
-        // Optional analytics must not prevent the product from opening.
-        disconnectRemoteFlags();
+        // Optional analytics must not prevent the product from opening. Nothing was decided about the visitor, so
+        // the flags read unknown, not off.
+        failRemoteFlags();
         return;
       }
       if (withdrawn) {

@@ -14,10 +14,11 @@
  * A flag with `requires` is then off whenever the flag it names is off.
  *
  * Three-valued state: a PostHog-backed flag (and one that `requires` it) is `unknown` until the remote source has
- * answered or no answer will come (`readRemoteFlagStatus`). Such a flag has no boolean reader, so "not known yet" can
- * never be read as "off": read it with `readFeatureState` (or `useFeatureState`) and decide what `unknown` means at
- * the call site, or wait with `whenFeatureKnown`. A redirect, a persisted write or a one-shot decision must not act on
- * `unknown`.
+ * answered or the host decided no answer will come (`readRemoteFlagStatus`). A failed flag load stays `unknown`: it
+ * decided nothing. Such a flag has no boolean reader, so "not known yet" can never be read as "off": read it with
+ * `readFeatureState` (or `useFeatureState`) and decide what `unknown` means at the call site, or wait with
+ * `whenFeatureKnown`. A redirect, a persisted write or a one-shot decision must not act on `unknown`; a gate that must
+ * stop waiting when the load fails uses `useFeatureGate`, which fails open.
  *
  * Usage (non-React):
  *   import { isFeatureEnabled, readFeatureState } from '#flags/feature-flags.js';
@@ -28,6 +29,7 @@
  */
 
 import type {
+  FeatureFlagAnswer,
   FeatureFlagName,
   FeatureFlags,
   FeatureFlagState,
@@ -150,25 +152,46 @@ export function isFeatureEnabled(flag: LocalFeatureFlagName, storage?: MinimalRe
 }
 
 /**
- * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived. A PostHog-backed
- * flag is `unknown` while the remote source is `pending`, and a flag that `requires` an unknown flag is `unknown` too.
+ * Why one flag is or is not known now: `on` or `off` once answered (or decided), `pending` while a PostHog-backed flag
+ * (or the flag it `requires`) waits for PostHog, `failed` when that load failed. For a gate that has to stop waiting
+ * (`useFeatureGate`); any other reader uses {@link readFeatureState}, where both are `unknown`.
  *
  * @param flag - The flag.
- * @returns Its state.
+ * @returns Its answer.
  */
-export function readFeatureState(flag: FeatureFlagName): FeatureFlagState {
+export function readFeatureAnswer(flag: FeatureFlagName): FeatureFlagAnswer {
   const { posthogKey, requires }: FlagDefinition = flagRegistry[flag];
-  if (
-    (posthogKey !== undefined && readRemoteFlagStatus() === 'pending') ||
-    (requires !== undefined && readFeatureState(requires as FeatureFlagName) === 'unknown')
-  ) {
-    return 'unknown';
+  if (posthogKey !== undefined) {
+    const status = readRemoteFlagStatus();
+    if (status === 'pending' || status === 'failed') {
+      return status;
+    }
+  }
+  if (requires !== undefined) {
+    const required = readFeatureAnswer(requires as FeatureFlagName);
+    if (required === 'pending' || required === 'failed') {
+      return required;
+    }
   }
   return getFlags()[flag] ? 'on' : 'off';
 }
 
 /**
- * Wait until a flag is known, for a decision that cannot be taken again later (a one-shot write).
+ * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived. A PostHog-backed
+ * flag is `unknown` while the remote source is `pending` or its load `failed`, and a flag that `requires` an unknown
+ * flag is `unknown` too.
+ *
+ * @param flag - The flag.
+ * @returns Its state.
+ */
+export function readFeatureState(flag: FeatureFlagName): FeatureFlagState {
+  const answer = readFeatureAnswer(flag);
+  return answer === 'pending' || answer === 'failed' ? 'unknown' : answer;
+}
+
+/**
+ * Wait until a flag is known, for a decision that cannot be taken again later (a one-shot write). A failed load is not
+ * known: the wait continues until PostHog's next refresh answers.
  *
  * @param flag - The flag.
  * @returns Whether it is on, once it is `on` or `off`; at once when it already is.

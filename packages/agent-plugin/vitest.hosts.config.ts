@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['e2e/**/*.hosts.test.ts'],
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     testTimeout: 300_000,
     hookTimeout: 300_000,
     fileParallelism: false,

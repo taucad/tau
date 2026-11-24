@@ -56,7 +56,7 @@ const headed = process.env['PARITY_HEADED'] === '1';
 
 export default defineConfig({
   test: {
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     projects: [
       {
         // The web app's bundling of runtime packages: package-owned WASM such as `@taucad/image`'s resvg.

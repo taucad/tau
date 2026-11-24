@@ -6,6 +6,6 @@ export default defineConfig({
       reportsDirectory: '../../out/reports/coverage/tools/workspace-plugin',
     },
     environment: 'node',
-    reporters: ['verbose'],
+    reporters: process.env.GITHUB_ACTIONS === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
   },
 });

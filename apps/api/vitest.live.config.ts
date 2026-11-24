@@ -45,7 +45,7 @@ export default defineConfig({
     maxConcurrency: 1,
     testTimeout: 600_000,
     hookTimeout: 600_000,
-    reporters: ['verbose'],
+    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
     // Gaxios and google-auth-library `await import('node-fetch')` at request
     // time, which vite-node resolves relative to the test file rather than the
     // importer. Node's own resolver restores what gaxios expects.

@@ -1599,21 +1599,22 @@ describe('a chat continued on a second device', () => {
       return { root, launcher };
     };
     /**
-     * Send a command to a run that has just paused, as the page sends it: the pause's own settlement (its
-     * `turn.finalized` row, then the placement acknowledgement) is still running for a moment after the `paused` row is
-     * readable, and a command that meets it is refused `CHAT_RUN_LIVE` `{ state: 'settling' }` (retry `wait`), so it is
-     * sent again, under a new command id, until the run has settled. How long that moment lasts depends on the host's
-     * scheduling: on Node 26 the `paused` row is readable before the settlement ends far more often than on Node 24.
+     * Send a command to a run that has just paused, as the page and the CLI send it: the pause's own settlement (its
+     * `turn.finalized` row, then the placement acknowledgement) can still be running when the `paused` row is readable,
+     * and a command that meets it is refused `CHAT_RUN_LIVE` `{ state: 'settling' }` (retry `wait`), so it is sent
+     * again under the same command id until the run has settled. A settling refusal is not recorded under that id, so
+     * the re-send is served, not replayed. How often a command meets the settlement depends on how fast `execute`
+     * reaches the run: about 1 ms on Node 26 against 6 to 12 ms on Node 24, while the settlement takes the same 4 to
+     * 28 ms on both.
      */
     const sendOnceSettled = async (
       launcher: AgentLauncher,
-      command: Omit<Parameters<AgentLauncher['execute']>[0], 'commandId'>,
-    ): Promise<Awaited<ReturnType<AgentLauncher['execute']>>> =>
-      vi.waitFor(
+      command: Omit<Parameters<AgentLauncher['execute']>[0], 'commandId'> & { readonly commandId?: string },
+    ): Promise<Awaited<ReturnType<AgentLauncher['execute']>>> => {
+      const commandId = command.commandId ?? key();
+      return vi.waitFor(
         async () => {
-          const answer = await launcher.execute({ ...command, commandId: key() } as Parameters<
-            AgentLauncher['execute']
-          >[0]);
+          const answer = await launcher.execute({ ...command, commandId } as Parameters<AgentLauncher['execute']>[0]);
           expect(answer, JSON.stringify(answer)).not.toMatchObject({
             code: 'CHAT_RUN_LIVE',
             details: { state: 'settling' },
@@ -1622,6 +1623,7 @@ describe('a chat continued on a second device', () => {
         },
         { timeout: 3000, interval: 10 },
       );
+    };
     const heartbeatCount = async (root: string): Promise<number> =>
       heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
 

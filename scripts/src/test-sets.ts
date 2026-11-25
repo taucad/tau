@@ -31,6 +31,8 @@ export const workspaceTests = [
   'src/desktop-split-graph.test.ts',
   'src/docs-links-workflow.test.ts',
   'src/end-to-end-ratchet.test.ts',
+  'src/flake-repro-cli.test.ts',
+  'src/flake-repro-workflow.test.ts',
   'src/formal-plugin-target.test.ts',
   'src/nx-cache-inputs.test.ts',
   'src/paseo-absence.test.ts',

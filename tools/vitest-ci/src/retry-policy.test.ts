@@ -495,16 +495,17 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
   });
 
   /**
-   * Runs fixtures as a CI task whose change is `NX_BASE..NX_HEAD` of the temporary repository. The config is this
-   * package's fixture config unless the repository holds its own copy, which makes the repository the project root.
+   * Runs fixtures as a CI task whose change is `NX_BASE..NX_HEAD` of the temporary repository: one fixture with this
+   * package's fixture config, or several with a copy of that config in the repository, which makes the repository
+   * the project root.
    */
   const runTask = (
-    fixture: string | readonly string[],
+    fixture: string | { readonly filters: readonly string[]; readonly config: string },
     base: string,
     head: string,
-    config = join(fixtures, 'vitest.config.ts'),
   ) => {
-    const filters = typeof fixture === 'string' ? [fixture] : fixture;
+    const { filters, config } =
+      typeof fixture === 'string' ? { filters: [fixture], config: join(fixtures, 'vitest.config.ts') } : fixture;
     const label = filters.join('+');
     const require = createRequire(import.meta.url);
     const vitestBin = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
@@ -636,7 +637,7 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
       const base = commitAll(directory, 'base');
       const head = commitAll(directory, 'no change');
 
-      const task = runTask('quarantined-failure', base, head, config);
+      const task = runTask({ filters: ['quarantined-failure'], config }, base, head);
       expect(task.status, task.output).toBe(0);
       expect(task.output).toContain(`::notice title=Quarantined failure::quarantined failure, non-gating, #2787`);
     }, 60_000);
@@ -647,7 +648,7 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
       const base = commitAll(directory, 'base');
       const head = commitAll(directory, 'no change');
 
-      const task = runTask(['quarantined-failure', 'four-retried-passes'], base, head, config);
+      const task = runTask({ filters: ['quarantined-failure', 'four-retried-passes'], config }, base, head);
       expect(task.status, task.output).toBe(1);
       expect(task.output).toContain('::notice title=Quarantined failure::');
       expect(task.output).toContain('Task failed: 4 retried passes in this task, over the budget of 3 (RT-4)');
@@ -659,7 +660,7 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
       place('one-retried-pass.fixture.ts');
       const head = commitAll(directory, 'add the test');
 
-      const task = runTask(['quarantined-failure', 'one-retried-pass'], base, head, config);
+      const task = runTask({ filters: ['quarantined-failure', 'one-retried-pass'], config }, base, head);
       expect(task.status, task.output).toBe(1);
       expect(task.output).toContain('::notice title=Quarantined failure::');
       expect(task.output).toContain('earns no credit: its file is changed by this change (RT-3)');

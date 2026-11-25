@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
 import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render as renderBare, screen } from '@testing-library/react';
@@ -777,19 +779,25 @@ const readFrame = (): CommitFrame => ({
 /* A fresh performance clock: a document open the lane ends is ended per clock, so a row that times one gets its own. */
 const freshPerformanceClock = (): WaitClock => ({ now: () => performance.now() });
 
-const renderOverDeferredTranscript = (history: readonly MyUIMessage[], clock: WaitClock = freshPerformanceClock()) => {
+const renderOverDeferredTranscript = (
+  history: readonly MyUIMessage[],
+  clock: WaitClock = freshPerformanceClock(),
+  open?: OpenWait,
+) => {
   const commits: CommitFrame[] = [];
   publishChatState({ messages: [], transcript: 'loading' });
   const tree = (
     <WaitClockProvider clock={clock}>
-      <Profiler
-        id='chat-history'
-        onRender={() => {
-          commits.push(readFrame());
-        }}
-      >
-        <ChatHistory />
-      </Profiler>
+      <openWaitContext.Provider value={open}>
+        <Profiler
+          id='chat-history'
+          onRender={() => {
+            commits.push(readFrame());
+          }}
+        >
+          <ChatHistory />
+        </Profiler>
+      </openWaitContext.Provider>
     </WaitClockProvider>
   );
   const { unmount } = render(tree);
@@ -857,15 +865,16 @@ describe('ChatHistory — transcript load (I21)', () => {
 });
 
 /*
- * A15d, C9's new rows (loading states UX blueprint, § Chat lane; U7): while the transcript loads, the chat header's
- * trailing slot holds the wait indicator, which reveals 1,000 ms into the wait; a lane mounted during the document's own
- * open counts from navigation start, a later wait from its own start. jsdom runs no CSS, so the rows read the reveal
- * delay the indicator hands its animation.
+ * A15d, C9's rows, under the seamless loading rules (Progressive Loading Policy rules 15 to 17; UI Policy § 5): while
+ * the transcript loads, the feed draws the transcript's shape as bars, from 300 ms into the wait, with no words; a lane
+ * mounted during the document's own open counts from navigation start, a lane mounted during a later open from that
+ * open's start, and a later wait from its own start. jsdom runs no CSS, so the rows read the skeleton delay the bars
+ * hand their animation.
  */
-describe('ChatHistory — transcript wait indicator (A15d)', () => {
+describe('ChatHistory — transcript wait shape (A15d)', () => {
   const history = [message('u1', 'user'), message('a1', 'assistant')];
   const headerIndicator = (): HTMLElement | undefined =>
-    document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"] [data-slot="wait-indicator"]') ??
+    document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"] [data-slot="project-wait"]') ??
     undefined;
   const navigationEntry = (name: string): PerformanceEntry => ({
     name,
@@ -876,8 +885,8 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     toJSON: () => ({ name }),
   });
   const revealDelay = (): number => {
-    const body = headerIndicator()?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
-    const revealValue = body?.style.getPropertyValue('--wait-reveal-delay') ?? '';
+    const body = headerIndicator()?.querySelector<HTMLElement>('[data-slot="project-wait-skeleton"]');
+    const revealValue = body?.style.getPropertyValue('--wait-skeleton-delay') ?? '';
     const match = /^calc\((-?[\d.]+)ms \+ var\(--wait-offset, 0ms\)\)$|^(-?[\d.]+)ms$/u.exec(revealValue);
     return Number(match?.[1] ?? match?.[2] ?? Number.NaN);
   };
@@ -898,7 +907,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     /* The route rewrites the URL it opened with before the transcript waits (review round 5). */
     { opened: '/w/acme/bracket', current: '/w/acme/bracket?chat=chat-1' },
   ])(
-    "shows 'Loading chat' in the header's indicator slot (D14) only from 1,000 ms after navigation for the open's own load, opened at $opened, now at $current",
+    "draws the transcript's shape, with no words, from 300 ms after navigation for the open's own load, opened at $opened, now at $current",
     ({ opened, current }) => {
       globalThis.history.replaceState(null, '', current);
       vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry(`http://localhost${opened}`)]);
@@ -907,11 +916,16 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
 
       const indicator = headerIndicator();
       expect(indicator).toHaveAttribute('data-state', 'waiting');
-      expect(indicator).toHaveTextContent('Loading chat…');
-      /* 600 ms left of the 1,000 ms, counted from navigation start, not from this mount. */
-      expect(revealDelay()).toBe(600);
-      /* A route open is announced once, by the route: the slot is seen, not live. */
-      expect(indicator).not.toHaveAttribute('role', 'status');
+      expect(indicator).toHaveAttribute('aria-busy', 'true');
+      expect(indicator!.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+      /* No sentence, no spinner: the viewer is the open's one status (rule 17). */
+      expect(indicator!.textContent).toBe('');
+      expect(document.querySelector('[data-slot="wait-indicator"]')).toBeNull();
+      expect(screen.queryByText(/Loading chat/u)).toBeNull();
+      /* Already past the 300 ms mark, counted from navigation start, not from this mount: the bars show at once. */
+      expect(revealDelay()).toBe(-100);
+      /* A route open is announced once, by the route: the shape is seen, not live. */
+      expect(indicator!.querySelector('[role=status], [aria-live]')).toBeNull();
     },
   );
 
@@ -925,7 +939,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(400);
     try {
       renderOverDeferredTranscript(history);
-      expect(revealDelay()).toBe(600);
+      expect(revealDelay()).toBe(-100);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -938,7 +952,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(5000);
     try {
       renderOverDeferredTranscript(history);
-      expect(revealDelay()).toBe(1000);
+      expect(revealDelay()).toBe(300);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -952,7 +966,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(5000);
     try {
       renderOverDeferredTranscript(history);
-      expect(revealDelay()).toBe(1000);
+      expect(revealDelay()).toBe(300);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -964,7 +978,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
     vi.spyOn(performance, 'now').mockReturnValue(400);
     const first = renderOverDeferredTranscript(history, clock);
-    expect(revealDelay()).toBe(600);
+    expect(revealDelay()).toBe(-100);
     /* To Home, which unmounts the lane, and back 10 s later: the transcript loads again, as a later wait. */
     globalThis.history.replaceState(null, '', '/');
     first.unmount();
@@ -973,7 +987,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     renderOverDeferredTranscript(history, clock);
 
     expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
-    expect(revealDelay()).toBe(1000);
+    expect(revealDelay()).toBe(300);
   });
 
   it('keeps timing the open from navigation start when the lane remounts on the document project', () => {
@@ -985,7 +999,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(700);
     renderOverDeferredTranscript(history, clock);
 
-    expect(revealDelay()).toBe(300);
+    expect(revealDelay()).toBe(-400);
   });
 
   /* Review round 14: a replace keeps the document's entry, so the settled open must end on its own. */
@@ -1002,7 +1016,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(9000);
     renderOverDeferredTranscript(history, clock);
 
-    expect(revealDelay()).toBe(1000);
+    expect(revealDelay()).toBe(300);
   });
 
   it('times a load that starts after the open from its own start', () => {
@@ -1011,14 +1025,23 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     renderOverDeferredTranscript(history);
 
     expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
-    expect(revealDelay()).toBe(1000);
+    expect(revealDelay()).toBe(300);
   });
 
-  it('leaves the slot empty for a chat whose transcript is known', () => {
+  it('draws no shape for a chat whose transcript is known', () => {
     publishChatState({ messages: history, transcript: 'loaded' });
     render(<ChatHistory />);
 
-    expect(headerIndicator()).toHaveAttribute('data-state', 'idle');
-    expect(headerIndicator()).toBeEmptyDOMElement();
+    expect(headerIndicator()).toBeUndefined();
+  });
+
+  /* A project reached by a click: the frame's open started at the click, and the lane mounted before the reveal
+   * takes over the frame's bars on that clock, so they do not blink out for 300 ms. */
+  it("times a lane mounted during a later project open from that open's start", () => {
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    renderOverDeferredTranscript(history, undefined, { startedAt: 4200, isRevealed: false });
+
+    expect(revealDelay()).toBe(-500);
   });
 });

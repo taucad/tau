@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ParameterManifest, ParameterSetOutcome, ParameterSetRequestBase } from '@taucad/parameters';
 import { fileParameterEntrySchema } from '@taucad/types';
@@ -409,11 +409,25 @@ describe('ParametersPane', () => {
     expect(helper).toHaveAttribute('data-display-symbol', 'in');
   });
 
-  it('waits for the manifest before showing the form', () => {
+  it('waits for the manifest in a busy, named body with the host’s shape and no sentence', () => {
+    entries.set('main.ts', { manifest: undefined, entry: undefined, failure: undefined });
+    renderPane({ ManifestWait: ({ entryPath }) => <span data-testid='manifest-wait'>{entryPath}</span> });
+
+    const body = screen.getByRole('group', { name: 'main.ts parameters' });
+    expect(body).toHaveAttribute('aria-busy', 'true');
+    expect(within(body).getByTestId('manifest-wait')).toHaveTextContent('main.ts');
+    expect(screen.queryByText(/Loading parameter metadata/u)).toBeNull();
+    expect(screen.queryByTestId('parameters-component')).toBeNull();
+  });
+
+  it('draws the waiting body empty for a host with no shape of its own', () => {
     entries.set('main.ts', { manifest: undefined, entry: undefined, failure: undefined });
     renderPane();
 
-    expect(screen.getByText('Loading parameter metadata…')).toBeInTheDocument();
+    const body = screen.getByRole('group', { name: 'main.ts parameters' });
+    expect(body).toHaveAttribute('aria-busy', 'true');
+    expect(body.textContent).toBe('');
+    expect(body.querySelector('[role=status], [aria-live]')).toBeNull();
   });
 
   it('offers Retry for a failure the source can retry', () => {

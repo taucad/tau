@@ -59,6 +59,16 @@
         "command": "node scripts/src/validate-expected-failures.ts"
       }
     },
+    "validate-quarantine": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Validates every project's quarantine.json (testing policy § 16.3, § 16.4): the schema and bounds of @taucad/vitest-ci/quarantine, an entry resolving to a test of a tracked file, at most 8 entries per project and 20 in the workspace, no expired entry and nothing in the never-quarantine set. Uncached: it reads every tracked quarantine.json and the test files they name."
+      },
+      "options": {
+        "command": "node scripts/src/validate-quarantine.ts"
+      }
+    },
     "validate-project-names": {
       "executor": "nx:run-commands",
       "options": {

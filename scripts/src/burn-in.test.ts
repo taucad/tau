@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   burnIn,
   detectionProbability,
+  isRunnableName,
   isTestFile,
   ownerOf,
   planBurnIn,
@@ -135,6 +136,24 @@ describe('file → target mapping', () => {
     expect(reasons.get('libs/untested/src/a.test.ts')).toBe('`untested` has no `test` target');
     expect(reasons.get('apps/react-e2e/src/a.test.ts')).toContain('only nx:run-commands Vitest targets');
     expect(reasons.get('apps/ui-e2e/src/journey.test.ts')).toBe('`listed:test` names its files, and not this one');
+  });
+
+  it('burns in a route test under a `$` folder and leaves out a path the run would refuse', () => {
+    const plan = planBurnIn(
+      ['packages/core/src/w.$workspace.$project/chat.test.tsx', 'packages/core/src/a b.test.ts'],
+      nodes,
+      workspace,
+    );
+    expect(plan.units).toEqual([
+      { project: 'core', target: 'test', files: ['packages/core/src/w.$workspace.$project/chat.test.tsx'] },
+    ]);
+    expect(plan.skipped).toEqual([
+      { file: 'packages/core/src/a b.test.ts', reason: 'its path has characters a burn-in run does not accept' },
+    ]);
+    for (const unit of plan.units) {
+      expect([unit.project, unit.target, ...unit.files].every((name) => isRunnableName(name))).toBe(true);
+    }
+    expect(isRunnableName('packages/../etc/a.test.ts')).toBe(false);
   });
 
   it('plans nothing for a pull request that changes no test file, so it adds no job', () => {

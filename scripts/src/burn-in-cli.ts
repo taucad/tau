@@ -37,6 +37,7 @@ import type { Launcher, ProjectTarget } from '#flake-repro.js';
 import {
   burnIn,
   isRunFailure,
+  isRunnableName,
   planBurnIn,
   renderSummary,
   runOutcomes,
@@ -305,11 +306,10 @@ const parseUnits = (text: string | undefined): BurnInUnit[] => {
     throw new UsageError('--units must be the JSON the plan wrote');
   }
   const units = Array.isArray(parsed) ? (parsed as BurnInUnit[]) : [];
-  const safe = /^[\w@.:/-]+$/u;
   for (const unit of units) {
     for (const value of [unit.project, unit.target, ...unit.files]) {
-      if (typeof value !== 'string' || !safe.test(value) || value.includes('..')) {
-        throw new UsageError(`--units names ${JSON.stringify(value)}, outside [A-Za-z0-9_@.:/-]`);
+      if (!isRunnableName(value)) {
+        throw new UsageError(`--units names ${JSON.stringify(value)}, outside [A-Za-z0-9_@.:/$-]`);
       }
     }
   }

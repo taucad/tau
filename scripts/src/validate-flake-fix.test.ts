@@ -223,7 +223,7 @@ const cases: ReadonlyArray<{
     classification: 'forbidden',
     rules: ['test-config', 'raised-retry'],
   },
-  { name: 'fake-clock', classification: 'test-only', rules: [] },
+  { name: 'fake-clock', classification: 'tolerance', rules: ['fake-clock-timer'] },
   { name: 'fake-clock-no-advance', classification: 'forbidden', rules: ['fixed-sleep'] },
   {
     name: 'raised-project-timeout',
@@ -248,6 +248,8 @@ const cases: ReadonlyArray<{
   { name: 'of-division', classification: 'forbidden', rules: ['deleted-assertion'] },
   { name: 'close-to-receiver', classification: 'tolerance', rules: ['widened-tolerance'] },
   { name: 'reordered-suite-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
+  { name: 'fake-clock-real-timers', classification: 'tolerance', rules: ['fake-clock-timer'] },
+  { name: 'ambiguous-wait-reshuffle', classification: 'tolerance', rules: ['widened-wait'] },
   { name: 'mixed-timers', classification: 'forbidden', rules: ['fixed-sleep'] },
   { name: 'widened-wait-same-condition', classification: 'tolerance', rules: ['widened-wait'] },
   { name: 'widened-wait-new-bounded', classification: 'tolerance', rules: ['widened-wait'] },

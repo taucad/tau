@@ -23,11 +23,12 @@
  *   literal (`expect(true)`); a raised `retry` (an unevaluable new value counts); a raised test, hook or Playwright
  *   project timeout, each test compared with itself, without a `Timeout-budget:` line naming the measured p99 as a
  *   duration (`Timeout-budget: p99 21.4 s over 300 runs`, or `… 1200 ms (p99)`) in the pull-request body or a commit
- *   message; an added fixed sleep (`sleep`, `delay`, `setTimeout` unless the file installs and advances a fake clock,
- *   `waitForTimeout`, `wait(<n>)`).
+ *   message; an added fixed sleep (`sleep`, `delay`, `setTimeout`, `waitForTimeout`, `wait(<n>)`).
  * - tolerance: a raised test timeout that carries its `Timeout-budget:` line; a raised bound on an existing
  *   condition wait (an added wait does not hide it); a raised timeout constant; a raised tolerance, epsilon or
- *   threshold; fewer digits on an existing `toBeCloseTo`; strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
+ *   threshold; fewer digits on an existing `toBeCloseTo`; an added `setTimeout` inside a declaration that installs
+ *   and advances a fake clock (whether the clock still governs it needs flow analysis, so it fails closed to
+ *   review); strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
  *
  * The classification is the most severe finding: forbidden, then tolerance, then product, else test-only. Only
  * test-only earns the `flake:test-only` label (the agent may auto-merge with its stress proof); every other class
@@ -771,6 +772,8 @@ export type Measures = {
     readonly assertions: Tally;
     readonly literalAssertions: Tally;
     readonly sleeps: Tally;
+    /** `setTimeout` calls a fake clock installed and advanced around them may excuse. */
+    readonly fakeClockTimers: Tally;
     readonly strict: Tally;
     readonly loose: Tally;
   };
@@ -847,6 +850,7 @@ export const measure = (source: string): Measures => {
     assertions: {},
     literalAssertions: {},
     sleeps: {},
+    fakeClockTimers: {},
     strict: {},
     loose: {},
   };
@@ -928,8 +932,12 @@ export const measure = (source: string): Measures => {
       }
     }
 
+    const excused = last === 'setTimeout' && controlled(blocks);
+    if (excused) {
+      bump(byPath.fakeClockTimers, path);
+    }
     if (
-      (sleepNames.has(last) && !(last === 'setTimeout' && controlled(blocks))) ||
+      (sleepNames.has(last) && !excused) ||
       ((last === 'wait' || callee === 'scheduler.wait') && args[0] !== undefined && evaluate(args[0]) !== undefined)
     ) {
       bump(byPath.sleeps, path);
@@ -1038,8 +1046,8 @@ const byValue = (a: Binding, b: Binding): number => b.value! - a.value!;
  * The values in `after` that exceed what `before` held, paired by structural identity (`id`: the declaration path,
  * and the callee, receiver or key with its first argument) before any value is compared:
  * - an identity with as many values on both sides pairs them in order and compares each pair;
- * - an identity with a different count on each side is ambiguous: every value after that matches no value before
- *   is a raise (fail closed);
+ * - an identity with a different count on each side is ambiguous: its values compare sorted, largest to largest, so
+ *   any value that exceeds its rank before is a raise (fail closed), and one beyond the count before is an addition;
  * - identities on one side only are removals and additions. They are compared largest to largest, so a value that
  *   moved to a new identity (a renamed test, a reworded condition) and went up is still a raise. An addition beyond
  *   the removals is a raise unless `fresh` is `'ignore'` (a new wait or matcher loosens nothing that stood before).
@@ -1070,8 +1078,17 @@ export const raised = (
     } else if (previous.length === values.length) {
       result.push(...values.filter((value, index) => isRaise(previous[index]!, value)));
     } else {
+      // Ambiguous: which value became which is unknown, so compare the sorted values largest to largest. A value
+      // beyond the ones that stood before is an addition; one with no constant value is a raise unless it stood.
       const texts = new Set(previous.map((value) => value.text));
-      result.push(...values.filter((value) => !texts.has(value.text)));
+      const before = previous.filter((value) => value.value !== undefined).sort(byValue);
+      const known = values.filter((value) => value.value !== undefined).sort(byValue);
+      result.push(
+        ...values.filter((value) => value.value === undefined && !texts.has(value.text)),
+        ...known.filter((value, index) =>
+          index >= before.length ? fresh === 'raise' : value.value! > before[index]!.value!,
+        ),
+      );
     }
   }
   for (const [id, values] of was) {
@@ -1206,6 +1223,16 @@ export const codeFindings = ({
   }
   if (raised(was.closeTo, is.closeTo, 'ignore').length > 0) {
     add('widened-tolerance', 'tolerance', 'lowers the digits of a `toBeCloseTo`');
+  }
+  // Proving that a fake clock still governs the timer (no `useRealTimers()` in between, no real await on it) needs
+  // flow analysis, so an excused timer is not test-only: it goes to the operator.
+  const clockTimers = grew(was.byPath.fakeClockTimers, is.byPath.fakeClockTimers);
+  if (clockTimers.length > 0) {
+    add(
+      'fake-clock-timer',
+      'tolerance',
+      `adds a \`setTimeout\` under a fake clock in ${clockTimers.map((key) => key || 'the file').join('; ')}: confirm the clock, not the wall time, runs it`,
+    );
   }
   const loosened = grew(is.byPath.strict, was.byPath.strict).filter(
     (key) => (is.byPath.loose[key] ?? 0) > (was.byPath.loose[key] ?? 0),

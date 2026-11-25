@@ -447,6 +447,26 @@ describe('IndexedDbStorageProvider', () => {
       expect(await provider.getPendingProjectOperations()).toEqual([operation]);
     });
 
+    it('admits deleting one copy of a live project, which the project outlives', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const operation = {
+        operationId: 'req_permanent_delete_copy',
+        kind: 'permanent-delete',
+        projectId: project.projectId,
+        storage: { backend: 'opfs', providerBasePath: 'copy' },
+        copy: true,
+      } as const;
+
+      await provider.beginPermanentDeleteProject(operation);
+
+      expect(await provider.getProjectLibraryState(project.projectId)).not.toHaveProperty('deletedAt');
+      expect(await provider.getPendingProjectOperations()).toEqual([operation]);
+      await expect(provider.beginPermanentDeleteProject({ ...operation, operationId: 'req_second' })).rejects.toThrow(
+        'Permanent delete is already pending',
+      );
+    });
+
     it('serializes restore against permanent-delete admission across storage instances', async () => {
       const first = new IndexedDbStorageProvider();
       const second = new IndexedDbStorageProvider();

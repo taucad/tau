@@ -73,7 +73,13 @@ export type PendingPermanentDeleteProjectOperation = {
   readonly operationId: string;
   readonly kind: 'permanent-delete';
   readonly projectId: string;
+  /** The one exact directory this deletes; any other directory that carries the id is untouched. */
   readonly storage: PendingProjectStorage;
+  /**
+   * Another directory still carried the id when this was journaled, so the project outlives the delete: it need not be
+   * in the Trash, and a directory already gone when the delete runs is not a conflict while the id lives on elsewhere.
+   */
+  readonly copy?: true;
 };
 
 export type PendingProjectOperation =

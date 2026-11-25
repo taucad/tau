@@ -280,13 +280,18 @@ const objectStoreWorker = {
     await storage.deletePendingProjectOperation(operationId);
   },
 
-  async beginPermanentDeleteProject(projectId: string, storageConfig: PendingProjectStorage): Promise<string> {
+  async beginPermanentDeleteProject(
+    projectId: string,
+    storageConfig: PendingProjectStorage,
+    options?: Readonly<{ copy?: boolean }>,
+  ): Promise<string> {
     const operationId = generatePrefixedId(idPrefix.request);
     await storage.beginPermanentDeleteProject({
       operationId,
       kind: 'permanent-delete',
       projectId,
       storage: storageConfig,
+      ...(options?.copy === true ? { copy: true } : {}),
     });
     return operationId;
   },

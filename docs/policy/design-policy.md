@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-11-15'
+updated: '2026-11-25'
 ---
 
 # Design Policy
@@ -67,6 +67,10 @@ measurements remain explicit.
   reopen a closed disclosure, erase an edit draft, reset selection, move focus
   or seize the reader's scroll. Retain stable identity and position. Announce
   meaningful lifecycle changes, not every token or file tick.
+  Only the reader opens or closes a transcript disclosure: running, failing,
+  finishing and reloading leave it as it was, so a chat reads the same live
+  and reloaded. Opening one keeps the clicked line where it is and pauses
+  following until the reader returns to the bottom.
   Parameter updates retain the last valid model until its replacement is ready;
   keep requested and actually presented identity distinct rather than implying
   that old geometry already represents new values.
@@ -135,6 +139,14 @@ failed and stopped runs remove the live row. The transcript fills the available
 space without per-turn viewport spacers or top pinning; follow new content only
 while the reader is at the bottom. A collapsed activity group may retain its
 own progress affordance. The chat header and sidebar add no second live cue.
+
+Routine activity in the transcript rests as one muted line per group: its
+family icon, its summary and a chevron that is visible without hover. The line
+keeps its height while tools arrive. Opened, it shows one bordered container
+with a row per item in order, thoughts included, and each row opens its own
+detail in place. A group of one item is that item's own line and opens straight
+to its detail. A failure is named in the summary and on its row's icon and verb;
+it does not open the row.
 
 **Saved**, **checks passed**, **work finished** and **backed up** are independent
 facts. A saved revision can contain interrupted or unverified work. Loading is

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:22:21.846Z",
+  "updatedAt": "2026-11-25T23:27:01.651Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2159,6 +2159,19 @@
       "counted": 114,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45720959624,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2859",
+      "sha": "67a771ad2cdec550bff06d3ecbf9b9fd4f066781",
+      "at": "2026-11-25T23:26:49Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1120,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -2635,12 +2648,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "desktop:test": {
-      "executions": 11,
-      "tests": 12221,
+      "executions": 12,
+      "tests": 13341,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:21:57Z"
+      "lastSeen": "2026-11-25T23:26:49Z"
     },
     "docs:test": {
       "executions": 7,

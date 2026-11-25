@@ -77,7 +77,7 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { buildEditedUserMessage } from '#utils/chat.utils.js';
+import { buildEditedUserMessage, composeDraftText } from '#utils/chat.utils.js';
 import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -689,6 +689,16 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  * this is the same string on the way back (I5).
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
+
+/**
+ * Whether the composer still holds exactly what a sent message took out of it.
+ *
+ * The draft is the editor's raw text and the message is the composed one, so the two are compared in the composed
+ * form. Comparing them raw left every draft with a trailing newline or space in the composer after it was queued, where
+ * a second Enter sent it again.
+ */
+const draftIsOf = (draftText: string, message: MyUIMessage): boolean =>
+  composeDraftText(draftText) === composedText(message);
 
 /** Two log rows are the same row (EQ3: no ordering across devices is needed). */
 const sameRowKey = (left: RowKey, right: RowKey): boolean =>
@@ -1972,7 +1982,7 @@ export class ChatSessionStore {
         : { ...record, items: [...record.items, item] };
     });
     const draft = session.draftActorRef.getSnapshot().context;
-    if (draft.draftText === '' || draft.draftText === composedText(gesture.message)) {
+    if (draft.draftText === '' || draftIsOf(draft.draftText, gesture.message)) {
       session.draftActorRef.send({ type: 'clearDraft' });
       try {
         await this.releaseDraftAttachments(chatId);
@@ -3130,7 +3140,7 @@ export class ChatSessionStore {
      * person may have typed the next message into the same box. Neither the
      * clear nor a returning message may land on that. */
     const { draftText } = session.draftActorRef.getSnapshot().context;
-    if (gesture.kind === 'send' && draftText !== '' && draftText !== composedText(gesture.message)) {
+    if (gesture.kind === 'send' && draftText !== '' && !draftIsOf(draftText, gesture.message)) {
       return;
     }
     /* An `edit` and a `regenerate` rewind to a message the transcript still

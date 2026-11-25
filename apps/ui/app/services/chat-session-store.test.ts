@@ -6682,6 +6682,36 @@ describe('ChatSessionStore — composer records (W7)', () => {
     reopened.release(chatId);
   });
 
+  it.each([
+    ['a trailing newline', 'model the bracket\n'],
+    ['a trailing space', 'model the bracket '],
+    ['leading whitespace', '\n model the bracket'],
+  ])('clears a sent draft that ends up queued when its text has %s', async (_case, typed) => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: typed });
+
+    /* The message carries the composed text, which `buildUserMessage` trims; the draft is what the editor holds. */
+    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: typed }) });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+    store.release(chatId);
+  });
+
+  it('keeps text typed after a send was composed, though it differs only past the sent text', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    const message = buildUserMessage({ text: 'model the bracket' });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket\nand a second one' });
+
+    await store.requestTurn(chatId, { kind: 'send', message });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket\nand a second one');
+    store.release(chatId);
+  });
+
   it('promotes both blobs into the chat directory and clears the draft-stage copies', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);

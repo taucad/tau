@@ -37,6 +37,7 @@ import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { noteBrowserComposerFocused } from '#services/agent-host-client.js';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
@@ -158,6 +159,8 @@ export const ChatTextarea = memo(function ({
     setIsFocused(true);
     /* PL1: the AI SDK loads on demand; focus starts its fetch so the first send is not slowed by it. */
     prewarmChatSdk();
+    /* C7: a send may follow, so an open project host refreshes its deployment answer before admission needs it. */
+    void noteBrowserComposerFocused();
   }, []);
   const handleBlur = useCallback((): void => {
     setIsFocused(false);

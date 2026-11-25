@@ -668,7 +668,16 @@ export const TauMetrics = {
     description: 'Invite notification emails suppressed before send, by reason',
     attributes: z.object({
       trigger: z.enum(['publish', 'invite']).optional(),
-      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable', 'email_disabled']).optional(),
+    }),
+  }),
+
+  projectInviteEmailsTotal: defineCounter({
+    name: 'project.invite_emails',
+    unit: '{email}',
+    description: 'Collaborator invitation emails by outcome: sent, or why it was skipped',
+    attributes: z.object({
+      outcome: z.enum(['sent', 'email_disabled', 'undeliverable', 'send_failed']).optional(),
     }),
   }),
 
@@ -1629,9 +1638,11 @@ export const TauMetrics = {
 
   /*
    * STO-25: how long a hosted project takes to open in the browser, from its revision root opening.
-   * `first_view` is the repository checked out, so the editor and file tree are usable; `fully_fetched`
-   * is every large object local, so the viewer can render. `cache` is cold when the open fetched at
-   * least one large object from the network.
+   * `first_view` is the first view on screen: during a Tau Cloud open, when the page's route shows the
+   * file tree, editor and composer (since SP6; before, and when the page never says, the repository
+   * checked out). It is sent once the open's cache is known, so an open that fails before then sends
+   * none. `fully_fetched` is every large object local, so the viewer can render. `cache` is cold when
+   * the open fetched at least one large object from the network.
    */
   projectOpenDuration: defineHistogram({
     name: 'tau.project.open.duration',

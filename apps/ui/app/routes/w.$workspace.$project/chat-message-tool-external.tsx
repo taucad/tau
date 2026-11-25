@@ -22,6 +22,7 @@ import type { DynamicToolUIPart } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
 // The subpath, not the `@taucad/chat/rpc` barrel: the barrel carries every RPC handler into the transcript.
 import { createFileEditDiffStats } from '@taucad/chat/rpc/client-text-mutation';
+import { parseToolErrorEnvelope } from '@taucad/chat/utils';
 import {
   ChatToolCard,
   ChatToolCardContent,
@@ -36,7 +37,7 @@ import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
 import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import { summarizeExternalCall, summaryNoun } from '@taucad/chat-ui/utils/external-call-summary';
@@ -114,6 +115,35 @@ const unsafeDisplay = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200E\u200F\u202
 export const sanitizeAgentText = (text: string, limit = 200): string => {
   const folded = text.replaceAll(unsafeDisplay, '').replaceAll(/\s+/gu, ' ').trim();
   return folded.length > limit ? `${folded.slice(0, limit)}…` : folded;
+};
+
+/** The envelope fields the error card reads; any other field an agent sent is dropped. */
+const failureEnvelopeFields = ['errorCode', 'message', 'toolName', 'toolCallId'] as const;
+
+/**
+ * Bound a failed call's error text for the error card.
+ *
+ * A structured failure is parsed first and bounded field by field: cutting the
+ * serialized envelope would break the JSON the card reads its reason from, and
+ * a stopped call's envelope carries the tool name, which for a shell call is the
+ * whole command.
+ *
+ * @param errorText - The failed part's error text.
+ * @returns The same failure, inert and bounded, still parseable when it was.
+ */
+export const sanitizeAgentFailure = (errorText: string): string => {
+  const envelope = parseToolErrorEnvelope(errorText);
+  if (envelope === undefined) {
+    return sanitizeAgentText(errorText, 400);
+  }
+  return JSON.stringify(
+    Object.fromEntries(
+      failureEnvelopeFields.flatMap((field) => {
+        const value = envelope[field];
+        return typeof value === 'string' ? [[field, sanitizeAgentText(value, field === 'message' ? 400 : 200)]] : [];
+      }),
+    ),
+  );
 };
 
 /**
@@ -365,7 +395,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   if (part.state === 'output-error') {
     return (
       <ChatToolError
-        errorText={sanitizeAgentText(part.errorText, 400)}
+        errorText={sanitizeAgentFailure(part.errorText)}
         icon={icon}
         noun={sanitizeAgentText(heading.noun)}
       />

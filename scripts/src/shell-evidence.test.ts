@@ -398,6 +398,15 @@ describe('conformance cache guard', () => {
   it('accepts an uncached target and a fingerprinted one', () => {
     expect(cacheViolations('a:test:shell-conformance', { cache: false })).toEqual([]);
     expect(cacheViolations('a:test:shell-conformance', cacheable)).toEqual([]);
+    expect(
+      cacheViolations('a:test:shell-conformance', {
+        ...cacheable,
+        outputs: [
+          ...(cacheable.outputs ?? []),
+          '{workspaceRoot}/out/test-results/{projectName}/test-shell-conformance.outcomes.jsonl',
+        ],
+      }),
+    ).toEqual([]);
   });
 
   it('fails a cached target without the environment fingerprint', () => {
@@ -427,6 +436,12 @@ describe('conformance cache guard', () => {
     ).toHaveLength(2);
     expect(
       cacheViolations('a:t', { ...cacheable, outputs: ['{workspaceRoot}/out/test-results/shell-conformance'] }),
+    ).toEqual([expect.stringContaining('outputs')]);
+    expect(
+      cacheViolations('a:t', {
+        ...cacheable,
+        outputs: ['{workspaceRoot}/out/test-results/{projectName}/test-shell-conformance.outcomes.jsonl'],
+      }),
     ).toEqual([expect.stringContaining('outputs')]);
     expect(cacheViolations('a:t', { ...cacheable, options: { command: 'vitest run' } })).toEqual([
       expect.stringContaining('verdict record'),
@@ -529,6 +544,7 @@ describe('shell conformance workflow evidence', () => {
         expect(configuration?.outputs).toEqual([
           `{workspaceRoot}/out/test-results/shell-conformance/*/${receipt}`,
           `{workspaceRoot}/out/test-results/shell-conformance/*/${receipt.replace(/\.json$/u, '.verdict.json')}`,
+          `{workspaceRoot}/out/test-results/{projectName}/${target.replaceAll(':', '-')}.outcomes.jsonl`,
         ]);
       }
     },

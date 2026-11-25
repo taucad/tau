@@ -80,6 +80,19 @@ describe('resolveRenderTier', () => {
     expect(tier.features).toEqual(renderTierFeatures('webgpu', 'hardware'));
   });
 
+  it("should lay chosen features over the adapter's own under a partial override", () => {
+    const tier = resolveRenderTier(webGpuRenderer({ vendor: 'google', architecture: 'swiftshader' }), {
+      features: { ambientOcclusion: true, antialias: true, speculativePreparation: true },
+    });
+    expect(tier).toMatchObject({ rasterizer: 'software', overridden: true });
+    expect(tier.features).toEqual({
+      ambientOcclusion: true,
+      antialias: true,
+      speculativePreparation: true,
+      environmentResolution: environmentResolution.softwareRasterizer,
+    });
+  });
+
   it('should resolve a renderer once, so every reader of one canvas incarnation sees the same tier', () => {
     const renderer = webGpuRenderer({ vendor: 'google', architecture: 'swiftshader' });
     const first = resolveRenderTier(renderer);

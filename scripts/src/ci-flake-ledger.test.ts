@@ -134,6 +134,42 @@ describe('pairFailures', () => {
     expect(unresolved).toBe(0);
   });
 
+  it('should pair a failed run that its Fail fast job cancelled, but not the Fail fast job', () => {
+    const evidence: RunEvidence[] = [
+      {
+        run: queueRun({
+          id: 1,
+          pr: 10,
+          baseSha: base(100),
+          headSha: base(101),
+          conclusion: 'cancelled',
+          at: '2026-11-18T10:00:00Z',
+        }),
+        jobs: [
+          job(11, 'Affected (test-3)', 'failure'),
+          job(12, 'Fail fast (affected-lane)', 'failure'),
+          gate('cancelled'),
+        ],
+      },
+      {
+        run: queueRun({
+          id: 2,
+          pr: 10,
+          baseSha: base(200),
+          headSha: base(201),
+          conclusion: 'success',
+          at: '2026-11-18T12:00:00Z',
+        }),
+        jobs: [job(21, 'Affected (test-3)', 'success'), gate('success')],
+      },
+    ];
+    const { pairs, unresolved } = pairFailures(evidence);
+    expect(pairs.map((pair) => [pair.job, pair.failed.run.id, pair.passed.run.id])).toEqual([
+      ['Affected (test-3)', 1, 2],
+    ]);
+    expect(unresolved).toBe(0);
+  });
+
   it('should not pair a failure inherited from the group it was built on', () => {
     const evidence: RunEvidence[] = [
       {

@@ -21,6 +21,8 @@
  * to focus, and the router's commit is its only source (boundary 1). Boundary 2, the runtime's start after hydration
  * in `runtime/app-runtime-provider.tsx`, is not a counted site; the ownership ratchet holds it. A new boundary needs a
  * ruling, and a file added to the programme's paths joins this list; the second row fails a ratchet file left out.
+ * The library machines and runtime that moved to `apps/libs/project-library` (#2500) are held at zero there by that
+ * library's empty ceiling, as is the revision clients' lease in `apps/libs/revisions-ui`.
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this
@@ -48,9 +50,6 @@ const zeroScope = [
   new URL('machines/focus.machine.ts', import.meta.url),
   new URL('machines/focus.route-state.ts', import.meta.url),
   new URL('machines/github-credential-renewal.machine.ts', import.meta.url),
-  new URL('machines/library-access.machine.ts', import.meta.url),
-  new URL('machines/library-discovery.machine.ts', import.meta.url),
-  new URL('machines/library-recovery.machine.ts', import.meta.url),
   new URL('machines/project-session.machine.ts', import.meta.url),
   new URL('machines/project.machine.ts', import.meta.url),
   new URL('machines/session-file-check.machine.ts', import.meta.url),

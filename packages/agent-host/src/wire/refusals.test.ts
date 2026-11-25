@@ -14,6 +14,7 @@ import type { RefusalCode } from '#wire/refusals.js';
 /** Produced resumable failures, including bounded output recovery. */
 const todaysResumable = [
   'CIRCUIT_BREAKER_OPEN',
+  'DEPLOYMENT_UNKNOWN',
   'INSUFFICIENT_CREDIT',
   'INVALID_REQUEST',
   'MALFORMED_RESPONSE',

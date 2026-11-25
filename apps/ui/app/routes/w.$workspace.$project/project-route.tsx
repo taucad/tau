@@ -21,6 +21,7 @@ import type { CommittedProjectRoute, FocusRegistryView } from '#machines/focus.r
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
 import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project
@@ -111,7 +112,7 @@ export function ProjectRouteGate({
           <div
             className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
             role='status'
-            aria-label='Opening project'
+            aria-label={projectOpenCopy.label}
           >
             <Loader className='size-8' />
           </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSettingsCatalogue, searchSettings } from '#components/settings/settings-catalogue.js';
+import { viewerControlCopy } from '#components/settings/viewer/viewer-settings-copy.js';
 
 const catalogue = createSettingsCatalogue([
   { name: 'kernelTracing', label: 'Kernel tracing', description: 'Record kernel spans' },
@@ -34,6 +35,16 @@ describe('createSettingsCatalogue', () => {
     const entries = catalogue.flatMap(({ entries }) => entries);
 
     expect(new Set(entries.map(({ id }) => id)).size).toBe(entries.length);
+  });
+
+  it('should label the orbit style entry with its row title and description', () => {
+    const entry = catalogue.flatMap(({ entries }) => entries).find(({ id }) => id === 'viewer-orbit-style');
+
+    expect(entry).toMatchObject({
+      label: viewerControlCopy.orbitStyle.title,
+      description: viewerControlCopy.orbitStyle.description,
+    });
+    expect(entry?.label).toBe('Orbit style');
   });
 
   it('should keep every section, ungated, for the host to filter', () => {
@@ -75,6 +86,12 @@ describe('searchSettings', () => {
 
   it('should reject results when any query token is unmatched', () => {
     expect(searchSettings('theme storage', catalogue)).toEqual([]);
+  });
+
+  it('should find the orbit style by the names other tools give its two modes', () => {
+    for (const query of ['orbit style', 'free orbit', 'turntable', 'trackball', 'arcball', 'tumble', 'constrained']) {
+      expect(ids(query)).toContain('viewer-orbit-style');
+    }
   });
 
   it('should match setting aliases', () => {

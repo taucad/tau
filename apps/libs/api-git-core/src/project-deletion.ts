@@ -13,8 +13,9 @@ import {
   projectDeletionManifest,
   projectGit,
   projectInvitation,
+  projectShare,
+  projectShareAccess,
   publication,
-  publicationAccess,
   user,
 } from '@taucad/api-database/schema';
 import type { RepositoryLocator } from '#store/port.js';
@@ -123,15 +124,24 @@ export async function requestProjectDeletion(input: {
       .update(projectInvitation)
       .set({ revokedAt: at })
       .where(and(eq(projectInvitation.projectId, row.id), isNull(projectInvitation.revokedAt)));
+    /* The cloud link stops and its invited people lose access in the same
+       commit as the fence; the cascade removes both rows at purge. */
     await transaction
-      .update(publicationAccess)
+      .update(projectShareAccess)
       .set({ status: 'revoked', revokedAt: at })
       .where(
-        inArray(
-          publicationAccess.publicationId,
-          transaction.select({ id: publication.id }).from(publication).where(eq(publication.projectId, row.id)),
+        and(
+          inArray(
+            projectShareAccess.shareId,
+            transaction.select({ id: projectShare.id }).from(projectShare).where(eq(projectShare.projectId, row.id)),
+          ),
+          eq(projectShareAccess.status, 'active'),
         ),
       );
+    await transaction
+      .update(projectShare)
+      .set({ disabledAt: at, updatedAt: at })
+      .where(and(eq(projectShare.projectId, row.id), isNull(projectShare.disabledAt)));
     await transaction
       .update(publication)
       .set({ unpublishedAt: at })

@@ -19,7 +19,9 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+
+import { desktopHostBuildOf, writeDesktopHostBuild } from '#shared/desktop-host-build.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
 import { localSigningIdentity } from './local-signing.mjs';
@@ -77,6 +79,19 @@ const main = (): void => {
   if (args.length === 0) {
     throw new Error('pass an electron-vite command');
   }
+
+  /* LW8: record the checked-out commit beside the bundles, as packaging does, so a local launch reports its build. */
+  mkdirSync(join(desktopRoot, 'dist'), { recursive: true });
+  writeDesktopHostBuild(
+    join(desktopRoot, 'dist'),
+    desktopHostBuildOf(() =>
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: desktopRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ),
+  );
 
   const environment = { ...process.env };
   if (process.platform === 'darwin') {

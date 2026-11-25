@@ -1,12 +1,27 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type * as RuntimeKernelModule from '@taucad/runtime/kernel';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
-import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf, createReplicadPackFacts } from '#utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
+
+// The cooperative abort poll: the stand-in throws once `abortAfter` polls have passed (unbounded by default).
+const { abort } = vi.hoisted(() => ({ abort: { polls: 0, abortAfter: Number.POSITIVE_INFINITY } }));
+
+vi.mock('@taucad/runtime/kernel', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeKernelModule>()),
+  checkAbort(): void {
+    abort.polls += 1;
+    if (abort.polls > abort.abortAfter) {
+      throw new Error('Render aborted by a superseding document operation');
+    }
+  },
+}));
 
 // =============================================================================
 // Fixtures
@@ -728,5 +743,127 @@ describe('convertReplicadGeometriesToGltf', () => {
         convertReplicadGeometriesToGltf({ geometries: [createSimpleGeometry()], format: 'glb' }),
       ).not.toThrow();
     });
+  });
+});
+
+describe('convertReplicadGeometriesToGltf with kept pack facts (N6)', () => {
+  /** A closed, outward-wound tetrahedron: drawn one-sided. */
+  const tetrahedron = (): GeometryReplicad =>
+    createSimpleGeometry({
+      faces: {
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+        triangles: new Uint32Array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+        faceGroups: [
+          { start: 0, count: 6, faceId: 7 },
+          { start: 6, count: 6, faceId: 9 },
+        ],
+      },
+    });
+  const doubleSided = (glb: Uint8Array<ArrayBuffer>): unknown =>
+    (readGlbJsonAndBin(glb).json as unknown as { materials: Array<{ doubleSided?: boolean }> }).materials[0]!
+      .doubleSided;
+
+  it('should pack the same bytes with kept facts as without, in every output frame', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    const frames = [{}, { coordinateSystem: 'z-up', unit: { length: 'millimeter' } }] as const;
+
+    for (const frame of frames) {
+      const reference = convertReplicadGeometriesToGltf({ geometries: [geometry], ...frame });
+      expect(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts, ...frame })).toEqual(reference);
+      expect(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts, ...frame })).toEqual(reference);
+    }
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts }))).toBe(false);
+    expect(packFacts.get(geometry.faces)?.closed.size).toBe(frames.length);
+  });
+
+  it('should read the kept facts of a mesh instead of deriving them again', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts });
+    const facts = packFacts.get(geometry.faces)!;
+    // A planted closedness shows the pack reads the kept fact: the closed solid is now drawn double sided.
+    for (const frame of facts.closed.keys()) {
+      facts.closed.set(frame, false);
+    }
+
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts }))).toBe(true);
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry] }))).toBe(false);
+  });
+
+  it('should key facts by the mesh, so a copy of its arrays derives its own', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts });
+    const copy = { ...geometry, faces: { ...geometry.faces } };
+
+    convertReplicadGeometriesToGltf({ geometries: [copy], packFacts });
+    expect(packFacts.get(copy.faces)).not.toBe(packFacts.get(geometry.faces));
+  });
+});
+
+/**
+ * SHA-256 of a GLB without its `asset.generator`, which names the writing package's version and so changes on every
+ * release (as in `apps/runtime-e2e/src/bundler-parity.test.ts`): the JSON chunk re-serialized without it, then the
+ * BIN chunk as is.
+ */
+function digestGlbWithoutGenerator(glb: Uint8Array<ArrayBuffer>): string {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength))) as {
+    asset: { generator?: string };
+  };
+  delete json.asset.generator;
+  const binStart = 20 + jsonLength;
+  const binLength = binStart < glb.byteLength ? view.getUint32(binStart, true) : 0;
+  const bin = glb.subarray(binStart + 8, binStart + 8 + binLength);
+  return createHash('sha256').update(JSON.stringify(json)).update(bin).digest('hex');
+}
+
+describe('convertReplicadGeometriesToGltf under a superseding operation (P9c)', () => {
+  const parts = (count: number): GeometryReplicad[] =>
+    Array.from({ length: count }, (_, index) => createSimpleGeometry({ name: `Part ${index}` }));
+
+  it('should poll the abort word before each part, before writing, and in the writer', () => {
+    abort.polls = 0;
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+
+    convertReplicadGeometriesToGltf({ geometries: parts(3) });
+
+    // Three parts and the write, then the writer's poll before each of the three nodes and before serializing.
+    expect(abort.polls).toBe(8);
+  });
+
+  it('should stop inside the writer once a supersede lands after the last pack poll', () => {
+    abort.polls = 0;
+    abort.abortAfter = 4;
+
+    expect(() => convertReplicadGeometriesToGltf({ geometries: parts(3) })).toThrow(/superseding/u);
+    // The pack's four polls passed; the writer's first poll stopped the write.
+    expect(abort.polls).toBe(5);
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+  });
+
+  it('should stop between parts once a later operation supersedes the render', () => {
+    abort.polls = 0;
+    abort.abortAfter = 1;
+
+    expect(() => convertReplicadGeometriesToGltf({ geometries: parts(3) })).toThrow(/superseding/u);
+    // The first part was packed; the poll before the second stopped the pack instead of writing a stale GLB.
+    expect(abort.polls).toBe(2);
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+  });
+
+  it('should pack the same bytes while nothing aborts', () => {
+    abort.abortAfter = Number.POSITIVE_INFINITY;
+    const geometries = parts(2);
+    const glb = convertReplicadGeometriesToGltf({ geometries });
+
+    // The digest of these two parts' GLB as packed on main at 63b2560f81, before any change to the pack: a change
+    // to the packed bytes fails here instead of changing both sides of a comparison.
+    expect(digestGlbWithoutGenerator(glb)).toBe('f65646d5bd832a51d3fe79c9c772bcf7326e088cad407cbd910a14b50f159a0d');
+    // And packing is deterministic: a second pack of the same parts gives the same bytes.
+    expect(convertReplicadGeometriesToGltf({ geometries })).toEqual(glb);
   });
 });

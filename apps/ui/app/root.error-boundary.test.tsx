@@ -59,11 +59,16 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
   BillingSessionProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   useBillingSession: () => ({ apiBaseUrl: undefined, environment: undefined, userId: undefined }),
 }));
-vi.mock('#providers/financial-session-provider.js', () => ({
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
   FinancialSessionProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   FinancialSessionScope: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   useFinancialSession: () => ({ capture: vi.fn() }),
   useOptionalFinancialSession: () => undefined,
+}));
+/* The memory router renders `App` without the layout's boundary, which hands the payment return its session. */
+vi.mock('#cloud/cloud-financial-session.js', () => ({
+  CloudFinancialSessionProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
+  useCloudFinancialSession: () => ({ capture: vi.fn() }),
 }));
 
 const { default: App, ErrorBoundary, Layout } = await import('#root.js');

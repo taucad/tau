@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom';
 import { queuedSendStatus } from '#components/hand-off/hand-off.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor, JSONContent } from '@tiptap/core';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
@@ -47,9 +47,10 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
 import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
-import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
+import { noteBrowserComposerFocused } from '#services/agent-host-client.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
 import type { CadReference } from '@taucad/chat/references';
 import {
@@ -794,6 +795,12 @@ export const ChatTextareaDesktop = memo(function ({
     editor.setEditable(!isSubmitting, false);
   }, [editor, isSubmitting]);
 
+  const handleComposerFocus = useCallback((): void => {
+    handleTextareaFocus?.();
+    /* C7: a send may follow, so an open project host refreshes its deployment answer before admission needs it. */
+    void noteBrowserComposerFocused();
+  }, [handleTextareaFocus]);
+
   const focusEditor = useCallback(() => {
     editorRef.current?.commands.focus('end');
   }, []);
@@ -888,7 +895,7 @@ export const ChatTextareaDesktop = memo(function ({
         data-collapsed={isCollapsed ? '' : undefined}
         data-queued-send={isQueuedSendShown ? '' : undefined}
         onKeyDownCapture={cancelQueuedSubmitOnEscape}
-        onFocus={handleTextareaFocus}
+        onFocus={handleComposerFocus}
         onBlur={handleTextareaBlur}
         {...boxDropHandlers}
       >

@@ -50,7 +50,8 @@ import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { DesktopShell } from '#services-host-shell.js';
 import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
 import { desktopChatObserver, desktopHostBuild } from '#services-host-evidence.js';
-import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createGatewayModelTransport } from '@taucad/agent-host';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
 import type { GatewayHostLabels } from '@taucad/agent-host/wire';
 import {
   acpModelProbeTimeout,
@@ -255,6 +256,11 @@ export type AgentHostConfig = {
   readonly tauApiUrl: string;
   readonly tauWebSocketUrl: string;
   /**
+   * This launch started in safe mode (main decides it before `ready`): every project's revisions refuse Tau Cloud before
+   * any request (W9 R5). Read once per project host, never live.
+   */
+  readonly safeMode?: boolean | undefined;
+  /**
    * ACP adapters main resolved and probed (W4-ACP), or absent for Tau's own
    * runs only. Discovery is *main's* because main also advertises the ids to
    * the renderer through the preload bootstrap, and a second resolution here
@@ -370,6 +376,8 @@ export type ServicesHostOptions = {
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
   readonly terminalShell?: TerminalConcernOptions['shell'];
+  /** The shell's one-time setup a person starts from the Terminal pane (`DesktopShell.provision`); absent, none runs. */
+  readonly terminalProvision?: TerminalConcernOptions['provision'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -637,6 +645,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     heldStarts?.();
     heldStarts = undefined;
   };
+  /* The API's deployment answer, asked at each run's admission (D1): it, not the build, chooses whether a run carries
+   * the billing layer. One per host, in memory, so every project it opens shares the channel's cached answer. */
+  const deployment = createDeploymentModeResolver();
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
@@ -811,6 +822,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const terminals = createTerminalConcern({
     shell: options.terminalShell,
+    provision: options.terminalProvision,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
     /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */
@@ -1316,6 +1328,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             preparableKernels: nativeKernels.preparable,
           }),
       apiBaseUrl: config.tauApiUrl,
+      ...(config.safeMode === true ? { safeMode: true } : {}),
       syncTelemetryPlacement: 'desktop',
       /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
       syncTelemetryConsent: () => telemetryConsent,
@@ -1330,19 +1343,21 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
       },
       systemPrompt: config.systemPrompt,
-      /* The build defines this; a missing define must fail loudly rather than
-       * quietly running a Cloud build on the self-host transport. The bearer is
-       * resolved per request, never captured: main refreshes it. The project id
-       * is the renderer's, which `GET /v1/projects` lists, so every receipt
-       * attributes to a project the usage page can name. */
-      modelTransport: (tauCloudBuildEnabled ? createTauCloudGatewayModelTransport : createGatewayModelTransport)({
+      /* The channel's API answers whether a run is funded (D1), never the build. The bearer is resolved per
+       * request, never captured: main refreshes it. The project id is the renderer's, which `GET /v1/projects`
+       * lists, so every receipt attributes to a project the usage page can name. */
+      modelTransport: createGatewayModelTransport({
         baseUrl: config.gatewayBaseUrl,
         projectId,
         auth: () => authToken,
-        /* The funded build names the account an attempt charges (GI-Q6); the self-host transport ignores it. */
-        principal: () => sessionPrincipal,
         /* LW17: the host and build the desktop's own evidence reports, so one run reads one release. */
         hostLabels: desktopHostLabels(),
+        billing: {
+          /* An unknown answer refuses the run before any model call (I1). */
+          deployment: async () => deployment.mode(config.gatewayBaseUrl),
+          /* A funded run names the account an attempt charges (GI-Q6). */
+          principal: () => sessionPrincipal,
+        },
       }),
       /* The desktop rides the signed-in session (RH-R13), naming its account so a resume refuses another's
        * attempt (GI-Q6). Read per admission: main re-sends both on every sign-in, refresh and sign-out. */

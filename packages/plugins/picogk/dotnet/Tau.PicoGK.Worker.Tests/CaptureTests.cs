@@ -132,6 +132,79 @@ public sealed partial class WorkerTests
     }
 
     [Fact]
+    public void RemovedPreviewsAreNeverReadBackAndTheSceneShowsGeometryAsAdded()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            ExtractedComponent unchanged;
+            using (var reference = new CaptureViewerBackend(Path.Combine(root, "lazy-reference")))
+            {
+                using var sphere = Voxels.voxSphere(Vector3.Zero, 2);
+                reference.Add(sphere, "Sphere", 0);
+                unchanged = Assert.Single(reference.Extract().Components);
+            }
+            var copies = TauGeometryCapture.Counters(library)[1];
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "lazy-readback"));
+            using (var preview = Voxels.voxSphere(Vector3.Zero, 5))
+            {
+                backend.Add(preview, 0);
+                backend.RemoveAllObjects();
+                _ = backend.GetBoundingBox(); // Applies the queued commands.
+            }
+            // The dropped preview released its lease without a read-back.
+            Assert.Equal(copies, TauGeometryCapture.Counters(library)[1]);
+            Assert.Equal(0UL, TauGeometryCapture.Counters(library)[4]);
+            using var mutated = Voxels.voxSphere(Vector3.Zero, 2);
+            backend.Add(mutated, "Sphere", 0);
+            using (var grown = Voxels.voxSphere(new Vector3(1, 0, 0), 3)) mutated.BoolAdd(grown);
+            backend.SetGroupVisible(1, false);
+            using var hidden = Voxels.voxSphere(new Vector3(20, 0, 0), 2);
+            backend.Add(hidden, 1);
+            Assert.Equal(0, backend.GeometryCopies);
+            // The scene shows the sphere as it was at Add, not as the model left it.
+            var component = Assert.Single(backend.Extract().Components);
+            Assert.Equal(unchanged.Positions, component.Positions);
+            Assert.Equal(unchanged.Indices, component.Indices);
+            Assert.Equal(1, backend.GeometryCopies);
+            // The hidden object keeps only its lease; disposal releases it.
+            Assert.Equal(1UL, TauGeometryCapture.Counters(library)[4]);
+            backend.Dispose();
+            Assert.Equal(0UL, TauGeometryCapture.Counters(library)[4]);
+        }
+        finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [Fact]
+    public void TheSceneDoesNotKeepAnAuthorsGeometryAlive()
+    {
+        using var library = new Library(1f);
+        Library.RegisterGlobalLibrary(library);
+        try
+        {
+            using var backend = new CaptureViewerBackend(Path.Combine(root, "weak-identity"));
+            var dropped = AddAndDrop(backend);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Assert.False(dropped.IsAlive);
+            // The scene still owns what was shown.
+            Assert.Single(backend.Extract().Components);
+        }
+        finally { Library.UnregisterGlobalLibrary(); }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference AddAndDrop(CaptureViewerBackend backend)
+        {
+            var mesh = Utils.mshCreateCube(new Vector3(2, 4, 6));
+            backend.Add(mesh, 0);
+            _ = backend.GetBoundingBox(); // Applies the queued Add, whose command holds the identity.
+            return new WeakReference(mesh);
+        }
+    }
+
+    [Fact]
     public void RejectedCaptureAndCancelledAddReleaseLeasesAndPendingArrays()
     {
         using var library = new Library(1f);

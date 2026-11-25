@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { createStaticHandler, RouterContextProvider } from 'react-router';
 import type { EntryContext } from 'react-router';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import handleRequest, { handleError } from '#entry.server.js';
 import { claimSsrErrors, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
@@ -187,6 +187,75 @@ describe('entry.server handleRequest', () => {
       loadContext,
     );
     expect(response.status).toBe(200);
+  });
+});
+
+/**
+ * The ready option the entry streamed a workspace document on, for a user agent, read from the document's
+ * `Server-Timing` (`shell` for `onShellReady`, `all-ready` for `onAllReady`).
+ */
+const readyOptionFor = async (userAgent: string): Promise<string | undefined> => {
+  const request = new Request('https://taucad.dev/w/home/fixture', { headers: { 'User-Agent': userAgent } });
+  const staticHandlerContext = await createStaticHandler([{ id: 'root', path: '*' }]).query(request);
+  if (staticHandlerContext instanceof Response) {
+    throw new TypeError('Expected a document context');
+  }
+  const context = mock<EntryContext>({
+    staticHandlerContext,
+    serverHandoffStream: undefined,
+    isSpaMode: false,
+    branches: undefined,
+    manifest: mockDeep<EntryContext['manifest']>({
+      entry: { module: '/entry.js', imports: [] },
+      routes: {
+        root: {
+          id: 'root',
+          parentId: undefined,
+          path: '*',
+          index: false,
+          module: '/root.js',
+          hasLoader: false,
+          hasClientLoader: false,
+        },
+      },
+    }),
+    future: mock<EntryContext['future']>(),
+  });
+  context.routeModules = { root: { default: () => <p>Workspace fixture</p> } };
+  const response = await handleRequest(request, 200, new Headers(), context, new RouterContextProvider());
+  // Drain the real React stream.
+  await response.text();
+  return /\b(shell|all-ready);dur=/u.exec(response.headers.get('Server-Timing') ?? '')?.[1];
+};
+
+/**
+ * React Router 8 prerenders through a Vite preview server and marks the whole pass with `IS_RR_BUILD_REQUEST=yes`.
+ * A prerender whose request carries a bare `node` user agent (Node's `fetch`) must stream as a browser's document, or
+ * the static shells differ from the function's document (prerender dry run 2026-11-17, finding D3).
+ */
+describe('entry.server handleRequest for a prerender (RR8, D3)', () => {
+  const browser =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should wait for everything for a bot, such as a bare `node` user agent outside a build', async () => {
+    vi.stubEnv('IS_RR_BUILD_REQUEST', undefined);
+    await expect(readyOptionFor('node')).resolves.toBe('all-ready');
+  });
+
+  it("should stream a prerender's `node` user agent from the shell, as a browser's document", async () => {
+    vi.stubEnv('IS_RR_BUILD_REQUEST', 'yes');
+    await expect(readyOptionFor('node')).resolves.toBe('shell');
+  });
+
+  it('should stream a browser from the shell with or without the build marker', async () => {
+    vi.stubEnv('IS_RR_BUILD_REQUEST', undefined);
+    await expect(readyOptionFor(browser)).resolves.toBe('shell');
+    vi.stubEnv('IS_RR_BUILD_REQUEST', 'yes');
+    await expect(readyOptionFor(browser)).resolves.toBe('shell');
   });
 });
 

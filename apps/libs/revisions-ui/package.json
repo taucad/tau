@@ -1,0 +1,79 @@
+{
+  "name": "@taucad/revisions-ui",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app revisions feature: the History graph layout and view, revision timeline styles, the revision region, name popover and conflict editor, entry titles, the revision compute worker, the page's revision clients over the worker port protocol, who made each entry and the push records it reads, the audited conflict-line removal, the History pane's page-wide requests, and the history hooks every revision surface reads, with the app's services injected",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/revisions-ui"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/revisions-ui#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "revisions",
+    "history"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./components/revisions/name-popover": "./src/components/revisions/name-popover.tsx",
+    "./components/revisions/revision-conflict-editor": "./src/components/revisions/revision-conflict-editor.tsx",
+    "./components/revisions/revision-graph-layout": "./src/components/revisions/revision-graph-layout.ts",
+    "./components/revisions/revision-graph-view": "./src/components/revisions/revision-graph-view.tsx",
+    "./components/revisions/revision-region": "./src/components/revisions/revision-region.tsx",
+    "./components/revisions/revision-timeline": "./src/components/revisions/revision-timeline.ts",
+    "./hooks/use-revision-status": "./src/hooks/use-revision-status.ts",
+    "./hooks/use-revisions": "./src/hooks/use-revisions.ts",
+    "./lib/chat-turn-revision-state": "./src/lib/chat-turn-revision-state.ts",
+    "./lib/history-lanes": "./src/lib/history-lanes.ts",
+    "./lib/history-lanes.test-harness": "./src/lib/history-lanes.test-harness.ts",
+    "./lib/revision-actor": "./src/lib/revision-actor.ts",
+    "./lib/revision-entry-title": "./src/lib/revision-entry-title.ts",
+    "./lib/revision-failure-reporting": "./src/lib/revision-failure-reporting.ts",
+    "./lib/revision-pane-requests": "./src/lib/revision-pane-requests.ts",
+    "./lib/revision-push-records": "./src/lib/revision-push-records.ts",
+    "./lib/revision-pushes": "./src/lib/revision-pushes.ts",
+    "./lib/revision-ref-removal": "./src/lib/revision-ref-removal.ts",
+    "./lib/revision-who": "./src/lib/revision-who.ts",
+    "./machines/revision-compute": "./src/machines/revision-compute.ts",
+    "./services/revision-client-registry": "./src/services/revision-client-registry.ts",
+    "./types/revision-client.types": "./src/types/revision-client.types.ts",
+    "./types/revision-push.types": "./src/types/revision-push.types.ts",
+    "./types/revision-worker-protocol": "./src/types/revision-worker-protocol.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/editor-ui": "workspace:*",
+    "@taucad/events": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/utils": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}

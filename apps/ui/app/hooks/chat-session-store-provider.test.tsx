@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -97,7 +97,7 @@ vi.mock('#runtime/file-manager-facade.js', async (importOriginal) => {
 });
 
 /* A read owner that admits every read at once: no observation runs while the file managers are idle. */
-vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+vi.mock('@taucad/project-library/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: unknown) => ({
     connect: () => () => undefined,

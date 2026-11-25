@@ -279,8 +279,8 @@ const ConnectionRow = memo(function ConnectionRow({
               <AlertDialogHeader>
                 <AlertDialogTitle>Disconnect repositories for @{connection.login}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Repository access and write approvals in Tau are removed. Local projects, GitHub sign-in and Gists
-                  remain. This does not uninstall the App on GitHub.
+                  Repository access and permission to back up in Tau are removed. Projects on this device, GitHub
+                  sign-in and Gists remain. This does not uninstall the App on GitHub.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               {error ? (
@@ -454,7 +454,7 @@ export function GithubRepositorySettings(): React.JSX.Element {
             <SettingsRow
               title='Connect GitHub'
               description={
-                pending ? 'Finish connecting in your browser' : 'Import from and push to your GitHub repositories'
+                pending ? 'Finish connecting in your browser' : 'Import from and back up to your GitHub repositories'
               }
               control={
                 <>

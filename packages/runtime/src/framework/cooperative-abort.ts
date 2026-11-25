@@ -19,7 +19,7 @@
  * @internal
  */
 
-import { RenderAbortedError } from '#framework/runtime-operation-errors.js';
+import { isRenderAbortedError, RenderAbortedError } from '#framework/runtime-operation-errors.js';
 import { documentAbortReason } from '#framework/document-abort-state.js';
 
 let localAbortSignal: AbortSignal | undefined;
@@ -69,7 +69,13 @@ export function clearAbortContext(): void {
  * @public
  */
 export function checkAbort(): void {
-  localAbortSignal?.throwIfAborted();
+  if (localAbortSignal?.aborted) {
+    // A superseded document aborts its signal with a numeric reason (the shared-state path below does so too, so
+    // every check after the first one lands here). Throw the cancellation error itself, not the reason: kernels and
+    // formatters recognise a `RenderAbortedError` and skip the work a real failure needs, such as source mapping.
+    const { reason } = localAbortSignal as { reason: unknown };
+    throw isRenderAbortedError(reason) ? reason : new RenderAbortedError();
+  }
   if (documentSignalView && documentSignalState !== undefined) {
     const current = Atomics.load(documentSignalView, 0);
     if (current !== documentSignalState) {

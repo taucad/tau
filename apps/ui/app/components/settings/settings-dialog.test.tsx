@@ -1,3 +1,4 @@
+import type * as DeploymentModeModule from '#cloud/deployment-mode.js';
 // @vitest-environment jsdom
 
 // oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
@@ -17,6 +18,17 @@ import {
 import { SettingsDialog, SettingsSurface } from '#components/settings/settings-dialog.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
+/* A funded deployment (adaptive app deployment mode W12): the one build shows these surfaces from the API's answer. */
+vi.mock('#cloud/use-deployment-mode.js', () => ({
+  useDeploymentMode: () => ({ state: 'funded', basis: 'confirmed', environment: 'development' }),
+  useRetryDeploymentMode: () => () => undefined,
+}));
+vi.mock('#cloud/settings-billing.js', async () => import('#cloud/settings-billing.funded.js'));
+vi.mock('#cloud/deployment-mode.js', async () => ({
+  ...(await vi.importActual<typeof DeploymentModeModule>('#cloud/deployment-mode.js')),
+  initialDeploymentMode: { state: 'funded', basis: 'confirmed', environment: 'development' },
+}));
+
 const loadGeneralSettings = vi.hoisted(() => vi.fn());
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
 const deferredBillingState = vi.hoisted(() => ({ showTarget: false }));
@@ -30,7 +42,7 @@ vi.mock('#components/auth/settings/security/security-settings.js', () => ({
   SecuritySettings: renderSecuritySettings,
 }));
 vi.mock('#components/auth/api-key/api-keys.js', () => ({ ApiKeys: () => <div>Mounted API keys</div> }));
-vi.mock('#components/settings/billing-settings.js', () => ({
+vi.mock('@taucad/billing-ui/components/settings/billing-settings', () => ({
   BillingSettings: () => (
     <div>
       Mounted billing

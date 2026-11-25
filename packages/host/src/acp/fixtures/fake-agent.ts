@@ -1316,12 +1316,13 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         if (limit !== undefined) {
           await textChunk(promptSessionId, `${limit.title}\n\n`);
         }
-        /* Flushed, and a beat given, before the rejection: the client reads stderr and stdout on separate pipes. */
+        /* Flushed before the rejection, with no beat after it: the client reads stderr and stdout on separate pipes,
+         * and must still attach this line to the failure (`adapter-connection.ts`, `stderrWrittenBefore`). */
         await new Promise<void>((resolve) => {
           process.stderr.write(
             `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
             () => {
-              setTimeout(resolve, 20);
+              resolve();
             },
           );
         });

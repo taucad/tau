@@ -14,6 +14,7 @@ import {
 } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { mock } from 'vitest-mock-extended';
+import { createHandleEpochs } from '#build-epochs.js';
 import { normalizeRenderShapes, render } from '#utils/render-output.js';
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -180,6 +181,7 @@ describe('standard physical materials through Replicad and the runtime', () => {
     const deserialize = definition.deserializeHandle!;
     const context = mock<Parameters<typeof deserialize>[2]>();
     context.replicadLibrary = library;
+    context.epochs = createHandleEpochs(library);
     const image = Uint8Array.from(
       Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1EAAAAASUVORK5CYII=',

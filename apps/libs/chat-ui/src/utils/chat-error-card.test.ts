@@ -28,8 +28,17 @@ describe('cardOf', () => {
     ['EXTERNAL_AGENT_MODEL_UNAVAILABLE', 'switchModel'],
     ['MODEL_ROUTE_PAUSED', 'switchModel'],
     ['BILLING_ACCOUNT_RESTRICTED', 'accountRestricted'],
+    ['DEPLOYMENT_UNKNOWN', 'deploymentUnknown'],
   ] as const)('routes %s to the approved %s card', (code, category) => {
     expect(cardOf(code, errorCategory.generic).category).toBe(category);
+  });
+
+  /* I1: a run whose server's billing mode is unknown made no model call, so it resumes once the server answers. */
+  it('should route DEPLOYMENT_UNKNOWN to its own resumable card', () => {
+    expect(cardOf('DEPLOYMENT_UNKNOWN', errorCategory.generic)).toEqual({
+      category: 'deploymentUnknown',
+      retry: 'resume',
+    });
   });
 
   it('uses one code category for gateway failures even when the HTTP status is 200', () => {

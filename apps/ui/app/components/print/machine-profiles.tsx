@@ -25,8 +25,8 @@ import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { MachineSettingsHandle } from '#components/print/use-machine-settings.js';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
-import { NamePopover } from '#components/revisions/name-popover.js';
-import type { NameFormCopy } from '#components/revisions/name-popover.js';
+import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
+import type { NameFormCopy } from '@taucad/revisions-ui/components/revisions/name-popover';
 
 const slug = (name: string): string =>
   name

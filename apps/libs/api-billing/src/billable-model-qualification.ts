@@ -299,6 +299,16 @@ const routes = [
     { pricingRevision: '2026-11-13', validThrough: '2026-11-30T23:59:59.999Z' },
   ),
   // https://cloud.google.com/vertex-ai/generative-ai/pricing (cache writes billed from 2027-01-12; not metered yet)
+  // https://aistudio.google.com/docs/pricing (Vertex global matches; implicit caching only)
+  route(
+    'google-gemini-4-neon',
+    'Gemini 4 Neon',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('3', '.15', undefined, '15'),
+    { pricingRevision: '2026-11-19' },
+  ),
   route(
     'google-gemini-4-hydrogen',
     'Gemini 4 Hydrogen',

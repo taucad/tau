@@ -1,11 +1,13 @@
 import { createActor, setup, types } from 'xstate';
+import type { GithubCredentialRenewal } from '@taucad/revisions-ui/hooks/use-revision-status';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**
  * When a project's GitHub credential is minted again (app state orchestration charter I15; plan § 4 A10).
  *
- * The revision client's GitHub lease (`hooks/use-revision-status.ts`) asks for a re-mint a while before the credential
+ * The revision clients' GitHub lease (`@taucad/revisions-ui/hooks/use-revision-status`, bound in the app's
+ * `hooks/use-revision-status.ts`) asks for a re-mint a while before the credential
  * expires, and a minute after a mint that could not move the deadline. Until A10 a module `setTimeout` held that wait;
  * now it is an `after` on the actor's clock, so the scoped hook holds no timer. The lease keeps one renewal actor per
  * project and owns what a renewal does: the machine only says when one is due.
@@ -113,16 +115,6 @@ export const githubCredentialRenewalMachine = setup({
     },
   },
 });
-
-/** One project's renewal: arm, drop, and stop when the lease is let go. @public */
-export type GithubCredentialRenewal = Readonly<{
-  /** Re-mint after `delayMilliseconds`, replacing a wait already armed. */
-  schedule: (delayMilliseconds: number) => void;
-  /** Drop the armed wait. */
-  cancel: () => void;
-  /** Stop the actor; nothing is emitted after this. */
-  stop: () => void;
-}>;
 
 /**
  * Start one project's renewal actor. A module-level lease outlives every mount, so this is its owner, not a component

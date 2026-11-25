@@ -12,7 +12,7 @@ import type { OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js
 /*
  * TA6 in a real browser: Tau's view cube options per orbit style, on a real `ViewportGizmo` in controlled mode. The
  * host applies each reported pose to its camera, as the camera actor does, so the cube's built-in navigation buttons
- * are tested as Tau runs them: side triangles in both orbit styles, roll arrows and roll keys in Tumble only.
+ * are tested as Tau runs them: side triangles in both orbit styles, roll arrows and roll keys in Free orbit only.
  */
 
 const cleanups: Array<() => void> = [];
@@ -109,19 +109,19 @@ const isUpright = (camera: PerspectiveCamera): boolean => {
   return side.lengthSq() < 1e-9 || (Math.abs(camera.up.dot(side.normalize())) < 1e-6 && camera.up.dot(worldUp) > 0);
 };
 
-describe.each(['turntable', 'tumble'] as const)('view cube navigation in %s', (orbitStyle) => {
-  it('reveals the side triangles and Home on focus, and the roll arrows in Tumble only', async () => {
+describe.each(['turntable', 'free'] as const)('view cube navigation in %s', (orbitStyle) => {
+  it('reveals the side triangles and Home on focus, and the roll arrows in Free orbit only', async () => {
     const cube = await mountCube(orbitStyle);
     expect(shown(cube)).toEqual([]);
     cube.gizmo.domElement.focus();
     await vi.waitFor(() => {
       expect(shown(cube)).toEqual(
-        orbitStyle === 'tumble'
+        orbitStyle === 'free'
           ? ['roll-clockwise', 'up', 'roll-counterclockwise', 'left', 'right', 'down', 'home']
           : ['up', 'left', 'right', 'down', 'home'],
       );
     });
-    expect(cube.gizmo.canRoll).toBe(orbitStyle === 'tumble');
+    expect(cube.gizmo.canRoll).toBe(orbitStyle === 'free');
   });
 
   it.each(['up', 'right', 'down', 'left'] as const)(
@@ -171,7 +171,7 @@ describe.each(['turntable', 'tumble'] as const)('view cube navigation in %s', (o
 
   it('returns upright with Home', async () => {
     const cube = await mountCube(orbitStyle);
-    if (orbitStyle === 'tumble') {
+    if (orbitStyle === 'free') {
       await press(cube, 'roll-clockwise');
       expect(isUpright(cube.camera)).toBe(false);
     }
@@ -183,7 +183,7 @@ describe.each(['turntable', 'tumble'] as const)('view cube navigation in %s', (o
 
   it('returns upright on a double-click on the cube', async () => {
     const cube = await mountCube(orbitStyle);
-    if (orbitStyle === 'tumble') {
+    if (orbitStyle === 'free') {
       await press(cube, 'roll-clockwise');
       expect(isUpright(cube.camera)).toBe(false);
     }
@@ -194,13 +194,13 @@ describe.each(['turntable', 'tumble'] as const)('view cube navigation in %s', (o
     });
   });
 
-  it(orbitStyle === 'tumble' ? 'rolls a quarter turn with the roll key' : 'takes no roll key', async () => {
+  it(orbitStyle === 'free' ? 'rolls a quarter turn with the roll key' : 'takes no roll key', async () => {
     const cube = await mountCube(orbitStyle);
     cube.gizmo.domElement.focus();
     const up = cube.camera.up.clone();
     await userEvent.keyboard('{Shift>}{ArrowLeft}{/Shift}');
     await vi.waitFor(() => {
-      expect(cube.camera.up.angleTo(up)).toBeCloseTo(orbitStyle === 'tumble' ? Math.PI / 2 : 0, 3);
+      expect(cube.camera.up.angleTo(up)).toBeCloseTo(orbitStyle === 'free' ? Math.PI / 2 : 0, 3);
     });
   });
 

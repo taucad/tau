@@ -7,9 +7,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Project } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
+import type { PendingProjectOperation } from '@taucad/project-library/types/pending-project-operation.types';
 import type { EditorState } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 
 const projectOneId = 'proj_one';
 const projectTwoId = 'proj_two';
@@ -445,6 +445,26 @@ describe('IndexedDbStorageProvider', () => {
       );
       expect(await provider.getProjectLibraryState(project.projectId)).toMatchObject({ deletedAt: 42 });
       expect(await provider.getPendingProjectOperations()).toEqual([operation]);
+    });
+
+    it('admits deleting one copy of a live project, which the project outlives', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const operation = {
+        operationId: 'req_permanent_delete_copy',
+        kind: 'permanent-delete',
+        projectId: project.projectId,
+        storage: { backend: 'opfs', providerBasePath: 'copy' },
+        copy: true,
+      } as const;
+
+      await provider.beginPermanentDeleteProject(operation);
+
+      expect(await provider.getProjectLibraryState(project.projectId)).not.toHaveProperty('deletedAt');
+      expect(await provider.getPendingProjectOperations()).toEqual([operation]);
+      await expect(provider.beginPermanentDeleteProject({ ...operation, operationId: 'req_second' })).rejects.toThrow(
+        'Permanent delete is already pending',
+      );
     });
 
     it('serializes restore against permanent-delete admission across storage instances', async () => {

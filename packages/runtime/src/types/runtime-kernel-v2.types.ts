@@ -55,6 +55,53 @@ export type TessellationReport = Readonly<{
   linearTolerance?: number;
   /** Angular tolerance in degrees the mesh was produced at. */
   angularTolerance?: number;
+  /**
+   * Parts of the delivered mesh by where their triangles came from: kept by the kernel from an earlier render of the
+   * same part at the same tolerances, or meshed for this render. Absent when the kernel keeps no meshes.
+   */
+  meshes?: { reused: number; computed: number };
+}>;
+/** Library operations a model's code called in one build, by where their result came from. @public */
+export type OperationReuse = Readonly<{
+  /** Answered from the kernel's own reuse of an earlier, identical operation. */
+  reused: number;
+  /** Computed in this build. */
+  computed: number;
+}>;
+/** The time one kind of library operation took in a build, summed over the calls that computed. @public */
+export type OperationCost = Readonly<{
+  /** The operation, as the kernel's library names it, such as `Shape.fillet`. */
+  operation: string;
+  /** Milliseconds, summed over `calls`. */
+  elapsed: number;
+  calls: number;
+}>;
+/**
+ * What a kernel can say about the build its `evaluate` delivered. Every field is optional; the runtime adds the
+ * build's cost and whether a build ran at all.
+ * @public
+ */
+export type KernelBuildReport = Readonly<{
+  /** The kernel answered from a build it kept, without running the model's code. */
+  reused?: boolean;
+  /** Library operations the model's code called. */
+  operations?: OperationReuse;
+  /** The costliest operations by elapsed time, costliest first; the runtime keeps at most three. */
+  costliest?: readonly OperationCost[];
+}>;
+/**
+ * What one evaluation cost and whether it reused a build: the runtime's view, completed by the kernel's report.
+ * @public
+ */
+export type BuildReport = Readonly<{
+  /** No model code ran: a build the runtime or the kernel kept answered. */
+  reused: boolean;
+  /** Milliseconds the worker spent producing the evaluation, excluding its wait in the queue. */
+  elapsed: number;
+  /** Library operations of a build that ran, when the kernel reports them. */
+  operations?: OperationReuse;
+  /** The costliest operations of a build that ran, at most three, when the kernel reports them. */
+  costliest?: readonly OperationCost[];
 }>;
 /** A single rendered view with its declared media type, optional units and mesh cost. @public */
 export type Artifact = Readonly<{
@@ -138,6 +185,8 @@ export type EvaluateOutput<Handle, Views, Exports> = Readonly<{
   instances?: {
     readonly [Id in keyof Views]?: Views[Id] extends { readonly instances: true } ? readonly ViewInstance[] : never;
   };
+  /** What the kernel reused in this build and what its costliest operations took; reported to hosts and agents. */
+  build?: KernelBuildReport;
 }>;
 /** Per-view render input narrowed by the selected view identifier. @public */
 export type RenderInput<Handle, Views> = {
@@ -243,6 +292,17 @@ export type KernelDefinitionV2<
   readonly builtinPackages?: Readonly<Record<string, InstalledPackageManifest>>;
   readonly name: string;
   readonly version: string;
+  /**
+   * What the build key reads for the model's sources. `'files'` (the default) hashes each resolved
+   * file's bytes. `'bundle'` hashes the bundler's output instead, so a comment-only or
+   * formatting-only edit that prints the same bundle reuses the previous build.
+   *
+   * Declare `'bundle'` only when `resolve` answers from `runtime.bundler.resolveDependencies` and
+   * every hook reads the model's sources only through `runtime.bundler.bundle` output: the code it
+   * executes, and the source map for error locations only. A kernel that reads a source file itself
+   * (a header comment, a JSDoc annotation, raw text for any purpose) keeps `'files'`.
+   */
+  readonly sourceIdentity?: 'files' | 'bundle';
   readonly implementationAssets?: readonly RuntimeImplementationAsset[];
   readonly optionsSchema?: OptionsSchema;
   readonly evaluateOptionsSchema?: EvaluateSchema;

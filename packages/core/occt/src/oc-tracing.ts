@@ -236,6 +236,25 @@ const valueTypeNames: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Embind's own handle methods (`ClassHandle`): they query or release the JavaScript handle and do no OCCT work. They
+ * skip the abort check, so cleanup after a superseding abort (a `finally` that deletes, a `FinalizationRegistry`
+ * callback that asks `isDeleted()`) still frees what it owns instead of throwing; a throw from a finalizer would also
+ * be uncaught. Exceptions are still converted.
+ */
+const ownershipMethods: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
+  'delete',
+  'isDeleted',
+  'deleteLater',
+  'isAliasOf',
+  // Embind aliases `Symbol.dispose` to `delete`, so `using` releases a handle the same way. Read by name: the
+  // disposal symbols are not in this package's ES2024 lib, and an older runtime may not define them.
+  ...(['dispose', 'asyncDispose'] as const).flatMap((name) => {
+    const symbol = (Symbol as unknown as Partial<Record<typeof name, symbol>>)[name];
+    return symbol === undefined ? [] : [symbol];
+  }),
+]);
+
+/**
  * Whether an Emscripten object is an OCCT value type that is returned without an exception proxy.
  *
  * @param value - The Emscripten object.
@@ -280,8 +299,11 @@ function createEmscriptenWrapper(
           return cached.wrapper;
         }
 
+        const ownership = ownershipMethods.has(property);
         const wrapper = function (this: unknown, ...methodArguments: unknown[]): unknown {
-          checkAbort();
+          if (!ownership) {
+            checkAbort();
+          }
           try {
             return wrapEmscriptenResult(Reflect.apply(member, target, methodArguments));
           } catch (error) {
@@ -309,6 +331,13 @@ function createEmscriptenWrapper(
 /**
  * Wraps an OpenCASCADE instance with exception-only interception (no tracing overhead).
  * Use when OC tracing is disabled but the WASM build has exceptions enabled.
+ *
+ * Constructors, instance methods and namespace functions check for a superseding abort before each call (embind's
+ * handle methods `delete`, `isDeleted`, `deleteLater` and `isAliasOf` do not, so cleanup is never stopped); static
+ * class members (`oc.TopoDS.Face`, `oc.BRepBndLib.Add`) are not intercepted. In Replicad's builds the statics that
+ * run long are the native batch Booleans and mesh extractors, which stop through the native user break instead;
+ * every other static measured 18 ms or less per call on four heavy models, and the loops that call them also make proxied
+ * instance calls, so an abort is still seen within one iteration.
  *
  * @template T - The concrete OC instance type from the calling kernel
  * @param oc - The raw OpenCascade instance to wrap

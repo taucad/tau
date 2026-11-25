@@ -56,7 +56,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
 
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach all nine (A5b attached focus)', () => {
+  it('should list the ten static children once, and attach all ten (adaptive app deployment mode W1 added deployment)', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -67,6 +67,7 @@ describe('app runtime root', () => {
       'chatSessions',
       'sessions',
       'focus',
+      'deployment',
     ]);
     expect(appRuntimeAttachedChildren).toEqual([
       'environment',
@@ -78,6 +79,7 @@ describe('app runtime root', () => {
       'chatSessions',
       'sessions',
       'focus',
+      'deployment',
     ]);
   });
 
@@ -176,11 +178,16 @@ describe('app runtime root', () => {
   it('should tell focus the window came back, only on a return from blur (R16)', () => {
     const host = createFakeEnvironmentHost({ focused: true });
     const focusEvents: string[] = [];
-    /* Focus is the only actor that takes `windowFocused`; the root's own transition sends it on. */
+    /* Focus is the only machine that takes `windowFocused` from the root here (a pinned build's `deployment` is a
+     * no-op); the root's own transition sends it on. */
     const runtime = createAppRuntime({
       environment: () => host,
       inspect: (inspection) => {
-        if (inspection.type === '@xstate.transition' && inspection.event.type === 'windowFocused') {
+        if (
+          inspection.type === '@xstate.transition' &&
+          inspection.event.type === 'windowFocused' &&
+          inspection.actorRef !== runtime.getSnapshot().children['deployment']
+        ) {
           focusEvents.push(inspection.actorRef.sessionId === runtime.sessionId ? 'root' : 'focus');
         }
       },
@@ -396,6 +403,11 @@ describe('app runtime root totality', () => {
       { type: 'quitHoldChanged', held: false },
     ],
     quitRetried: [{ type: 'quitRetried' }],
+    deploymentChanged: [
+      { type: 'deploymentChanged', mode: { state: 'funded', basis: 'confirmed', environment: 'staging' } },
+      { type: 'deploymentChanged', mode: { state: 'unknown', problem: 'unreachable' } },
+    ],
+    deploymentRetried: [{ type: 'deploymentRetried' }],
     choicesChanged: [
       {
         type: 'choicesChanged',

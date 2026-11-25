@@ -2,8 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatErrorProviderAccount as ChatErrorProviderAccountSelfHost } from '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js';
+import { ChatErrorProviderAccount as ChatErrorProviderAccountSelfHost } from '#routes/w.$workspace.$project/chat-error-provider-account.unfunded.js';
 import { ChatErrorProviderAccount as ChatErrorProviderAccountCloud } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
+
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();

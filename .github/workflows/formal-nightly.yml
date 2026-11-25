@@ -10,11 +10,14 @@ name: Formal nightly
 #
 # Placement (CI throughput review, Q-4 step 2): `ci.yml` calls this workflow in the merge queue with the
 # affected `formal:nightly` projects and the landing commit's sha as the seed, so each landing explores a
-# fresh, replayable seed for the projects it can break. The release gate (RG-1) calls it with every project.
-# The schedule stays until both have run green (§ 5b of the program's handoff).
+# fresh, replayable seed for the projects it can break. The release gate (RG-1) calls it with every project,
+# uncached, on every desktop candidate and three times a day on `main`'s head (02:17, 10:23 and 21:47 UTC).
+# Retired schedule: the 03:41 UTC nightly was deleted once the release gate's formal matrix had run green
+# (§ 5b of the program's handoff: runs 44202795708, 44239145867, 44262695407 and 44374725276). The watchdog now
+# judges the release gate's schedule instead; this workflow runs only when called or dispatched.
 #
 # Seeds: every seeded tool reads `FORMAL_SEED`, a non-negative integer below 2^31 - 1, and picks a random
-# one when it is unset (the schedule and a dispatch). A caller passes `seed`, any string (a commit sha, a
+# one when it is unset (a dispatch). A caller passes `seed`, any string (a commit sha, a
 # run id), as `TAU_FORMAL_SEED`; the run step derives `FORMAL_SEED` from the first 32 bits of its SHA-256,
 # so the same landing commit always replays the same seed, and the log prints it for a local replay.
 #
@@ -22,15 +25,18 @@ name: Formal nightly
 # with the runner's own cap of two JVMs (FM-R15), and the queue's run is Nx-cached. Its configs and Apalache commands
 # read no seed, so the same specs, tools and toolchain give the same verdict; only the merge queue's call (`ci.yml`
 # passes the read token, and the job runs in `nx-cache-write` there) reads and writes that cache. The release gate
-# passes no token and the schedule writes none, so the gate always checks afresh. `formal:nightly` stays uncached:
+# passes no token and a dispatch writes none, so the gate always checks afresh. `formal:nightly` stays uncached:
 # its seed is the commit's.
 
 on:
-  schedule:
-    - cron: '41 3 * * *' # 03:41 UTC
   workflow_dispatch: {}
   workflow_call:
     inputs:
+      uncached:
+        description: Read and write no Nx cache, local or remote (the release gate passes true)
+        type: boolean
+        required: false
+        default: false
       ref:
         description: Commit the tiers check out (the merge-queue commit, a release candidate)
         type: string
@@ -48,7 +54,7 @@ on:
         description: Read token of the Nx remote cache (the merge queue's call passes it; the release gate does not)
         required: false
 
-# The schedule and a dispatch run one at a time; each caller's run (the queue, the release gate) has its own group.
+# Dispatches run one at a time; each caller's run (the queue, the release gate) has its own group.
 concurrency:
   group: formal-nightly${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}
   cancel-in-progress: false
@@ -56,8 +62,11 @@ concurrency:
 env:
   # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
   # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
-  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
-  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+  # `uncached` (the release gate, CI scaling review C2): no cache server, no token and `NX_SKIP_NX_CACHE`, so a
+  # cached tier is never read at the gate. The caller's own workflow-level `env` does not reach this workflow.
+  NX_SKIP_NX_CACHE: ${{ inputs.uncached && 'true' || 'false' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ !inputs.uncached && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ !inputs.uncached && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || '' }}
 
 jobs:
   # One job per project with a `formal:nightly` target, each with its own budget: a single serial job
@@ -72,6 +81,17 @@ jobs:
   # exactly one shard, and the caller's required check needs every shard to pass. agent-host's 46 runs
   # measure 2,797 JVM-seconds (job 134332529778, 23.7 min on one runner at two JVMs); on four runners the
   # slowest shard is its longest config, `TurnSettlement.two-turns.cfg` at 392 s.
+  # This file is the caller's copy (`main`'s, at the release gate), but the tiers run the checked-out commit's
+  # formal runner. A release candidate cut before #2560 has no `--shard` and no run seconds, and four shards
+  # each failed on `Unknown option '--shard'` (gate run 44222563188, candidate 7abb090f). So a check tier is
+  # sharded only when the checkout carries tools/formal/run-seconds.json, which came with `--shard`; otherwise
+  # it runs whole in one job (every config, 23.7 min measured, inside the 120-minute budget).
+  # A project with a `formal:nightly:mutants` target runs its mutant matrix there, split into
+  # `MUTANT_SHARDS` jobs (ST-3, lane budget): each re-runs the same-seed simulation, deals the mutants
+  # by the measured seconds in tools/formal/mutant-seconds.json (`formal nightly --mutants-only --shard
+  # k/N`, a control and its mutants together) and runs its own share on the runner's slot pool, so every
+  # mutant is in exactly one shard, and the caller's required check needs every shard to pass. agent-host's
+  # 75 mutants measure 17.3 min in series; three shards hold about 5.8 min each.
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -98,6 +118,7 @@ jobs:
         env:
           REQUESTED: ${{ inputs.projects || '' }}
           CHECK_SHARDS: 4
+          MUTANT_SHARDS: 3
         run: |
           # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON array and drops Nx's log lines.
           set -euo pipefail
@@ -118,11 +139,13 @@ jobs:
             echo "Requested projects: $projects"
           fi
           tiers='[]'
-          for target in formal:nightly formal:nightly:check; do
+          for target in formal:nightly formal:nightly:check formal:nightly:mutants; do
             selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
-            # One job per project and target; a `formal:nightly:check` tier is one job per shard.
+            # One job per project and target; a `formal:nightly:check` or `formal:nightly:mutants` tier is one
+            # job per shard.
             shards=1
-            if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi
+            if [ "$target" = formal:nightly:check ] && [ -f tools/formal/run-seconds.json ]; then shards=$CHECK_SHARDS; fi
+            if [ "$target" = formal:nightly:mutants ]; then shards=$MUTANT_SHARDS; fi
             tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
               --argjson shards "$shards" \
               '. + [$projects[] | select(. as $name | $requested | index([$name]) != null) | . as $project
@@ -183,7 +206,8 @@ jobs:
             export FORMAL_SEED
             echo "FORMAL_SEED=$FORMAL_SEED from seed source $TAU_FORMAL_SEED"
           fi
-          # A shard's `--shard k/N` reaches the formal runner and is part of the task's Nx hash.
+          # A shard's `--shard k/N` reaches the formal runner, which runs only that shard's share, and is part
+          # of the task's Nx hash.
           shard=()
           if [ -n "$SHARD" ]; then shard=(--shard="$SHARD"); fi
           pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream "${shard[@]}"
@@ -201,14 +225,14 @@ jobs:
           retention-days: 14
 
   # The wide-bound TLA+ configs (app state orchestration A0.6): each `formal:wide` target (today `ui`'s, the
-  # `nightly`-tier configs under `apps/ui/specs`) runs on the schedule and on a dispatch only. A caller (`ci.yml`
-  # in the merge queue) passes `ref`, so a called run never starts it: the queue runs the sized `pr` configs in
+  # `nightly`-tier configs under `apps/ui/specs`) runs on a dispatch only. A caller (`ci.yml` in the merge queue,
+  # the release gate) passes `ref`, so a called run never starts it: the queue runs the sized `pr` configs in
   # `formal:tla`. The target is not `formal:nightly`, which the queue would run on every landing that affects its
   # project. Selected by target, not project name (scripts/src/validate-workflows.ts). With no `nightly`-tier
   # config yet it reports 0 runs and passes.
   formal-wide:
     name: Formal wide tier
-    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !inputs.ref }}
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.ref }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs

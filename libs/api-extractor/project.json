@@ -264,7 +264,9 @@
         "^production",
         "{workspaceRoot}/packages/plugins/*/agent/**/*.md",
         "{workspaceRoot}/packages/workbench/agent/**/*.md",
-        "{workspaceRoot}/pnpm-lock.yaml"
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/replicad/copper-lampshade/main.ts"
       ]
     }
   }

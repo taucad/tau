@@ -15,6 +15,7 @@ import {
   readWideFrameHint,
 } from '#lib/frame-hint.js';
 import type { FrameHintVariables, PhoneFrameHint, PhoneFrameHintVariables, WideFrameHint } from '#lib/frame-hint.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 import {
   MobileWorkbenchNavigationFrame,
   mobileWorkbenchNavigationHeight,
@@ -299,13 +300,25 @@ function PhoneFrame(): React.JSX.Element {
 
 /**
  * The chat lane's own frame: its background, its header bar and the composer's resting box (the empty composer's
- * 82 px frame), empty. Nothing in it stands for content. The workspace frame draws it in the chat lane, and the chat
- * gate shows it while the focused chat is re-established, so the lane keeps its frame in both waits.
+ * 82 px frame). The workspace frame draws it empty in the chat lane, and the chat gate keeps it while the project opens
+ * (its feed then draws the transcript's shape) and while the focused chat is re-established, so the lane keeps one
+ * frame through every wait (Progressive Loading Policy rule 15). In a phone sheet its header is the sheet's bar height.
  *
- * @param props - When the lane is waiting inside a live workspace, the label of its busy state.
+ * @param props - When the lane is waiting inside a live workspace, the label of its busy state; what its feed draws;
+ *   and a status for its header's trailing slot.
  * @returns The chat lane frame.
  */
-export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): React.JSX.Element {
+export function ChatLaneFrame({
+  busyLabel,
+  children,
+  headerStatus,
+}: {
+  readonly busyLabel?: string;
+  /** The feed's content while the lane waits, such as the transcript's shape. Empty by default. */
+  readonly children?: React.ReactNode;
+  /** The header's trailing slot, such as the open's status where the lane covers the viewer. */
+  readonly headerStatus?: React.ReactNode;
+}): React.JSX.Element {
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
@@ -317,8 +330,10 @@ export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): R
       aria-busy={busyLabel === undefined ? undefined : true}
       aria-label={busyLabel}
     >
-      <div className='h-9 shrink-0 border-b bg-sidebar' />
-      <div className='min-h-0 flex-1' />
+      <div className='flex h-9 shrink-0 items-center justify-end border-b bg-sidebar px-2 [[data-slot=drawer-content]_&]:h-(--drawer-bar-height) [[data-slot=drawer-content]_&]:px-4'>
+        {headerStatus}
+      </div>
+      <div className='relative min-h-0 flex-1'>{children}</div>
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'
@@ -340,7 +355,7 @@ export function WorkspaceOpening(): React.JSX.Element {
     <span
       role='status'
       aria-busy='true'
-      aria-label='Opening project'
+      aria-label={projectOpenCopy.label}
       data-testid='workspace-opening'
       className='sr-only'
     />

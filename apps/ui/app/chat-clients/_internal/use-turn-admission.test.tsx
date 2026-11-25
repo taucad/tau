@@ -32,7 +32,7 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_
 vi.mock('#lib/tau-cloud-intent.js', () => ({
   isCloudProjectPending: () => harness.cloudOpenPending,
   canOpenCloudProject: () => harness.canOpen,
-  cloudOpenAccountReason: 'Use the account that opened this project from Tau Cloud.',
+  cloudOpenAccountReason: 'Sign in with the account you used to open this project.',
   tauCloudIntent: {
     subscribe: (listener: () => void) => {
       harness.intentListeners.add(listener);
@@ -40,7 +40,7 @@ vi.mock('#lib/tau-cloud-intent.js', () => ({
     },
   },
 }));
-vi.mock('#services/revision-client-registry.js', () => {
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => {
   /* One client object, as the registry holds one per project. */
   const client = {
     status: () => ({ sync: { state: harness.syncState }, remote: { kind: 'tau', phase: 'connected' } }),
@@ -166,7 +166,7 @@ describe('useTurnAdmission', () => {
     harness.canOpen = false;
     await expect(admit(opus)).rejects.toMatchObject({
       code: 'CHAT_PLACEMENT_UNAVAILABLE',
-      message: 'Use the account that opened this project from Tau Cloud.',
+      message: 'Sign in with the account you used to open this project.',
     });
     expect(listening()).toBe(0);
   });

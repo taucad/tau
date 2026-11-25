@@ -152,16 +152,21 @@ const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main')
 };
 
 describe('electron-vite build stamp', () => {
-  /* LW8: the services utility reports the commit it was built from as its build, on every observability fact. */
-  it('stamps main and preload with the checked-out commit as the desktop host build', async () => {
-    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: appRoot, encoding: 'utf8' }).stdout.trim();
-
+  /*
+   * ST-9: no bundle compiles the commit in, so `desktop:build`'s cache key holds sources and configuration only.
+   * LW8's build id is recorded beside the bundles at packaging (`src/shared/desktop-host-build.ts`).
+   */
+  it('compiles no commit into main or preload, and keys desktop:build on no commit', async () => {
     /* One at a time: each resolution changes the working directory while it runs. */
     const main = await resolveProcessExternals('main');
     const preload = await resolveProcessExternals('preload');
+    const project = JSON.parse(readFileSync(join(appRoot, 'project.json'), 'utf8')) as {
+      targets: Record<string, { inputs?: ReadonlyArray<string | Record<string, string>> }>;
+    };
 
-    expect(main.define['tauDesktopHostBuild']).toBe(JSON.stringify(head.slice(0, 12)));
-    expect(preload.define['tauDesktopHostBuild']).toBe(JSON.stringify(head.slice(0, 12)));
+    expect(main.define).not.toHaveProperty('tauDesktopHostBuild');
+    expect(preload.define).not.toHaveProperty('tauDesktopHostBuild');
+    expect(project.targets['build']?.inputs).not.toContainEqual({ runtime: 'git rev-parse HEAD' });
   });
 });
 
@@ -169,6 +174,8 @@ describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('geospec-engine');
+    /* Bundled, cadmpeg-ts's `node` entry resolves its NAPI addon beside a chunk and finds none. */
+    expect(include).toContain('cadmpeg-ts');
     /* Inlined into a main chunk, node-pty looks for `pty.node` beside the chunk and every Terminal is unavailable. */
     expect(include).toContain('node-pty');
     for (const id of [

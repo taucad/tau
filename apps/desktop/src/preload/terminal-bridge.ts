@@ -158,7 +158,12 @@ export const createTerminalBridge = (
             deliver(frame.data);
           });
           relayed.start();
-          send({ type: 'open', size: initialSize });
+          /* Only `true` asks for setup: the page cannot smuggle any other value onto the wire. */
+          send({
+            type: 'open',
+            size: initialSize,
+            ...(request.setUp === true ? { setUp: true } : {}),
+          });
         });
         ipc.send(desktopTerminalChannels.open, { requestId, projectRoot: projectRoot.data });
       }

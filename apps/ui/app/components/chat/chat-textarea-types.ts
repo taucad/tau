@@ -9,7 +9,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
@@ -17,7 +17,7 @@ import { chatDragKindOf } from '#components/chat/chat-drop-zone.js';
 import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -42,7 +42,7 @@ import {
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
 import { osClass } from '#telemetry/platform-class.js';
 import { attachmentAccept } from '#utils/attachment-accept.js';
-import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
+import { attachmentRefusalCopy } from '@taucad/chat-ui/utils/attachment-refusal';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.

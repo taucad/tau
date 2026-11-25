@@ -329,6 +329,35 @@ export const compressedStatic =
     }
   };
 
+/**
+ * The web app's service worker (progressive loading PL7, `scripts/build-service-worker.ts`), and the retiring worker
+ * at the retired `/usage` worker's URL.
+ */
+const serviceWorkerPaths = ['/service-worker.js', '/offline-shell-worker.js'];
+
+/** Never stored, as `netlify.toml` serves it, so a new build's worker, the kill switch's included, reaches the next page load. */
+const serviceWorkerCacheControl = 'no-cache, no-store, must-revalidate';
+
+/**
+ * Serve a built worker with {@link serviceWorkerCacheControl}; a build without one falls through.
+ *
+ * @param root - The client build directory.
+ * @returns Middleware for `GET` of each of `serviceWorkerPaths`.
+ */
+const serveServiceWorker =
+  (root: string): RequestHandler =>
+  (request, response, next) => {
+    response.sendFile(
+      path.resolve(root, request.path.slice(1)),
+      { cacheControl: false, headers: { 'Cache-Control': serviceWorkerCacheControl } },
+      (error) => {
+        if (error !== undefined && !response.headersSent) {
+          next();
+        }
+      },
+    );
+  };
+
 export async function createApp(options: CreateAppOptions = {}): Promise<Express> {
   // Load eagerly so a serve started without a build fails at boot rather than per request.
   await loadServerBuild();
@@ -337,6 +366,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Express
   app.use(coiMiddleware());
   app.use('/assets', compressedStatic('build/client/assets', 'public, max-age=31536000, immutable'));
   app.use('/assets', express.static('build/client/assets', { immutable: true, maxAge: '1y' }));
+  app.get(serviceWorkerPaths, serveServiceWorker('build/client'));
   app.use(compressedStatic('build/client', 'public, max-age=3600'));
   app.use(express.static('build/client', { maxAge: '1h' }));
 

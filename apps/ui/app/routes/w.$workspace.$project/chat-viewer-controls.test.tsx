@@ -12,7 +12,8 @@ import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-co
 
 const mocks = vi.hoisted(() => ({ isMobile: false, viewerControls: false }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'viewerControls' ? mocks.viewerControls : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && mocks.viewerControls ? 'on' : 'off'),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
 const editorSnapshot = { context: { focusedChatId: 'chat-test' as string | undefined } };

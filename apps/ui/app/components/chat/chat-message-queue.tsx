@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { useChatContext } from '#hooks/use-chat.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import type { ChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
+import type { ChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { ChatMessageQueueView } from '@taucad/chat-ui/components/chat-message-queue-view';
 
 function ConnectedQueue({

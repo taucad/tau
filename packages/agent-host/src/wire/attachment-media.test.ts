@@ -135,8 +135,11 @@ describe('attachment-media', () => {
 
         const outcome = await normalizeImageAttachment({ bytes, transcode, transcodeSources: allSources });
 
-        expect(outcome).toEqual({ status: 'stored', mediaType, bytes, format, converted: false });
-        expect(outcome.status === 'stored' && outcome.bytes).toBe(bytes);
+        /* The bytes are the input itself (identity, not an element-by-element comparison, which took 3.6 s of the 5 s
+         * limit for the 1 MiB case on CI); the rest of the outcome is compared whole. */
+        const { bytes: stored, ...rest } = outcome.status === 'stored' ? outcome : { ...outcome, bytes: undefined };
+        expect(stored).toBe(bytes);
+        expect(rest).toEqual({ status: 'stored', mediaType, format, converted: false });
         expect(transcode).not.toHaveBeenCalled();
       },
     );
@@ -173,12 +176,19 @@ describe('attachment-media', () => {
 
       const outcome = await normalizeImageAttachment({ bytes, transcode, transcodeSources: allSources });
 
-      expect(transcode).toHaveBeenCalledExactlyOnceWith({
+      /* The port is handed the input bytes themselves: checked by identity, since comparing a 1 MiB input element by
+       * element took 4.1 s of the 5 s limit on CI. Every other field of the call is compared whole. */
+      expect(transcode).toHaveBeenCalledOnce();
+      const { files, ...request } = transcode.mock.calls[0]![0];
+      expect(request).toEqual({
         from: format,
         to: 'jpeg',
-        files: [{ name: file, mimeType: imageFormats[format].mediaType, bytes }],
         options: { maxEdge: 1568, maxBytes: mebibyte, background: '#FFFFFF' },
       });
+      expect(files).toHaveLength(1);
+      const { bytes: handed, ...described } = files[0];
+      expect(handed).toBe(bytes);
+      expect(described).toEqual({ name: file, mimeType: imageFormats[format].mediaType });
       expect(outcome).toEqual({
         status: 'stored',
         mediaType: 'image/jpeg',

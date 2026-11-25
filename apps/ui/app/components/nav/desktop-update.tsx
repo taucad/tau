@@ -20,7 +20,8 @@ export function DesktopUpdateControl({
 }): React.JSX.Element | undefined {
   const [snapshot, setSnapshot] = useState<DesktopUpdateSnapshot>();
   const [open, setOpen] = useState(false);
-  const [actionFailed, setActionFailed] = useState(false);
+  /* The action the person asked for that failed, which names the failure; reading the first status counts as a check. */
+  const [failedAction, setFailedAction] = useState<FailedAction>();
   const { setOpen: showSidebar, setOpenMobile, isMobile } = useSidebar();
   const revealedRequest = useRef(0);
   useEffect(() => {
@@ -45,11 +46,11 @@ export function DesktopUpdateControl({
     // async-iife: bootstrap — hydrate the external subscription; cleanup ignores late results.
     void (async () => {
       try {
-        // Hydration restores status, not a historical request to open the popover.
+        // Hydration restores status, not a historical request to open the details.
         receive(await bridge.snapshot(), false);
       } catch {
         if (!subscriptionLifetime.signal.aborted) {
-          setActionFailed(true);
+          setFailedAction('check');
         }
       }
     })();
@@ -61,57 +62,52 @@ export function DesktopUpdateControl({
   if (!snapshot) {
     return undefined;
   }
-  const { phase } = snapshot;
-  const busy = phase === 'saving' || phase === 'restarting' || phase === 'checking';
-  const failed = phase === 'error' || phase === 'restart-blocked' || actionFailed;
-  const quiet = phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed';
+  const { phase, blockedReason } = snapshot;
+  const busyLabel = busyLabels[phase];
+  const failed =
+    phase === 'error' || phase === 'restart-blocked' || blockedReason !== undefined || failedAction !== undefined;
+  /* A blocked update is never quiet: the person is the only one who can fix the clock or reinstall (B25, B27). */
+  const quiet =
+    blockedReason === undefined &&
+    (phase === 'current' ||
+      phase === 'checking' ||
+      phase === 'offline' ||
+      phase === 'disabled' ||
+      phase === 'system-managed');
   if (quiet && !open) {
     return undefined;
   }
-  const title = actionFailed
-    ? 'Couldn’t complete the request'
-    : {
-        'system-managed': 'Updates managed by APT',
-        disabled: 'Updates unavailable',
-        checking: 'Checking for updates',
-        current: 'You’re up to date',
-        downloading: 'Downloading an update',
-        ready: 'Update ready',
-        available: 'Update available',
-        error: 'Update interrupted',
-        saving: 'Saving your work',
-        'restart-blocked': 'Restart paused',
-        restarting: 'Restarting Tau',
-        'move-required': 'Move Tau to Applications',
-      }[phase];
   /* The user already asked to restart: the download's completion installs without a second ask. */
   const restartsWhenReady = phase === 'downloading' && snapshot.installWhenReady === true;
-  const detail = actionFailed
-    ? 'Try again. Your current session is still open.'
-    : restartsWhenReady
-      ? 'Tau will save your work and restart as soon as the download finishes.'
-      : (snapshot.detail ??
-        {
-          'system-managed': 'Your administrator manages updates through APT.',
-          disabled: 'Automatic updates are disabled for this build.',
-          checking: 'Looking for the latest version of Tau.',
-          current: 'You have the latest version.',
-          downloading: 'Keep working. We’ll let you know here when it’s ready.',
-          ready:
-            snapshot.installOnQuit === false
-              ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
-              : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
-          available: 'Download the latest version. Your session will stay open.',
-          error: 'We’ll retry automatically. Your work is unaffected.',
-          saving: 'Saving your work before restarting…',
-          'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
-          restarting: 'Reopening your workspace…',
-          'move-required':
-            'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
-        }[phase]);
+  const blocked = blockedReason === undefined ? undefined : blockedCopy[blockedReason];
+  /* Installing after a clock refusal would only meet the same refusal; a fresh check is the retry (B25). */
+  const intent = blockedReason === 'clock' ? 'check' : intentOf(phase);
+  const title = failedAction
+    ? failedTitles[failedAction]
+    : blocked
+      ? blocked.title
+      : restartsWhenReady
+        ? 'Restarts when ready'
+        : titles[phase];
+  const detail = failedAction
+    ? failedAction === 'restart' || failedAction === 'move'
+      ? 'Tau is still open. Try again.'
+      : 'Your work isn’t affected. Try again.'
+    : blocked
+      ? blocked.detail
+      : restartsWhenReady
+        ? 'Tau will save your work and restart as soon as the download finishes.'
+        : phase === 'ready'
+          ? /* Main words the one case the renderer cannot tell apart: a newer Tau that APT already installed. */
+            (snapshot.detail ??
+            (snapshot.installOnQuit === false
+              ? 'Tau saves your work, then restarts to install. Quitting normally leaves the update for later.'
+              : 'Tau saves your work, then restarts to install. If you’d rather wait, it installs when you quit Tau.'))
+          : details[phase];
+  /* One spinner at a time: a busy button carries its own, so the tile spins only while downloading. */
   const Icon = failed
     ? ShieldAlert
-    : busy || phase === 'downloading'
+    : phase === 'downloading'
       ? Loader
       : phase === 'current'
         ? Check
@@ -119,36 +115,25 @@ export function DesktopUpdateControl({
           ? Download
           : ArrowUpCircle;
   const act = async (): Promise<void> => {
-    setActionFailed(false);
+    setFailedAction(undefined);
     try {
-      if (phase === 'ready' || phase === 'restart-blocked' || phase === 'downloading' || phase === 'error') {
-        /* Before the download finishes, main holds the request and restarts when it does. A retry from a failed
-         * attempt carries it too, so one click takes an update from failed to installed. */
+      if (intent === 'restart') {
+        /* Before the download finishes, main holds the request and restarts when it does. */
         await bridge.install();
-      } else if (phase === 'available' || phase === 'move-required') {
+      } else if (phase === 'error') {
+        /* A failed download starts over with a check, which downloads again; "Try again" never agrees to a restart, and
+         * main forgets the failed release, so `download` would have nothing to fetch. */
+        await bridge.check();
+      } else if (intent === 'download' || intent === 'move') {
         /* For move-required, main moves Tau to Applications and relaunches it from there. */
         await bridge.download();
       } else {
         await bridge.check();
       }
     } catch {
-      setActionFailed(true);
+      setFailedAction(intent);
     }
   };
-  const actionLabel =
-    phase === 'ready'
-      ? 'Restart now'
-      : phase === 'restart-blocked'
-        ? 'Retry restart'
-        : phase === 'available'
-          ? 'Download'
-          : phase === 'downloading'
-            ? 'Restart when ready'
-            : phase === 'move-required'
-              ? 'Move to Applications'
-              : phase === 'current' || phase === 'system-managed'
-                ? 'Check again'
-                : 'Retry';
   return (
     <UpdateControl
       title={title}
@@ -156,16 +141,18 @@ export function DesktopUpdateControl({
       detail={detail}
       icon={Icon}
       isFailed={failed}
-      isProminent={phase === 'ready' && !actionFailed}
-      releasePage={snapshot.releasePage}
+      releasePage={blocked ? snapshot.downloadPage : snapshot.releasePage}
+      releaseLabel={blocked ? 'Download Tau' : undefined}
       isOpen={open}
       action={
-        restartsWhenReady || phase === 'disabled'
+        restartsWhenReady || phase === 'disabled' || blockedReason === 'installation-marker'
           ? undefined
           : {
-              label: actionLabel,
+              /* A repeated failed action is "Try again" (UX policy). */
+              label: failedAction ? 'Try again' : blockedReason === 'clock' ? 'Check again' : labels[phase],
               variant: phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default',
-              busy,
+              busy: busyLabel !== undefined,
+              busyLabel,
               onClick: () => {
                 void act();
               },
@@ -175,3 +162,104 @@ export function DesktopUpdateControl({
     />
   );
 }
+
+type Phase = DesktopUpdateSnapshot['phase'];
+
+/** What the notice's button asks main to do. */
+type FailedAction = 'check' | 'download' | 'restart' | 'move';
+
+const intentOf = (phase: Phase): FailedAction =>
+  phase === 'ready' || phase === 'restart-blocked' || phase === 'downloading'
+    ? 'restart'
+    : phase === 'error' || phase === 'available'
+      ? 'download'
+      : phase === 'move-required'
+        ? 'move'
+        : 'check';
+
+/* The two refusals only the person can fix; both offer Download Tau in place of release notes (B25, B27). */
+const blockedCopy: Readonly<
+  Record<NonNullable<DesktopUpdateSnapshot['blockedReason']>, { title: string; detail: string }>
+> = {
+  clock: {
+    title: 'Check your date and time',
+    detail:
+      'Tau couldn’t verify the update because your computer’s date and time look wrong. Correct them, then check again.',
+  },
+  'installation-marker': {
+    title: 'This copy of Tau can’t update itself',
+    detail: 'Its installation is damaged. Download Tau and install it again; your projects stay where they are.',
+  },
+};
+
+const failedTitles: Readonly<Record<FailedAction, string>> = {
+  check: 'Couldn’t check',
+  download: 'Couldn’t download',
+  restart: 'Couldn’t restart',
+  move: 'Couldn’t move Tau',
+};
+
+/* Titles are the state in about three words: the collapsed row and the screen-reader announcement show nothing else. */
+const titles: Readonly<Record<Phase, string>> = {
+  'system-managed': 'Updates via APT',
+  disabled: 'Updates are off',
+  checking: 'Checking for updates',
+  current: 'You’re up to date',
+  downloading: 'Downloading update',
+  ready: 'Update ready',
+  available: 'Update available',
+  error: 'Couldn’t update',
+  offline: 'Can’t check while offline',
+  saving: 'Saving your work',
+  'restart-blocked': 'Couldn’t restart',
+  restarting: 'Restarting Tau',
+  'move-required': 'Move Tau to update',
+};
+
+/* Say what happened to the person and their work, then the one next step. `ready` is worded where it is built. */
+const details: Readonly<Record<Phase, string>> = {
+  'system-managed': 'Tau updates through APT on this computer, so new versions arrive with your system updates.',
+  disabled: 'This copy of Tau doesn’t update itself.',
+  checking: 'Looking for a newer version of Tau.',
+  current: 'Tau checks for new versions on its own.',
+  downloading: 'Keep working. Tau will let you know here when it’s ready.',
+  ready: '',
+  /* Only the manual-update route offers `available`; its Download opens the archive in the browser. */
+  available: 'Opens your browser to download the latest version. Tau stays open.',
+  /* Main retries on a backoff and checks again every few hours, so "later" holds. */
+  /* `error` also covers a failed check (offline, say) and a failure before restarting. */
+  error: 'Tau couldn’t check for or download an update. Your work isn’t affected, and Tau will try again later.',
+  /* W9 R6: an offline check is postponed, not failed; the network's return checks again. */
+  offline: 'Tau checks for updates again when you’re back online.',
+  saving: 'Tau restarts as soon as everything is saved.',
+  /* `prepareToInstall` refuses while work is unsaved or a machine still runs. */
+  'restart-blocked':
+    'Tau stayed open: something is still saving, or a machine is still running. Finish up, then try again.',
+  restarting: 'Your workspace reopens in a moment.',
+  'move-required':
+    'Tau can’t update from where it is now, such as Downloads or a disk image. Moving it to Applications restarts Tau.',
+};
+
+/* Buttons name the action; a repeated failed action is "Try again" (UX policy). */
+const labels: Readonly<Record<Phase, string>> = {
+  'system-managed': 'Check again',
+  disabled: 'Check again',
+  checking: 'Check again',
+  current: 'Check again',
+  downloading: 'Restart when ready',
+  ready: 'Restart now',
+  available: 'Download',
+  error: 'Try again',
+  offline: 'Check again',
+  saving: 'Restart now',
+  'restart-blocked': 'Try again',
+  restarting: 'Restart now',
+  'move-required': 'Move to Applications',
+};
+
+/* While busy, the button names the work under way. */
+const busyLabels: Readonly<Partial<Record<Phase, string>>> = {
+  checking: 'Checking…',
+  saving: 'Saving…',
+  restarting: 'Restarting…',
+};

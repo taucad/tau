@@ -465,7 +465,7 @@ describe('app state ownership ratchet', () => {
     expect(manifest.components.files).toContain('apps/ui/app/runtime/app-runtime-provider.tsx');
   });
 
-  it('should hold the GitHub renewal factory, the one long-lived module start a component reaches, to its one caller (A10 debt)', () => {
+  it('should hold the GitHub renewal factory, the one long-lived module start a component reaches, to its one binding (A10 debt)', () => {
     const appRoot = fileURLToPath(new URL('.', import.meta.url));
     const callers: string[] = [];
     const visit = (directory: string): void => {
@@ -476,7 +476,8 @@ describe('app state ownership ratchet', () => {
         } else if (
           sourceFilePattern.test(entry.name) &&
           !testFilePattern.test(entry.name) &&
-          /\bstartGithubCredentialRenewal\(/u.test(readFileSync(path, 'utf8'))
+          entry.name !== 'github-credential-renewal.machine.ts' &&
+          /\bstartGithubCredentialRenewal\b/u.test(readFileSync(path, 'utf8'))
         ) {
           callers.push(relative(appRoot, path).split(sep).join('/'));
         }
@@ -484,5 +485,12 @@ describe('app state ownership ratchet', () => {
     };
     visit(appRoot);
     expect(callers).toEqual(['hooks/use-revision-status.ts']);
+    /* The binding hands it to the revision clients, whose lease starts it once per project and nowhere else. */
+    const clients = readFileSync(
+      join(findWorkspaceRoot(appRoot), 'apps/libs/revisions-ui/src/hooks/use-revision-status.ts'),
+      'utf8',
+    );
+    expect(clients.match(/\bstartRenewal\(/gu)).toHaveLength(1);
+    expect(clients).toContain('lease.renewal ??= services.github.startRenewal(');
   });
 });

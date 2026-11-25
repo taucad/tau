@@ -32,23 +32,23 @@ export type RevisionFailureSubject =
 
 /** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
 const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
-  ['GIT_RATE_LIMITED', 'Tau Cloud is getting too many requests for this project. Wait a minute, then try again.'],
-  ['GIT_LEASE_OWNER_BUSY', 'Tau Cloud is still busy with this account’s other projects. Try again in a moment.'],
+  ['GIT_RATE_LIMITED', 'Too many requests for this project. Wait a minute, then try again.'],
+  ['GIT_LEASE_OWNER_BUSY', 'Still busy with this account’s other projects. Try again in a moment.'],
   [
     'GIT_HYDRATE_BUDGET_EXHAUSTED',
-    'This account has reached today’s limit for opening projects on Tau Cloud. Try again tomorrow.',
+    'This account has reached today’s limit for opening projects from the cloud. Try again tomorrow.',
   ],
 ];
 
 /** Whatever the engine itself could not do, said the same way for every verb. */
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
-  ['ENGINE_FAILED', 'Tau could not read this project’s history. Reload the page and try again.'],
+  ['ENGINE_FAILED', 'Couldn’t read this project’s history. Reload the page and try again.'],
   ['ENGINE_UNAVAILABLE', 'This project’s history is not ready yet. Wait a moment and try again.'],
   [
     'MISSING_LARGE_OBJECT',
     'A file this point in history needs is not on this device. Back up and sync, then try again.',
   ],
-  ['UNSUPPORTED_OPERATION', 'Tau cannot do that to this project.'],
+  ['UNSUPPORTED_OPERATION', 'That can’t be done in this project.'],
 ];
 
 /**
@@ -71,7 +71,7 @@ export const revisionFailureCopy: Readonly<
 > = {
   connection: {
     title: 'Couldn’t load history',
-    fallback: 'Tau could not connect to this project’s history. Reload the page and try again.',
+    fallback: 'Reload the page and try again.',
     codes: new Map(engineCopy),
   },
   restore: {
@@ -119,7 +119,7 @@ export const revisionFailureCopy: Readonly<
   },
   branch: {
     title: 'Couldn’t change the branch',
-    fallback: 'Tau could not finish that branch change. Reload the page and try again.',
+    fallback: 'Couldn’t finish that branch change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
       /* A fresh project: nothing recorded, and nothing unrecorded to record. */
@@ -136,7 +136,7 @@ export const revisionFailureCopy: Readonly<
         'This branch is already backed up under its name, and Tau can’t remove a name there. Make a new branch from it instead.',
       ],
       /* Made, with nowhere for a chat to work in it. */
-      ['BRANCH_UNPLACED', 'Tau made that branch but could not open its files. Reload the page and try again.'],
+      ['BRANCH_UNPLACED', 'The branch was made, but its files couldn’t be opened. Reload the page and try again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try again.'],
       ['CHECKOUT_CONFLICT', 'That branch already exists. Pick another name.'],
       /* Asked before the project has anything selected to branch from; it used
@@ -160,7 +160,7 @@ export const revisionFailureCopy: Readonly<
   },
   save: {
     title: 'Couldn’t save',
-    fallback: 'Tau could not record this change. Reload the page and try again.',
+    fallback: 'Couldn’t save this change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
       /* D3: another writer moved the line first; the files stay as they are, unsaved. */
@@ -170,34 +170,34 @@ export const revisionFailureCopy: Readonly<
   },
   backup: {
     title: 'Not backed up',
-    fallback: 'Tau could not back this project up. It will try again.',
+    fallback: 'Couldn’t back up this project. Tau will try again.',
     codes: new Map([
       ...hostedRemoteCopy,
       /* Terminal (W2a): no retry and no verb clears it; only a repair of the cloud copy does. */
       [
         'REMOTE_DAMAGED',
-        'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
+        'Tau has to repair this project’s cloud backup before it can back up again. Nothing on this device is lost.',
       ],
     ]),
   },
   removeConflictLine: {
     title: 'Couldn’t dismiss the conflict',
-    fallback: 'Tau Cloud could not remove that decision. Try again.',
+    fallback: 'Couldn’t dismiss that conflict. Try again.',
     codes: new Map([
       ...hostedRemoteCopy,
-      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove another device’s decision.'],
-      ['GIT_REF_NOT_REMOVABLE', 'Tau Cloud cannot remove that decision.'],
+      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can dismiss another device’s conflict.'],
+      ['GIT_REF_NOT_REMOVABLE', 'That conflict can’t be dismissed.'],
     ]),
   },
   turn: {
     title: 'Nothing was saved for that request',
-    fallback: 'Tau could not record what that change produced. Try sending it again.',
+    fallback: 'Couldn’t save what that change produced. Send it again.',
     codes: new Map([
       ...engineCopy,
       /* Another document of this project is mid-change on the same files. */
       ['LEASE_UNAVAILABLE', 'Another window has this project open. Wait for it to finish, then try again.'],
       /* The earlier edits on the checkout could not be recorded before the turn began (RM-S14). */
-      ['BASE_CUT_FAILED', 'Tau could not save this project’s earlier edits first. Try sending that again.'],
+      ['BASE_CUT_FAILED', 'Couldn’t save this project’s earlier edits first. Send that again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try sending that again.'],
       ['UNKNOWN_REVISION', 'The point that change built on is not in this project any more.'],
       /* Let go before it recorded anything — a stop, a reload, an abandonment. */

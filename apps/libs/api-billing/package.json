@@ -57,7 +57,7 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "catalog:",
     "nestjs-zod": "^5.4.0",
-    "postgres": "^3.4.9",
+    "postgres": "4.1.1",
     "reflect-metadata": "^0.2.2",
     "stripe": "catalog:"
   },

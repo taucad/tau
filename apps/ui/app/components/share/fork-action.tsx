@@ -13,10 +13,10 @@ import {
 } from '@taucad/ui/components/dialog';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
+import type { CreateProjectOptions } from '@taucad/project-library/runtime/project-library-commands';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { toast } from '@taucad/ui/components/sonner';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 
 export type PublicationForkSource = {

@@ -10,6 +10,15 @@ describe('workspace-root validation', () => {
       }),
     ).toEqual(['.pkgcheck-consumer-a1', 'coverage']);
   });
+
+  it('should allow the CI checkout of the workflow’s own apt installer', () => {
+    expect(
+      unexpectedWorkspaceRootEntries({
+        actualEntries: ['.git', 'apps', 'node_modules', '.tau-ci'],
+        trackedPaths: ['apps/ui/package.json'],
+      }),
+    ).toEqual([]);
+  });
 });
 
 // Representative tracked paths cover the reviewed public root and nested authored directories.

@@ -20,7 +20,7 @@
  *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `PLANT`, `RESUMEB`, `APPENDM`, `REFRESHM`, `STAND` (and `PULL`, which the
  *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
@@ -1665,6 +1665,61 @@ const corpora: readonly Corpus[] = [
   },
 ];
 
+/**
+ * Nightly: `FORMAL_FRESH_PART=<k>/<n>` writes only part `k` of the fresh-seed corpora, so `n` processes write them
+ * side by side (`agent-host:formal:nightly:fresh`). Every part derives the same seed and the same traces per
+ * generator; the generators are dealt to the parts by their measured cost, so the parts together write every
+ * generator's traces once, as one process does. Default `1/1`: every generator.
+ */
+const freshPart = (() => {
+  const text = process.env['FORMAL_FRESH_PART'] ?? '1/1';
+  const match = /^(\d+)\/(\d+)$/.exec(text);
+  const index = Number(match?.[1]);
+  const count = Number(match?.[2]);
+  if (!match || count < 1 || index < 1 || index > count) {
+    throw new Error(`FORMAL_FRESH_PART must be k/n with 1 <= k <= n, got ${text}`);
+  }
+  return { index, count };
+})();
+
+/**
+ * Milliseconds each generator took for 534 fresh traces on a shared 4-core machine (2026-11-17): the log
+ * generators dominate, the merge generators are cheap. Only the deal reads it; an unlisted generator weighs 1000.
+ */
+const freshCost: Readonly<Record<string, number>> = {
+  base: 15_912,
+  'undefined-keys': 10_856,
+  redelivery: 8537,
+  'duplicate-segments': 111,
+  'merge-ties': 80,
+  'overlapping-segments': 92,
+  'skewed-clocks': 85,
+  'shared-turns': 231,
+  'rewound-turns': 309,
+  'future-rows': 386,
+  'abandoned-turns': 8823,
+  'legacy-epochs': 11_229,
+  'opaque-rows': 18_667,
+  'stale-append': 8983,
+  invocations: 8468,
+};
+
+/**
+ * Deals the generators to `count` parts, heaviest first, each to the least-loaded part (ties by name, then to the
+ * lowest part); then numbers the parts lightest first, because part 1 also runs the committed-corpus tests.
+ */
+const dealFreshParts = (names: readonly string[], count: number): string[][] => {
+  const weight = (name: string): number => freshCost[name] ?? 1000;
+  const parts = Array.from({ length: count }, () => ({ load: 0, names: [] as string[] }));
+  for (const name of names.toSorted((left, right) => weight(right) - weight(left) || (left < right ? -1 : 1))) {
+    const loads = parts.map((part) => part.load);
+    const lightest = parts[loads.indexOf(Math.min(...loads))]!;
+    lightest.load += weight(name);
+    lightest.names.push(name);
+  }
+  return parts.toSorted((left, right) => left.load - right.load).map((part) => part.names);
+};
+
 const tracesByCorpus = new Map<string, Trace[]>();
 const tracesOf = async (corpus: Corpus): Promise<Trace[]> => {
   const cached = tracesByCorpus.get(corpus.name);
@@ -1717,12 +1772,22 @@ describe('ChatLedger differential (Lean goldens)', () => {
     'should write fresh-seed corpora and their TypeScript output for the nightly oracle',
     async () => {
       const seed = Number(process.env['FORMAL_SEED'] ?? Math.floor(Math.random() * 2_147_483_647));
+      const mine = dealFreshParts(
+        corpora.map((corpus) => corpus.name),
+        freshPart.count,
+      )[freshPart.index - 1]!;
       process.stdout.write(
-        `chat-ledger fresh differential: seed ${seed}, ${freshPerGenerator(corpora.length)} traces per generator (replay with FORMAL_SEED=${seed})\n`,
+        `chat-ledger fresh differential: seed ${seed}, ${freshPerGenerator(corpora.length)} traces per generator (replay with FORMAL_SEED=${seed})${freshPart.count > 1 ? `; part ${freshPart.index}/${freshPart.count}: ${mine.join(', ')}` : ''}\n`,
       );
-      rmSync(freshDirectory, { recursive: true, force: true });
+      // Clear the directory of everything another part does not write: alone, that is everything.
+      const others = new Set(corpora.map((corpus) => corpus.name).filter((name) => !mine.includes(name)));
       mkdirSync(freshDirectory, { recursive: true });
-      for (const corpus of corpora) {
+      for (const entry of readdirSync(freshDirectory)) {
+        if (!others.has(entry.replace(/-\d+\.(?:trace|typescript)$/, ''))) {
+          rmSync(`${freshDirectory}${entry}`, { recursive: true, force: true });
+        }
+      }
+      for (const corpus of corpora.filter((candidate) => mine.includes(candidate.name))) {
         // oxlint-disable-next-line no-await-in-loop -- one generator at a time bounds memory.
         const traces = await generate({ ...corpus, count: freshPerGenerator(corpora.length) }, seed);
         writeFileSync(`${freshDirectory}${corpus.name}-${seed}.trace`, traceText(traces));
@@ -1732,8 +1797,31 @@ describe('ChatLedger differential (Lean goldens)', () => {
         );
       }
 
-      expect(existsSync(`${freshDirectory}invocations-${seed}.typescript`)).toBe(true);
+      expect(mine.filter((name) => !existsSync(`${freshDirectory}${name}-${seed}.typescript`))).toEqual([]);
     },
     1_800_000,
   );
+
+  it('should deal every generator to exactly one fresh part, cheapest part first', () => {
+    const names = corpora.map((corpus) => corpus.name);
+    for (const count of [1, 2, 4, 15, 20]) {
+      const parts = dealFreshParts(names, count);
+      expect(parts).toHaveLength(count);
+      expect(parts.flat().toSorted()).toEqual(names.toSorted());
+    }
+    expect(dealFreshParts(names, 1)).toEqual([
+      names.toSorted((left, right) => (freshCost[right] ?? 0) - (freshCost[left] ?? 0)),
+    ]);
+    const costOf = (part: readonly string[]): number => {
+      let total = 0;
+      for (const name of part) {
+        total += freshCost[name] ?? 0;
+      }
+      return total;
+    };
+    const loads = dealFreshParts(names, 4).map((part) => costOf(part));
+    expect(loads).toEqual(loads.toSorted((left, right) => left - right));
+    // One process writes all of them; four write them in under a third of the time.
+    expect(Math.max(...loads)).toBeLessThan(costOf(Object.keys(freshCost)) / 3);
+  });
 });

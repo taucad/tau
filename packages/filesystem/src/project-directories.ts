@@ -93,6 +93,29 @@ import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 
 /** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
+/**
+ * When a discovered project's `tau.json` last changed, or nothing when its provider cannot say: a failed stat or a
+ * synthesised zero leaves the time out rather than inventing one.
+ *
+ * @param provider - The provider of the copy's root, as the scan resolved it.
+ * @param locator - The copy.
+ * @returns The manifest's modification time in milliseconds, when known.
+ */
+const manifestModifiedAt = async (
+  provider: FileSystemProvider | undefined,
+  locator: ProjectLocator,
+): Promise<number | undefined> => {
+  try {
+    const stat = await provider?.stat(`${locator.relativeDirectory}/tau.json`);
+    return stat !== undefined && stat.mtimeMs > 0 ? stat.mtimeMs : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** One exact physical directory: its storage root and its canonical path inside it. */
+type PhysicalDirectory = Readonly<{ storageRootKey: string; providerBasePath: string }>;
+
 type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagingPort['copyHost']> }>;
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
@@ -134,6 +157,8 @@ export type ProjectDiscoveryEntry =
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
+      /** When this copy's `tau.json` last changed; read only while another directory carries the same id. */
+      readonly modifiedAt?: number;
     }
   | {
       readonly status: 'duplicate-id';
@@ -141,6 +166,8 @@ export type ProjectDiscoveryEntry =
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
+      /** When this copy's `tau.json` last changed, so a person can tell the copies apart. */
+      readonly modifiedAt?: number;
     }
   | {
       /**
@@ -332,8 +359,11 @@ export class ProjectDirectories {
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   /** A root's published state; a root that is not `available` is never scanned (blueprint D1). */
   private readonly _rootState: (storageRootKey: string) => RootState | 'pending' | undefined;
-  /** Retire one logical project route the authority installed, as a delete must. */
-  private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
+  /**
+   * Retire one logical project route the authority installed, as a delete must. With `boundTo`, only while the route
+   * is mounted on that exact directory: another copy of the id keeps the route it holds.
+   */
+  private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
 
   /**
    * Create the project-directory lifecycle over the authority's collaborators.
@@ -349,7 +379,7 @@ export class ProjectDirectories {
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     /** A root's admission state; `pending` while a non-Home root is still being admitted. */
     rootState?: (storageRootKey: string) => RootState | 'pending' | undefined;
-    revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
+    revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
   }) {
     this._observedIdentityResolver = createProjectIdentityResolver({
       capacity: 0,
@@ -398,6 +428,7 @@ export class ProjectDirectories {
   public async listProjectManifests(): Promise<ProjectDiscoveryResult> {
     const discovered: ProjectDiscoveryEntry[] = [];
     const roots: ProjectRootDiscoveryStatus[] = [];
+    const providers = new Map<string, FileSystemProvider>();
     /* oxlint-disable eslint/no-await-in-loop -- Root scans are deliberately serialized to bound filesystem-handle and IndexedDB pressure. */
     for (const resolvedRoot of this._discoveryRoots()) {
       const { root, scope, storageRootKey } = resolvedRoot;
@@ -476,6 +507,7 @@ export class ProjectDirectories {
         );
         discovered.push(...chunk.filter((entry) => entry !== undefined));
       }
+      providers.set(storageRootKey, provider);
       roots.push({ status: 'complete', root });
     }
     /* oxlint-enable eslint/no-await-in-loop -- End bounded serial root scan. */
@@ -505,11 +537,15 @@ export class ProjectDirectories {
         occurrenceCount.set(entry.projectId, (occurrenceCount.get(entry.projectId) ?? 0) + 1);
       }
     }
-    const entries = discovered.map(
-      (entry): ProjectDiscoveryEntry =>
-        entry.status === 'valid' && (occurrenceCount.get(entry.projectId) ?? 0) > 1
-          ? { ...entry, status: 'duplicate-id' }
-          : entry,
+    /* Only copies that share an id are told apart by time: one stat each, never one per project. */
+    const entries = await Promise.all(
+      discovered.map(async (entry): Promise<ProjectDiscoveryEntry> => {
+        if (entry.status !== 'valid' || (occurrenceCount.get(entry.projectId) ?? 0) <= 1) {
+          return entry;
+        }
+        const modifiedAt = await manifestModifiedAt(providers.get(entry.locator.storageRootKey), entry.locator);
+        return { ...entry, status: 'duplicate-id', ...(modifiedAt === undefined ? {} : { modifiedAt }) };
+      }),
     );
     return { entries, roots };
   }
@@ -575,6 +611,8 @@ export class ProjectDirectories {
    * Permanently remove one exact physical project directory. Identity is
    * re-established under the same project-wide lock that all logical project
    * mutations acquire, so no write can race the verification/delete window.
+   * Other directories that carry the same id are untouched, and so is the
+   * project route while it is mounted on one of them.
    *
    * @param input - Exact project identity, physical path, and storage scope.
    * @returns Identity-safe deletion outcome.
@@ -601,7 +639,8 @@ export class ProjectDirectories {
     const scope: StorageRootConfig = { ...input.scope };
     const provider = await this._registry.getProvider(scope);
     const logicalRoot = projectRoute(projectId);
-    const physicalLock = `${this._registry.resolveStorageRootKey(scope)}:${path}`;
+    const storageRootKey = this._registry.resolveStorageRootKey(scope);
+    const physicalLock = `${storageRootKey}:${path}`;
     const locks = [`project:${projectId}`, physicalLock];
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
@@ -627,7 +666,7 @@ export class ProjectDirectories {
           return { status: 'identity-mismatch', actualProjectId: identity.projectId };
         }
 
-        this._revokeProjectRoute(logicalRoot, true);
+        this._revokeProjectRoute(logicalRoot, true, { storageRootKey, providerBasePath: path });
         const separator = path.lastIndexOf('/');
         const physicalParent = separator === -1 ? '' : path.slice(0, separator);
         const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;

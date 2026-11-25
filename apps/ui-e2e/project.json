@@ -9,18 +9,18 @@
     "formal:logs": {},
     "test": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "metadata": {
-        "description": "Node-only suites: none of them serves apps/ui/build (ui-build-snapshot.test.ts builds a fixture tree in a temp directory), so this target builds no web UI variant and carries no env fixture. serve-ui-build.test.ts reads apps/ui/serve/build, which the ui:build:serve dependency produces and caches. The browser tiers below still build ui themselves."
+        "description": "Node-only suites that read no UI build: none of them serves apps/ui/build or apps/ui/serve/build (ui-build-snapshot.test.ts builds a fixture tree in a temp directory), so this target depends on no UI build and carries no env fixture, and a CI test lane that runs it builds no UI bundle. serve-ui-build.test.ts, which reads apps/ui/serve/build, runs in test:e2e:daemon-host, which already depends on ui:build:serve. The browser tiers below still build ui themselves."
       },
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
       }
     },
     "test:e2e:queue": {
       "executor": "nx:noop",
       "dependsOn": [
+        "test:e2e:adaptive",
         "test:e2e:daemon-host",
         "test:e2e:deploy-skew",
         "test:e2e:development",
@@ -29,6 +29,20 @@
       ],
       "metadata": {
         "description": "The merge-queue e2e ratchet: the suites of this project that passed five consecutive e2e-nightly runs (two before 2026-11-17). ci.yml's e2e-queue lane runs each one as its own job in the merge queue whenever this project is affected, and e2e-nightly.yml leaves every suite listed here out of its matrix. A suite joins by being added to dependsOn (a target of this project) once green on five consecutive nightlies, and never moves back. Running this target runs them all."
+      }
+    },
+    "queue-build": {
+      "executor": "nx:noop",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "metadata": {
+        "description": "The ui:build the queue suites restore (CI decomposition global review, ruling 6). ci.yml's queue-builds job runs it at the start of every merge-queue run and writes it to the remote cache, and the e2e-queue rows wait for that job, so test:e2e:non-isolated (dependsOn), test:e2e:deploy-skew and test:e2e:daemon-host (their first `nx run ui:build`) restore it instead of each building it. The rows still run ui:build themselves under their own env fixture: Nx restores this build only when the hash, every env input of ui:build included, is theirs, and builds otherwise. The queue job's environment is ci.yml's workflow env, whose TAU_*_URL values are the fixture's; TAU_CLOUD_ENABLED and the TAU_E2E_* fixture values are not ui:build inputs."
+      }
+    },
+    "queue-build:serve": {
+      "executor": "nx:noop",
+      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
+      "metadata": {
+        "description": "The ui:build:serve the queue suites restore (ruling 6, as queue-build): ci.yml's queue-builds job builds it once per merge-queue run, and test:e2e:daemon-host (dependsOn) restores it."
       }
     },
     "test:e2e": {
@@ -94,14 +108,34 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys (src/support/two-deploys.ts, which also serves each deploy's service worker) and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. service-worker-boot.test.ts holds the web app's service worker on the boot path to the rule that a worker never makes the app fail where no worker would (Brain research/pl7-service-worker-staging-defects-blueprint.md, red-first rows): a request only the worker makes fails, a precached shell names a file the live deploy no longer serves, a successor's install cannot fetch an entry, the kill switch over a stalled worker, and navigations stay the browser's own. PL7 staging defects FP9 adds rows on one live build whose server drops one chunk's connection once (failNext): a chunk the page needs reloads an untouched page into the same build, and the chat panel's decorative spinner degrades instead of taking the panel down. The staging verification of 2026-11-21 adds rows on the same server: the kernel's runtime worker whose script or static import fails is replaced (and past the page's bound the viewer offers Reload), a route module failing during a client navigation reloads into its destination, and the part preview code failing leaves the shared model route standing. Both groups joined this queue suite by operator decision 7 of that blueprint, outside the five-nightly ratchet, with 20 consecutive green runs recorded in their pull requests. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts --environment=node"
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts apps/ui-e2e/src/service-worker-boot.test.ts --environment=node"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:service-worker": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The web app's service worker on a built app (progressive loading PL7). service-worker.test.ts serves one ui:build as one deploy and checks the worker's offline opens of Home and a local project, their cross-origin isolation, that API, auth, data and marketing requests pass through, and its precache list (shell invariants 8 and 9). service-worker-deploy.test.ts serves it as two deploys (src/support/two-deploys.ts) and checks that a tab the worker controls keeps working and opens the new deploy once the update rule fires (ruling OD3), and that one deploy of the kill switch (TAU_SERVICE_WORKER_KILL_SWITCH) retires an installed worker. A new suite: e2e-nightly.yml runs it, and it joins test:e2e:queue only after five consecutive green nightlies (the end-to-end ratchet). Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/service-worker.test.ts apps/ui-e2e/src/service-worker-deploy.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",
@@ -123,12 +157,47 @@
           "TAU_CLOUD_ENABLED": "false",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
-          "TAU_FRONTEND_URL": "http://localhost:3000"
+          "TAU_FRONTEND_URL": "http://localhost:3000",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true"
         },
         "commands": [
           "pnpm exec nx run ui:build",
           "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts src/glass-prism-loader.spec.ts"
         ]
+      }
+    },
+    "test:e2e:timing-budgets": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "CI decomposition ruling D-DC17 (operator Q3, option B): the nine timing-budget specs, which measure runner speed as much as the product, run only here and never in the test:e2e nightly shards (vitest.config.ts admits them only with TAU_E2E_TIMING_BUDGET_SPECS=true, which this target sets). timing-budgets.yml runs it, non-gating, on every main push that affects this project, one job per shard under one concurrency group that cancels a superseded run, and updates one comment on each owner issue (metadata.owners, spec to issue) with the run and every spec's result. shards equals the number of files, so Vitest's --shard=<index>/<count> gives each job exactly one spec. The JSON report at out/test-results/timing-budgets/report.json is what the workflow reads. TODO(D-DC17): once every spec is green, the release gate requires this lane; it does not yet. The first command builds ui under the same env fixture as test:e2e, for the reason given there.",
+        "shards": 9,
+        "owners": {
+          "src/glass-prism-loader.spec.ts": 2287,
+          "src/headless-chat-image-capture.performance.spec.ts": 2286,
+          "src/home-load-gate.spec.ts": 2288,
+          "src/metal-morph-loader.spec.ts": 2287,
+          "src/mobile-stability.spec.ts": 2288,
+          "src/parameters-pane.performance.spec.ts": 2288,
+          "src/project-load-frames.spec.ts": 2288,
+          "src/revision-latency.spec.ts": 2288,
+          "src/user-project-thumbnail-generation.spec.ts": 2286
+        }
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium --reporter=default --reporter=github-actions --reporter=json --outputFile.json=../../out/test-results/timing-budgets/report.json src/glass-prism-loader.spec.ts src/headless-chat-image-capture.performance.spec.ts src/home-load-gate.spec.ts src/metal-morph-loader.spec.ts src/mobile-stability.spec.ts src/parameters-pane.performance.spec.ts src/project-load-frames.spec.ts src/revision-latency.spec.ts src/user-project-thumbnail-generation.spec.ts"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true"
+        }
       }
     },
     "test:e2e:development": {
@@ -156,8 +225,8 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/picovoxel-multi.spec.ts",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/picovoxel-multi.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/picovoxel-multi.spec.ts",
+          "vitest run --config vitest.config.ts --project firefox src/picovoxel-multi.spec.ts"
         ],
         "env": {
           "PORT": "3015",
@@ -172,9 +241,9 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts src/chat-questions.spec.ts src/chat-todo-list.spec.ts",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts src/chat-questions.spec.ts src/chat-todo-list.spec.ts",
+          "vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
+          "vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts"
         ],
         "parallel": false,
         "env": {
@@ -193,7 +262,7 @@
         "records": {
           "commands": [
             "pnpm --dir ../.. exec nx run ui:build",
-            "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/workbench-records.spec.ts"
+            "vitest run --config vitest.config.ts --project chromium src/workbench-records.spec.ts"
           ]
         }
       },
@@ -202,7 +271,7 @@
         "parallel": false,
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/workbench-records.spec.ts src/arrange-workbench.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/workbench-records.spec.ts src/arrange-workbench.spec.ts"
         ],
         "env": {
           "TAU_E2E_UI_SNAPSHOT": "true",
@@ -216,12 +285,16 @@
     "test:e2e:daemon-host": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
+      "metadata": {
+        "description": "The `tau serve` daemon over the serve build that its ui:build:serve dependency writes to apps/ui/serve/build. First its bytes on the wire, from Node (src/support/serve-ui-build.test.ts: status, headers, the SPA fallback, the cadmpeg engines the daemon serves); then a real chat placed on the daemon in Chromium (src/daemon-agent-host.spec.ts), after ui:build. serve-ui-build.test.ts runs here rather than in test, so no CI test lane builds a UI bundle (CI decomposition global review, G5)."
+      },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
+          "pnpm --dir ../.. exec vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
         ],
         "env": {
           "TAU_E2E_HOST_TIER": "true",
@@ -243,7 +316,7 @@
         "parallel": false,
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/gemini-browser-agent-host.live.spec.ts src/provider-switch.live.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/gemini-browser-agent-host.live.spec.ts src/provider-switch.live.spec.ts"
         ],
         "env": {
           "TAU_E2E_LIVE_GEMINI": "true",
@@ -258,20 +331,44 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Cloud-build load tier (lane A0.11): the loading rows a self-host build cannot show, because it has no billing fence and asks for /v1/projects only for a project on the Tau remote (N1, H7, N2, H6 and the U1 session discriminator). Like test:e2e:live, the first command builds the cloud UI variant (TAU_CLOUD_ENABLED=true is a build-time input of ui:build) and global-setup.ts starts the UI only. No API runs and no secret is needed: src/support/cloud-stand-ins.ts answers get-session, /v1/projects and /v1/agents by interception for a signed-in stand-in owner with one Tau-remote project, and holds an answer when a row forces its defect. TAU_BILLING_ENVIRONMENT gives the billing fence an identity to gate on. TAU_E2E_CLOUD_LOAD=true runs the cloud-only blocks of the two specs, which every other tier skips, and the name pattern (cloud-load-gate.spec.ts's block, home-load-gate.spec.ts's N1 and H7 cases) keeps home-load-gate.spec.ts's self-host cases out of this tier. Its rows pin known defects (cloudDefectRow): each is a plain test that passes while its defect assertion fails, records that failure as a notice annotation naming the defect, and fails if the assertion passes (the defect no longer reproduces: flip expectedFailure) or anything else faults. The verbose and github-actions reporters print each standing defect's notice (locally under the row, and as a workflow annotation in CI). --retry 0: a row runs once, so a sampled pass is never retried into a reading. Arguments reach only the vitest command. Its own PORT keeps it from reusing a self-host server another e2e target started."
+        "description": "Cloud-build load tier (lane A0.11): the loading rows an unfunded deployment cannot show, because it has no billing fence and asks for /v1/projects only for a project on the Tau remote (N1, H7, N2, H6 and the U1 session discriminator). Like test:e2e:live, the first command builds the one adaptive UI (adaptive app deployment mode W12) and global-setup.ts starts the UI only. No API runs and no secret is needed: src/support/cloud-stand-ins.ts answers get-session, /v1/projects, /v1/agents and a funded /v1/deployment by interception for a signed-in stand-in owner with one Tau-remote project, and holds an answer when a row forces its defect. TAU_E2E_CLOUD_LOAD=true runs the cloud-only blocks of the two specs, which every other tier skips, and the name pattern (cloud-load-gate.spec.ts's block, home-load-gate.spec.ts's N1 and H7 cases) keeps home-load-gate.spec.ts's self-host cases out of this tier. Its rows pin known defects (cloudDefectRow): each is a plain test that passes while its defect assertion fails, records that failure as a notice annotation naming the defect, and fails if the assertion passes (the defect no longer reproduces: flip expectedFailure) or anything else faults. The verbose and github-actions reporters print each standing defect's notice (locally under the row, and as a workflow annotation in CI). --retry 0: a row runs once, so a sampled pass is never retried into a reading. Arguments reach only the vitest command. Its own PORT keeps it from reusing a self-host server another e2e target started."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
           { "command": "pnpm --dir ../.. exec nx run ui:build", "forwardAllArgs": false },
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium --retry 0 --reporter=verbose --reporter=github-actions --testNamePattern \"cloud-build tier|^N1: |^H7: \" src/cloud-load-gate.spec.ts src/home-load-gate.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium --retry 0 --reporter=verbose --reporter=github-actions --testNamePattern \"cloud-build tier|^N1: |^H7: \" src/cloud-load-gate.spec.ts src/home-load-gate.spec.ts"
         ],
         "env": {
           "PORT": "3021",
           "TAU_E2E_CLOUD_LOAD": "true",
-          "TAU_CLOUD_ENABLED": "true",
-          "TAU_BILLING_ENVIRONMENT": "development",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:adaptive": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Adaptive web tier (adaptive app deployment mode charter W7): the first command builds the UI, `adaptive` since the flip (W8), and global-setup.ts serves it. No API runs: the cloud stand-ins answer the signed-in session, and each row of src/adaptive-web.spec.ts answers GET /v1/deployment funded or unfunded, holds it, or blocks or stalls the Cloud chunk, which the spec finds in the build's module-id manifest. Every other tier skips the spec. Its own PORT keeps it from reusing a server another e2e target started. Admitted to the merge queue through test:e2e:queue after five consecutive green nightlies (CI decomposition DC-24, global review 2026-11-24 ruling 11; about 5.5 min), which deleted its own e2e-nightly.yml job."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "parallel": false,
+        "commands": [
+          {
+            "command": "pnpm --dir ../.. exec nx run ui:build",
+            "forwardAllArgs": false
+          },
+          "vitest run --config vitest.config.ts --project chromium --retry 0 src/adaptive-web.spec.ts"
+        ],
+        "env": {
+          "PORT": "3023",
+          "TAU_E2E_ADAPTIVE_TIER": "true",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
@@ -289,7 +386,7 @@
         "parallel": false,
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium --retry 0 src/github-accounts.live.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium --retry 0 src/github-accounts.live.spec.ts"
         ],
         "env": {
           "PORT": "3018",
@@ -389,6 +486,14 @@
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node --no-file-parallelism"
+      }
+    },
+    "test:e2e:desktop-boot-signals-staging": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts --environment=node --testNamePattern=T-R9.3"
       }
     }
   }

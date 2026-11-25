@@ -32,6 +32,10 @@ type FollowLatestOutput = {
  * scroll events, which content growth never fires: the list follows until the
  * person scrolls up, away from the bottom, and resumes once they scroll back.
  *
+ * Opening a disclosure is inspection too. The line the person clicked stays
+ * where it is and its contents grow below it, so following also stops there
+ * and resumes when the list is back at its bottom.
+ *
  * @param virtuosoRef - The list whose last row is scrolled into view.
  * @returns Props to spread onto the Virtuoso list.
  */
@@ -63,19 +67,35 @@ export function useFollowLatestOutput(
       }
       lastScrollTop = scrollTop;
     };
+    const handleClick = (event: MouseEvent): void => {
+      if (event.target instanceof Element && event.target.closest('[aria-expanded]') !== null) {
+        isFollowingRef.current = false;
+      }
+    };
     scroller.addEventListener('scroll', handleScroll, { passive: true });
+    // Capture, so the decision precedes the height change the click causes.
+    scroller.addEventListener('click', handleClick, { capture: true });
     return () => {
       scroller.removeEventListener('scroll', handleScroll);
+      scroller.removeEventListener('click', handleClick, { capture: true });
     };
   }, [scroller]);
 
   const followOutput = useCallback((): 'auto' | false => (isFollowingRef.current ? 'auto' : false), []);
 
   const totalListHeightChanged = useCallback(() => {
+    // Closing a disclosure can return the list to its bottom without a scroll event.
+    if (
+      !isFollowingRef.current &&
+      scroller !== undefined &&
+      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= bottomThreshold
+    ) {
+      isFollowingRef.current = true;
+    }
     if (isFollowingRef.current) {
       virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: instantScrollBehavior });
     }
-  }, [virtuosoRef]);
+  }, [scroller, virtuosoRef]);
 
   return { scrollerRef, followOutput, totalListHeightChanged };
 }

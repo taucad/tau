@@ -246,12 +246,15 @@ export const beginLaunch = (input: {
   readonly launchId: string;
 }): LaunchBeginning => {
   const { previous, build } = input;
-  /* 1. Another build starts its own count; an automatic install whose target is not running did not take. */
+  /* 1. Another build starts its own count. An automatic install did not take when the build it was started from is
+   * still the one running; once another build runs (the target, or one installed by hand), the record is dropped. */
   const sameBuild = previous?.build === build;
   let count = sameBuild ? previous.unhealthyCount : 0;
   const autoInstall = previous?.autoInstall;
   const blockedAutoInstallTarget =
-    autoInstall !== undefined && autoInstall.targetVersion !== input.version ? autoInstall.targetVersion : undefined;
+    autoInstall !== undefined && autoInstall.fromBuild === build && autoInstall.targetVersion !== input.version
+      ? autoInstall.targetVersion
+      : undefined;
   /* 2. Classify the previous launch of this build. */
   const last = sameBuild ? previous.last : undefined;
   const previousOutcome = last === undefined ? undefined : classifyLaunch(last);
@@ -303,6 +306,8 @@ export type BootHealth = {
   readonly end: (ended: LaunchEnd) => void;
   /** An automatic install is about to start (WP7). */
   readonly noteAutoInstall: (targetVersion: string) => void;
+  /** The automatic install of `targetVersion` never went ahead: restore the record this launch began with. */
+  readonly withdrawAutoInstall: (targetVersion: string) => void;
   /** The ledger as it stands. */
   readonly snapshot: () => BootHealthLedger;
 };
@@ -373,6 +378,15 @@ export const startBootHealth = (input: {
     },
     noteAutoInstall: (targetVersion) => {
       ledger = { ...ledger, autoInstall: { fromBuild: input.build, targetVersion } };
+      persist();
+    },
+    withdrawAutoInstall: (targetVersion) => {
+      if (ledger.autoInstall?.targetVersion !== targetVersion) {
+        return;
+      }
+      const { autoInstall: _withdrawn, ...rest } = ledger;
+      const began = begun.ledger.autoInstall;
+      ledger = began === undefined ? rest : { ...rest, autoInstall: began };
       persist();
     },
     snapshot: () => ledger,

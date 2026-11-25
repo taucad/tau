@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createDeploymentModeResolver,
   deploymentAnswerKeyPrefix,
@@ -302,6 +302,60 @@ describe('createDeploymentModeResolver', () => {
     await absent.resolver.mode(api);
     await expect(absent.resolver.mode(api)).resolves.toBe('funded');
     expect(absent.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
+// Refresh ahead of expiry (C7)
+// ===========================================================================
+
+describe('refresh and keepFresh', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should ask again only within the refresh lead of expiry, once however often it is told', async () => {
+    const { resolver, fetch, advance } = harness({ [api]: [json(cloud), json(cloud)] });
+    await resolver.mode(api);
+
+    advance(300 - deploymentModeDefaults.refreshLead / 1000 - 1);
+    resolver.refresh(api);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    advance(1);
+    resolver.refresh(api);
+    resolver.refresh(api);
+    /* The answer is still fresh, so an admission reads it without waiting on the refresh. */
+    await expect(resolver.resolve(api)).resolves.toMatchObject({ source: 'cache' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('should refresh before each expiry, retry a failure after the lead, and stop when asked', async () => {
+    vi.useFakeTimers();
+    const { refreshLead } = deploymentModeDefaults;
+    const answers: Scripted[] = [json(cloud), new Error('offline'), json(cloud)];
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      const next = answers.shift();
+      if (next === undefined || next instanceof Error) {
+        throw next ?? new Error('no response scripted');
+      }
+      return typeof next === 'function' ? next() : next;
+    });
+    const resolver = createDeploymentModeResolver({ fetch });
+
+    const stop = resolver.keepFresh(api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300_000 - refreshLead);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    /* The failed refresh leaves the answer standing in, and is retried one lead later. */
+    await expect(resolver.mode(api)).resolves.toBe('funded');
+    await vi.advanceTimersByTimeAsync(refreshLead);
+    expect(fetch).toHaveBeenCalledTimes(3);
+
+    stop();
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });
 

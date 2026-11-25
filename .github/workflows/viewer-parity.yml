@@ -219,6 +219,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-viewer-parity-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Every fixture of the manifest, against the eight shards' references merged: the gate runs once, unsharded.
   gate:
     name: Parity gate (nanoraster native on lavapipe, WASM on SwiftShader)
@@ -293,3 +304,14 @@ jobs:
           name: viewer-parity-results
           path: ${{ env.PARITY_OUT }}
           retention-days: 14
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-viewer-parity-gate
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "measure before release — placeholder budget",
+    "path": "dist/**/*.mjs",
+    "limit": "100 kB"
+  }
+]

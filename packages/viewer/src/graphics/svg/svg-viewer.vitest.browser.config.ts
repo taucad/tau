@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** Real Chromium acceptance of the authored SVG viewer and its isolated styles. */
@@ -13,6 +14,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
     include: ['src/graphics/svg/svg-viewer.browser.test.tsx', 'src/graphics/svg/svg-viewer-pan-zoom.browser.test.tsx'],
     fileParallelism: false,
     browser: {

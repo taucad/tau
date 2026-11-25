@@ -1590,6 +1590,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:libs/utils
+      '@taucad/vitest-ci':
+        specifier: workspace:*
+        version: link:tools/vitest-ci
       '@taucad/workbench':
         specifier: workspace:*
         version: link:packages/workbench
@@ -8685,6 +8688,8 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+
+  tools/vitest-ci: {}
 
   tools/workspace-plugin:
     devDependencies:

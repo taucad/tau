@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -24,7 +25,7 @@ export default defineConfig({
      * 68210d500a; nodejs/node#66376) or CI leaves Node 24. */
     pool: 'forks',
     execArgv: ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc'],
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/apps/desktop',

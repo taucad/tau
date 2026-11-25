@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { useProject } from '#hooks/use-project.js';
 import { summarizeRecordIssues, useRecordIssues } from '#workbench-records/record-issues.js';
 import type { RecordIssueState } from '#workbench-records/record-issues.js';
@@ -471,19 +472,28 @@ export function MobileProjectTopBar(): React.JSX.Element {
   }, []);
   const shareLabel = paneTitle('share');
   const ShareIcon = workbenchPanes.share.icon;
+  /* The desktop app's narrow window keeps its titlebar row: the traffic lights and the shell's fixed sidebar, Back and
+   * Forward controls. The bar becomes that row, as the wide editor's chat header does: it starts after those controls,
+   * has no sidebar trigger of its own, keeps the titlebar's 36px height and controls, and drags the window. */
+  const isDesktop = isDesktopTarget();
   return (
     <header
       data-slot='mobile-project-top-bar'
-      className='flex h-12 shrink-0 items-center gap-0.5 border-b bg-background px-1 md:hidden'
+      className={cn(
+        'flex shrink-0 items-center gap-0.5 border-b bg-background px-1 md:hidden',
+        isDesktop ? 'h-9 pl-(--titlebar-controls-width) [app-region:drag] [&_button]:[app-region:no-drag]' : 'h-12',
+      )}
     >
       {/* The records' live announcement, which the desktop trigger makes and this bar takes over below `md`. */}
       <span role='status' className='sr-only'>
         {status.issuesName}
       </span>
-      {/* I3: the bar's three controls are 40px, as the shell pages' phone bar (D11). */}
-      <SidebarTrigger className='size-10'>
-        <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-5' />
-      </SidebarTrigger>
+      {/* I3: on a phone the bar's three controls are 40px, as the shell pages' phone bar (D11). */}
+      {isDesktop ? null : (
+        <SidebarTrigger className='size-10'>
+          <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-5' />
+        </SidebarTrigger>
+      )}
       <button
         ref={titleRef}
         type='button'
@@ -491,12 +501,21 @@ export function MobileProjectTopBar(): React.JSX.Element {
         aria-haspopup='dialog'
         aria-expanded={isSheetOpen}
         disabled={isUnavailable}
-        className='flex h-10 min-w-0 flex-1 cursor-action flex-col items-start justify-center rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:focus-outline disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent'
+        className={cn(
+          'flex min-w-0 flex-1 cursor-action flex-col items-start justify-center rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:focus-outline disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+          isDesktop ? 'h-8' : 'h-10',
+        )}
         onClick={() => {
           setSheetOpen(true);
         }}
       >
-        <span className='flex w-full min-w-0 items-center gap-1 text-sm leading-5 font-medium'>
+        <span
+          className={cn(
+            'flex w-full min-w-0 items-center gap-1 text-sm font-medium',
+            /* Two lines in the titlebar's 32px control: name and status line, 16px each. */
+            isDesktop ? 'leading-4' : 'leading-5',
+          )}
+        >
           <span className='truncate'>{projectName}</span>
           <ChevronDown aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
         </span>
@@ -507,7 +526,7 @@ export function MobileProjectTopBar(): React.JSX.Element {
           <Button
             ref={registerRecordRecoveryFocus}
             variant='ghost'
-            size='icon-lg'
+            size={isDesktop ? 'icon-sm' : 'icon-lg'}
             aria-label={shareLabel}
             data-slot='project-share-button'
             disabled={isUnavailable}
@@ -515,7 +534,7 @@ export function MobileProjectTopBar(): React.JSX.Element {
               openPanel('share');
             }}
           >
-            <ShareIcon aria-hidden className='size-5' />
+            <ShareIcon aria-hidden className={isDesktop ? 'size-4' : 'size-5'} />
           </Button>
         </TooltipTrigger>
         <TooltipContent>{shareLabel}</TooltipContent>

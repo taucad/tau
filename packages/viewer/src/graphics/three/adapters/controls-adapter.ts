@@ -520,6 +520,7 @@ export const createControlsAdapter = ({
         step: event.step,
         enablePan: routing?.enablePan,
         enableZoom: routing?.enableZoom,
+        orbitStyle: routing?.cameraInput.orbitStyle,
       });
       if (moved) {
         invalidate();

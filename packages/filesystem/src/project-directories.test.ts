@@ -95,6 +95,31 @@ describe('WorkspaceFileService', () => {
       expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
     });
 
+    it('should tell copies that share an id apart by when each tau.json changed, and stat no other project', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const duplicateId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+      await writeManifest(provider, 'a-original', manifestProject(duplicateId, 'original'));
+      await writeManifest(provider, 'b-copy', manifestProject(duplicateId, 'copy'));
+      await writeManifest(provider, 'c-single', manifestProject('proj_ccccccccccccccccccccc', 'single'));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      /* This provider synthesises a zero mtime, which is left out; report a real one. */
+      const originalStat = provider.stat.bind(provider);
+      const stat = vi
+        .spyOn(provider, 'stat')
+        .mockImplementation(async (path) => ({ ...(await originalStat(path)), mtimeMs: 1_700_000_000_000 }));
+
+      const result = await service.listProjectManifests();
+
+      const times = Object.fromEntries(
+        result.entries.map((entry) => [
+          entry.locator.relativeDirectory,
+          'modifiedAt' in entry ? entry.modifiedAt : 'absent',
+        ]),
+      );
+      expect(times).toEqual({ 'a-original': 1_700_000_000_000, 'b-copy': 1_700_000_000_000, 'c-single': 'absent' });
+      expect(stat.mock.calls.map(([path]) => path)).not.toContain('c-single/tau.json');
+    });
+
     it('should initialize hand-authored manifests without rewriting their bytes', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const bytes = serializeProjectManifest(
@@ -828,6 +853,43 @@ describe('WorkspaceFileService', () => {
         context.service.dispose();
         coordinator.dispose();
       }
+    });
+
+    /* Blueprint audit row 4: deleting one copy of a shared id never revokes the route another copy holds. */
+    it('keeps the project route of another copy of the id and revokes only the bound one', async () => {
+      const writeCopy = async (copy: string): Promise<void> => {
+        await rootProvider.mkdir(copy, { recursive: true });
+        await rootProvider.writeFile(
+          `${copy}/tau.json`,
+          serializeProjectManifest(
+            projectToManifest({ name: copy, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } }),
+          ),
+        );
+        await rootProvider.writeFile(
+          `${copy}/${projectIdentityPath}`,
+          serializeProjectIdentity({ version: 1, projectId }),
+        );
+        await rootProvider.writeFile(`${copy}/main.ts`, encoder.encode(`export const copy = '${copy}';`));
+      };
+      await writeCopy('bound-copy');
+      await writeCopy('other-copy');
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'indexeddb', providerBasePath: 'bound-copy' }],
+        roots: [{ backend: 'indexeddb' }],
+      });
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'other-copy', scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      expect(await rootProvider.exists('other-copy')).toBe(false);
+      await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe(
+        "export const copy = 'bound-copy';",
+      );
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'bound-copy', scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).rejects.toThrow();
     });
   });
 

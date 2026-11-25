@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
 import { replicadKernel } from '@taucad/replicad';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -22,20 +22,49 @@ import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { installHandleLedger, summarizeLeaks } from '@taucad/runtime-testing';
+import type { HandleLedger } from '@taucad/runtime-testing';
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 import * as replicad from 'replicad';
 import type { LedgerWorkerMessage } from '#fixtures/replicad-ledger-worker.js';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc') as () => void;
-const collect = async (): Promise<void> => {
-  for (let round = 0; round < 4; round += 1) {
+const collectRounds = 4;
+/**
+ * Collect and let the finalization registry run. Given the ledger, stop once a round after the first deletes no
+ * handle: nothing was finalized, so a further round has nothing new to collect (as in `replicad-handle-epochs`).
+ *
+ * @param ledger - The ledger whose deletions show when collection has settled.
+ */
+const collect = async (ledger?: HandleLedger): Promise<void> => {
+  let deleted = ledger?.stats().deleted;
+  for (let round = 0; round < collectRounds; round += 1) {
     gc();
     await new Promise((resolve) => {
       setTimeout(resolve, 5);
     });
+    if (ledger) {
+      const now = ledger.stats().deleted;
+      if (round > 0 && now === deleted) {
+        return;
+      }
+      deleted = now;
+    }
   }
 };
+
+const testTimeout = 300_000;
+/**
+ * Closes for every session a test opened. A test that times out keeps running in the background, and the matrix
+ * tests share one OpenCascade instance and its ledger: its builds would add handles to the next test's count. So each
+ * test's sessions are closed after it, whether it passed, failed or timed out, before the next test starts.
+ */
+const openSessions = new Set<() => Promise<void>>();
+afterEach(async () => {
+  const closes = [...openSessions];
+  openSessions.clear();
+  await Promise.all(closes.map(async (close) => close()));
+}, testTimeout);
 
 type ParameterSet = Readonly<Record<string, unknown>>;
 
@@ -76,23 +105,45 @@ describe('Replicad handle ledger over the editing matrix', () => {
         });
         const document = client.open({ source: { path: fixture.mainFile }, parameters: base, watch: false });
         const view = document.view('model');
-        try {
-          const render = async (): Promise<void> => {
+        let closed: Promise<void> | undefined;
+        /** The edit in flight, settled: closing waits for it so it adds no handle after its test. */
+        let inFlight: Promise<unknown> = Promise.resolve();
+        const close = async (): Promise<void> => {
+          closed ??= (async () => {
+            await inFlight.catch(() => undefined);
+            view.close();
+            document.close();
+            await client.shutdown();
+          })();
+          return closed;
+        };
+        openSessions.add(close);
+        /** One edit and its render; refused once the test has ended, so a timed-out test stops editing. */
+        const edit = async (parameters?: ParameterSet): Promise<void> => {
+          if (closed) {
+            throw new Error('The session is closed: its test has ended');
+          }
+          inFlight = (async () => {
+            if (parameters) {
+              await document.update({ parameters });
+            }
             const outcome = await view.rendering();
             if (outcome.superseded || !outcome.rendering.success) {
               throw new Error(`Render failed: ${JSON.stringify(outcome).slice(0, 2000)}`);
             }
-          };
-          await render();
+          })();
+          await inFlight;
+        };
+        try {
+          await edit();
           const ledger = installHandleLedger(replicad.getOC());
           await collect();
           const before = ledger.snapshot();
           const atBase: number[] = [];
           for (const step of steps) {
             const parameters = step === 'a' ? a : step === 'b' ? b : step;
-            await document.update({ parameters });
-            await render();
-            await collect();
+            await edit(parameters);
+            await collect(ledger);
             if (step === base) {
               atBase.push(ledger.since(before).length);
             }
@@ -105,9 +156,8 @@ describe('Replicad handle ledger over the editing matrix', () => {
           );
           expect(ledger.stats().doubleDeletes).toBe(0);
         } finally {
-          view.close();
-          document.close();
-          await client.shutdown();
+          openSessions.delete(close);
+          await close();
         }
       });
     }
@@ -289,6 +339,18 @@ describe('Replicad handle ledger over an interrupted drag', () => {
         });
       });
     const view = document.view('model');
+    let closed: Promise<void> | undefined;
+    const close = async (): Promise<void> => {
+      closed ??= (async () => {
+        worker.release();
+        view.close();
+        document.close();
+        await worker.client.shutdown();
+        worker.close();
+      })();
+      return closed;
+    };
+    openSessions.add(close);
     const render = async (): Promise<string> => {
       const outcome = await view.rendering();
       if (outcome.superseded || !outcome.rendering.success) {
@@ -348,11 +410,8 @@ describe('Replicad handle ledger over an interrupted drag', () => {
         checkpoints: heldAt.map((at) => checkpointOf(telemetry, at)),
       };
     } finally {
-      worker.release();
-      view.close();
-      document.close();
-      await worker.client.shutdown();
-      worker.close();
+      openSessions.delete(close);
+      await close();
     }
   };
 

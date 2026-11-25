@@ -13,7 +13,7 @@ index b1a0fdda8a14f71dd62d21325f3eb59afc45f1d0..f47c7245914e4e7a0f657af220df1781
  				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
  
 diff --git a/build/three.webgpu.js b/build/three.webgpu.js
-index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac946cb83de 100644
+index da6128d25f3443904c6be038b761365b7c884168..6ea649f47fd468bc169787b651e8b4ef50800ea9 100644
 --- a/build/three.webgpu.js
 +++ b/build/three.webgpu.js
 @@ -155,6 +155,7 @@ class NodeMaterialObserver {
@@ -24,7 +24,39 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  
  			return true;
  
-@@ -29723,6 +29724,14 @@ class RenderObject {
+@@ -700,11 +701,15 @@ class NodeMaterialObserver {
+ 
+ 		const { renderId } = nodeFrame;
+ 
++		// The first render object this observer sees in a frame still refreshes, but equals() below must also run for it
++		// so its cached world matrix stays in sync. Backport of three r186 (no early out); drop with three >= 0.186.
++		let firstOfFrame = false;
++
+ 		if ( this.renderId !== renderId ) {
+ 
+ 			this.renderId = renderId;
+ 
+-			return true;
++			firstOfFrame = true;
+ 
+ 		}
+ 
+@@ -712,12 +717,12 @@ class NodeMaterialObserver {
+ 		const isBundle = renderObject.bundle !== null && renderObject.bundle.static === true && this.getRenderObjectData( renderObject ).version === renderObject.bundle.version;
+ 
+ 		if ( isStatic || isBundle )
+-			return false;
++			return firstOfFrame;
+ 
+ 		const lightsData = this.getLights( renderObject.lightsNode, renderId );
+ 		const notEqual = this.equals( renderObject, lightsData, renderId ) !== true;
+ 
+-		return notEqual;
++		return firstOfFrame || notEqual;
+ 
+ 	}
+ 
+@@ -29723,6 +29728,14 @@ class RenderObject {
  
  		};
  
@@ -39,7 +71,7 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  		this.material.addEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -30301,6 +30310,37 @@ class RenderObject {
+@@ -30301,6 +30314,37 @@ class RenderObject {
  	 */
  	dispose() {
  
@@ -77,7 +109,7 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -33624,7 +33664,15 @@ class Textures extends DataMap {
+@@ -33624,7 +33668,15 @@ class Textures extends DataMap {
  		const mipHeight = size.height >> activeMipmapLevel;
  
  		let depthTexture = renderTarget.depthTexture || depthTextureMips[ activeMipmapLevel ];
@@ -94,7 +126,7 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  
  		let textureNeedsUpdate = false;
  
-@@ -59280,15 +59328,16 @@ class Renderer {
+@@ -59280,15 +59332,16 @@ class Renderer {
  
  			// reversed depth
  
@@ -114,7 +146,7 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  
  					}
  
-@@ -78657,6 +78706,20 @@ class WebGPUBindingUtils {
+@@ -78657,6 +78710,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -136,7 +168,7 @@ index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac9
  
  			bindingsData.layout.usedTimes --;
 diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
-index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65aba373a4 100644
+index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..64d467c8a382511692ea18d2b4ce83fb988445d1 100644
 --- a/build/three.webgpu.nodes.js
 +++ b/build/three.webgpu.nodes.js
 @@ -155,6 +155,7 @@ class NodeMaterialObserver {
@@ -147,7 +179,39 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  
  			return true;
  
-@@ -29723,6 +29724,14 @@ class RenderObject {
+@@ -700,11 +701,15 @@ class NodeMaterialObserver {
+ 
+ 		const { renderId } = nodeFrame;
+ 
++		// The first render object this observer sees in a frame still refreshes, but equals() below must also run for it
++		// so its cached world matrix stays in sync. Backport of three r186 (no early out); drop with three >= 0.186.
++		let firstOfFrame = false;
++
+ 		if ( this.renderId !== renderId ) {
+ 
+ 			this.renderId = renderId;
+ 
+-			return true;
++			firstOfFrame = true;
+ 
+ 		}
+ 
+@@ -712,12 +717,12 @@ class NodeMaterialObserver {
+ 		const isBundle = renderObject.bundle !== null && renderObject.bundle.static === true && this.getRenderObjectData( renderObject ).version === renderObject.bundle.version;
+ 
+ 		if ( isStatic || isBundle )
+-			return false;
++			return firstOfFrame;
+ 
+ 		const lightsData = this.getLights( renderObject.lightsNode, renderId );
+ 		const notEqual = this.equals( renderObject, lightsData, renderId ) !== true;
+ 
+-		return notEqual;
++		return firstOfFrame || notEqual;
+ 
+ 	}
+ 
+@@ -29723,6 +29728,14 @@ class RenderObject {
  
  		};
  
@@ -162,7 +226,7 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  		this.material.addEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -30301,6 +30310,37 @@ class RenderObject {
+@@ -30301,6 +30314,37 @@ class RenderObject {
  	 */
  	dispose() {
  
@@ -200,7 +264,7 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -33624,7 +33664,15 @@ class Textures extends DataMap {
+@@ -33624,7 +33668,15 @@ class Textures extends DataMap {
  		const mipHeight = size.height >> activeMipmapLevel;
  
  		let depthTexture = renderTarget.depthTexture || depthTextureMips[ activeMipmapLevel ];
@@ -217,7 +281,7 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  
  		let textureNeedsUpdate = false;
  
-@@ -59280,15 +59328,16 @@ class Renderer {
+@@ -59280,15 +59332,16 @@ class Renderer {
  
  			// reversed depth
  
@@ -237,7 +301,7 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  
  					}
  
-@@ -78657,6 +78706,20 @@ class WebGPUBindingUtils {
+@@ -78657,6 +78710,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -259,7 +323,7 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  
  			bindingsData.layout.usedTimes --;
 diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials/nodes/manager/NodeMaterialObserver.js
-index 29e26ebd184194778f88326ca6a3d47da3b94c8d..02134aa617c39918887b387c800bbfe26728b405 100644
+index 29e26ebd184194778f88326ca6a3d47da3b94c8d..1da9f405c5486e703aa6780fbfe36ba40db18dfc 100644
 --- a/src/materials/nodes/manager/NodeMaterialObserver.js
 +++ b/src/materials/nodes/manager/NodeMaterialObserver.js
 @@ -147,6 +147,7 @@ class NodeMaterialObserver {
@@ -269,6 +333,38 @@ index 29e26ebd184194778f88326ca6a3d47da3b94c8d..02134aa617c39918887b387c800bbfe2
 +			this.getMaterialData( renderObject.material );
  
  			return true;
+ 
+@@ -692,11 +693,15 @@ class NodeMaterialObserver {
+ 
+ 		const { renderId } = nodeFrame;
+ 
++		// The first render object this observer sees in a frame still refreshes, but equals() below must also run for it
++		// so its cached world matrix stays in sync. Backport of three r186 (no early out); drop with three >= 0.186.
++		let firstOfFrame = false;
++
+ 		if ( this.renderId !== renderId ) {
+ 
+ 			this.renderId = renderId;
+ 
+-			return true;
++			firstOfFrame = true;
+ 
+ 		}
+ 
+@@ -704,12 +709,12 @@ class NodeMaterialObserver {
+ 		const isBundle = renderObject.bundle !== null && renderObject.bundle.static === true && this.getRenderObjectData( renderObject ).version === renderObject.bundle.version;
+ 
+ 		if ( isStatic || isBundle )
+-			return false;
++			return firstOfFrame;
+ 
+ 		const lightsData = this.getLights( renderObject.lightsNode, renderId );
+ 		const notEqual = this.equals( renderObject, lightsData, renderId ) !== true;
+ 
+-		return notEqual;
++		return firstOfFrame || notEqual;
+ 
+ 	}
  
 diff --git a/src/renderers/common/RenderObject.js b/src/renderers/common/RenderObject.js
 index 14bf760075160551f34bda034a6e79d5ef40c17a..3593add94ed5f63a638c4d1887c4cfb18bb57a77 100644

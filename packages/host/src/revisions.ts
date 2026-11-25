@@ -71,6 +71,7 @@ import {
   tauRemoteUrl,
   watchRevisionStream,
   withCommitAuthor,
+  withoutTauCloud,
 } from '@taucad/revisions';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import type { ReportingConsent } from '#telemetry.js';
@@ -273,6 +274,12 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly gitExecutable?: string | undefined;
   /** Tau API origin, when this host has an authenticated cloud session. */
   readonly apiBaseUrl?: string | undefined;
+  /**
+   * This launch started in safe mode, which makes no Tau Cloud read or write (W9 R5). Known when the host is created,
+   * never read live: every leg addressing the Tau remote is refused before any request, and the remote long poll,
+   * storage read, registration and publication are off. Other Git remotes and local history are unaffected.
+   */
+  readonly safeMode?: boolean | undefined;
   /** Read per remote request; never persisted under the project. */
   readonly tauCredential?: (() => TauApiCredential | undefined) | undefined;
   /**
@@ -635,12 +642,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /* Every verb's engine failure, for the host's reporter: the only place a failed `git worktree add` is seen with
    * git's own words, since the checkout's refusal keeps the port's sentence alone. */
   const { events } = options;
-  const port =
+  const observedPort =
     events === undefined
       ? unobservedPort
       : observeRevisionEngineFailures(unobservedPort, (failure) => {
           events({ type: 'revision.engine-failed', ...failure });
         });
+  const port = options.safeMode === true ? withoutTauCloud(observedPort) : observedPort;
+  /* No Tau Cloud hook at all in safe mode: no long poll, storage read, registration or publication (W9 R5). */
+  const cloudApiBaseUrl = options.safeMode === true ? undefined : apiBaseUrl;
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
   const emitChannel = (event: AgentChannelRevisionEvent): void => {
     for (const listener of channelListeners) {
@@ -734,7 +744,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     completeChanges: options.watchWorkspace !== false,
     parameters: parameterCodec,
     ...(apiBaseUrl === undefined ? {} : { remoteUrl: (id: string) => tauRemoteUrl(apiBaseUrl, id) }),
-    ...(apiBaseUrl === undefined || options.tauCredential === undefined
+    ...(cloudApiBaseUrl === undefined || options.tauCredential === undefined
       ? {}
       : {
           /* D13: another device's push wakes this open project over the API's
@@ -743,7 +753,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             watchRevisionStream(
               {
                 projectId: input.projectId,
-                apiBaseUrl: () => apiBaseUrl,
+                apiBaseUrl: () => cloudApiBaseUrl,
                 auth: () => {
                   const credential = options.tauCredential?.();
                   return credential === undefined
@@ -760,7 +770,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             return credential === undefined
               ? undefined
               : readRemoteStorageOverHttp(
-                  apiBaseUrl,
+                  cloudApiBaseUrl,
                   { kind: 'bearer', authorization: credential.authorization },
                   projectId,
                 );
@@ -772,7 +782,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             }
             /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
             await registerProjectOverHttp(
-              apiBaseUrl,
+              cloudApiBaseUrl,
               { kind: 'bearer', authorization: credential.authorization },
               {
                 id,
@@ -786,7 +796,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             if (credential === undefined) {
               throw new Error('Sign in with `tau auth login` to back up to the cloud.');
             }
-            return publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
+            return publishOverHttp(cloudApiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
           },
         }),
     onChatsProjected: (chatIds) => {

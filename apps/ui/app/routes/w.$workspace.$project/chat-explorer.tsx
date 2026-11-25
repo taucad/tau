@@ -1,5 +1,5 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
@@ -306,6 +306,6 @@ export function ModelPanelBody(props: Parameters<typeof ModelPanelBodyContent>[0
   return availability === 'ready' ? (
     <ModelPanelBodyContent {...props} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='tree' label='Model' />
   );
 }

@@ -20,18 +20,20 @@
 /* oxlint-disable no-await-in-loop -- downloads and file comparisons run in a bounded, deterministic order. */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
-  fetchVerified,
   gunzip,
   integrityFromHex,
   integrityToHex,
   readTarEntries,
   readWheel,
+  unattendedFetchRetry,
 } from '@taucad/archive-core';
+import { fetchVerifiedFile } from '@taucad/archive-core/node';
 import {
   computeClosureIntegrity,
   createPreparationHost,
@@ -170,27 +172,22 @@ const blobPath = (seed: string, sha256: string): string => join(seed, 'blobs', '
 
 /**
  * The verified bytes of a blob: from the seed when its bytes hash to their name, else downloaded and verified against
- * the publisher's digest before they are written to the seed.
+ * the publisher's digest before they are written to the seed. The download retries on the unattended schedule, so a
+ * GitHub Releases or PyPI name-resolution failure of about two minutes costs retries, not the run (merge-queue job
+ * 138868659888 failed `seed` after three attempts within 300 ms on `ENOTFOUND`).
  */
 const verifiedBlob = async (seed: string, blob: Blob): Promise<Uint8Array<ArrayBuffer>> => {
-  const path = blobPath(seed, blob.sha256);
-  if (existsSync(path)) {
-    const bytes = new Uint8Array(await readFile(path));
-    if (sha256Hex(bytes) === blob.sha256 && bytes.byteLength === blob.byteLength) {
-      return bytes;
-    }
-  }
-  const bytes = await fetchVerified({
+  const { bytes, fetched } = await fetchVerifiedFile({
     url: blob.url,
+    path: blobPath(seed, blob.sha256),
     integrity: integrityFromHex('sha256', blob.sha256),
     byteLength: blob.byteLength,
+    retry: unattendedFetchRetry,
     signal: AbortSignal.timeout(30 * 60 * 1000),
   });
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${String(process.pid)}.tmp`;
-  await writeFile(temporary, bytes);
-  await rename(temporary, path);
-  console.log(`verified ${blob.label} (${(blob.byteLength / 1e6).toFixed(1)} MB)`);
+  if (fetched) {
+    console.log(`verified ${blob.label} (${(blob.byteLength / 1e6).toFixed(1)} MB)`);
+  }
   return bytes;
 };
 
@@ -203,11 +200,14 @@ const fetchJson = async (url: string): Promise<unknown> => {
       }
       return await response.json();
     } catch (error) {
-      if (attempt === 3) {
+      const { attempts, initialDelayMilliseconds, maximumDelayMilliseconds } = unattendedFetchRetry;
+      if (attempt === attempts) {
         throw new Error(`GET ${url} failed: ${error instanceof Error ? error.message : String(error)}`, {
           cause: error,
         });
       }
+      // The pinned downloads' schedule, so a name-resolution outage of about two minutes costs retries.
+      await delay(Math.min(initialDelayMilliseconds * 2 ** (attempt - 1), maximumDelayMilliseconds));
     }
   }
 };

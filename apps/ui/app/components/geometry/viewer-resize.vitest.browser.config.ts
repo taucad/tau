@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -31,6 +32,7 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
     provide: { webGpuProfile: process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? 'software' : 'hardware' },
     include: ['app/components/geometry/viewer-resize.browser.test.tsx'],
     testTimeout: 60_000,

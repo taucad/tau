@@ -52,16 +52,50 @@ const functionProperties = new Set(['length', 'name', 'prototype', 'arguments', 
 
 const ledgers = new WeakMap<WeakKey, HandleLedger>();
 
-/** The first stack frame outside `node_modules`, Node internals and this file, and the frames that led there. */
+/**
+ * One V8 call site as `function (file:line:column)`, or `file:line:column` for an anonymous function, as V8 prints it.
+ *
+ * @param site - The call site.
+ * @returns The frame.
+ */
+const describeFrame = (site: NodeJS.CallSite): string => {
+  const location = `${site.getFileName() ?? '<anonymous>'}:${site.getLineNumber() ?? 0}:${site.getColumnNumber() ?? 0}`;
+  const typeName = site.getTypeName();
+  const functionName = site.getFunctionName() ?? site.getMethodName();
+  if (!functionName) {
+    return location;
+  }
+  const qualified =
+    typeName && !site.isToplevel() && !functionName.startsWith(`${typeName}.`)
+      ? `${typeName}.${functionName}`
+      : functionName;
+  return `${site.isConstructor() ? 'new ' : ''}${qualified} (${location})`;
+};
+
+/**
+ * The first stack frame outside `node_modules`, Node internals and this file, and the frames that led there.
+ *
+ * The frames are read from V8's call sites while the stack is captured, without the host's stack formatting: a test
+ * runner's formatter source-maps every frame, which cost about 0.3 ms per handle (4 s of a 26 s planetary-gear-system
+ * build that creates 15,000 handles). Positions are therefore those of the code as it ran. Only strings are kept, so
+ * nothing the stack referenced (a receiver, a closure) is kept alive.
+ *
+ * @returns The site and the stack.
+ */
 const siteOf = (): { site: string; stack: string } => {
-  const { stackTraceLimit } = Error;
+  const { stackTraceLimit, prepareStackTrace } = Error;
   Error.stackTraceLimit = 40;
-  const frames = (new Error('site').stack ?? '')
-    .split('\n')
-    .slice(1)
-    .map((line) => line.trim().replace(/^at /u, ''))
-    .filter((line) => !/oc-handle-ledger\.utils\.[jt]s|node:|<anonymous>/u.test(line));
-  Error.stackTraceLimit = stackTraceLimit;
+  Error.prepareStackTrace = (_error, sites) => sites.map((site) => describeFrame(site));
+  let captured: unknown;
+  try {
+    captured = new Error('site').stack;
+  } finally {
+    Error.prepareStackTrace = prepareStackTrace;
+    Error.stackTraceLimit = stackTraceLimit;
+  }
+  const frames = (captured as string[]).filter(
+    (line) => !/oc-handle-ledger\.utils\.[jt]s|node:|<anonymous>/u.test(line),
+  );
   return {
     site: frames.find((line) => !line.includes('node_modules')) ?? '?',
     stack: frames.slice(0, 8).join(' < '),

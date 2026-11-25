@@ -24,6 +24,15 @@ const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[servi
 const prerenderConcurrency = 4;
 
 /**
+ * Per-request prerender bound in milliseconds, through Tau's `@react-router/dev` patch (React Router's own is a fixed
+ * 10 s with no retry). The first requests pay the server bundle's cold import: on the 3-core `macos-26` runner the first
+ * prerendered file arrived 10 to 19 s after the server build, and `/manifest.webmanifest.data` hit the 10 s bound in 7
+ * of 22 probe builds, on Node 24.20.0 and 26.13.1 alike (UI asset integrity probe, 2026-11-24). Later requests take well
+ * under a second; 60 s still ends one that hangs.
+ */
+const prerenderTimeout = 60_000;
+
+/**
  * `getStaticPaths()` is not used: most routes here (`/projects`,
  * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/migrate-theme`,
  * `/api/*`, `/_index`) are auth-gated, runtime-only, or proxy endpoints that
@@ -136,5 +145,6 @@ export default {
       return listStaticPrerenderPaths();
     },
     concurrency: prerenderConcurrency,
+    timeout: prerenderTimeout,
   },
 } satisfies Config;

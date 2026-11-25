@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -16,8 +17,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    // On GitHub Actions a failure also becomes a check-run annotation, readable without the job log.
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/packages/cli',

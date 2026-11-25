@@ -328,6 +328,18 @@ describe('useProjects deletion', () => {
     expect(registry.operations).toEqual(['close:proj_live', 'remove-composers:proj_live', 'delete:proj_live']);
     expect(projectManager.permanentlyDeleteProject).toHaveBeenCalledExactlyOnceWith('proj_live');
   });
+
+  it('deletes one copy by its folder and keeps what the other copy still holds (W0)', async () => {
+    registry.live('proj_live');
+    const locator = { backend: 'opfs', storageRootKey: 'opfs:origin', relativeDirectory: 'copy' } as const;
+    const { result } = renderHook(() => useProjects());
+
+    await act(async () => result.current.deleteProjectCopy('proj_live', locator));
+
+    // The project lives on in the other copy, so its live composer records are not stopped.
+    expect(registry.operations).toEqual(['close:proj_live', 'delete:proj_live']);
+    expect(projectManager.permanentlyDeleteProject).toHaveBeenCalledExactlyOnceWith('proj_live', locator);
+  });
 });
 
 describe('useProjects listing query', () => {

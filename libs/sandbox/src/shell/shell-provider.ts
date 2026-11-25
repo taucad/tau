@@ -245,4 +245,11 @@ export type ShellProvider = Readonly<{
    * hears `false` keeps those stores read-only.
    */
   storeGuard?: (() => Promise<boolean>) | undefined;
+  /**
+   * Release the custody this provider still holds, such as a recovered execution awaiting
+   * {@link ShellProvider.release}, once nothing more runs through it; every later call refuses. Its owner calls it before
+   * dropping the provider: custody is an open lock file, and from Node 26 a file handle that garbage collection has to
+   * close is an uncaught `ERR_INVALID_STATE`. Absent where the provider holds no such handle.
+   */
+  close?: (() => Promise<void>) | undefined;
 }>;

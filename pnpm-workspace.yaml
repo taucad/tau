@@ -102,7 +102,7 @@ catalog:
   '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.223.0
   '@opentelemetry/sdk-node': ^0.223.0
-  '@oxc-node/core': ^0.0.35
+  '@oxc-node/core': ^1.0.2
   buffer: 6.0.3
   playwright: ^1.61.0
   '@pyroscope/nodejs': ^0.4.13
@@ -519,6 +519,7 @@ patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.75': tools/pnpm/patches/@anthropic-ai__sandbox-runtime@0.0.75.patch
   react-router@8.5.1: tools/pnpm/patches/react-router@8.5.1.patch
   '@react-router/fs-routes@8.5.1': tools/pnpm/patches/@react-router__fs-routes@8.5.1.patch
+  '@react-router/dev@8.5.1': tools/pnpm/patches/@react-router__dev@8.5.1.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

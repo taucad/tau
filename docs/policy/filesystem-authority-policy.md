@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-11-09'
+updated: '2026-11-24'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -125,7 +125,7 @@ Standalone providers (used to browse or discover a backend without mounting it, 
 
 Adopt and Repair are the named expected-manifest mutations. Adopt writes a strictly valid manifest into an adoption-required directory after a fresh scan, restoring the id the route binding remembers when no discovered project holds it. Repair canonicalizes a degraded manifest only on explicit request, and never for a JSON syntax error. Choosing the canonical directory for a duplicate ID re-verifies it with a fresh scan and only writes the binding; it never writes project files. Re-mint stays unimplemented until a copy's chat identities can be re-keyed. Never write a new manifest through a stale discovery result or a generic conditional-write surface.
 
-Before journaling permanent deletion, run a fresh uniqueness-aware discovery and require exactly one valid current occurrence. Check `deletedAt` and insert the pending operation in one existing IndexedDB transaction; Restore rejects while that operation exists. Re-discover after an `absent` result before local cleanup. If final directory removal fails after marker unlink, best-effort restore the exact manifest and identity bytes already verified and retain replay state.
+Permanent deletion is locator-exact: it removes the one directory the person chose by its `ProjectLocator`, or else the directory the route binds. Before journaling, run a fresh discovery with every root completely observed and require that this exact locator still holds the project id; the authority re-establishes that identity under the logical-project and physical locks before it deletes, and revokes the project route only while that route is mounted on this directory. Other directories that carry the id are untouched. Check `deletedAt` and insert the pending operation in one existing IndexedDB transaction, unless another directory held the id when the operation was journaled; Restore rejects while that operation exists. Re-discover after deletion before local cleanup: while another directory still carries the id, the device state keyed by it stays and a route bound to the deleted directory moves to a remaining copy; only the last copy's deletion removes that state. An `absent` result that finds the id only in another directory is a conflict unless another directory held the id when the operation was journaled. If final directory removal fails after marker unlink, best-effort restore the exact manifest and identity bytes already verified and retain replay state.
 
 **Why**: Reads through a shared instance are coherent by construction. Raw provider mutation would bypass locks, invalidation, and change events; a named authority operation preserves those guarantees when no mounted logical route can safely identify the target.
 

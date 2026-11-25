@@ -25,6 +25,8 @@ export type ProjectLibraryEntry = {
   readonly workspaceName?: string;
   /** Why `tau.json` is degraded: the project opens from `manifest`, its normalized view, until Repair. */
   readonly issue?: ProjectManifestParseIssue;
+  /** When this directory's `tau.json` last changed; discovery reads it only while another directory holds the id. */
+  readonly modifiedAt?: number;
 };
 
 /** Flat presentation projection used by local library and recents components. */
@@ -36,6 +38,8 @@ export type ProjectListItem = Project & {
   readonly workspaceName?: string;
   /** Why `tau.json` is degraded, when it is. */
   readonly manifestIssue?: ProjectManifestParseIssue;
+  /** When this directory's `tau.json` last changed, when discovery read it (another directory holds the id). */
+  readonly modifiedAt?: number;
 };
 
 export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): ProjectListItem => ({
@@ -47,6 +51,7 @@ export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): Proje
   ...(entry.slugs === undefined ? {} : { slugs: entry.slugs }),
   ...(entry.workspaceName === undefined ? {} : { workspaceName: entry.workspaceName }),
   ...(entry.issue === undefined ? {} : { manifestIssue: entry.issue }),
+  ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
 });
 
 /*

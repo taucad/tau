@@ -24,6 +24,7 @@ Quote focused test paths containing `$` so the shell preserves route parameters.
 
 - Reuse existing UI owners and name them in the change. Copy/Copy-Link controls use `app/components/copy-button.tsx` and its success tick. Sharing/publication controls remain usable before render success so broken projects can be shared for diagnosis.
 - Activity wrappers follow the stable first aggregatable group, never a changing group count. Keep an established wrapper mounted until a non-foldable category ends its run.
+- Wrap each activity row in `ChatActivityRow`; no group, row or thought opens itself.
 - File loading uses the filesystem owner's typed text/binary/too-large/orphaned/error outcomes. The canonical content classifier reads a 512-byte prefix with BOM/NUL handling; an extension must not decide whether the editor leaves its loading state.
 - Keep `app/routes.ts` minimal and route modules under `app/routes`. Build-time Netlify values and SSR runtime values have different lifetimes; `app/environment.config.ts` owns runtime resolution. Keep the server's `tslib` runtime dependency and defer expensive analytics initialization and grammar loading.
 - For serving/deployment, read [infrastructure instructions](../../infra/AGENTS.md). `server.ts` and `app/lib/server-args.ts` own explicit host/HTTPS options and cross-origin headers. Preserve the LAN CA-trust explanation and CA/page QR targets when host and HTTPS are enabled; never install trust certificates implicitly.

@@ -329,6 +329,24 @@ describe('ViewerStage', () => {
       expect(onRetry).toHaveBeenCalledOnce();
     });
 
+    it('should draw a failure another live region announces as a group named by its summary, not a second alert', () => {
+      const { region } = renderStage({
+        status: {
+          kind: 'failed',
+          summary: 'Couldn’t open this project',
+          message: 'The download didn’t finish. Try again.',
+          action: <button type='button'>Try again</button>,
+          live: false,
+        },
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const group = screen.getByRole('group', { name: 'Couldn’t open this project' });
+      expect(group).toHaveTextContent('The download didn’t finish. Try again.');
+      expect(region).toContainElement(group);
+      expect(group).toContainElement(screen.getByRole('button', { name: 'Try again' }));
+    });
+
     it('should centre a failure with an action where the status pill sits while no model is drawn, and keep it at the top over one', () => {
       const status = {
         kind: 'failed',

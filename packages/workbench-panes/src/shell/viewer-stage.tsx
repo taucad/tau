@@ -3,7 +3,7 @@
  * part menu's gesture and keys, the hover label, the status and failure overlays and the bottom controls. A host keeps
  * its model source, its canvas element (through `renderCanvas`), its layout container and its app-only slot content.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { AlertTriangle } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -40,6 +40,12 @@ export type ViewerStageStatus =
        * with the summary in full (no "Details" disclosure) and the action under it.
        */
       action?: React.ReactNode;
+      /**
+       * Whether the stage announces a failure with an action. `false` where another live region already says it, such
+       * as a route's announcement for a project open: the failure is then a group named by its summary, seen but not
+       * announced a second time. Defaults to `true`, an alert.
+       */
+      live?: boolean;
     }>;
 
 /**
@@ -149,7 +155,8 @@ function StageStatus({
 
 /**
  * The stage's failure over the canvas region: the runtime error overlay, or, with an action the person can take, one
- * alert with what failed, what it means and the action, announced once (UI Policy § 5). Whatever the canvas still
+ * alert with what failed, what it means and the action, announced once (UI Policy § 5). Where another live region says
+ * the failure (`live: false`), it is a group named by its summary instead, so it is not announced twice. Whatever the canvas still
  * draws stays under it. While no model is drawn the alert is centred where the status pill sits, so a wait that fails
  * says so in the place the person was already looking.
  *
@@ -163,12 +170,15 @@ function StageFailure({
   failure: Extract<ViewerStageStatus, { kind: 'failed' }>;
   hasModel: boolean;
 }>): React.JSX.Element {
+  const summaryId = useId();
   if (failure.action === undefined) {
     return <RuntimeErrorOverlay message={failure.message} summary={failure.summary} className={failureClasses} />;
   }
+  const isLive = failure.live !== false;
   return (
     <div
-      role='alert'
+      role={isLive ? 'alert' : 'group'}
+      aria-labelledby={isLive || failure.summary === undefined ? undefined : summaryId}
       data-slot='viewer-failure'
       className={cn(
         failureClasses,
@@ -182,7 +192,11 @@ function StageFailure({
           <AlertTriangle aria-hidden className='size-4 text-feature' strokeWidth={1.5} />
         </span>
         <div className='flex flex-col gap-1'>
-          {failure.summary === undefined ? null : <p className='text-sm font-medium'>{failure.summary}</p>}
+          {failure.summary === undefined ? null : (
+            <p id={summaryId} className='text-sm font-medium'>
+              {failure.summary}
+            </p>
+          )}
           <p className={failure.summary === undefined ? 'text-sm' : 'text-xs text-muted-foreground'}>
             {failure.message}
           </p>

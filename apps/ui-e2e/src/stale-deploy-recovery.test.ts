@@ -470,13 +470,17 @@ describe('a code load that fails once on the build the server still runs (FP9, F
 
     await startChatFromHome(page, live.origin);
 
+    /* The run's own card. The sidebar's status line shows the same failure, but only once the seed's command met it;
+     * the chat's host read can meet it first, while the seed still waits for that read (merge-queue jobs 136629890632
+     * and 138839875362), and then only the card says it. */
+    const card = page.locator('[data-decision="run-error"]');
     try {
-      await page
+      await card
         .getByText(/failed to load|did not finish loading/iu)
         .first()
         .waitFor({ timeout: 60_000 });
     } catch (error) {
-      const shown = await page.locator('[data-decision="run-error"]').allInnerTexts();
+      const shown = await card.allInnerTexts();
       throw new Error(
         `No load failure card (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); run cards: ${JSON.stringify(shown)}`,
         { cause: error },
@@ -484,7 +488,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     }
     await page.waitForTimeout(1000);
     expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
-    expect(await page.getByRole('button', { name: 'Reload', exact: true }).count()).toBeGreaterThanOrEqual(1);
+    expect(await card.getByRole('button', { name: 'Reload', exact: true }).count()).toBe(1);
     // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
     expect(live.requestCount(agentWorkerScript)).toBeGreaterThanOrEqual(3);
   }, 120_000);

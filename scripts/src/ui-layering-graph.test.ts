@@ -68,7 +68,7 @@ const foundation = ['ui-core', 'ui-kit'];
 /** The `protocol:agent` projects: the agent wire, its host, its tools, its evidence and its skills. */
 const agentProtocol = ['agent-host', 'agent-observability', 'agent-tools', 'chat', 'skills'];
 
-/** The projects outside the UI app libraries that L0 may depend on: the platform and the shared app libraries. */
+/** The projects outside the UI app libraries that L0 may depend on: the platform, the shared app libraries and the test tool. */
 const foundationTargets = new Set([
   'events',
   'filesystem',
@@ -79,6 +79,8 @@ const foundationTargets = new Set([
   'telemetry',
   'types',
   'utils',
+  // The reporter list every Vitest config imports (`@taucad/vitest-ci`): test tooling, never product code.
+  'vitest-ci',
 ]);
 
 /** The viewer stack `ui-kit` left in W6, when `FormatBadge` moved from `@taucad/workbench-panes` to `@taucad/ui`. */

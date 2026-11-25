@@ -94,7 +94,11 @@ jobs:
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
       pkgcheck: ${{ steps.plan.outputs.pkgcheck }}
       pkgcheck-shards: ${{ steps.plan.outputs.pkgcheck-shards }}
+      node-floor: ${{ steps.plan.outputs.node-floor }}
+      node-floor-shards: ${{ steps.plan.outputs.node-floor-shards }}
       compute-qualify: ${{ steps.plan.outputs.compute-qualify }}
+      burn-in: ${{ steps.burn-in.outputs.burn-in }}
+      burn-in-units: ${{ steps.burn-in.outputs.burn-in-units }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -186,6 +190,10 @@ jobs:
           # lane never runs in the merge queue. The release gate (RG-1, which replaced the formal nightly's schedule) runs
           # every `formal:nightly` project, the release gate every viewer-parity fixture, and the candidate gate the full
           # shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule but "never".
+          # Node floor lane (`node-floor`, Brain research/node-26-ci-migration.md R2): an affected published package
+          # (`type:package`, the release projects) with a `test` target; its suites run again on the `engines.node`
+          # floor, Node 24, while every other lane runs setup-nx's Node 26 (compatibility policy: package tests and
+          # universal Wasm instantiation at the declared host floor). A pull request runs the packages its diff touches.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"], "pr": "touched"},
@@ -204,7 +212,8 @@ jobs:
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
              "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"},
-             "compute-qualify": {"targets": ["compute-qualify-ci"]}}
+             "compute-qualify": {"targets": ["compute-qualify-ci"]},
+             "node-floor": {"tags": ["type:package"], "targets": ["test"], "pr": "touched"}}
           QUEUE_HUBS: '["agent-host", "host"]'
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
@@ -454,6 +463,17 @@ jobs:
           pkgcheck_shards=$(echo "$pkgcheck_projects" | node scripts/src/test-shard-dealer.ts --shard all --shards auto \
             --max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json)
           echo "Package-check shards: $pkgcheck_shards"
+          # Node floor shards (`node-floor`): the lane's packages as their `<project>:test` tasks (the snapshot's keys),
+          # a package with `test:shard-<n>` targets as those tasks instead, as in the test lanes, dealt by measured
+          # uncached test seconds into one shard per 600 s, at most four, as the package checks are.
+          node_floor_units=$(jq -c --argjson projects "$(jq -c '."node-floor"' <<< "$lanes")" '
+            .graph.nodes as $nodes
+            | [$projects[] as $project
+               | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
+               | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else "\($project):test" end]' "$RUNNER_TEMP/graph.json")
+          node_floor_shards=$(echo "$node_floor_units" | node scripts/src/test-shard-dealer.ts --shard all --shards auto \
+            --max-shards 4 --shard-seconds 600 --durations scripts/src/test-shard-durations.json)
+          echo "Node floor shards: $node_floor_shards"
           # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
           {
@@ -482,6 +502,8 @@ jobs:
             echo "e2e-queue-suites=$e2e_queue_suites"
             echo "pkgcheck=$(if [ "$pkgcheck_shards" = '[]' ]; then echo false; else echo true; fi)"
             echo "pkgcheck-shards=$pkgcheck_shards"
+            echo "node-floor=$(if [ "$node_floor_shards" = '[]' ]; then echo false; else echo true; fi)"
+            echo "node-floor-shards=$node_floor_shards"
             echo "compute-qualify=$(flag compute-qualify)"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
@@ -495,6 +517,19 @@ jobs:
             '{api: ($selected.api != [] | tostring), "billing-e2e": ($selected.billing != [] | tostring), "reused-run": $reused, desktop: $desktop, "desktop-projects": $desktop_projects}' \
             > out/ci-plan/lanes.json
           cat out/ci-plan/lanes.json
+
+      # Burn-in of changed tests (Brain research/ci-flake-quarantine-blueprint.md, FQ-10, operator decision O6 B): the
+      # test files this pull request adds or modifies, mapped to their project's `test` target, the target the test
+      # lanes run (`scripts/src/burn-in.ts`). None selects no `burn-in` job. Pull requests only: the merge queue and
+      # pushes never burn in. The files are the pull request's own, as the "touched" rule above reads them.
+      - name: Plan the burn-in of changed tests
+        id: burn-in
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          head=${NX_HEAD:-HEAD}
+          git diff --name-only --no-renames --diff-filter=AM --relative "$(git merge-base "$NX_BASE" "$head")" "$head" \
+            | node scripts/src/burn-in-cli.ts plan --graph "$RUNNER_TEMP/graph.json" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the lane plan
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -866,6 +901,17 @@ jobs:
         if: always() && steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate-workspace-root
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always() && startsWith(matrix.lane, 'test-') && steps.queue.outputs.run-id == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-${{ matrix.lane }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The package checks (publint, attw, madge, the public-surface audit and the README quickstart) of the
   # affected projects that have one. The plan deals them by measured uncached `pkgcheck` seconds
   # (scripts/src/pkgcheck-shard-durations.json, with the test shards' dealer), one shard per 600 s and at most
@@ -875,6 +921,8 @@ jobs:
   # "fewer jobs"). The plan's one graph names the projects, so this job builds no affected graph of its own;
   # it waits for the plan, which ends at about 2 min. The shards partition the selected projects
   # (scripts/src/test-shard-dealer.test.ts), and the required gate needs every shard.
+  # They run on the `engines.node` floor, Node 24, with the `node-floor` lane: the checks exercise the packed packages
+  # users install, and the compatibility policy asks for that evidence at the declared host floor.
   pkgcheck:
     name: Affected (pkgcheck-${{ matrix.shard.shard }})
     needs: [plan]
@@ -900,6 +948,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
+          node-version: '24.20.0' # The `engines.node` floor line, as in `node-floor`
           save-pnpm-store: 'false'
           affected-base: ${{ needs.plan.outputs.affected-base }}
 
@@ -963,6 +1012,101 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
+  # The Node floor lane (Brain research/node-26-ci-migration.md, option (a), operator ruling 2026-11-24). setup-nx gives
+  # every other lane Node 26 LTS, whose V8 14.6 has the wasm import-wrapper fix Node 24's 13.6 lacks
+  # (nodejs/node#66366). The published packages still declare `engines.node >=24.0.0`, so the compatibility policy
+  # asks for their tests at that floor ("Published-package tests at `engines.node` minimum") and for each universal
+  # Wasm artifact to instantiate on Node 24. This lane runs the `test` of the affected published packages
+  # (`type:package`) on Node 24.20.0, the 24.x line CI ran before. The kernel packages' suites load the wasm payloads
+  # each package ships (replicad and opencascade OCCT, PicoVoxel and Manifold, in their `single` and `multi` builds),
+  # so they are the Wasm instantiation smoke at the floor, run whenever a package or anything it depends on changes.
+  # Their #2730 V8 flags apply on V8 13 only, that is here. The package checks run on the floor too (`pkgcheck`
+  # above). The plan deals the packages by measured test seconds, as the package checks; API, UI, browser, end-to-end
+  # and desktop suites stay off the floor (they ship on Tau-controlled runtimes, not on users' Node).
+  node-floor:
+    name: Node 24 floor (${{ matrix.shard.shard }})
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.node-floor == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    strategy:
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.node-floor-shards) }}
+    steps:
+      # Two commits in a queue run, full history otherwise (see `plan`).
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.20.0' # The `engines.node` floor line, as in `pkgcheck`
+          save-pnpm-store: 'false'
+          affected-base: ${{ needs.plan.outputs.affected-base }}
+
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      # The shard's task graph, for its pinned downloads (as in the affected lanes).
+      - name: Find the shard's pinned downloads
+        id: pins
+        env:
+          UNITS: ${{ matrix.shard.projects }}
+        run: |
+          graph="$RUNNER_TEMP/node-floor-graph.json"
+          projects=$(tr ',' '\n' <<< "$UNITS" | cut -d: -f1 | sort -u | paste -sd, -)
+          pnpm nx run-many -t test --projects "$projects" --graph="$graph" > /dev/null
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
+      # As the test lanes: the shard's whole `test` projects in one `run-many`, then each sharded package's dealt
+      # `test:shard-<n>` tasks, every one run even when another failed. Streamed, so a long suite keeps its summary.
+      - name: Run the shard's tests on the floor Node
+        env:
+          UNITS: ${{ matrix.shard.projects }}
+        run: |
+          set -o pipefail
+          node --version
+          echo "Shard projects and tasks: $UNITS"
+          projects=$(tr ',' '\n' <<< "$UNITS" | grep -E '^[^:]+:test$' | cut -d: -f1 | paste -sd, - || true)
+          tasks=$(tr ',' '\n' <<< "$UNITS" | grep -vE '^[^:]+:test$' || true)
+          status=0
+          if [ -n "$projects" ]; then
+            pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream || status=1
+          fi
+          for project in $(echo "$tasks" | cut -d: -f1 | sort -u); do
+            targets=$(echo "$tasks" | grep "^$project:" | cut -d: -f2- | paste -sd' ' -)
+            # shellcheck disable=SC2086 # one word per target
+            pnpm nx run-many -t $targets --projects "$project" --parallel=1 --outputStyle=stream || status=1
+          done
+          exit "$status"
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
   browser:
     name: Browser, accessibility and Lighthouse
     needs: plan
@@ -988,7 +1132,7 @@ jobs:
         with:
           playwright-browsers: chromium
       - name: Install Chromium
-        run: pnpm exec playwright install chromium
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Use the pinned browser for Lighthouse
         run: node --input-type=module -e "import { chromium } from 'playwright'; console.log('CHROME_PATH=' + chromium.executablePath())" >> "$GITHUB_ENV"
       - name: Verify affected browser applications
@@ -1011,6 +1155,85 @@ jobs:
         with:
           name: browser-evidence
           path: out/reports/
+          retention-days: 14
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-browser
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Burn-in of changed tests on pull requests (Brain research/ci-flake-quarantine-blueprint.md, FQ-10, operator decision
+  # O6 B). The test files the pull request adds or modifies (the plan's `burn-in-units`, each its project's `test`
+  # target) run ten times in fresh Vitest processes with `--sequence.shuffle`, a recorded seed per run (the run id plus
+  # the run's index) and no retry (RT-3: a changed test gets no credit for a retry), capped at 5 minutes of runs; the
+  # cap kills the run in progress, and the summary names the files it cut short. Ten runs catch a 20 % flake 89 % of
+  # the time and a 5 % one 40 %. A failing run fails this job, and the required gate `Run affected tasks` fails with
+  # it, so a pull request cannot enter the queue with a flake its own diff brings. A pull request that changes no test
+  # file the test lanes run gets no job; the merge queue never runs it (`scripts/src/burn-in-cli.ts`).
+  burn-in:
+    name: Burn-in (changed tests)
+    needs: plan
+    # The plan sets `burn-in` on pull requests only.
+    if: needs.plan.outputs.burn-in == 'true'
+    runs-on: ubuntu-latest
+    # Setup, the targets' dependencies and the 5-minute cap on the runs.
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      # As the test lanes: some suites run the native sandbox.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      # As the test lanes: the pinned downloads the burned-in targets' task graph reaches come from the Actions cache.
+      - name: Find the burn-in's pinned downloads
+        id: pins
+        env:
+          UNITS: ${{ needs.plan.outputs.burn-in-units }}
+        run: |
+          graph="$RUNNER_TEMP/burn-in-graph.json"
+          projects=$(jq -r 'map(.project) | join(",")' <<< "$UNITS")
+          pnpm nx run-many -t test --projects "$projects" --graph="$graph" > /dev/null
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+      - name: Restore the Python kernel seeds
+        if: steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+      - name: Restore the wasi-sdk archive
+        if: steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
+      - name: Burn in the changed tests
+        env:
+          UNITS: ${{ needs.plan.outputs.burn-in-units }}
+        run: |
+          node scripts/src/burn-in-cli.ts run --units "$UNITS" --runs 10 --minutes 5 \
+            --seed "$(( GITHUB_RUN_ID % 1000000000 ))" --out out/burn-in --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the burn-in report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: burn-in
+          path: out/burn-in/
+          if-no-files-found: ignore
           retention-days: 14
 
   # Standalone-project oracles, in `standalone-projects.yml` (also nightly): on every push to
@@ -1126,6 +1349,47 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # One build of each UI bundle the end-to-end rows consume, per merge-queue run (CI decomposition global review,
+  # ruling 6, which completes DC-4). With no `needs`, it starts with the run and writes `ui:build` and
+  # `ui:build:serve` (`ui-e2e:queue-build`, `ui-e2e:queue-build:serve`) to the remote cache; `e2e-queue` waits for
+  # it, and the suites that ran each of them from scratch (`deploy-skew`, `non-isolated` and `daemon-host` the web
+  # build, `daemon-host` the serve build, about 13 runner-minutes in queue run 45350462131) restore them. A row
+  # still runs its own `ui:build` under its own env fixture, and Nx restores this one only when every input of the
+  # hash, the env inputs included, is the row's, so no row runs against another variant than before; the workflow
+  # env above holds the fixture's TAU_*_URL values. `ui:build` reads the staged C# language bundle as a dependency
+  # output, hashed after `csharp-language:prepare` runs, so `daemon-host`, which stages it for its serve build before
+  # its `nx run ui:build`, now gets the same hash as everyone else (it never had: it missed in every run). One row per bundle: two builds on one runner exhaust it (see
+  # `--parallel=1` above). The rows run whatever this job's result, and build a bundle it did not write. A pull
+  # request's rows build their own: its plan selects them only when its diff touches the project, which this job,
+  # with no plan, cannot see. `run-many`, not `nx affected`: in a queue run that does not affect `ui`, both bundles
+  # are already in the cache and restore in seconds.
+  queue-builds:
+    name: Queue UI build (${{ matrix.target }})
+    if: ${{ github.event_name == 'merge_group' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [queue-build, 'queue-build:serve']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Build the bundle
+        env:
+          TARGET: ${{ matrix.target }}
+        run: pnpm nx run-many -t "$TARGET" --parallel=1
+
   # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed five consecutive
   # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
   # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
@@ -1141,7 +1405,8 @@ jobs:
     name: Browser end-to-end (${{ matrix.suite.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    needs: [plan]
+    # `queue-builds` (above) only to start after it, never for its result.
+    needs: [plan, queue-builds]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true' }}
     permissions:
       contents: 'read'
@@ -1152,7 +1417,7 @@ jobs:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
       # The suites that open no chat, so capture no chat log for the empty-capture rule to find: e2e-nightly.yml's list.
-      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
+      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios", "test:e2e:adaptive"]'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1169,14 +1434,15 @@ jobs:
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install chromium firefox webkit
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
 
       # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
       # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
       - name: Install Pandoc for reference conversion
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
-          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          ./.github/actions/apt-install/download.sh pandoc-download \
+            https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb \
+            "$RUNNER_TEMP/pandoc.deb" sha256:91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
       # Sandboxed native kernel workers.
@@ -1238,6 +1504,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-e2e-${{ matrix.suite.slug }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Compute reuse qualification (audit R5): the cheap subset of the Replicad qualification matrix, run whenever the
   # plan's input check selects it. It asserts reuse-off GLB hashes, byte parity with reuse on across cache histories,
   # multi-thread WASM parity and the per-step work counts pinned in
@@ -1265,10 +1542,21 @@ jobs:
         # The plan selected the lane through the target; the one project that declares it runs.
         run: pnpm nx run-many -t compute-qualify-ci --parallel=1 --outputStyle=stream
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-compute-qualify
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (every package-check shard, browser, GeoSpec example
   # contracts, CLI end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing
-  # contracts, and the shell rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected
+  # contracts, the Node 24 floor shards, and the shell rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected
   # fails it. Viewer parity is planned on pull requests and pushes only (VP-1), so on a pull request that touches
   # its inputs this check, which the queue's auto-merge waits for, holds the pull request until parity passes. It
   # waits for every lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
@@ -1302,6 +1590,8 @@ jobs:
         formal-nightly,
         e2e-queue,
         compute-qualify,
+        node-floor,
+        burn-in,
       ]
     if: ${{ github.event_name == 'merge_group' && always() || !cancelled() }}
     runs-on: ubuntu-latest
@@ -1338,6 +1628,10 @@ jobs:
           E2E_QUEUE_RESULT: ${{ needs.e2e-queue.result }}
           COMPUTE_QUALIFY_REQUIRED: ${{ needs.plan.outputs.compute-qualify }}
           COMPUTE_QUALIFY_RESULT: ${{ needs.compute-qualify.result }}
+          NODE_FLOOR_REQUIRED: ${{ needs.plan.outputs.node-floor }}
+          NODE_FLOOR_RESULT: ${{ needs.node-floor.result }}
+          BURN_IN_REQUIRED: ${{ needs.plan.outputs.burn-in }}
+          BURN_IN_RESULT: ${{ needs.burn-in.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -1366,6 +1660,8 @@ jobs:
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
+          if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
+          if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed
@@ -1540,6 +1836,25 @@ jobs:
     name: Fail fast (compute-qualify)
     needs: [compute-qualify]
     if: ${{ failure() && github.event_name == 'merge_group' && needs.compute-qualify.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-node-floor:
+    name: Fail fast (node-floor)
+    needs: [node-floor]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.node-floor.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  # The burn-in never runs in the merge queue, so this one never fires; it keeps one fail-fast job per gated lane.
+  fail-fast-burn-in:
+    name: Fail fast (burn-in)
+    needs: [burn-in]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.burn-in.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: *fail-fast-permissions
@@ -2250,6 +2565,17 @@ jobs:
         if: ${{ !cancelled() && matrix.shard == 1 && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-api-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The required check `API tests (Postgres + MinIO)` (main ruleset), and the job `staging.yml` and the gate read:
   # it passes only when both API shards passed, and is skipped exactly when they were.
   api:
@@ -2299,6 +2625,17 @@ jobs:
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-billing-e2e
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
   # `tau agent` as real child processes against real kernels, 13 to 14 minutes on one runner.
   # Their own lane, out of the test shards, where they were the floor of one shard: it runs when
@@ -2334,3 +2671,14 @@ jobs:
 
       - name: Run the CLI end-to-end suites
         run: pnpm nx run-many -t test:scenarios --parallel=1 --outputStyle=static
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-cli-e2e-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

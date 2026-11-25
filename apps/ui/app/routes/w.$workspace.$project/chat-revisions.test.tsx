@@ -1243,9 +1243,12 @@ describe('Revisions pane vocabulary and History', () => {
 
     const card = await screen.findByRole('group', { name: 'History' });
     expect(within(card).getAllByTestId('history-skeleton')).toHaveLength(1);
-    expect(
-      screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]'),
-    ).not.toBeNull();
+    /* The bars show from the wait ladder's 300 ms mark, by CSS, not with the frame (Progressive Loading Policy rule 16). */
+    expect(within(card).getByTestId('history-skeleton')).toHaveClass('wait-skeleton');
+    const chip = screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]');
+    expect(chip).not.toBeNull();
+    /* The branch pill shows from the 300 ms mark too, on a wrapper: its own pulse keeps its animation. */
+    expect(chip?.parentElement).toHaveClass('wait-skeleton');
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
   });

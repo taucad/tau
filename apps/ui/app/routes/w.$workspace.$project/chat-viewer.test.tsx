@@ -1943,8 +1943,11 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.queryByRole('region', { name: 'Preparing model' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reopen renderer/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
-    /* The pill's words are laid out from the wait's start and revealed by CSS from 1,000 ms (UI Policy § 6). */
-    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Checking model files…');
+    /* The pill's words are laid out from the wait's start and revealed by CSS from 1,000 ms (UI Policy § 6). The open
+       waits for this first check, so the pill says the open's one label (Progressive Loading Policy rule 18). */
+    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Opening project…');
+    /* The open waits for it, so the route's announcement speaks for it: the pill is seen, not announced. */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).not.toHaveAttribute('role');
     /* The geometry unit, and so the kernel, waits for the files: the stage creates none during the check. */
     expect(mockProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
@@ -1974,14 +1977,12 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'waiting');
   });
 
-  it('should read "Still checking model files" with "Try again" once the session reports the check slow', () => {
+  it('should read "Still opening project" with "Try again" once the session reports the open\'s check slow', () => {
     mockSyncStatus = checking;
     mockSessionAvailability = 'slow';
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent(
-      'Still checking model files…',
-    );
+    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Still opening project…');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(mockRevisionClientSend).toHaveBeenCalledWith({
       command: 'retryLargeObjects',
@@ -2006,6 +2007,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     const pill = document.querySelector('[data-slot="wait-indicator-body"]');
     expect(pill).toHaveTextContent('Downloading model files…');
     expect(pill).toHaveTextContent('25%');
+    /* A wait after the open is its own group: the route's announcement is quiet, so the pill says it (rule 22). */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Downloading model files' })).not.toBeInTheDocument();
   });
@@ -2221,6 +2224,8 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     document.querySelector<HTMLElement>('[data-slot="viewer-wait-caption-slow"]') ?? undefined;
   const slowDelay = (element: Element | undefined): string | undefined =>
     element instanceof HTMLElement ? element.style.getPropertyValue('--wait-slow-delay') : undefined;
+  const detailDelay = (element: Element | undefined): string | undefined =>
+    element instanceof HTMLElement ? element.style.getPropertyValue('--wait-detail-delay') : undefined;
   const advance = (milliseconds: number): void => {
     act(() => {
       vi.advanceTimersByTime(milliseconds);
@@ -2250,7 +2255,7 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     mockViewSettings = {};
   });
 
-  it('should keep one stage from the first frame through opening, downloading and preparing, the pill saying each step', () => {
+  it('should keep one stage from the first frame through opening, downloading and preparing, the pill saying one label', () => {
     mockSyncStatus = opening;
     renderOpen();
     const stage = screen.getByTestId('chat-viewer-layout');
@@ -2260,14 +2265,17 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms' });
     expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
 
+    /* One label for the whole open (Progressive Loading Policy rules 18 and 19): no step, device or transport words. */
+    const body = pill();
     publishSyncStatus(downloading);
     expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
-    expect(pill()).toHaveTextContent('Downloading files…');
-    expect(pill()).not.toHaveTextContent('Downloading project files');
+    expect(pill()).toBe(body);
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
 
     publishSyncStatus(preparing);
     expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
-    expect(pill()).toHaveTextContent('Preparing files…');
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
+    expect(stage).not.toHaveTextContent(/Downloading|Preparing|device/u);
 
     /* No full-pane placeholder at any step, and no empty state before the files are known. */
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
@@ -2294,42 +2302,45 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     expect(mockViewFields).toBeUndefined();
   });
 
-  it('should lay out one caption row of one height in every step, with no words for the opening step', () => {
+  it('should lay out one caption row of one height in every step, with words only for a download’s numbers', () => {
     mockSyncStatus = opening;
     renderOpen();
     expect(caption()).toHaveClass('absolute', 'top-full', 'h-4', 'text-xs', 'text-muted-foreground');
-    /* Opening project has no caption: the pill already says it. */
+    /* A step with no numbers has no detail line: no sentence fills it. */
     expect(caption()?.textContent).toBe('');
 
     advance(3000);
     expect(caption()?.textContent).toBe('');
 
+    /* A download with no known size has no numbers either; only what to do is laid out, hidden until a stall. */
+    publishSyncStatus(downloading);
+    expect(captionText()?.textContent).toBe('');
+
     publishSyncStatus(downloadingWithNumbers);
     expect(caption()).toHaveClass('h-4');
-    expect(caption()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    expect(captionText()).toHaveTextContent(/^189 of 295 files, 44\.8 MB of 70\.0 MB$/u);
 
     publishSyncStatus(preparing);
     expect(caption()).toHaveClass('h-4');
-    expect(caption()).toHaveTextContent('Getting your files ready to open.');
+    expect(caption()?.textContent).toBe('');
   });
 
   it('should show the download numbers by CSS once the open passes 3 s, with no timer', () => {
     mockSyncStatus = downloadingWithNumbers;
     renderOpen();
-    expect(pill()).toHaveTextContent('Downloading files…');
+    expect(pill()).toHaveTextContent('Opening project…');
     expect(pill()).toHaveTextContent('64%');
-    /* The words are laid out from the start and revealed by `wait-after-slow` at the open's start plus 3 s, on the
-       pill's own slow delay. */
+    /* The words are laid out from the start and revealed by `wait-detail` at the ladder's detail mark. */
     expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
-    expect(captionText()).toHaveClass('wait-after-slow');
-    expect(slowDelay(captionText())).toBe('calc(10000ms - 7000ms)');
+    expect(captionText()).toHaveClass('wait-detail');
+    expect(detailDelay(captionText())).toBe('3000ms');
     expect(vi.getTimerCount()).toBe(0);
 
     /* Time passing re-renders nothing: the same element keeps its delay, which CSS counts down. */
     const text = captionText();
     advance(5000);
     expect(captionText()).toBe(text);
-    expect(slowDelay(captionText())).toBe('calc(10000ms - 7000ms)');
+    expect(detailDelay(captionText())).toBe('3000ms');
   });
 
   it('should keep the caption on the wait’s clock when the stage mounts part way through it', () => {
@@ -2345,13 +2356,14 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
       largeObjects: downloadingWithNumbers.largeObjects,
     };
     renderOpen();
-    expect(pill()).toHaveTextContent('Downloading model files…');
+    /* A wait the open bore is the open's: it says the open's one label. */
+    expect(pill()).toHaveTextContent('Opening project…');
     expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
     expect(pill()).toHaveStyle({ '--wait-reveal-delay': '0ms' });
-    expect(slowDelay(captionText())).toBe('calc(9000ms - 7000ms)');
+    expect(detailDelay(captionText())).toBe('2000ms');
   });
 
-  it('should swap in "Still downloading files" with "Try again" by CSS 10 s into the download, and say what to do', () => {
+  it('should offer the slow words and "Try again" only after 10 s in which the download made no progress', () => {
     mockSyncStatus = opening;
     renderOpen();
     const body = pill();
@@ -2359,21 +2371,15 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     publishSyncStatus(downloadingWithNumbers);
     /* The pill keeps its element and its own clock through the step: it does not restart. */
     expect(pill()).toBe(body);
-    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms', '--wait-slow-delay': '10000ms' });
-    /* The slow mark counts from the download's own start, not the open's: the swap is moved onto the download's
-       delay, which the status row carries for the pill's words. */
-    const status = document.querySelector('[data-slot="viewer-wait-status"]');
-    expect(status).toHaveStyle({ '--viewer-download-slow-delay': '10000ms' });
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms' });
+    /* The download's start is progress: the slow mark is 10 s from it, not from the open's start. */
+    expect(slowDelay(pill())).toBe('10000ms');
     const label = document.querySelector('[data-slot="wait-indicator-label"]');
     const slowWords = document.querySelector('[data-slot="wait-indicator-slow"]');
-    expect(label).toHaveTextContent('Downloading files…');
+    expect(label).toHaveTextContent(/^Opening project…$/u);
     expect(label).toHaveClass('wait-until-slow');
-    expect(slowWords).toHaveTextContent('Still downloading files…');
+    expect(slowWords).toHaveTextContent('Still opening project…');
     expect(slowWords).toHaveClass('wait-after-slow');
-    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveClass(
-      '[&_[data-slot=wait-indicator-label]]:[--wait-slow-delay:var(--viewer-download-slow-delay)]',
-      '[&_[data-slot=wait-indicator-slow]]:[--wait-slow-delay:var(--viewer-download-slow-delay)]',
-    );
 
     /* The caption's numbers give way, and what to do appears, at the same mark. */
     expect(captionText()?.firstElementChild).toHaveClass('wait-until-slow');
@@ -2382,29 +2388,64 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     expect(slowCaption()).toHaveClass('wait-after-slow');
     expect(slowDelay(slowCaption())).toBe('10000ms');
 
-    /* "Try again" is a real button, hidden (so neither focusable nor in the accessibility tree) until the mark. */
-    const retry = screen.getByRole('button', { name: 'Try again' });
-    expect(retry).toHaveClass('wait-after-slow');
-    expect(slowDelay(retry)).toBe('10000ms');
-    expect(document.activeElement).not.toBe(retry);
+    /* One "Try again", hidden (so neither focusable nor in the accessibility tree) until the mark. */
+    const retries = within(document.body).getAllByRole('button', { name: 'Try again', hidden: true });
+    expect(retries).toHaveLength(1);
+    expect(slowWords).toContainElement(retries[0]!);
     expect(vi.getTimerCount()).toBe(0);
-    fireEvent.click(retry);
+
+    /* Bytes arrive 8 s later: the slow mark moves to 10 s after them, on new elements, so a moving download never
+       reads as slow. */
+    advance(8000);
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: { ...downloadingWithNumbers.largeObjects, objects: 190, bytes: 45 * 1024 * 1024 },
+    });
+    expect(pill()).toBe(body);
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).not.toBe(label);
+    expect(slowDelay(pill())).toBe('10000ms');
+    expect(slowDelay(slowCaption())).toBe('10000ms');
+    expect(captionText()).toHaveTextContent('190 of 295 files, 45.0 MB of 70.0 MB');
+
+    fireEvent.click(within(document.body).getByRole('button', { name: 'Try again', hidden: true }));
     expect(mockSyncNow).toHaveBeenCalledOnce();
 
-    /* The download moves on: the slow words and Try again go with it. */
+    /* The download is done: the slow words and Try again go with it. */
     publishSyncStatus(preparing);
     expect(pill()).toBe(body);
-    expect(pill()).toHaveTextContent('Preparing files…');
-    expect(pill()).not.toHaveTextContent('Still downloading files…');
-    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(pill()).toHaveTextContent('Opening project…');
+    expect(document.querySelector('[data-slot="wait-indicator-slow"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again', hidden: true })).not.toBeInTheDocument();
     expect(slowCaption()).toBeUndefined();
-    expect(caption()).toHaveTextContent('Getting your files ready to open.');
+  });
 
-    /* A later download counts from its own start again, on a new element. */
-    advance(4000);
-    publishSyncStatus(downloadingWithNumbers);
-    expect(screen.getByRole('button', { name: 'Try again' })).not.toBe(retry);
-    expect(slowDelay(screen.getByRole('button', { name: 'Try again' }))).toBe('10000ms');
+  it('should never show a percentage lower than one it showed under the same label', () => {
+    mockSyncStatus = downloadingWithNumbers;
+    renderOpen();
+    expect(pill()).toHaveTextContent('64%');
+
+    /* Bytes arrive for the same transfer: the percentage moves on. */
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: { ...downloadingWithNumbers.largeObjects, bytes: 52.5 * 1024 * 1024 },
+    });
+    expect(pill()).toHaveTextContent('75%');
+
+    /* A new transfer starts its own count (a fill begun again over the remaining files): the percentage would go back,
+       so the pill drops it for the rest of the wait and keeps its one label. The numbers stay true to the transfer. */
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: {
+        ...downloadingWithNumbers.largeObjects,
+        objects: 2,
+        totalObjects: 106,
+        bytes: 1024 * 1024,
+        totalBytes: 17.5 * 1024 * 1024,
+      },
+    });
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
+    expect(pill()).not.toHaveTextContent('%');
+    expect(captionText()).toHaveTextContent('2 of 106 files, 1.0 MB of 17.5 MB');
   });
 
   it('should not announce the pill or the caption itself: the open has one route announcement', () => {
@@ -2460,13 +2501,15 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
       const stage = screen.getByTestId('chat-viewer-layout');
       publishSyncStatus(status);
 
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveAttribute('data-slot', 'viewer-failure');
-      expect(alert).toHaveTextContent(summary);
-      expect(alert).toHaveTextContent(message);
+      /* The route's announcement says the failure: the card is a labelled group, not a second alert (rule 22). */
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const notice = screen.getByRole('group', { name: summary });
+      expect(notice).toHaveAttribute('data-slot', 'viewer-failure');
+      expect(notice).toHaveTextContent(message);
       expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
       expect(pill()).toBeUndefined();
-      fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+      expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+      fireEvent.click(within(notice).getByRole('button', { name: 'Try again' }));
       expect(retried).toHaveBeenCalledOnce();
     },
   );
@@ -2476,10 +2519,9 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
     mockCanOpenCloudProject = false;
     renderOpen();
 
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('Sign in to continue');
-    expect(alert).toHaveTextContent('Sign in with the account you used to open this project.');
-    expect(within(alert).getByRole('link', { name: 'Open History' })).toHaveAttribute(
+    const notice = screen.getByRole('group', { name: 'Sign in to continue' });
+    expect(notice).toHaveTextContent('Sign in with the account you used to open this project.');
+    expect(within(notice).getByRole('link', { name: 'Open History' })).toHaveAttribute(
       'href',
       expect.stringContaining('workbench=revisions') as string,
     );
@@ -2497,8 +2539,8 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
 
     it.each([
       { name: 'opening', status: opening, label: 'Opening project…' },
-      { name: 'downloading', status: downloading, label: 'Downloading files…' },
-      { name: 'preparing', status: preparing, label: 'Preparing files…' },
+      { name: 'downloading', status: downloading, label: 'Opening project…' },
+      { name: 'preparing', status: preparing, label: 'Opening project…' },
     ] as const)('should lay out the stage with the $name pill from the first frame', ({ status, label }) => {
       mockSyncStatus = status;
       renderOpen();
@@ -2517,10 +2559,9 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
       mockSyncStatus = { sync: { state: 'checking' }, remote: { phase: 'failed' } };
       renderOpen();
       expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveAttribute('data-slot', 'viewer-failure');
-      expect(alert).toHaveTextContent('Couldn’t open this project');
-      fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+      const notice = screen.getByRole('group', { name: 'Couldn’t open this project' });
+      expect(notice).toHaveAttribute('data-slot', 'viewer-failure');
+      fireEvent.click(within(notice).getByRole('button', { name: 'Try again' }));
       expect(mockConnectRemote).toHaveBeenCalledOnce();
     });
 
@@ -2532,7 +2573,7 @@ describe('ChatViewer stage through a cloud open (cloud open loading states, opti
       mockViewGraphics.set('view-1', mockGraphicsActor);
       publishSyncStatus(preparing);
       expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
-      expect(pill()).toHaveTextContent('Preparing files…');
+      expect(pill()).toHaveTextContent('Opening project…');
       expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
 
       mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);

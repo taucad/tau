@@ -755,6 +755,23 @@ describe('useProjectManager.createProject', () => {
       mock.mockReset();
     }
     mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    /* A deleted directory leaves every later listing: discovery after the delete reads what is still on disk. */
+    mockPermanentlyDeleteProjectDirectory.mockImplementation(async ({ projectId, providerBasePath }) => {
+      const listed = mockListProjectManifests.getMockImplementation();
+      mockListProjectManifests.mockImplementation(async () => {
+        const result = (await listed?.()) ?? { roots: [], entries: [] };
+        return {
+          ...result,
+          entries: result.entries.filter(
+            (entry) =>
+              !('projectId' in entry) ||
+              entry.projectId !== projectId ||
+              entry.locator.relativeDirectory !== providerBasePath,
+          ),
+        };
+      });
+      return { status: 'deleted' };
+    });
     mockVerifyProjectRoute.mockResolvedValue({ status: 'discovery-required' });
     mockReadScopedShallowDirectory.mockReset();
     mockReadScopedShallowDirectory.mockRejectedValue(new Error('ENOENT: unreadable'));
@@ -4636,17 +4653,15 @@ describe('useProjectManager.createProject', () => {
     expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
   });
 
-  it('refuses permanent-delete admission when the project identity is duplicated', async () => {
-    const duplicateLocator: ProjectLocator = {
-      ...fakeLocator,
-      relativeDirectory: 'duplicate',
-    };
-    mockGetProjectFileSystemConfig.mockResolvedValue({
+  describe('one copy of several (blueprint W0)', () => {
+    const duplicateLocator: ProjectLocator = { ...fakeLocator, relativeDirectory: 'duplicate' };
+    const duplicateStorage: PendingProjectStorage = { backend: 'opfs', providerBasePath: 'duplicate' };
+    const boundConfig = {
       projectId: fakeProject.id,
       backend: 'opfs',
       providerBasePath: fakeLocator.relativeDirectory,
-    });
-    mockListProjectManifests.mockResolvedValue({
+    } as const;
+    const twoCopies: ProjectDiscoveryResult = {
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
         { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
@@ -4657,13 +4672,137 @@ describe('useProjectManager.createProject', () => {
           locator: duplicateLocator,
         },
       ],
+    };
+    const copyPending = (
+      storage: PendingProjectStorage,
+    ): Extract<PendingProjectOperation, { kind: 'permanent-delete' }> => ({
+      ...pendingPermanentDelete,
+      storage,
+      copy: true,
     });
-    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-    await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow(
-      'Project must have exactly one current occurrence',
-    );
-    expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+    /** Render with two copies listed and the route bound to `fakeLocator`, then forget the bootstrap's writes. */
+    const renderTwoCopies = async (pending: PendingProjectOperation) => {
+      mockGetProjectFileSystemConfig.mockResolvedValue(boundConfig);
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundConfig]);
+      mockListProjectManifests.mockResolvedValue(twoCopies);
+      mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pending]);
+      const rendered = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await act(async () => rendered.result.current.getProjectListing());
+      mockSetProjectFileSystemConfig.mockClear();
+      mockDeleteProjectFileSystemConfig.mockClear();
+      mockDeleteProjectResources.mockClear();
+      mockSetProjectDisclosure.mockClear();
+      mockRmdir.mockClear();
+      return rendered;
+    };
+
+    const expectSharedStateKept = (): void => {
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+      expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockSetProjectDisclosure).not.toHaveBeenCalled();
+      expect(mockRmdir).not.toHaveBeenCalledWith(`/.tau/composers/chats/${fakeProject.id}`, { recursive: true });
+      expect(mockCompletePending).toHaveBeenCalledWith(pendingPermanentDelete.operationId);
+    };
+
+    it('deletes only the chosen copy and keeps the device state the other copy still holds', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+
+      await act(async () => result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator));
+
+      // Not trashed: the project outlives the delete, so the journal row says so.
+      expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, duplicateStorage, { copy: true });
+      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith({
+        projectId: fakeProject.id,
+        providerBasePath: 'duplicate',
+        scope: { backend: 'opfs' },
+      });
+      expectSharedStateKept();
+      // The route still binds the copy that remains.
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    });
+
+    it('moves the route to the remaining copy when the deleted copy was the bound one, and the next pass opens it', async () => {
+      const { result } = await renderTwoCopies(copyPending({ backend: 'opfs', providerBasePath: 'test-project' }));
+
+      await act(async () => result.current.permanentlyDeleteProject(fakeProject.id, fakeLocator));
+
+      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith({
+        projectId: fakeProject.id,
+        providerBasePath: fakeLocator.relativeDirectory,
+        scope: { backend: 'opfs' },
+      });
+      expectSharedStateKept();
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+        projectId: fakeProject.id,
+        backend: 'opfs',
+        providerBasePath: 'duplicate',
+      });
+      const listing = await act(async () => result.current.getProjectListing());
+      expect(listing.projects.map((project) => project.locator)).toEqual([duplicateLocator]);
+      expect(listing.conflicts).toEqual([]);
+    });
+
+    it('deletes the copy the route binds when no copy is named, and keeps the shared state', async () => {
+      const { result } = await renderTwoCopies(copyPending({ backend: 'opfs', providerBasePath: 'test-project' }));
+
+      await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+      expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(
+        fakeProject.id,
+        { backend: 'opfs', providerBasePath: 'test-project' },
+        { copy: true },
+      );
+      expectSharedStateKept();
+    });
+
+    it('finishes a copy whose directory is already gone while another copy holds the id', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+      mockPermanentlyDeleteProjectDirectory.mockImplementationOnce(async () => {
+        mockListProjectManifests.mockResolvedValue({ ...twoCopies, entries: [twoCopies.entries[0]!] });
+        return { status: 'absent' };
+      });
+
+      await act(async () => result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator));
+
+      expectSharedStateKept();
+    });
+
+    it('refuses a folder that no longer holds the project', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+
+      await expect(
+        result.current.permanentlyDeleteProject(fakeProject.id, { ...fakeLocator, relativeDirectory: 'elsewhere' }),
+      ).rejects.toThrow('This folder no longer holds the project');
+      expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+      expect(mockPermanentlyDeleteProjectDirectory).not.toHaveBeenCalled();
+    });
+
+    it('refuses to guess which copy to delete when the route binds neither', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+      mockGetProjectFileSystemConfig.mockResolvedValue({ ...boundConfig, providerBasePath: 'moved-away' });
+
+      await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow(
+        'Choose which copy of the project to delete',
+      );
+      expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+    });
+
+    it('refuses a copy while another root is not observed', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+      mockListProjectManifests.mockResolvedValue({
+        ...twoCopies,
+        roots: [
+          ...twoCopies.roots,
+          { status: 'inaccessible', root: { backend: 'webaccess', workspaceId: 'wsp_gone' }, reason: 'revoked' },
+        ],
+      } as ProjectDiscoveryResult);
+
+      await expect(result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator)).rejects.toThrow(
+        'Project storage is not completely observable',
+      );
+      expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+    });
   });
 
   it('retains local state and the journal when an absent result reveals a moved occurrence', async () => {
@@ -5251,6 +5390,8 @@ describe('useProjectManager.createProject', () => {
           });
         });
         await act(async () => {
+          // The directory is gone once the delete returns, so the listing after it no longer holds the project.
+          mockListProjectManifests.mockResolvedValue({ ...validProjectDiscovery, entries: [] });
           deletion.release();
           await deleting;
         });

@@ -1460,6 +1460,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     inventory: async () => custody.inventory(),
     recover: async (input) => custody.recover(input),
     release: async (input) => custody.release(input),
+    close: async () => custody.close(),
     launch: async (launch) => {
       launch.signal.throwIfAborted();
       const refusal = admit(launch, options);

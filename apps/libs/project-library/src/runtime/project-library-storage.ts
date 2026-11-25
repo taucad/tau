@@ -75,7 +75,8 @@ import type {
 
 export type ProjectDiscoveryConflict =
   | Extract<ProjectDiscoveryEntry, { status: 'adoption-required' }>
-  | Extract<ProjectDiscoveryEntry, { status: 'duplicate-id' }>
+  /** A copy no route binds, with its workspace's name when the listing could read it. */
+  | (Extract<ProjectDiscoveryEntry, { status: 'duplicate-id' }> & { readonly workspaceName?: string })
   | Extract<ProjectDiscoveryEntry, { status: 'route-blocked' }>
   | Extract<ProjectDiscoveryEntry, { status: 'invalid' }>;
 
@@ -445,21 +446,60 @@ const removeProjectComposerRecords = async (
   }
 };
 
-const assertProjectAbsentAfterDelete = async (
+/**
+ * The other directories that still carry a permanently deleted directory's project id, read once it is gone from its
+ * locator. Every root must be observed, or "none" could be a root this pass did not see. The id back at the deleted
+ * locator is a conflict, and so is the id found only elsewhere after a delete that found its directory already gone,
+ * unless another copy carried the id when the delete was journaled: a sole copy's delete must not finish over a
+ * project that moved.
+ */
+const remainingCopiesAfterDelete = async (
   fileManager: ProjectLibraryFileManager,
-  projectId: string,
-  storage: PendingProjectStorage,
-): Promise<void> => {
+  operation: Extract<PendingProjectOperation, { kind: 'permanent-delete' }>,
+  status: 'deleted' | 'absent',
+): Promise<ProjectOccurrence[]> => {
+  const { projectId, storage } = operation;
   const discovery = await fileManager.client.listProjectManifests();
-  const rootStatus = discovery.roots.find(
-    (root) => persistentStorageRootKey(root.root) === persistentStorageRootKey(storage),
-  );
+  const storageRootKey = persistentStorageRootKey(storage);
+  const rootStatus = discovery.roots.find((root) => persistentStorageRootKey(root.root) === storageRootKey);
   if (rootStatus?.status !== 'complete' || discovery.roots.some((root) => root.status === 'inaccessible')) {
     throw new PendingProjectRecoveryError('workspace-unavailable');
   }
-  if (projectOccurrences(discovery, projectId).length > 0) {
+  const occurrences = projectOccurrences(discovery, projectId);
+  const atLocator = occurrences.some(
+    (occurrence) =>
+      occurrence.locator.storageRootKey === storageRootKey &&
+      occurrence.locator.relativeDirectory === storage.providerBasePath,
+  );
+  if (atLocator || (status === 'absent' && occurrences.length > 0 && operation.copy !== true)) {
     throw new PendingProjectRecoveryError('identity-conflict');
   }
+  return occurrences;
+};
+
+/**
+ * Finish deleting one copy while another directory still carries the id, so the project lives on there: its route
+ * config, chats index, editor layout, library row and composer records stay. A route that bound the deleted copy moves
+ * to the copy discovery lists first, as a pass would bind it; left on the deleted locator, a pass would sweep it as an
+ * orphan whenever no single copy is left to rebind, and the state with it.
+ */
+const settleCopyDelete = async (
+  { fileManager, worker }: Readonly<{ fileManager: ProjectLibraryFileManager; worker: ProjectLibraryObjectStore }>,
+  operation: Extract<PendingProjectOperation, { kind: 'permanent-delete' }>,
+  remaining: readonly ProjectOccurrence[],
+): Promise<void> => {
+  const { projectId, storage } = operation;
+  const config = await getProjectFileSystemConfig(projectId);
+  if (
+    config !== undefined &&
+    config.backend !== 'memory' &&
+    persistentStorageRootKey(config) === persistentStorageRootKey(storage) &&
+    config.providerBasePath === storage.providerBasePath
+  ) {
+    await setProjectFileSystemConfig(routeConfigFor(projectId, remaining[0]!.locator));
+  }
+  await fileManager.workspace.syncProjectRoots();
+  await worker.completePendingProjectOperation(operation.operationId);
 };
 
 /** What committing a pending operation reads and writes through. */
@@ -492,8 +532,14 @@ export const commitPendingProjectOperation = async (
     if (result.status === 'identity-mismatch' || result.status === 'unidentifiable') {
       throw new PendingProjectRecoveryError('identity-conflict');
     }
-    if (result.status === 'absent') {
-      await assertProjectAbsentAfterDelete(fileManager, operation.projectId, operation.storage);
+    const remaining = await remainingCopiesAfterDelete(fileManager, operation, result.status);
+    if (remaining.length > 0) {
+      try {
+        await settleCopyDelete({ fileManager, worker }, operation, remaining);
+      } catch (error) {
+        throw new PendingProjectRecoveryError('local-state-error', { cause: error });
+      }
+      return;
     }
     try {
       await worker.deleteProjectResources(operation.projectId);
@@ -985,6 +1031,7 @@ export const buildDiscoveryOnlyListing = async (
       locator: entry.locator,
       ...(slugs === undefined ? {} : { slugs }),
       ...(entry.issue === undefined ? {} : { issue: entry.issue }),
+      ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
     };
   });
   return {
@@ -1057,11 +1104,20 @@ export const buildProjectListing = async (
       ...(slugs === undefined ? {} : { slugs }),
       ...(workspaceName === undefined ? {} : { workspaceName }),
       ...(entry.issue === undefined ? {} : { issue: entry.issue }),
+      ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
     };
   });
-  const conflicts: ProjectDiscoveryConflict[] = discovery.entries.filter(
-    (entry): entry is Exclude<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status !== 'valid',
-  );
+  const conflicts: ProjectDiscoveryConflict[] = discovery.entries
+    .filter((entry): entry is Exclude<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status !== 'valid')
+    .map((entry) => {
+      const { locator } = entry;
+      // A copy's card names both folders, so it needs its workspace's name as a project's card does (W0).
+      const workspaceName =
+        entry.status === 'duplicate-id' && locator.backend === 'webaccess'
+          ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
+          : undefined;
+      return workspaceName === undefined ? entry : { ...entry, workspaceName };
+    });
   return {
     projects,
     conflicts,

@@ -27,7 +27,13 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
+  SheetHeaderStatusContext,
 } from '#components/ui/floating-panel.js';
+import {
+  CoveringSheetFailure,
+  CoveringSheetProvider,
+  CoveringSheetStatus,
+} from '#routes/w.$workspace.$project/covering-sheet.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
@@ -254,6 +260,9 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
     }
   }
 }
+
+/** The open's status in a covering sheet's header: one element, so the header slot keeps it across renders. */
+const coveringSheetStatus = <CoveringSheetStatus />;
 
 /** A snap point's visible height as a CSS length: a fraction of the viewport, or a fixed height. */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
@@ -611,6 +620,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
 
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);
+  /* A sheet at full covers the viewer, which carries the open's status and failure: the sheet carries them instead
+   * (its header's trailing slot and its body), and the covered viewer is inert (Progressive Loading Policy rule 17). */
+  const isCovering = drawerOpen && !isViewerTab && activeSnapPoint === 1;
 
   return (
     <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
@@ -637,6 +649,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           reallocates the canvas and every render target on each frame of the transition. */}
         <div
           className='relative min-h-0 flex-1'
+          inert={isCovering || undefined}
           style={{
             paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
           }}
@@ -649,97 +662,103 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           <ProjectUnavailableOverlay />
         </div>
 
-        <Drawer
-          handleOnly
-          modal={false}
-          open={drawerOpen}
-          snapPoints={snapPoints}
-          detentNames={mobileDrawerDetentNames}
-          activeSnapPoint={activeSnapPoint}
-          setActiveSnapPoint={chooseSnapPoint}
-          onOpenChange={handleDrawerChange}
-        >
-          <DrawerTitle className='sr-only' id='drawer-title'>
-            Chat Interface
-          </DrawerTitle>
-          <DrawerDescription className='sr-only' id='drawer-description'>
-            Chat Interface - use navigation tabs to switch between panels
-          </DrawerDescription>
-
-          {/* This docked panel shares interaction with the viewer and persistent navigation. */}
-          {drawerOpen ? (
-            <DrawerContent
-              ref={sheetRef}
-              aria-labelledby='drawer-title'
-              aria-describedby='drawer-description'
-              className={cn(
-                'flex-1 bg-sidebar',
-                'z-40', // Position below the navigation tabs
-                // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
-                mobileWorkbenchNavigationHeight,
-                //
-                'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
-                'data-[vaul-drawer-direction=bottom]:mt-0',
-                '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
-              )}
-              style={{
-                height: '100%',
-                ...(entersAtRest ? restingEntrance : undefined),
-              }}
-              onEscapeKeyDown={(event) => {
-                if (isEditingTarget(event.target ?? undefined)) {
-                  event.preventDefault();
-                }
-              }}
-              onCloseAutoFocus={(event) => {
-                // Closing returns focus to the nav's current destination (the Model), not to the page.
-                event.preventDefault();
-                const focused = document.activeElement;
-                if (!focused || focused === document.body || sheetRef.current?.contains(focused)) {
-                  navigationRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
-                }
-              }}
+        <CoveringSheetProvider isCovering={isCovering}>
+          <SheetHeaderStatusContext.Provider value={isCovering ? coveringSheetStatus : undefined}>
+            <Drawer
+              handleOnly
+              modal={false}
+              open={drawerOpen}
+              snapPoints={snapPoints}
+              detentNames={mobileDrawerDetentNames}
+              activeSnapPoint={activeSnapPoint}
+              setActiveSnapPoint={chooseSnapPoint}
+              onOpenChange={handleDrawerChange}
             >
-              {/* The active surface, named by its title; the nav's destinations are buttons, not tabs. */}
-              <section
-                ref={attachSection}
-                tabIndex={-1}
-                aria-label={surfaceTitle(activeTab)}
-                data-slot='mobile-surface'
-                className={cn(
-                  'flex h-full flex-col p-0 outline-none',
-                  // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
-                  'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
-                  // While typing, the drawer is the frame above the keyboard and the panel fills it.
-                  'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
-                )}
-                style={{
-                  // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
-                  height: `calc(${sheetHeight} - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
-                }}
-              >
-                <div className='flex h-full flex-1 flex-col'>
-                  {activeTab === 'terminal' ? (
-                    <div ref={attachTerminalSlot} className='size-full' />
-                  ) : (
-                    <Suspense fallback={null}>
-                      <MobileSurface id={activeTab} />
-                    </Suspense>
-                  )}
-                </div>
-              </section>
-            </DrawerContent>
-          ) : null}
-        </Drawer>
+              <DrawerTitle className='sr-only' id='drawer-title'>
+                Chat Interface
+              </DrawerTitle>
+              <DrawerDescription className='sr-only' id='drawer-description'>
+                Chat Interface - use navigation tabs to switch between panels
+              </DrawerDescription>
 
-        {terminalHost
-          ? createPortal(
-              <MobilePane id='terminal' onOpenChange={closeTerminal}>
-                <ProjectTerminalPane />
-              </MobilePane>,
-              terminalHost,
-            )
-          : null}
+              {/* This docked panel shares interaction with the viewer and persistent navigation. */}
+              {drawerOpen ? (
+                <DrawerContent
+                  ref={sheetRef}
+                  aria-labelledby='drawer-title'
+                  aria-describedby='drawer-description'
+                  className={cn(
+                    'flex-1 bg-sidebar',
+                    'z-40', // Position below the navigation tabs
+                    // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
+                    mobileWorkbenchNavigationHeight,
+                    //
+                    'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
+                    'data-[vaul-drawer-direction=bottom]:mt-0',
+                    '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
+                  )}
+                  style={{
+                    height: '100%',
+                    ...(entersAtRest ? restingEntrance : undefined),
+                  }}
+                  onEscapeKeyDown={(event) => {
+                    if (isEditingTarget(event.target ?? undefined)) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onCloseAutoFocus={(event) => {
+                    // Closing returns focus to the nav's current destination (the Model), not to the page.
+                    event.preventDefault();
+                    const focused = document.activeElement;
+                    if (!focused || focused === document.body || sheetRef.current?.contains(focused)) {
+                      navigationRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+                    }
+                  }}
+                >
+                  {/* The active surface, named by its title; the nav's destinations are buttons, not tabs. */}
+                  <section
+                    ref={attachSection}
+                    tabIndex={-1}
+                    aria-label={surfaceTitle(activeTab)}
+                    data-slot='mobile-surface'
+                    className={cn(
+                      'flex h-full flex-col p-0 outline-none',
+                      // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
+                      'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
+                      // While typing, the drawer is the frame above the keyboard and the panel fills it.
+                      'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
+                    )}
+                    style={{
+                      // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
+                      height: `calc(${sheetHeight} - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
+                    }}
+                  >
+                    <div className='relative flex h-full flex-1 flex-col'>
+                      {activeTab === 'terminal' ? (
+                        <div ref={attachTerminalSlot} className='size-full' />
+                      ) : (
+                        <Suspense fallback={null}>
+                          <MobileSurface id={activeTab} />
+                        </Suspense>
+                      )}
+                      {/* The covered viewer's failure, over whatever the sheet shows (rule 21). */}
+                      <CoveringSheetFailure />
+                    </div>
+                  </section>
+                </DrawerContent>
+              ) : null}
+            </Drawer>
+
+            {terminalHost
+              ? createPortal(
+                  <MobilePane id='terminal' onOpenChange={closeTerminal}>
+                    <ProjectTerminalPane />
+                  </MobilePane>,
+                  terminalHost,
+                )
+              : null}
+          </SheetHeaderStatusContext.Provider>
+        </CoveringSheetProvider>
 
         {/* Navigation tabs - Always visible and sticky to bottom */}
         <div

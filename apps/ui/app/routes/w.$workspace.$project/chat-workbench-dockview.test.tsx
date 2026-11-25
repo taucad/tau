@@ -55,12 +55,17 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
 const mockEditorRuntimeImported = vi.hoisted(() => vi.fn());
 const mockEditorViewMounted = vi.hoisted(() => vi.fn());
 const mockLoadEditorSyntax = vi.hoisted(() => vi.fn(async () => []));
+/* Counts each time a pane takes the editor runtime from its module, not the module's one evaluation: the module cache
+ * outlives a test, so a factory call would only count for whichever test imports it first. */
 vi.mock('@taucad/editor-ui/components/code/code-editor-view.client', () => {
-  mockEditorRuntimeImported();
+  function CodeEditorView(): React.JSX.Element {
+    mockEditorViewMounted();
+    return <div role='textbox' aria-label='Code editor' />;
+  }
   return {
-    CodeEditorView: () => {
-      mockEditorViewMounted();
-      return <div role='textbox' aria-label='Code editor' />;
+    get CodeEditorView() {
+      mockEditorRuntimeImported();
+      return CodeEditorView;
     },
   };
 });

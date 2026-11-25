@@ -97,6 +97,17 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 
 /* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
  * workspace opens and the chat gate shows while the focused chat is ensured. */
+/* Every case starts from the same doubles: a case that leaves the chats waiting or failed must not decide what a later
+ * one sees, whatever order the cases run in. */
+beforeEach(() => {
+  chatSync.state = 'loading';
+  availability.whole = 'ready';
+  availability.chats = 'ready';
+  mockState.current = undefined;
+  syncNow.mockClear();
+  mockEditorRefSend.mockClear();
+});
+
 describe('ChatLaneFrame', () => {
   it("renders the workspace frame's chat lane with its testid and no busy state of its own", () => {
     render(<ChatLaneFrame />);
@@ -151,14 +162,6 @@ describe('FocusedChatErrorPanel', () => {
 });
 
 describe('ChatHistoryGate', () => {
-  beforeEach(() => {
-    chatSync.state = 'loading';
-    availability.whole = 'ready';
-    availability.chats = 'ready';
-    syncNow.mockClear();
-    mockEditorRefSend.mockClear();
-  });
-
   /* SP2h: a chat opens on its records while the apply still writes the files. */
   it('opens the focused chat on the chats surface, before the whole apply lands', () => {
     chatSync.state = 'ready';

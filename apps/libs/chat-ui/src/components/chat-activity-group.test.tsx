@@ -306,6 +306,27 @@ describe('ChatToolCard inside an activity group', () => {
     expect(screen.getByText('exit 1').parentElement).toHaveClass('rounded-lg', 'border');
   });
 
+  it('keeps the classes its caller set on a bordered card that is the only row', async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatActivityGroup isSole summary='Ran commands' icon={BookOpen}>
+        <ChatActivityRow>
+          <ChatToolCard>
+            <ChatToolCardHeader>
+              <ChatToolCardTitle>Report</ChatToolCardTitle>
+            </ChatToolCardHeader>
+            <ChatToolCardContent className='max-h-48 overflow-y-auto'>
+              <p>Long report</p>
+            </ChatToolCardContent>
+          </ChatToolCard>
+        </ChatActivityRow>
+      </ChatActivityGroup>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Report' }));
+    expect(screen.getByText('Long report').parentElement).toHaveClass('max-h-48', 'overflow-y-auto');
+  });
+
   it('draws no spinner for a call a settled turn left running', () => {
     const { container, rerender } = render(
       <ChatActivityGroup isSole summary='Running commands' icon={BookOpen}>

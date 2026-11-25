@@ -350,7 +350,7 @@ function ChatToolCardContent({ children, className, forceMount }: ChatToolCardCo
         variant === 'card' && 'border-t',
         isMinimal && placement === 'standalone' && 'pl-1.5',
         isMinimal && placement === 'row' && 'pb-1.5',
-        placement !== 'sole' && className,
+        (!isMinimal || placement !== 'sole') && className,
       )}
       forceMount={forceMount}
     >

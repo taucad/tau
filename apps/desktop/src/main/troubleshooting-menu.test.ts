@@ -117,6 +117,18 @@ describe('diagnosticsReport', () => {
     expect(report).not.toContain('someone');
   });
 
+  it('should scrub the whole of a Windows account name that holds spaces', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-troubleshooting-'));
+    directories.push(directory);
+    writeFileSync(
+      join(directory, 'desktop.log'),
+      'opened C:\\Users\\Jane Q Public\\Tau and C:/Users/Jane Q Public/AppData and \\Users\\Jane Q Public\\x\n',
+    );
+    const report = diagnosticsReport(summary, join(directory, 'desktop.log'), '/home/tester');
+    expect(report).not.toMatch(/Jane|Public/u);
+    expect(report).toContain(String.raw`opened ~\Tau and ~/AppData and ~\x`);
+  });
+
   it('should still describe the build when the log cannot be read', () => {
     const report = diagnosticsReport(summary, join(tmpdir(), 'tau-no-such-log', 'desktop.log'), homedir());
     expect(report).toContain('1.14.20');

@@ -566,7 +566,7 @@ describe('revision machine composition (S48 Node set)', () => {
     await flush();
     publish?.send({
       type: 'confirm',
-      draft: { tag: 'v1', projectName: 'p', entryPath: 'main.ts', visibility: 'public', title: 'p' },
+      draft: { tag: 'v1', projectName: 'p', entryPath: 'main.ts', visibility: 'public' },
     });
     tree.promises.settle('createTag', { output: { name: 'v1', revisionId: 'rev-2' } });
     await flush();

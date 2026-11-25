@@ -17,7 +17,7 @@ import { deriveTranscodeSources } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { attachmentTranscodeSources } from '#runtime/attachment-transcode-sources.js';
 import { attachmentAccept } from '#utils/attachment-accept.js';
-import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
+import { attachmentRefusalCopy } from '@taucad/chat-ui/utils/attachment-refusal';
 
 const heic = new Uint8Array(
   readFileSync(new URL('../../../../packages/plugins/heif/src/fixtures/small.heic', import.meta.url)),

@@ -17,16 +17,16 @@ vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: { status: string }) => unknown) => selector({ status: 'idle' }),
 }));
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { children: ReactNode }) => <a href='#file'>{children}</a>,
 }));
-vi.mock('#components/files/viewer-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/viewer-link', () => ({
   ViewerLink: ({ children }: { children: ReactNode }) => <a href='#viewer'>{children}</a>,
 }));
 vi.mock('#components/files/directory-link.js', () => ({
   DirectoryLink: ({ children }: { children: ReactNode }) => <a href='#directory'>{children}</a>,
 }));
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 

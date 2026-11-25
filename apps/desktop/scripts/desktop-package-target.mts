@@ -28,6 +28,8 @@ export type DesktopPackagePlan = Readonly<{
   gitPayloadSupported: boolean;
   /** Whether the Terminal's git store guard (`libs/sandbox/store-guard`) ships for this target: Linux only. */
   storeGuard: boolean;
+  /** Whether the shell sandbox helper (`libs/sandbox/windows-sandbox`) ships for this target: Windows only. */
+  windowsSandbox: boolean;
 }>;
 
 export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopPackagePlan>> = {
@@ -41,6 +43,7 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     branding: ['icon.png', 'icon-dark.png'],
     gitPayloadSupported: true,
     storeGuard: true,
+    windowsSandbox: false,
   },
   'win32-x64': {
     target: 'win32-x64',
@@ -52,6 +55,7 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     branding: ['icon.png', 'icon-dark.png', 'icon.ico'],
     gitPayloadSupported: true,
     storeGuard: false,
+    windowsSandbox: true,
   },
 };
 
@@ -90,13 +94,20 @@ export const parseDesktopPackageArguments = (
 /**
  * What this package leaves out, one line each, for the script to print.
  * @param plan - The selected package.
- * @param present - Whether a prepared git payload and store guard exist for the target.
+ * @param present - Whether a prepared git payload, store guard and Windows sandbox helper exist for the target.
  * @returns Human-readable omissions; never empty, since GeoSpec native ships on macOS only. No native kernel closure is an
  *   omission: no package ships one, and the app downloads each on first use where its manifest declares the host.
  */
 export const desktopPackageOmissions = (
   plan: DesktopPackagePlan,
-  present: Readonly<{ git: boolean; gitResourceRoot: string; storeGuard?: boolean; storeGuardRoot?: string }>,
+  present: Readonly<{
+    git: boolean;
+    gitResourceRoot: string;
+    storeGuard?: boolean;
+    storeGuardRoot?: string;
+    windowsSandbox?: boolean;
+    windowsSandboxRoot?: string;
+  }>,
 ): readonly string[] => [
   'GeoSpec native engine (geospec-engine): its npm package ships a native binding for darwin-arm64 only, ' +
     'so the geometry utility (AP242 measurement, native GeoSpec checks) cannot start in this package.',
@@ -110,7 +121,49 @@ export const desktopPackageOmissions = (
     : [
         `store guard: none at ${present.storeGuardRoot ?? 'resources/store-guard'}; the Terminal opens each project's .git read-only.`,
       ]),
+  ...(!plan.windowsSandbox || present.windowsSandbox === true
+    ? []
+    : [
+        `Windows shell sandbox helper: none at ${present.windowsSandboxRoot ?? 'resources/windows-sandbox'}; this package has no sandboxed shell or Terminal.`,
+      ]),
 ];
+
+/**
+ * Why this package may not be assembled, when a Windows distribution archive would ship without the shell sandbox
+ * helper, or with one its NOTICE and manifest do not describe.
+ *
+ * Without `tau-windows-sandbox.exe` a Windows install has no contained shell and no Terminal at all: Tau never starts an
+ * uncontained one. The installer and its signing step (`package-windows.mts`) are built from this archive, so the
+ * archive is where the helper must be present, with the NOTICE for the Rust crates it links and the manifest whose
+ * digest names this very executable. A development package (no `--archive`) still assembles and names the omission.
+ * @param plan - The selected package.
+ * @param archive - Whether a distribution archive is written.
+ * @param helper - Whether the staged helper and NOTICE are files, whether the manifest's digest is the helper's, and
+ *   where they were looked for.
+ * @returns The refusal, or `undefined` when the package may be assembled.
+ */
+export const desktopWindowsSandboxRefusal = (
+  plan: DesktopPackagePlan,
+  archive: boolean,
+  helper: Readonly<{
+    executable: boolean;
+    notice: boolean;
+    manifestMatches: boolean;
+    windowsSandboxRoot: string;
+  }>,
+): string | undefined => {
+  if (!archive || !plan.windowsSandbox || (helper.executable && helper.notice && helper.manifestMatches)) {
+    return undefined;
+  }
+  const problems = [
+    helper.executable ? [] : ['tau-windows-sandbox.exe is missing'],
+    helper.notice ? [] : ['NOTICE is missing'],
+    !helper.executable || helper.manifestMatches ? [] : ["manifest.json does not name this helper's sha256"],
+  ]
+    .flat()
+    .join(', ');
+  return `A ${plan.target} release package must ship the shell sandbox helper; at ${helper.windowsSandboxRoot} ${problems}. Run desktop:prepare-windows-sandbox first.`;
+};
 
 /**
  * Why this package may not be assembled, when a Linux distribution archive would ship without the store guard.

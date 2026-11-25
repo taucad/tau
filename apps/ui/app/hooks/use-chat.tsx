@@ -52,20 +52,20 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { selectChatTranscript } from '#services/chat-session-store.js';
 import type { ChatSession, ChatTranscriptState, StopOrigin } from '#services/chat-session-store.js';
-import { noComposerTrays } from '#services/chat-composer-trays.js';
-import type { ComposerTray } from '#services/chat-composer-trays.js';
+import { noComposerTrays } from '@taucad/chat-ui/services/chat-composer-trays';
+import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type {
   DraftAttachment,
   DraftAttachmentModel,
   DraftAttachmentSource,
   draftMachine,
   PendingDraftImage,
-} from '#hooks/draft.machine.js';
-import { pendingDraftImages } from '#hooks/draft.machine.js';
+} from '@taucad/chat-ui/hooks/draft.machine';
+import { pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
@@ -170,6 +170,8 @@ export type CombinedChatState = {
   /** Durable host facts and the current read-only attachment, not SDK stream state. */
   projection?: ChatProjection;
   attachmentStatus?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachmentStatus']>;
+  /** The host whose log the chat is attached to, which is where its refusals came from. */
+  attachedHostId?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachedHostId']>;
   isLoading: boolean;
   /** Chat-scoped execution target mirrored from durable persistence. */
   activeExecution: CadAgentExecution | undefined;
@@ -274,6 +276,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       persistedError: persistenceContext?.persistedError,
       projection,
       attachmentStatus: store.getAttachmentStatus(activeChatId),
+      attachedHostId: store.getAttachedHostId(activeChatId),
       isLoading: status === 'streaming',
       activeExecution: persistenceContext?.activeExecution,
       activeKernel: persistenceContext?.activeKernel,
@@ -408,7 +411,7 @@ export type DraftActions = {
   /**
    * Add a raw image or PDF data URL to the new-message draft. Synchronous: the
    * `draftMachine` enqueues it through its single `attachmentProcessing`
-   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which converts
+   * chokepoint (see `apps/libs/chat-ui/src/hooks/draft.machine.ts`), which converts
    * images through the storage policy and stores the bytes before the draft references them. Pass the
    * original data URL. Generated captures pass `preserveOriginal` so their
    * lossless bytes bypass upload compression. Failures and refusals are

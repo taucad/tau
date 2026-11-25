@@ -1,0 +1,17 @@
+{
+  "name": "@taucad/vitest-ci",
+  "version": "0.0.1",
+  "description": "Shared Vitest reporter list and the CI test outcome recorder for every Tau test target",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "exports": {
+    ".": "./src/test-reporters.ts",
+    "./outcome-reporter": "./src/outcome-reporter.ts",
+    "./package.json": "./package.json"
+  }
+}

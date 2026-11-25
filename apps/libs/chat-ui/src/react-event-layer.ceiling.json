@@ -1,1 +1,4 @@
-{}
+{
+  "apps/libs/chat-ui/src/hooks/use-composer-record-toasts.ts": 1,
+  "apps/libs/chat-ui/src/hooks/use-draft-image-error-toast.ts": 1
+}

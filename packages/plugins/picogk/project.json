@@ -26,7 +26,13 @@
         "env": {
           "TAU_PICOGK_CLOSURE": "pinned"
         }
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/apps/ui/public/textures/matcap-sculpt.jpg",
+        "{workspaceRoot}/infra/seed/default-thumb.webp"
+      ]
     },
     "test:native-linux": {
       "executor": "nx:run-commands",
@@ -40,7 +46,13 @@
         "env": {
           "TAU_PICOGK_CLOSURE": "pinned"
         }
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/apps/ui/public/textures/matcap-sculpt.jpg",
+        "{workspaceRoot}/infra/seed/default-thumb.webp"
+      ]
     },
     "prepare-layer": {
       "executor": "nx:run-commands",

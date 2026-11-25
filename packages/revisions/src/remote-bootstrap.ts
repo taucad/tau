@@ -99,7 +99,7 @@ export async function bootstrapRemoteRevisionStore(input: RemoteBootstrapInput):
   const advertisedTarget = advertised.find((ref) => ref.name === `${headRefPrefix}${targetBranch}`)?.head;
   const expectedTarget = input.sourceRef === `${headRefPrefix}${targetBranch}` ? input.sourceHead : undefined;
   if (advertisedTarget !== expectedTarget) {
-    throw new RevisionPortError('REMOTE_REF_CONFLICT', `Remote branch ${targetBranch} already names another revision.`);
+    throw new RevisionPortError('REMOTE_REF_CONFLICT', `GitHub already has a different branch named ${targetBranch}.`);
   }
   let importedTree = new ImmutableRevisionTree([]);
   if (input.sourceRef === undefined || input.sourceHead === undefined) {

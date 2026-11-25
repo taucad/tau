@@ -2190,6 +2190,45 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
     }
   }, 180_000);
 
+  /* Tier 2a (R-2): a server may put the quota marker in front of the batch's sentence; the desktop files it as storage and drops the marker. */
+  it('reads a storage refusal behind the quota marker as storage, without the marker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-marker-'));
+    const sentence = 'This push needs more room than your 1 GB plan has left, so it was not backed up.';
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: { message: `Tau: storage quota exceeded — ${sentence}`, shortfallBytes: 1, remainingBytes: 0 },
+    });
+    const repositoryPath = join(root, 'project');
+    const large = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1));
+    for (let index = 0; index < large.length; index += 1) {
+      large[index] = (index * 17) % 256;
+    }
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([tauAttributes, ['models/bracket.step', large]]),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: { message: sentence, paths: ['models/bracket.step'] },
+      });
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+
   /* RV-W8 F11: the native list reads like the server's — largest first, at most ten. */
   it('names the largest ten files first when a push is over the storage plan', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-order-'));

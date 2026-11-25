@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Voxels } from 'picovoxel';
+import type { MeshChunk, Voxels } from 'picovoxel';
 
 import {
+  createPicovoxelMeshSink,
   meshPicovoxelField,
   picovoxelAdaptivePreviewsWatertight,
   picovoxelDefaultAdaptivity,
@@ -99,17 +100,68 @@ describe('PicoVoxel adaptive meshing', () => {
     expect(resolvePicovoxelMeshing(saved, 'fast', '0.2.0')).toEqual({ meshing: { adaptivity: 0.5 } });
   });
 
-  it('passes the meshing to toMesh and reports it only for an adaptive mesh', () => {
-    const mesh = Symbol('mesh');
-    const toMesh = vi.fn(function (this: unknown) {
+  it('streams the uniform mesh and builds only an adaptive mesh whole, freeing it at once', () => {
+    // Chunks are views into one reused buffer, as wasm-memory views are: the sink must copy each before it returns.
+    const scratch = new Float32Array(6);
+    const indices = new Uint32Array(3);
+    const streamMesh = vi.fn(function (this: unknown, onChunk: (chunk: MeshChunk) => void) {
       expect(this).toBe(field);
-      return mesh;
+      scratch.set([0, 0, 0, 1, 0, 0]);
+      indices.set([0, 1, 2]);
+      onChunk({ vertices: scratch.subarray(0, 6), triangles: indices.subarray(0, 3) });
+      scratch.set([0, 1, 0]);
+      indices.set([2, 1, 0]);
+      onChunk({ vertices: scratch.subarray(0, 3), triangles: indices.subarray(0, 3) });
+      onChunk({ vertices: scratch.subarray(0, 0), triangles: indices.subarray(0, 0) });
+      return { vertexCount: 3, triangleCount: 2 };
     });
-    const field = { toMesh } as unknown as Voxels;
-    expect(meshPicovoxelField(field, undefined)).toBe(mesh);
-    expect(meshPicovoxelField(field, { adaptivity: 0.25 })).toBe(mesh);
-    expect(toMesh.mock.calls).toEqual([[undefined], [{ adaptivity: 0.25 }]]);
+    const adaptive = {
+      vertices: new Float32Array(9),
+      triangles: new Uint32Array([0, 1, 2]),
+      lane: 'fast',
+      dispose: vi.fn(),
+    };
+    const toMesh = vi.fn(() => adaptive);
+    const field = { streamMesh, toMesh, lane: 'exact' } as unknown as Voxels;
+
+    const uniform = meshPicovoxelField(field, undefined);
+    expect(uniform.lane).toBe('exact');
+    expect([...uniform.vertices]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    expect([...uniform.triangles]).toEqual([0, 1, 2, 2, 1, 0]);
+    expect(uniform.vertices.buffer).not.toBe(scratch.buffer);
+    expect(toMesh).not.toHaveBeenCalled();
+
+    expect(meshPicovoxelField(field, { adaptivity: 0.25 })).toEqual({
+      vertices: adaptive.vertices,
+      triangles: adaptive.triangles,
+      lane: 'fast',
+    });
+    expect(toMesh.mock.calls).toEqual([[{ adaptivity: 0.25 }]]);
+    expect(adaptive.dispose).toHaveBeenCalledOnce();
+    expect(streamMesh).toHaveBeenCalledOnce();
     expect(picovoxelMeshingReport(undefined)).toEqual({});
     expect(picovoxelMeshingReport({ adaptivity: 0.25 })).toEqual({ adaptivity: 0.25 });
+  });
+
+  it('frees an adaptive mesh even when reading it fails', () => {
+    const dispose = vi.fn();
+    const mesh = {
+      get vertices(): Float32Array {
+        throw new Error('read failed');
+      },
+      dispose,
+    };
+    const field = { toMesh: () => mesh } as unknown as Voxels;
+
+    expect(() => meshPicovoxelField(field, { adaptivity: 0.5 })).toThrow('read failed');
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('joins nothing into empty arrays', () => {
+    const { finish } = createPicovoxelMeshSink();
+    const { vertices, triangles } = finish();
+
+    expect(vertices).toEqual(new Float32Array(0));
+    expect(triangles).toEqual(new Uint32Array(0));
   });
 });

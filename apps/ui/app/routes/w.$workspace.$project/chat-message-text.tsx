@@ -1,7 +1,7 @@
 import type { TextUIPart } from 'ai';
 import { memo, useMemo } from 'react';
 import { normalizeLatexDelimiters } from '@taucad/agent-host';
-import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
+import { MarkdownViewerChat } from '@taucad/chat-surfaces/components/markdown/markdown-viewer-chat';
 
 export const ChatMessageText = memo(function ({
   part,

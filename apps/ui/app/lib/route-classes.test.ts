@@ -14,7 +14,9 @@ import { matchPath } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 import {
+  appStartUrl,
   classesOwningRoute,
+  homeAppEntry,
   edgeShellClasses,
   routeClassOfRouteId,
   isStaticShellPath,
@@ -29,6 +31,7 @@ import {
   shellSkewCookie,
   staticShellClasses,
   staticShellFor,
+  workerRouteClasses,
 } from '#lib/route-classes.js';
 import { skewProtectionCookie, skewProtectionCookieName } from '#lib/skew-protection.server.js';
 import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js';
@@ -36,6 +39,7 @@ import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js
 import {
   homeShellDocument,
   config as marketingEdge,
+  selectDelivery,
   shellSkewCookie as marketingShellSkewCookie,
 } from '../../netlify/edge-functions/marketing.js';
 import { config as marketingEventsEdge } from '../../netlify/edge-functions/marketing-events.js';
@@ -201,10 +205,13 @@ describe('static-shell routing on Netlify (PL3)', () => {
     ['a look-alike file', '/w.data'],
     ['Home', '/'],
     ["Home's data request", '/_root.data'],
+    ["Home's trailing-slash data request", '/_.data'],
+    ["a project's trailing-slash data request", '/w/home/bracket-v2/_.data'],
+    ["a workspace's trailing-slash data request", '/w/home/_.data'],
     ['the library', '/projects'],
     ['a new project', '/projects/new'],
     ['a publication', '/s/abc123'],
-    ['the offline shell', '/usage'],
+    ['the usage page', '/usage'],
     ['settings', '/settings/billing'],
     ['the API proxy', '/api/ph/e/'],
     ['a health endpoint', '/health/build'],
@@ -309,8 +316,17 @@ describe('the Home shell behind the marketing edge function (PL4)', () => {
       expect(redirectMatches(rule.from, new URL('https://tau.new/')), rule.from).toBe(false);
       expect(redirectMatches(rule.from, new URL('https://www.tau.new/')), rule.from).toBe(false);
     }
-    // `/`, `/_root.data` and `/?…` reach the function as before whenever the edge function passes them on.
-    for (const href of ['/', '/?app', '/_root.data', '/_root.data?_routes=root,routes/_index', '/index.html']) {
+    // `/`, the root data request by either name and `/?…` reach the function as before whenever the edge function
+    // passes them on.
+    for (const href of [
+      '/',
+      '/?app',
+      '/_root.data',
+      '/_root.data?_routes=root,routes/_index',
+      '/_.data',
+      '/_.data?_routes=root,routes/_index',
+      '/index.html',
+    ]) {
       expect(route(href), href).toStrictEqual({ kind: 'function' });
     }
     expect(staticShellFor('/')).toBeUndefined();
@@ -400,5 +416,46 @@ describe('routeClassOfRouteId (RR7)', () => {
     { routeId: 'routes/not-a-route', classId: undefined },
   ])('should name $routeId as $classId, a file route by its name without the extension', ({ routeId, classId }) => {
     expect(routeClassOfRouteId(routeId)?.id).toBe(classId);
+  });
+});
+
+describe('the service worker’s classes (PL7)', () => {
+  it('should answer the two static shells cache-first, from their built files, and leave /usage to the function', () => {
+    expect(
+      workerRouteClasses().map(({ routeClass, delivery, document }) => [routeClass.id, delivery, document]),
+    ).toStrictEqual([
+      ['project', 'cache-first', '/w/__shell/__shell/index.html'],
+      ['home', 'cache-first', homeShellDocument],
+    ]);
+    expect(listStaticPrerenderPaths()).not.toContain('/usage');
+  });
+
+  it('should match exactly the URLs Netlify serves each shell for', () => {
+    const [project, home] = workerRouteClasses();
+    for (const path of ['/w/home/bracket-v2', '/w/home/bracket-v2/', '/w/a/b.data', '/w/a/b/preview', '/w/a', '/']) {
+      expect(project?.matches(path), path).toBe(staticShellFor(path)?.id === 'project');
+    }
+    expect(home?.matches('/')).toBe(true);
+    expect(home?.matches('/projects')).toBe(false);
+  });
+
+  /* The worker answers `/` with the Home shell exactly when the marketing edge function would. */
+  it.each([
+    ['/', undefined],
+    ['/', 'app'],
+    ['/', 'website'],
+    ['/?website', 'app'],
+    ['/?website=1', undefined],
+    ['/?utm_source=x&ref=hn', undefined],
+    ['/?utm_source=x', 'app'],
+    ['/?app', undefined],
+    ['/?code=abc&state=x', undefined],
+    [appStartUrl, undefined],
+    [appStartUrl, 'website'],
+  ])('should agree with the marketing edge function on whether %s with tau-entry %s is Home', (href, tauEntry) => {
+    const url = new URL(href, 'https://tau.new');
+    const request = new Request(url, { headers: tauEntry === undefined ? {} : { cookie: `tau-entry=${tauEntry}` } });
+    const delivery = selectDelivery(request, url, 'https://marketing.example');
+    expect(homeAppEntry(url.searchParams, tauEntry)).toBe(delivery.kind !== 'marketing');
   });
 });

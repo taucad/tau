@@ -1,5 +1,6 @@
 import { observeHomeProjectSaves } from '@taucad/files-ui/filesystem/observe-home-project-saves';
 import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
 import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
@@ -7,7 +8,6 @@ import { machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import {
-  createContext,
   useContext,
   useMemo,
   useCallback,
@@ -79,6 +79,7 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Wait for a file manager's content and tree services, up to the ready bound.
@@ -210,6 +211,7 @@ export type WorkspaceFacade = {
   restoreWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>;
 };
 
+/** What a file-manager provider gives its subtree; the shared `FileManagerContext` types only what library components use. */
 type FileManagerContextType = {
   fileManagerRef: FileManagerRef;
   backendType: FileSystemBackend | undefined;
@@ -408,8 +410,6 @@ type FileManagerContextType = {
   runtimeFileSystem: RuntimeFileSystem;
 };
 
-const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
-
 /** The file-manager host's ref, outside a runtime `undefined` (a component test that renders a gate alone). */
 function useOptionalFileManagerHost() {
   const runtime = useOptionalAppRuntime();
@@ -492,7 +492,7 @@ function startFailureCopy(errorClass: string | undefined, errorCode: string | un
       return {
         title: "Tau's local database did not open",
         description:
-          'The database Tau keeps on this device did not answer. Restart in safe mode, or open Troubleshooting to reset it.',
+          'Tau’s storage on this device didn’t answer. Restart in safe mode, or open Troubleshooting to reset it.',
         actions: ['restartInSafeMode', 'troubleshooting', 'showLogs'],
         offersRetry: true,
       };
@@ -667,11 +667,100 @@ export function SharedWorkerGate({
   );
 }
 
+/** What the database panel says and offers for the failure that left the start without its records (D3, R7). */
+function databaseNoticeCopy(errorName: string): Readonly<{
+  description: string;
+  actions: readonly RecoveryActionId[];
+  offersRetry: boolean;
+}> {
+  switch (errorName) {
+    case 'VersionError': {
+      return {
+        description:
+          'A newer Tau opened the database this device keeps. Home is open and your files are safe. Update Tau to bring back your folders, or reset the database.',
+        actions: ['updateTau', 'resetLocalDatabase', 'resetFolderList', 'showLogs'],
+        offersRetry: false,
+      };
+    }
+    case 'StorageUpgradeBlockedError': {
+      return {
+        description:
+          'Another Tau window or tab is holding the database this device keeps. Home is open. Close the other Tau window, then try again.',
+        actions: ['showLogs'],
+        offersRetry: true,
+      };
+    }
+    default: {
+      return {
+        description:
+          "Tau couldn't open the database this device keeps. Home is open and your files are safe. Reset the database to bring back your folders; their projects return from disk.",
+        actions: ['resetLocalDatabase', 'resetFolderList', 'showLogs', 'troubleshooting'],
+        offersRetry: true,
+      };
+    }
+  }
+}
+
+/**
+ * The database panel (desktop resilient startup blueprint D1, D3, R7): the start went on with Home alone because its
+ * records could not be read, so Home is open and the folders are missing. It says so beside Home and offers the action
+ * for the cause: Update Tau for a newer database, closing the other window when one holds it, and the reset, which is
+ * the shell's quarantine on the desktop and, on the web, offered only when Home's engine mirror exists. Try again
+ * reloads the page, which opens the database afresh.
+ */
+function DatabaseNotice({ fileManagerRef }: { readonly fileManagerRef: FileManagerRef }): React.ReactNode {
+  const degraded = useSelector(fileManagerRef, (state) => state.context.degraded);
+  if (degraded?.input !== 'records') {
+    return undefined;
+  }
+  const title = "Tau's local database is unavailable";
+  const copy = databaseNoticeCopy(degraded.errorName);
+  const actions = recoveryActions(copy.actions);
+  return (
+    <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+      <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+      <p className='min-w-0 flex-1 text-sm'>{copy.description}</p>
+      {actions.map((action) =>
+        action.kind === 'link' ? (
+          <Button key={action.id} asChild variant='outline'>
+            <a href={action.href}>{action.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={action.id}
+            type='button'
+            variant='outline'
+            onClick={() => {
+              void action.run();
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+      {copy.offersRetry || actions.length === 0 ? (
+        <Button
+          type='button'
+          onClick={() => {
+            globalThis.location.reload();
+          }}
+        >
+          <RefreshCw />
+          Try again
+        </Button>
+      ) : undefined}
+    </div>
+  );
+}
+
 /** Keep storage recovery inside the available page instead of displacing its shell. */
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+    <>
+      <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+      <DatabaseNotice fileManagerRef={fileManager.fileManagerRef} />
+    </>
   ) : undefined;
 }
 
@@ -1076,7 +1165,10 @@ function FileManagerScope({
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const { createFileSystemBridgeProxy } = await loadCode(async () => {
+        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        return { createFileSystemBridgeProxy };
+      });
       // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
       const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;
@@ -1511,7 +1603,7 @@ function FileManagerScope({
 }
 
 export function useFileManager(): FileManagerContextType {
-  const context = useContext(FileManagerContext);
+  const context = useContext(FileManagerContext) as FileManagerContextType | undefined;
   if (context === undefined) {
     throw new Error('useFileManager must be used within a FileManagerProvider');
   }
@@ -1522,10 +1614,10 @@ export function useFileManager(): FileManagerContextType {
 /**
  * Non-throwing variant of `useFileManager`. Returns `undefined` when called
  * outside a `FileManagerProvider` instead of throwing. Used by components
- * that optionally read from the file manager context (e.g. `FileSelector`).
+ * that optionally read from the file manager context.
  */
 export function useOptionalFileManager(): FileManagerContextType | undefined {
-  return useContext(FileManagerContext);
+  return useContext(FileManagerContext) as FileManagerContextType | undefined;
 }
 
 /**

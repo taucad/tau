@@ -1,8 +1,15 @@
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { useChatSelector } from '#hooks/use-chat.js';
+import { daemonPlacementOf, externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { useEffect } from 'react';
+import {
+  desktopAgentSignInBridge,
+  requestAgentSignIn,
+  takeAgentSignInSuccess,
+  useAgentSignInOutcome,
+} from '#components/terminal/agent-sign-ins.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -237,6 +244,42 @@ const answerInterrupt = async ({
 };
 
 /**
+ * A login card that carries on by itself once the sign-in its chat asked for in Tau's tab exits 0. Another chat's
+ * card for the same agent does not: the success is bound to the chat that asked.
+ *
+ * The exit is taken once, so the turn is tried again exactly as *Try again* would, and only once: a retry that still
+ * meets a logged-out agent draws this card again and waits for another sign-in. A failed sign-in leaves the card,
+ * which says how it ended. Nothing here names an agent; the login names it.
+ *
+ * @param props - The login, the card's chat, and the action that opens its sign-in tab.
+ * @returns The affordance.
+ */
+function AgentLoginCard({
+  login,
+  chatId,
+  onSignInInTerminal,
+}: {
+  readonly login: NonNullable<AgentHostApproval['login']>;
+  readonly chatId: string;
+  readonly onSignInInTerminal: (() => void) | undefined;
+}): React.JSX.Element {
+  const { regenerate } = useChatActions();
+  const outcome = useAgentSignInOutcome(login.agentId, chatId);
+  useEffect(() => {
+    if (outcome === 'succeeded' && takeAgentSignInSuccess(login.agentId, chatId)) {
+      regenerate();
+    }
+  }, [outcome, login.agentId, chatId, regenerate]);
+  return (
+    <ChatLoginAffordance
+      login={login}
+      onSignInInTerminal={onSignInInTerminal}
+      signInFailure={typeof outcome === 'object' ? outcome : undefined}
+    />
+  );
+}
+
+/**
  * The one presenter for a paused run's interrupt, wherever the run is placed.
  *
  * Mounted above the composer (`chat-textarea.tsx`), because a run that is
@@ -252,7 +295,9 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
   const machines = useMachinesFacet();
   const workspace = useProjectWorkspace({ enableNoContext: true });
+  const { activeChatId } = useChatContext();
   const activeExecution = useChatSelector((state) => state.activeExecution);
+  const attachedHostId = useChatSelector((state) => state.attachedHostId);
   const messages = useChatSelector((state) => state.messages);
   const open = useChatSelector((state) =>
     state.projection === undefined ? noOpenApprovals : selectOpenApprovals(state.projection),
@@ -263,7 +308,27 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
      * over to the affordance that says what the *user* has to do (V11). */
-    return <ChatLoginAffordance login={login} />;
+    /* Only where this desktop runs the agent can Tau start its CLI; elsewhere the card keeps the command to copy. The
+     * host is the one whose log refused the turn, which a relaunch keeps even before the composer names an agent. */
+    const refusingHost =
+      attachedHostId ?? (activeExecution === undefined ? undefined : daemonPlacementOf(activeExecution));
+    const signsInHere =
+      workspace !== undefined && desktopAgentSignInBridge() !== undefined && refusingHost === 'desktop';
+    return (
+      <AgentLoginCard
+        key={login.agentId}
+        login={login}
+        chatId={activeChatId}
+        onSignInInTerminal={
+          signsInHere
+            ? () => {
+                requestAgentSignIn(login.agentId, activeChatId);
+                workspace.setWorkbenchOpen(true);
+              }
+            : undefined
+        }
+      />
+    );
   }
   if (!approval) {
     return undefined;

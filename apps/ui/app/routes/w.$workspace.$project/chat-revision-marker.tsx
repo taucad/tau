@@ -8,19 +8,22 @@ import {
   deriveTurnRevisionState,
   turnRevisionDetail,
   turnRevisionLabel,
-} from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
-import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
+} from '@taucad/revisions-ui/lib/chat-turn-revision-state';
+import type {
+  TurnRevisionBase,
+  TurnRevisionLog,
+  TurnRevisionState,
+} from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { selectTurnRevision } from '#machines/chat-projection.logic.js';
-import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
 
 /** Tucked under the user bubble, like a status strip attached to a composer (R11, R12). */
 const cardClassName = 'mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3';

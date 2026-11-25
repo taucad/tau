@@ -92,6 +92,7 @@ import type {
   HostToolApprovalRecord,
   InterruptResolution,
   ModelTransport,
+  RunBillingMode,
   ToolRegistry,
   TurnAttemptKey,
   TurnPlacementPort,
@@ -730,6 +731,66 @@ const isLostReply = (ended: AgentRunOutcome): boolean => {
 const coded = (code: string, message: string, fields: Readonly<Record<string, unknown>> = {}): Error =>
   Object.assign(new Error(message), { code, ...fields });
 
+/**
+ * The billing mode a run recorded (I3): the `deployment` of its first `run.lifecycle` row that names one, so a later row
+ * can never change it. A value this build does not know reads as recorded, so the run is never re-asked under another
+ * mode.
+ */
+const recordedDeploymentOf = (events: readonly AgentLogEvent[], runId: string): string | undefined =>
+  (
+    events.find(
+      (event) =>
+        event.runId === runId &&
+        event.type === 'run.lifecycle' &&
+        typeof (event as { readonly deployment?: unknown }).deployment === 'string',
+    ) as (AgentLogEvent & { readonly deployment?: string }) | undefined
+  )?.deployment;
+
+/**
+ * Ask a deployment-following transport for a run's billing mode, as the field its admitting or reopening
+ * `run.lifecycle` row records (D1, I3). Nothing is recorded for a transport with no deployment, or for an unknown
+ * answer: the run's driver then ends it `DEPLOYMENT_UNKNOWN` before any call (I1).
+ */
+const deploymentFieldOf = async (
+  transport: ModelTransport,
+  stop?: AbortSignal,
+): Promise<Readonly<{ deployment?: RunBillingMode }>> => {
+  /* Bounded by the transport (10 s, then `unknown`), and by the run's Stop where its owner holds one. */
+  const answer = await transport.deployment?.resolve(stop);
+  return answer === 'funded' || answer === 'unfunded' ? { deployment: answer } : {};
+};
+
+/**
+ * The transport one run's calls use (I1, I3): a deployment-following transport's own for the run's recorded mode, and
+ * any other transport as it is, unless the run recorded `funded` and that transport cannot fund it. A mode this build
+ * cannot read refuses the run whatever the transport.
+ */
+const runTransportOf = (transport: ModelTransport, events: readonly AgentLogEvent[], runId: string): ModelTransport => {
+  const recorded = recordedDeploymentOf(events, runId);
+  if (recorded !== undefined && recorded !== 'funded' && recorded !== 'unfunded') {
+    throw coded(
+      'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
+      'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+    );
+  }
+  if (transport.deployment === undefined) {
+    if (recorded === 'funded' && transport.funding.type !== 'funded') {
+      throw coded(
+        'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
+        "This run's model calls are funded, and this Tau host cannot fund them, so it made none; resume it in a Tau build that can.",
+      );
+    }
+    return transport;
+  }
+  if (recorded === undefined) {
+    throw coded(
+      'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
+      "Tau could not learn whether this chat's model calls are funded, so it made none; resume once Tau is reachable.",
+    );
+  }
+  return transport.deployment.forRun(recorded);
+};
+
 /** The durable subset of a session model row. */
 const turnModelOf = (model: AgentSessionModel): TurnModelConfig => ({
   id: model.id,
@@ -1004,6 +1065,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
   let closed = false;
+  /* Set once the close has begun dropping every chat's log: a writer opened after it would never be closed, and its
+   * lock would refuse every later host for the chat `WRITER_LOCKED` until the process exits. */
+  let logsReleased = false;
   let closing: Promise<void> | undefined;
 
   const createTerm = options.createLeaderEpoch ?? createPortableId;
@@ -1114,6 +1178,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const logOf = async (chatId: string): Promise<DurableEventLog> => {
     const store = storeOf(chatId);
     if (store.log === undefined) {
+      if (logsReleased) {
+        throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
+      }
       const opened = options.openEventLog(chatId);
       store.log = opened;
       const forget = async (): Promise<void> => {
@@ -2373,7 +2440,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (funding.type !== 'funded') {
       throw coded(
         'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
-        "A Tau account funded this chat's last model request; sign in to that account to continue it.",
+        "Another account funded this chat's last model request; sign in to that account to continue it.",
         { details: { attemptId: open[0]! } },
       );
     }
@@ -2382,7 +2449,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (foreign !== undefined) {
       throw coded(
         'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
-        "Another Tau account funded this chat's last model request; sign in to that account to continue it.",
+        "Another account funded this chat's last model request; sign in to that account to continue it.",
         { details: { attemptId: foreign } },
       );
     }
@@ -2552,8 +2619,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         ...(rewind === undefined ? {} : { rewind }),
         ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
       };
-      const intent = (admission: AdmissionRecord): LogRowBody[] => [
-        { type: 'run.lifecycle', state: 'admitted', admission } as unknown as LogRowBody,
+      const intent = (
+        admission: AdmissionRecord,
+        deployment: Readonly<{ deployment?: RunBillingMode }> = {},
+      ): LogRowBody[] => [
+        { type: 'run.lifecycle', state: 'admitted', admission, ...deployment } as unknown as LogRowBody,
         ...(rewind === undefined ? [] : [{ type: 'history.rewound', ...rewind } satisfies LogRowBody]),
       ];
       if (agent !== undefined) {
@@ -2633,10 +2703,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         rewind === undefined && lastRunId !== undefined
           ? approvalAnswers(events, lastRunId, { timestamp: now().getTime(), ended: true })
           : undefined;
+      /* D1, I3: the run's billing mode is asked once, here, and recorded on its admission. */
+      const deployment = await deploymentFieldOf(options.modelTransport);
       return {
         kind: 'tau',
         turnId: start.message.id,
-        intent: intent({ kind: 'tau', ...base, selection: turnModelOf(model), context }),
+        intent: intent({ kind: 'tau', ...base, selection: turnModelOf(model), context }, deployment),
         start: told === undefined ? [] : [{ type: 'message.appended', message: told }],
         ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
         ...(request === undefined ? {} : { request }),
@@ -2675,13 +2747,30 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ...request,
         };
       }
+      /* I3: a run keeps the mode it recorded; one admitted with none (an earlier build, or an unknown answer) is asked
+       * now and records it on this reopening row. */
+      const reopening = async (): Promise<LogRowBody> => {
+        if (recordedDeploymentOf(events, runId) !== undefined) {
+          return running;
+        }
+        /* A Stop while the answer is asked ends the ask (`unknown`), as it ends the wait on an attempt (W2). */
+        store.resumeWait = resumeWait;
+        try {
+          const deployment = await deploymentFieldOf(options.modelTransport, resumeWait.stop.signal);
+          return { type: 'run.lifecycle', state: 'running', ...selection, ...deployment } as unknown as LogRowBody;
+        } finally {
+          if (store.resumeWait === resumeWait) {
+            store.resumeWait = undefined;
+          }
+        }
+      };
       if (entry?.committed !== true && admittedRowOf(events, runId)?.admission !== undefined) {
         /* The turn never committed: the journaled admission is replayed (RA-R3). */
         return {
           kind: 'tau',
           turnId: entry?.turnId ?? runId,
           mode: 'start',
-          intent: [running, ...settled],
+          intent: [await reopening(), ...settled],
           ...request,
         };
       }
@@ -2730,20 +2819,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           }),
         });
       }
+      /* The tail already answers the turn: the attempt ends with no call, and no mode is asked for. */
+      const complete =
+        entry?.failure?.code !== 'USER_STOPPED' &&
+        !outputLimited &&
+        !reminder &&
+        !answered &&
+        tail?.role === 'assistant';
       return {
         kind: 'tau',
         turnId: entry?.turnId ?? latestTurnId(history, runId),
-        /* The tail already answers the turn: the attempt ends with no call. */
-        mode:
-          entry?.failure?.code !== 'USER_STOPPED' &&
-          !outputLimited &&
-          !reminder &&
-          !answered &&
-          tail?.role === 'assistant'
-            ? 'complete'
-            : 'continue',
+        mode: complete ? 'complete' : 'continue',
         /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */
-        intent: [running, ...recovery],
+        intent: [complete ? running : await reopening(), ...recovery],
         ...request,
       };
     },
@@ -2870,6 +2958,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           }
           const clientContext =
             typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext;
+          /* D1, I3: every call of this attempt uses the transport of the mode the run recorded; none, and the run ends
+           * DEPLOYMENT_UNKNOWN here, before any call (I1). */
+          const modelTransport = runTransportOf(options.modelTransport, events, runId);
           const build = async (first: boolean): Promise<AgentSession> =>
             createAgentSession({
               chatId,
@@ -2878,7 +2969,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               systemPrompt: admission?.context?.systemPrompt ?? options.systemPrompt,
               systemPromptBlocks: options.systemPromptBlocks,
               model,
-              modelTransport: options.modelTransport,
+              modelTransport,
               /* The attempt's tools, as W8 granted them over its checkout (RA-R12); the host's without placement. */
               toolRegistry: approvingTools(key, grant?.tools ?? options.toolRegistry, append),
               eventLog: log,
@@ -2905,7 +2996,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           let stopped = false;
           /* Read through a call: `abort` lands between the loop's awaits, which narrowing cannot see. */
           const isStopped = (): boolean => stopped;
-          const { funding } = options.modelTransport;
+          const { funding } = modelTransport;
           const funded = funding.type === 'funded' && funding.usesBillingAttempt(model.providerKind);
           /* EQ1, charge and proceed: a funded reply lost in transit is retried in this live run, at most
            * `lostReplyRetries` times. The next attempt's prepare resolves and records the lost one first
@@ -3592,6 +3683,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           wake(store);
         }
         await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
+        logsReleased = true;
         await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
         if (failure !== undefined) {
           throw failure.error;

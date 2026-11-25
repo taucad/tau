@@ -12,13 +12,21 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
+import { testReporters } from '@taucad/vitest-ci';
 import { defaultClientConditions, defaultServerConditions, defineConfig } from 'vite';
-import type { Plugin, UserConfig } from 'vite';
+import type { EnvironmentOptions, Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
-import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
+import {
+  resolveServiceWorkerKillSwitch,
+  resolveUiBuildDirectory,
+  uiBuildDirectoryVariable,
+  serviceWorkerKillSwitchVariable,
+  unstampedBuildRelease,
+  unstampedRetainedBuildFloor,
+} from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -26,6 +34,8 @@ import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
+import { createCadmpegEngines } from './cadmpeg-engines.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -38,6 +48,10 @@ import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
+/** The web build's service worker seam: `retired` with the kill switch (`TAU_SERVICE_WORKER_KILL_SWITCH=true`). */
+const serviceWorkerMode = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable])
+  ? 'retired'
+  : 'enabled';
 /** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases. */
 const uiSourceAliasIdFilter = /^#/u;
 
@@ -83,11 +97,16 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
  * packages bundle into the SSR output.
  *
  * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
+ *
+ * The lists are the server environment's `resolve` options (`environments.ssr.resolve`): under React Router 8's
+ * Environment API build the top-level `ssr.external` and `ssr.noExternal` are not honoured, and
+ * `@taucad/runtime` was bundled into the server without a warning (React Router 8 migration RR5, round-2 finding 2).
+ * `scripts/check-server-output.mts` asserts the external specifiers survive in the built server.
  */
 export const uiSsrOptions = {
   noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
-} as const satisfies UserConfig['ssr'];
+} as const satisfies NonNullable<EnvironmentOptions['resolve']>;
 
 /**
  * The build-target seam (charter D2), shared with `desktop/` and `serve/vite.config.ts`.
@@ -164,26 +183,12 @@ export const uiResolveAlias = [
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
   readonly observabilityHarnessEnabled?: boolean;
-  readonly tauCloudEnabled?: boolean;
   readonly target?: 'web' | 'desktop';
 };
 
 const harnessDisabledOverrides = new Map([
   ['#lib/observability-harness-context.js', '#lib/observability-harness-disabled.js'],
   ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
-]);
-
-const cloudBoundarySpecifiers = new Set([
-  '#cloud/commercial-features.js',
-  '#cloud/environment-billing.js',
-  '#cloud/financial-purge.js',
-  '#cloud/gateway-model-transport.js',
-  '#cloud/nav-billing.js',
-  '#cloud/kernel-commerce.js',
-  '#cloud/root-billing.js',
-  '#cloud/settings-billing.js',
-  '#cloud/zoo-close-errors.js',
-  '#cloud/zoo-upgrade-banner.js',
 ]);
 
 const desktopSourceOverrides = new Map([
@@ -197,32 +202,12 @@ const desktopSourceOverrides = new Map([
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/cookie-preferences.js', '#components/cookie-preferences.desktop.js'],
-  ['#hooks/use-cookie-consent.js', '#hooks/use-cookie-consent.desktop.js'],
+  ['#hooks/use-privacy-choices.js', '#hooks/use-privacy-choices.desktop.js'],
 ]);
 
-const selfHostSourceOverrides = new Map([
-  ['#components/chat/chat-model-selector.js', '#components/chat/chat-model-selector.self-host.js'],
-  ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
-  ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
-  ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
-  ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
-  [
-    '#routes/w.$workspace.$project/chat-details-usage.js',
-    '#routes/w.$workspace.$project/chat-details-usage.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-error-credits.js',
-    '#routes/w.$workspace.$project/chat-error-credits.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-error-provider-account.js',
-    '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js',
-  ],
-  [
-    '#routes/w.$workspace.$project/chat-message-data-usage.js',
-    '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js',
-  ],
-]);
+/** The modules of the `cloud-core` chunk: the display-mode owner and its utilities (gate G1). */
+export const cloudCoreModulePattern =
+  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
 
 const normalizeProvenancePath = (moduleId: string): string => {
   const normalized = moduleId.replaceAll('\\', '/');
@@ -270,14 +255,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           options.target === 'desktop' && harnessSpecifier
             ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
             : harnessSpecifier;
-        const targetSpecifier =
-          options.tauCloudEnabled === false && hostSpecifier
-            ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
-            : hostSpecifier;
-        const specifier =
-          targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
-            ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
-            : targetSpecifier;
+        const specifier = hostSpecifier;
         if (specifier === undefined) {
           return null;
         }
@@ -440,16 +418,20 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui, editor-ui, settings-ui and publish-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), chat-surfaces (layering W4), project-library (layering W5), project-workspace (UI wave C), files-ui, editor-ui, revisions-ui, settings-ui, publish-ui and billing-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/chat-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/chat-surfaces/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/project-library/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/project-workspace/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/files-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/editor-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/revisions-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/settings-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/publish-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/billing-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [
@@ -488,41 +470,29 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 };
 
 /**
- * Publish `/tau-release.json` (`{ release }`) beside the client assets, which the API polls to admit this release.
- *
- * @param release - The short commit.
- * @returns The plugin.
- */
-const createReleaseManifestPlugin = (release: string): Plugin => ({
-  name: 'tau-release-manifest',
-  apply: 'build',
-  applyToEnvironment: (environment) => environment.config.consumer === 'client',
-  generateBundle() {
-    this.emitFile({ type: 'asset', fileName: 'tau-release.json', source: `${JSON.stringify({ release })}\n` });
-  },
-});
-
-/**
  * Record the build's Sentry release beside the build output (never shipped), so the deploy can attach its commits
  * to the exact release every event from this bundle reports (`sentryRelease` in `#lib/sentry-event.lib`).
  *
  * @param buildId - The build id baked into the server graph.
  * @returns The plugin.
  */
+/* The web build's output directory: `build`, or CI's second build beside it (gate G1). */
+const uiBuildDirectory = resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]);
+
 const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   name: 'tau-sentry-release-record',
   // Production builds only, like the server's `tauBuildId` (a test build carries no release).
   apply: (_config, { command, mode }) => command === 'build' && mode !== 'test',
   applyToEnvironment: (environment) => environment.config.consumer === 'server',
   async writeBundle() {
-    await writeFile(path.resolve(__dirname, 'build/sentry-release'), `tau-ui@${String(buildId)}\n`);
+    await writeFile(path.resolve(__dirname, uiBuildDirectory, 'sentry-release'), `tau-ui@${String(buildId)}\n`);
   },
 });
 
 /** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
-const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+const criticalModuleIdsPath = path.resolve(__dirname, uiBuildDirectory, 'client-module-ids.json');
 
-export default defineConfig(({ command, mode, isSsrBuild }) => {
+export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT'], {
@@ -531,6 +501,13 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
   });
   const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
+  // Deploys load each engine by digest from their dependency host; the dev server serves the installed package.
+  const cadmpegEngines = createCadmpegEngines({
+    base: process.env['CADMPEG_ENGINES_BASE'],
+    command,
+    mode,
+    root: __dirname,
+  });
   const csharpAssets = createCsharpLanguageAssets(
     isTest ? undefined : path.resolve(__dirname, '../../out/csharp-language/stage'),
   );
@@ -550,16 +527,21 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
   const isProductionBuild = command === 'build' && !isTest;
   /*
    * The release label runtime telemetry stamps (short commit). Server graph only, like `tauBuildId`: the page reads
-   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The same value is published as
-   * `/tau-release.json`, the only place the API learns UI releases from.
+   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The build compiles a fixed placeholder
+   * and never reads the commit, so `ui:build`'s cache key holds no commit (ST-9): the deploy stamps the release over
+   * the placeholder and publishes `/tau-release.json`, the only place the API learns UI releases from, with
+   * `scripts/stamp-build-release.mts`.
    */
-  const buildRelease = isProductionBuild ? resolveTauBuildRelease(process.env) : undefined;
-  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(buildRelease ?? '') };
+  const serverDefine = {
+    ...buildIdDefine,
+    tauBuildRelease: JSON.stringify(unstampedBuildRelease),
+    // The oldest build whose assets the deploy serves, stamped by `scripts/retain-previous-assets.mts` (FP2).
+    tauRetainedBuildFloor: JSON.stringify(unstampedRetainedBuildFloor),
+  };
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
-  const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
   return {
     root: __dirname,
@@ -576,7 +558,6 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
       tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
-      tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /*
        * Every web build may report signed-out runtime telemetry; the deployment's own API policy probe is the only
        * gate (unset means off), so a self-hosted UI reports only to an API its operator turned on. Tests stub the module.
@@ -584,6 +565,7 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
       tauTelemetryHostCloudBuild: JSON.stringify(!isTest),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
+      tauCadmpegEngines: cadmpegEngines.define,
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
@@ -605,14 +587,21 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
             ),
           }),
       /*
-       * Offline shell seam (B5 R3). Only this config defines it, so only the
-       * web bundle registers the service worker: `desktop/vite.config.ts` and
-       * `serve/vite.config.ts` have their own `define` blocks and their own
-       * `react-router.config.ts` without the `buildEnd` that generates the
-       * worker, and both already boot offline from an SPA index fallback.
+       * Service worker seam (progressive loading PL7). Only this config defines
+       * it, so only the web bundle registers the worker: `desktop/vite.config.ts`
+       * and `serve/vite.config.ts` have their own `define` blocks and their own
+       * `react-router.config.ts` without the `buildEnd` that builds the worker,
+       * and both already boot offline from an SPA index fallback. With the
+       * kill switch on (`TAU_SERVICE_WORKER_KILL_SWITCH=true`,
+       * `build-environment.ts`) it is `retired`: pages register nothing and only
+       * ask an existing registration to fetch the retiring worker.
        */
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-      ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_SERVICE_WORKER': JSON.stringify(serviceWorkerMode),
+          }),
       /*
        * This bundle is served by the web host, never by a `tau serve` daemon
        * (`serve/vite.config.ts`), so its origin has no agent descriptor. The
@@ -625,18 +614,17 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
     plugins: [
       mtAssets.plugin,
       picogkAssets.plugin,
+      cadmpegEngines.plugin,
       csharpAssets.plugin,
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
-        tauCloudEnabled,
         observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
       // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
-      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
-      ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, uiBuildDirectory, 'client') }),
       createSentryReleaseRecordPlugin(buildId),
       /*
        * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
@@ -687,21 +675,55 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
       plugins: () => [
         createUiSourceAliasPlugin({
           emitModuleGraph: true,
-          tauCloudEnabled,
           observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
         }),
         createAssetIntegrity({ receipt: false }),
       ],
     },
-    // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
-    ...(isProductionBuild ? { environments: { ssr: { define: serverDefine } } } : {}),
+    /*
+     * React Router 8 builds the client and server environments from this one config (the Environment API, with
+     * shared config and plugins), so an option for one graph only is set on its environment.
+     */
+    environments: {
+      /*
+       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
+       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
+       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
+       * the server build evaluates every icon anyway.
+       */
+      client: {
+        build: {
+          rolldownOptions: {
+            output: {
+              codeSplitting: {
+                groups: [
+                  { name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u },
+                  /*
+                   * Adaptive app deployment mode D6, gate G1: the display-mode owner and its utilities go in one named
+                   * chunk, out of Home's largest chunk. React Router keeps entry signatures exact, so a group always
+                   * takes its modules' dependencies too (here xstate and zod, which the shell loads anyway). The
+                   * financial session providers, the purge and the facades stay in the chunks automatic splitting
+                   * gives them: a group around them took the app runtime with it.
+                   */
+                  { name: 'cloud-core', test: cloudCoreModulePattern },
+                ],
+              },
+            },
+          },
+        },
+      },
+      ssr: {
+        // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
+        ...(isProductionBuild ? { define: serverDefine } : {}),
+        resolve: { ...uiSsrOptions },
+      },
+    },
     resolve: {
       alias: [
         ...uiResolveAlias,
         ...(isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : []),
       ],
     },
-    ssr: uiSsrOptions,
     optimizeDeps: {
       exclude: [...uiOptimizeDepsOptions.exclude],
       // Test mode (Vitest, the calibration preview) runs without React Router's entries; keep Vite's default crawl.
@@ -743,31 +765,17 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
       },
       target: 'es2022',
       /*
-       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
-       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
-       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
-       * the server build evaluates every icon anyway.
-       */
-      ...(isSsrBuild === true
-        ? {}
-        : {
-            rolldownOptions: {
-              output: {
-                codeSplitting: {
-                  groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
-                },
-              },
-            },
-          }),
-      /*
-       * The offline shell allowlist is generated from this manifest
-       * (`scripts/generate-offline-shell.ts`), so hashed filenames are never
+       * The service worker's precache list is generated from this manifest
+       * (`scripts/build-service-worker.ts`), so hashed filenames are never
        * hand-maintained. It only lists public build outputs.
        */
       manifest: true,
     },
 
     test: {
+      // Jsdom installs `localStorage` only where Node has none: Node 25+ turns its own accessor on, which hides
+      // jsdom's, so the workers keep Node 24's default (docs/policy/react-testing-policy.md, Environment).
+      execArgv: ['--no-experimental-webstorage'],
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
       // Keep mock library matchers on this runner's Vitest instance; externalizing it can load a second peer instance.
@@ -782,7 +790,7 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
         ignoreSourceErrors: true,
       },
       setupFiles: ['./vitest.setup.ts'],
-      reporters: ['verbose'],
+      reporters: testReporters('verbose'),
       coverage: {
         reportsDirectory: '../../out/reports/coverage/apps/ui',
         provider: 'v8',

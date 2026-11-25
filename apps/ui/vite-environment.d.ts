@@ -2,11 +2,15 @@ declare const tauBuildFrontendUrl: string;
 /** Netlify `CONTEXT` of the web build (`''` elsewhere); read only through `resolveDeployContext` in `environment.config`. */
 declare const tauBuildDeployContext: string;
 declare const tauBuildId: number;
-declare const tauCloudBuildEnabled: boolean;
 /** Runtime telemetry's host build signal (web: always; desktop: `TAU_TELEMETRY_HOST=cloud`); read only through `#cloud/telemetry-host`. */
 declare const tauTelemetryHostCloudBuild: boolean;
 /** The build's release label (short commit or semver); `''` when the build had none. Read through `#lib/build-identity`. */
 declare const tauBuildRelease: string;
+/**
+ * The oldest build whose assets the deploy serves (FP2): a placeholder in the web server graph until
+ * `scripts/retain-previous-assets.mts` stamps the build id over it; undefined elsewhere. Read only by `/health/build`.
+ */
+declare const tauRetainedBuildFloor: string;
 /** The C# language server bundle `csharp-language:prepare` staged; `null` only in test runs, which carry none. */
 // oxlint-disable-next-line typescript/no-restricted-types -- JSON defines spell absence as null.
 declare const tauCsharpLanguageAssets: Readonly<{ url: string; sha256: string }> | null;

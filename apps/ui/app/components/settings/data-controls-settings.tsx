@@ -13,7 +13,7 @@ import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.j
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { legalUrl } from '#lib/legal-url.js';
-import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
+import { setAnonymousRevisions, useAnonymousRevisions } from '@taucad/revisions-ui/lib/revision-actor';
 import { Button } from '@taucad/ui/components/button';
 
 function LearnMore(): React.JSX.Element {

@@ -46,10 +46,10 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 ## Project notes
 
-- Never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#environment.config`). Code that needs app state (project, file manager, models, env, auth, `lib/xstate.lib`) stays in the app or takes that state as a prop, callback or context value.
+- Never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#environment.config`). Code that needs app state (project, file manager, models, env, auth) stays in the app or takes that state as a prop, callback or context value.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts` or `.tsx` source.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.
-- `apps/ui/specs/message-queue` hashes `src/db/chat-message-queue-store.ts` and `src/components/chat-message-queue-view.tsx`; after editing them, regenerate with `FORMAL_UPDATE=1` and the message-queue conformance test.
+- `apps/ui/specs/message-queue` hashes the chat-message-queue store, machine and view (`src/db`, `src/machines`, `src/components`); after editing one, regenerate with `FORMAL_UPDATE=1` and its conformance test.
 - Moving `src/utils/new-chat-execution.ts` or its Lean model moves both: the differential test reads `specs/lean/corpus`.
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.

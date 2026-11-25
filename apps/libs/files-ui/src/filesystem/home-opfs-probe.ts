@@ -1,3 +1,4 @@
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 const probeTimeout = 5000;
 
 /** Probe the worker-only OPFS sync-access API Tau relies on. */
@@ -7,7 +8,10 @@ export const probeHomeOpfs = async (): Promise<boolean> => {
   }
 
   return new Promise<boolean>((resolve) => {
-    const worker = new Worker(new URL('home-opfs-probe.worker.ts', import.meta.url), { type: 'module' });
+    const worker = createModuleWorker(
+      () => new Worker(new URL('home-opfs-probe.worker.ts', import.meta.url), { type: 'module' }),
+      { name: 'home-opfs-probe' },
+    );
     let settled = false;
     const finish = (supported: boolean): void => {
       if (settled) {

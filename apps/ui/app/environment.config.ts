@@ -5,8 +5,7 @@
  */
 import { z } from 'zod';
 import { isMachinesFeatureEnabled } from '@taucad/types/constants';
-import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
-import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
+import { isBuildReleaseLabel } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 type RawEnvironment = Record<string, string | undefined>;
@@ -75,15 +74,16 @@ const environmentSchema = z.preprocess(
       /* A build product, not deployment configuration: the web build defines it for the server graph
        * only, so client chunks keep stable hashes across rebuilds (`#lib/build-identity`). */
       TAU_BUILD_ID: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
-      /* The release label runtime telemetry stamps; a build product like `TAU_BUILD_ID`, server graph only. */
-      TAU_RELEASE: typeof tauBuildRelease === 'string' && tauBuildRelease !== '' ? tauBuildRelease : undefined,
+      /* The release label runtime telemetry stamps; a build product like `TAU_BUILD_ID`, server graph only. An
+       * unstamped web build holds a placeholder, which is not a label, and publishes none. */
+      TAU_RELEASE:
+        typeof tauBuildRelease === 'string' && isBuildReleaseLabel(tauBuildRelease) ? tauBuildRelease : undefined,
       /* eslint-enable @typescript-eslint/naming-convention -- environment variable names */
     };
   },
   z.object({
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
     TAU_API_URL: z.url(),
-    ...cloudEnvironmentShape,
     TAU_WEBSOCKET_URL: z.url().describe('WebSocket URL for the API (e.g., wss://api.tau.new or ws://localhost:4001)'),
     TAU_FRONTEND_URL: z.url(),
     /** Ordered build identity for the stale-tab skew guard (blueprint DF20); set by the build, never the host. */
@@ -152,7 +152,7 @@ const environmentSchema = z.preprocess(
   }),
 );
 
-export type Environment = z.infer<typeof environmentSchema> & CloudBillingEnvironment;
+export type Environment = z.infer<typeof environmentSchema>;
 
 const parseEnvironment = (rawEnvironment: RawEnvironment): Environment => {
   const result = environmentSchema.safeParse(rawEnvironment);
@@ -194,12 +194,9 @@ const baseClientEnvironmentKeys = [
   'SENTRY_DSN',
   'SENTRY_ENVIRONMENT',
 ] as const satisfies ReadonlyArray<keyof Environment>;
-const clientEnvironmentKeys = [...baseClientEnvironmentKeys, ...cloudClientEnvironmentKeys] as const;
+const clientEnvironmentKeys = baseClientEnvironmentKeys;
 
-export type ClientEnvironment = Pick<
-  Environment,
-  (typeof baseClientEnvironmentKeys)[number] | keyof CloudBillingEnvironment
->;
+export type ClientEnvironment = Pick<Environment, (typeof baseClientEnvironmentKeys)[number]>;
 
 const selectClientEnvironment = (environment: Environment): Partial<ClientEnvironment> => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- fromEntries cannot retain tuple-key completeness.

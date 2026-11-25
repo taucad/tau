@@ -1,5 +1,5 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { memo, useCallback } from 'react';
 import { XIcon } from 'lucide-react';
 import { FloatingPanel, FloatingPanelClose } from '#components/ui/floating-panel.js';
@@ -38,7 +38,7 @@ export const FileTreePanelBody = memo(function ({
   /* A first view (STO-25): open once the entry closure lands, every entry still to land listed as arriving (I7). */
   const availability = useProjectAvailability('tree');
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='tree' label='Files' />;
   }
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>

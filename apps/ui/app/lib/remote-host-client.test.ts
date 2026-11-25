@@ -43,7 +43,7 @@ describe('remote host runtime environment', () => {
 
     expect(refusal).toBeInstanceOf(RemoteHostApiError);
     expect(refusal).toMatchObject({ code: 'BUSY' });
-    expect((refusal as Error).message).toMatch(/already running/iu);
+    expect((refusal as Error).message).toMatch(/is busy/iu);
   });
 
   /*
@@ -68,7 +68,9 @@ describe('remote host runtime environment', () => {
 
     expect(refusal).toBeInstanceOf(RemoteHostApiError);
     expect(refusal).toMatchObject({ code: 'CLOUD_HOST_UNAVAILABLE' });
-    expect((refusal as Error).message).toBe("Tau Cloud is unavailable: Unable to find image 'tau-host:latest' locally");
+    expect((refusal as Error).message).toBe(
+      "Couldn’t start the cloud agent: Unable to find image 'tau-host:latest' locally",
+    );
   });
 
   /* Nest's generic status phrase is not a reason: every other refusal's `error`

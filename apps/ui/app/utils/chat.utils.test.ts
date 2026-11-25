@@ -10,7 +10,7 @@ import {
   serializeTranscript,
   stampMessageCreatedAt,
 } from '#utils/chat.utils.js';
-import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { RequestTerminationCause } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import { clearLedger, recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { metaConfig } from '#constants/meta.constants.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
@@ -778,7 +778,7 @@ describe('serializeMessage', () => {
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (large object not on this device yet): models/part.step\n</tool_result>',
+        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (still downloading): models/part.step\n</tool_result>',
       );
     });
 
@@ -917,6 +917,39 @@ describe('serializeMessage', () => {
       ]);
       expect(serializeMessage(message)).toBe(
         `<tool_call name="evaluate_model">\ntargetFile: main.ts\n</tool_call>\n<tool_result>\nStatus: ready\n${line}\n</tool_result>`,
+      );
+    });
+
+    it.each<[string, Pick<EvaluateModelOutput, 'build' | 'tessellation'>, string]>([
+      [
+        'a computed build and the meshes kept',
+        {
+          build: {
+            reused: false,
+            elapsed: 7735.4,
+            operations: { reused: 412, computed: 108 },
+            costliest: [
+              { operation: 'Shape.fillet', elapsed: 2100.5, calls: 12 },
+              { operation: 'Shape.cut', elapsed: 300, calls: 4 },
+            ],
+          },
+          tessellation: { triangles: 12, vertices: 8, elapsed: 3, meshes: { reused: 30, computed: 4 } },
+        },
+        'Build: computed, 7735 ms; operations 412 reused, 108 computed; costliest Shape.fillet 2101 ms (12 calls), Shape.cut 300 ms (4 calls)\nMesh: 12 triangles, 8 vertices, 3 ms\nMeshes: 30 reused, 4 computed',
+      ],
+      ['a reused build', { build: { reused: true, elapsed: 6.2 } }, 'Build: reused, 6 ms'],
+    ])('serializes the evaluate_model build report of %s', (_case, output, lines) => {
+      const message = baseMessage([
+        {
+          type: 'tool-evaluate_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready', ...output },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        `<tool_call name="evaluate_model">\ntargetFile: main.ts\n</tool_call>\n<tool_result>\nStatus: ready\n${lines}\n</tool_result>`,
       );
     });
 

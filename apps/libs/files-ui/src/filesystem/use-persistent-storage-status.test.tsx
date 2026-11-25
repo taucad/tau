@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
-import type { PersistentStorageStatus } from '#filesystem/handle-store.js';
+import type { PersistentStorageStatus } from '@taucad/ui-core/types/persistent-storage.types';
 
 const state = vi.hoisted(() => ({
   status: 'best-effort' as PersistentStorageStatus,

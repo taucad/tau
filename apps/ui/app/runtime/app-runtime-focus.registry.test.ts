@@ -11,7 +11,10 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import type { FocusAccessAnswer } from '#machines/focus.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
-import { createSessionsRegistryLogic } from '#services/sessions-store.js';
+import { createSessionsOpenAhead, createSessionsRegistryLogic } from '#services/sessions-store.js';
+import type { SessionRevisionsAheadModule } from '#services/sessions-store.js';
+import type { SessionRevisionsAheadInput } from '#runtime/session-revisions.js';
+import { openAheadPorts } from '#runtime/app-runtime.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
@@ -195,4 +198,102 @@ it("should keep focus's open waiting through a refused budget close, so the pers
     expect(registry.getSnapshot().context.refs['p2']).toBeDefined();
   });
   expect(registry.getSnapshot().context.refs['p1']).toBeUndefined();
+});
+
+/*
+ * STO-25 SP6: the click's early open, over the app runtime's own view of a real focus and registry (`openAheadPorts`).
+ * A renamed focus tag or answer shape would otherwise switch off these releases unseen.
+ */
+const startOpenAhead = (registry: ReturnType<typeof createRegistry>, host: ReturnType<typeof startFocusHost>) => {
+  const released: string[] = [];
+  const module = {
+    openRevisionsAheadOfSession: () => (input: SessionRevisionsAheadInput) => () => {
+      released.push(input.projectId);
+    },
+    createSessionRevisionsAheadPorts: () => ({}),
+  } as unknown as SessionRevisionsAheadModule;
+  const openAhead = createSessionsOpenAhead({
+    loadRevisions: async () => module,
+    worker: () => ({ name: 'shared-worker' }) as unknown as Worker,
+    desktop: false,
+    ...openAheadPorts(host.focus, registry),
+  });
+  return { openAhead, released };
+};
+
+it("should release the click's early open when the person declines the budget's choice (STO-25 SP6)", async () => {
+  const opener = sessionRuntimeOpenerStandIn();
+  const registry = createRegistry(opener);
+  const host = startFocusHost({
+    sessions: registry,
+    library: { routeAccess: async (id) => ready(id), epoch: () => 0, onEpochChanged: () => () => undefined },
+    loadModule: async () => undefined,
+  });
+  cleanups.push(() => {
+    host.stop();
+    registry.stop();
+  });
+  const route = (serial: number, projectId: string): void => {
+    host.focus.send({
+      type: 'routeRequested',
+      requestId: `route:${serial}`,
+      slugs: { workspaceSlug: 'ws', projectSlug: projectId },
+      projectId,
+    });
+  };
+  route(1, 'p1');
+  await vi.waitFor(() => {
+    expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
+  });
+  await flushTasks();
+  /* Project p1 cannot close (unsaved drafts), so the one-project budget asks the person about p2. */
+  opener.latest('p1')?.refuse('unsaved parameter drafts');
+  const { openAhead, released } = startOpenAhead(registry, host);
+  openAhead({ projectId: 'p2', slugs: { workspaceSlug: 'ws', projectSlug: 'p2' } });
+  route(2, 'p2');
+  await vi.waitFor(() => {
+    expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
+  });
+  await flushTasks();
+  expect(released).toStrictEqual([]);
+
+  /* *Not now*: focus settles on p2 with the reopen offer and no session for it. */
+  registry.send({ type: 'cancelPendingOpen' });
+  await flushTasks();
+  expect(host.focus.getSnapshot().hasTag('focused')).toBe(true);
+  expect(registry.getSnapshot().context.refs['p2']).toBeUndefined();
+  expect(released).toStrictEqual(['p2']);
+});
+
+it("should release the click's early open when focus holds the project on an answer that opens nothing (STO-25 SP6)", async () => {
+  const registry = createRegistry(sessionRuntimeOpenerStandIn());
+  const host = startFocusHost({
+    sessions: registry,
+    /* The access check fails: focus holds the project, as it holds a session start that failed. */
+    library: {
+      routeAccess: async () => ({ status: 'error', message: 'Tau could not check this project. Try again.' }),
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  cleanups.push(() => {
+    host.stop();
+    registry.stop();
+  });
+  const { openAhead, released } = startOpenAhead(registry, host);
+  openAhead({ projectId: 'p3', slugs: { workspaceSlug: 'ws', projectSlug: 'p3' } });
+  /* The session module has loaded and the connection is open before the route is heard. */
+  await flushTasks();
+  host.focus.send({
+    type: 'routeRequested',
+    requestId: 'route:1',
+    slugs: { workspaceSlug: 'ws', projectSlug: 'p3' },
+    projectId: 'p3',
+  });
+  await vi.waitFor(() => {
+    expect(host.focus.getSnapshot().hasTag('held')).toBe(true);
+  });
+  await flushTasks();
+  expect(released).toStrictEqual(['p3']);
 });

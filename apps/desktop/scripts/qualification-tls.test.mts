@@ -386,24 +386,32 @@ const main = async (): Promise<void> => {
           });
         }
         assert.equal(name, 'certutil');
-        assert.equal(args[0], '-user');
-        assert.equal(args[2], 'Root');
-        if (args[1] === '-addstore') {
-          windowsFingerprint = new X509Certificate(readFileSync(args[3]!)).fingerprint.replaceAll(':', '');
+        // CurrentUser Root (`-user`) raises a modal security warning that a hosted runner cannot answer, so the
+        // spawn hangs until its timeout; the elevated LocalMachine Root store accepts the same root silently.
+        const [verb, store, operand, ...extra] = args;
+        assert.equal(store, 'Root', 'Windows trust targets the elevated LocalMachine Root store, never `-user`');
+        assert.deepEqual(extra, []);
+        if (verb === '-addstore') {
+          windowsFingerprint = new X509Certificate(readFileSync(operand!)).fingerprint.replaceAll(':', '');
           throw new Error('Windows import reported failure after mutation');
         }
-        if (args[1] === '-store') {
+        if (verb === '-store') {
           return `Cert Hash(sha1): ${windowsFingerprint}`;
         }
-        if (args[1] === '-delstore') {
-          assert.equal(args[3], windowsFingerprint);
+        if (verb === '-delstore') {
+          assert.equal(operand, windowsFingerprint);
           windowsFingerprint = '';
           return '';
         }
         throw new Error('Unexpected Windows trust command');
       },
     };
-    await assert.rejects(prepareQualificationTls(windows, windowsOwner), AggregateError);
+    await assert.rejects(prepareQualificationTls(windows, windowsOwner), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(String(error.errors[0]), /Windows import reported failure after mutation/u);
+      assert.equal(error.errors.length, 1, 'rollback removed the imported machine root');
+      return true;
+    });
     assert.equal(windowsFingerprint, '');
     await cleanupQualificationTls(windows, windowsOwner);
     console.log(

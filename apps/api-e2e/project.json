@@ -42,7 +42,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/api-e2e",
-        "command": "../../node_modules/.bin/vitest run --config src/git/project-deletion-race.vitest.config.ts --maxWorkers=2",
+        "command": "vitest run --config src/git/project-deletion-race.vitest.config.ts --maxWorkers=2",
         "env": {
           "TAU_E2E_EXTERNAL_SERVICES": "true",
           "TAU_E2E_COMPLETED_ARTIFACT": "true"
@@ -58,7 +58,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/api-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.deletion.config.ts --maxWorkers=2",
+        "command": "vitest run --config vitest.deletion.config.ts --maxWorkers=2",
         "env": {
           "TAU_E2E_EXTERNAL_SERVICES": "true",
           "TAU_E2E_COMPLETED_ARTIFACT": "true"

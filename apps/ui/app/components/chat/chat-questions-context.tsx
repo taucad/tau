@@ -3,8 +3,8 @@ import { Topic } from '@taucad/events';
 import type { Ask } from '@taucad/chat';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useChatContext } from '#hooks/use-chat.js';
-import { useChatQuestions } from '#hooks/use-chat-questions.js';
-import type { ChatQuestions } from '#hooks/use-chat-questions.js';
+import { useChatQuestions } from '@taucad/chat-surfaces/hooks/use-chat-questions';
+import type { ChatQuestions } from '@taucad/chat-surfaces/hooks/use-chat-questions';
 
 /** Which asks have a card on screen now; the tray shows the rest (agent questions blueprint D8). */
 type OnScreenStore = {

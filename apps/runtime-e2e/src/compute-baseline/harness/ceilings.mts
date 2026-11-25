@@ -29,7 +29,7 @@ const analyseRun = (report: any, label: string) => {
       'kernel.mesh',
       'kernel.bundle',
       'kernel.select',
-      'session.open',
+      'native.solve',
     ]
       .map(
         (name) =>

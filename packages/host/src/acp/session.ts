@@ -96,7 +96,10 @@ import { grokPromptUsageOf, grokVendorCostOf } from '#acp/grok-usage.js';
 import type { GrokPromptUsage } from '#acp/grok-usage.js';
 import { initialGrokNotificationState, grokNotificationAfter, finishGrokPresentation } from '#acp/grok-presentation.js';
 import type { GrokPresentation } from '#acp/grok-presentation.js';
+import { acpAdapterEnvironment } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
+import { resolveAcpAdapterExecutable } from '#acp/locate.js';
+import type { AcpExecutableFileSystem } from '#acp/locate.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
 import { seemsBinary } from '@taucad/filesystem/content-metadata';
@@ -713,6 +716,90 @@ export const loginOf = (
     kind: 'external-agent-login',
     agentId: adapter.id,
     authMethods: [...(first ? [first] : []), ...advertised.filter((method) => method !== serving)],
+  };
+};
+
+/**
+ * Session variables a sign-in CLI needs to hand its page to the default browser.
+ *
+ * Linux's `xdg-open` finds the desktop session through these; the adapter
+ * itself never opens a browser, so its allowlist does not carry them. None
+ * names a credential.
+ */
+const acpLoginBrowserEnvironment: readonly string[] = ['DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS'];
+
+/**
+ * What Tau's sign-in tab starts for one agent: its own CLI, never a shell (ACP agent policy rule 10).
+ *
+ * @public
+ */
+export type AcpLoginLaunch = {
+  /** Absolute path of the agent's CLI, the same file its adapter runs. */
+  readonly file: string;
+  /** The profile's `loginArgs`, exactly as the CLI receives them. */
+  readonly args: readonly string[];
+  /** The adapter's own environment, plus the browser-session variables. */
+  readonly env: NodeJS.ProcessEnv;
+  /**
+   * The command the login card shows, shown before the user presses Enter: the bare login command for a CLI on
+   * `PATH`, the quoted absolute path for one found outside it (D10). `file` is what runs either way.
+   */
+  readonly commandLine: string;
+};
+
+/**
+ * The agent's own sign-in, as a structured launch rather than a shell line.
+ *
+ * The CLI is located again first, so a file that moved or vanished since
+ * discovery is found anew or refused (ACP agent policy rule 4), and the
+ * environment is the one {@link acpAdapterEnvironment} gives the adapter, so the
+ * login lands in the configuration directory the agent reads. Tau reads no
+ * variable value here; it forwards names.
+ *
+ * @param adapter - A discovered adapter.
+ * @param options - Environment, platform and file system; this process's by default.
+ * @returns The launch, or `undefined` when the profile declares no `loginArgs`.
+ * @throws An error with `code: 'CLI_NOT_FOUND'` when the CLI is no longer anywhere it is searched for.
+ * @public
+ */
+export const acpLoginLaunch = (
+  adapter: AcpAdapter,
+  options: {
+    readonly environment?: NodeJS.ProcessEnv | undefined;
+    readonly platform?: NodeJS.Platform | undefined;
+    readonly fileSystem?: AcpExecutableFileSystem | undefined;
+  } = {},
+): AcpLoginLaunch | undefined => {
+  if (adapter.loginArgs === undefined || adapter.cli === undefined) {
+    return undefined;
+  }
+  /* Treated as a fallback so a PATH file that vanished is searched for again too. */
+  const resolved = resolveAcpAdapterExecutable(
+    adapter.executablePath === undefined ? adapter : { ...adapter, executableSource: 'fallback' },
+    options,
+  );
+  const file = resolved.executablePath;
+  if (file === undefined) {
+    return undefined;
+  }
+  const base = options.environment ?? process.env;
+  const env = acpAdapterEnvironment(base, resolved);
+  /* The CLI is its own program, never this process's runtime. */
+  delete env['ELECTRON_RUN_AS_NODE'];
+  for (const name of acpLoginBrowserEnvironment) {
+    if (base[name] !== undefined) {
+      env[name] = base[name];
+    }
+  }
+  const platform = options.platform ?? process.platform;
+  /* The card names the CLI by where discovery found it; a file found anew names where it was found. */
+  const executableSource = file === adapter.executablePath ? adapter.executableSource : resolved.executableSource;
+  const shown = cliLoginCommandOf({ ...resolved, executableSource }, { platform, execPath: process.execPath });
+  return {
+    file,
+    args: adapter.loginArgs,
+    env,
+    commandLine: shown ?? shellCommandLine(file, adapter.loginArgs, platform),
   };
 };
 

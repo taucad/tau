@@ -11,7 +11,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
-import { projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 /**
  * Where the run holding the files is. `background` is a window the browser froze, so the run cannot finish until it

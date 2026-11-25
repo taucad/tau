@@ -130,14 +130,11 @@ export const killPhases = [
 export const killClasses = ['foreground', 'background', 'unknown'] as const;
 /** Viewer graphics backends. @public */
 export const viewerBackends = ['webgl', 'webgpu'] as const;
-/** Limit ids that keep their numbers on the wire; any other id is sent as `_OTHER` alone. @public */
-export const runtimeLimitIds = [
-  'occt.export.triangles',
-  'mesh.export.triangles',
-  'host.utility.resident',
-  'picovoxel.tape.instructions',
-  'geospec.work.units',
-] as const;
+/**
+ * Limit ids that keep their numbers on the wire; any other id is sent as `_OTHER` alone. Each id has a producer:
+ * Electron main's resident-memory kill, PicoVoxel's SDF tape refusal and GeoSpec's work-unit budget. @public
+ */
+export const runtimeLimitIds = ['host.utility.resident', 'picovoxel.tape.instructions', 'geospec.work.units'] as const;
 /** Units a limit may carry with numbers. @public */
 export const runtimeLimitUnits = [
   'By',

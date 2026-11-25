@@ -70,13 +70,16 @@ export type AdmissionRefusalReport = Readonly<{
 
 /**
  * An admission authority that tells `onRefusal` of each request it refuses, then refuses it as before. The refusal
- * thrown, and every answer, is the authority's own; a listener that throws changes neither.
+ * thrown, and every answer, is the authority's own; a listener that throws changes neither. The shared store wraps
+ * its own authority with it; a host that builds its machine host over its own authority (the desktop services host)
+ * wraps that one (T19).
  *
  * @param authority - The authority.
  * @param onRefusal - Told the code and the refused session's actor kind.
  * @returns The observed authority.
+ * @public
  */
-const observedAdmission = (
+export const observeAdmissionRefusals = (
   authority: HostAdmissionAuthority,
   onRefusal: (refusal: AdmissionRefusalReport) => void,
 ): HostAdmissionAuthority => {
@@ -130,7 +133,9 @@ export const openSharedMachineHost = async (
   const identity = await openMachineHostIdentity(storeRoot);
   const authority = createHostAdmissionAuthority({ hostId: identity.hostId });
   const admission =
-    options.onAdmissionRefusal === undefined ? authority : observedAdmission(authority, options.onAdmissionRefusal);
+    options.onAdmissionRefusal === undefined
+      ? authority
+      : observeAdmissionRefusals(authority, options.onAdmissionRefusal);
   let host: NodeMachineHost;
   try {
     host = await createNodeMachineHost({

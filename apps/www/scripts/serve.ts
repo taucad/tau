@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequestHandler } from 'react-router';
 import type { ServerBuild } from 'react-router';
 
-// Local production verification server. Netlify runs the adapter's function in deployment.
-const serverUrl = new URL('../build/server/server-build.js', import.meta.url);
+// Local production verification server. Netlify runs the adapter's function in deployment, which imports the same
+// React Router server build (`build/server/index.js`, the Environment API build's single entry; adapter 4.x).
+const serverUrl = new URL('../build/server/index.js', import.meta.url);
 const build = (await import(serverUrl.href)) as ServerBuild;
 const handleRequest = createRequestHandler(build, 'production');
 const root = resolve(fileURLToPath(new URL('../build/client/', import.meta.url)));

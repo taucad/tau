@@ -328,6 +328,28 @@ describe('remoteMachine', () => {
 
     expect(actor.getSnapshot().matches('retrying')).toBe(true);
     expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'failed', error: 'config unreadable' });
+    /* Whether a remote is recorded is still not known: readiness keeps a project with no head unknown (I7). */
+    expect(selectRemoteFacet(actor.getSnapshot()).reading).toBe(true);
+    actor.stop();
+  });
+
+  it('says the remotes list is still being read until its read settles (I7)', async () => {
+    let answer: ((output: RemoteReadActorOutput) => void) | undefined;
+    const readRemote: RemoteActors['readRemote'] = createAsyncLogic({
+      run: async (): Promise<RemoteReadActorOutput> =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const { actor } = start({ readRemote });
+    await settle();
+
+    expect(actor.getSnapshot().matches('reading')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ kind: 'none', phase: 'none', reading: true });
+    answer?.({ remote: undefined });
+    await settle();
+    expect(actor.getSnapshot().matches('none')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).not.toHaveProperty('reading');
     actor.stop();
   });
 
@@ -707,7 +729,7 @@ describe('remoteMachine', () => {
       initialSync: createAsyncLogic({
         run: async (): Promise<RemoteInitialSyncActorOutput> => ({
           overQuota: ['models/bracket.step'],
-          message: 'This project is over its storage plan.',
+          message: 'This project doesn’t fit in its backup.',
           storage: { remainingBytes: 0, shortfallBytes: 5_242_880 },
         }),
       }),
@@ -728,7 +750,7 @@ describe('remoteMachine', () => {
     });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },
-      { type: 'toast.error', message: 'This project is over its storage plan.' },
+      { type: 'toast.error', message: 'This project doesn’t fit in its backup.' },
     ]);
     actor.stop();
   });
@@ -932,7 +954,7 @@ describe('remoteMachine', () => {
             throw new RevisionPortError(
               // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the table names real codes.
               refusal.code as RevisionPortErrorCode,
-              'Syncing files to Tau Cloud is a paid plan feature.',
+              'Syncing files to the cloud is a paid plan feature.',
             );
           },
         }),
@@ -950,7 +972,7 @@ describe('remoteMachine', () => {
         reason: refusal.reason,
       });
       /* The sentence is still the server's own, untouched (N4). */
-      expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+      expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
       actor.stop();
     }
   });
@@ -1327,7 +1349,7 @@ describe('remoteMachine', () => {
           run: async ({ input }): Promise<void> => {
             expect(input.kind).toBe('tau');
             await Promise.resolve();
-            throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+            throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to the cloud is a paid plan feature.');
           },
         }),
       });

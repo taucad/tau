@@ -7,7 +7,16 @@
 // The flagship benchmark subject: ~10^5 lattice beams (20,000 z-samples with
 // fin bursts), boolean assembly, and the full finishing family (offset,
 // fillet, smoothen, projectZSlice). Viewer previews/screenshots are dropped;
-// C# mutating voxel calls map to the pure copy-first facade. The `authorMs`
+// C# mutating voxel calls map to the pure copy-first facade.
+//
+// Every intermediate is freed at its last use, which is what lets the part
+// build at 0.38 mm and finer inside the 4 GiB wasm32 heap (research run
+// 2026-11-16, lane K1: the undisposed build fails at 0.38 mm, the disposed one
+// completes 0.30 mm). Each kernel stage runs inside `pk.scope()`, so whatever
+// a stage builds on the way (lattices, boxes, partial unions) is freed when
+// it returns; across stages, a grid used for the last time is the receiver of
+// a `{ consume: true }` call or is disposed right after. The output bytes are
+// those of the undisposed build. The `authorMs`
 // stopwatch accumulates pure-JS authoring time (lattice/point loops) so the
 // benchmark can report the authoring-vs-kernel phase split.
 
@@ -79,17 +88,27 @@ export class HelixHeatX {
 
   /** C# `voxConstruct` — the whole assembly; screenshots dropped. */
   voxConstruct(): Voxels {
+    const consume = { consume: true } as const;
+    const drop = (...objects: Voxels[]) => {
+      for (const object of objects) object.dispose();
+    };
+
     const hotCornerFins = this.measureKernel('turning-fins.hot', () => this.turningFins('hot'));
     const coolCornerFins = this.measureKernel('turning-fins.cool', () => this.turningFins('cool'));
-    const allCornerFins = this.measureKernel('corner-fins.union', () => hotCornerFins.union(coolCornerFins));
+    const allCornerFins = this.measureKernel('corner-fins.union', () =>
+      hotCornerFins.union(coolCornerFins, consume),
+    );
+    drop(coolCornerFins);
 
     const hotStraightFins = this.measureKernel('straight-fins.hot', () => this.straightFins('hot'));
     const coolStraightFins = this.measureKernel('straight-fins.cool', () => this.straightFins('cool'));
     const allStraightFins = this.measureKernel('straight-fins.union', () =>
-      hotStraightFins.union(coolStraightFins),
+      hotStraightFins.union(coolStraightFins, consume),
     );
+    drop(coolStraightFins);
 
-    const fins = this.measureKernel('fins.union', () => allCornerFins.union(allStraightFins));
+    const fins = this.measureKernel('fins.union', () => allCornerFins.union(allStraightFins, consume));
+    drop(allStraightFins);
 
     const structure = this.measureKernel('outer-structure.create', () => this.outerStructure());
 
@@ -102,60 +121,99 @@ export class HelixHeatX {
     const hotFluidVoid = this.measureKernel('hot-fluid-void.subtract', () =>
       hot.innerVolume.subtract(coolInner),
     );
+    drop(coolInner);
     const hotInner = this.measureKernel('hot-inner.offset', () =>
-      hot.innerVolume.offset({ distance: this.wallThickness }),
+      hot.innerVolume.offset({ distance: this.wallThickness, consume: true }),
     );
     const coolFluidVoid = this.measureKernel('cool-fluid-void.subtract', () =>
-      cool.innerVolume.subtract(hotInner),
+      cool.innerVolume.subtract(hotInner, consume),
     );
+    drop(hotInner);
 
-    const innerVolume = this.measureKernel('inner-volume.union', () => hotFluidVoid.union(coolFluidVoid));
-    const splitters = this.measureKernel('splitters.union', () => hot.splitters.union(cool.splitters));
+    const innerVolume = this.measureKernel('inner-volume.union', () =>
+      hotFluidVoid.union(coolFluidVoid, consume),
+    );
+    drop(coolFluidVoid);
+    const splitters = this.measureKernel('splitters.union', () =>
+      hot.splitters.union(cool.splitters, consume),
+    );
+    drop(cool.splitters);
     let outerVolume = this.measureKernel('outer-volume.offset', () => innerVolume.offset({ distance: 0.9 }));
 
     // '-v2': the stage no longer builds the preview-only thread cutters (see flange()),
     // so its timings are a new series, not a step change in the old one.
     const { flange, screwHoles } = this.measureKernel('flange.create-v2', () => this.flange());
 
-    const filletedFlange = this.measureKernel('finished-flange.fillet', () => flange.fillet({ rounding: 5 }));
+    const filletedFlange = this.measureKernel('finished-flange.fillet', () =>
+      flange.fillet({ rounding: 5, consume: true }),
+    );
     const finishedFlange = this.measureKernel('finished-flange.smoothen', () =>
-      filletedFlange.smoothen({ distance: 0.5 }),
+      filletedFlange.smoothen({ distance: 0.5, consume: true }),
     );
 
-    outerVolume = this.measureKernel('outer-volume.union-flange', () => outerVolume.union(finishedFlange));
+    outerVolume = this.measureKernel('outer-volume.union-flange', () =>
+      outerVolume.union(finishedFlange, consume),
+    );
+    drop(finishedFlange);
     const ioSupports = this.measureKernel('io-supports.create', () => this.ioSupports());
-    outerVolume = this.measureKernel('outer-volume.union-supports', () => outerVolume.union(ioSupports));
-    outerVolume = this.measureKernel('outer-volume.fillet', () => outerVolume.fillet({ rounding: 5 }));
-    outerVolume = this.measureKernel('outer-volume.smoothen', () => outerVolume.smoothen({ distance: 0.5 }));
+    outerVolume = this.measureKernel('outer-volume.union-supports', () =>
+      outerVolume.union(ioSupports, consume),
+    );
+    drop(ioSupports);
+    outerVolume = this.measureKernel('outer-volume.fillet', () =>
+      outerVolume.fillet({ rounding: 5, consume: true }),
+    );
+    outerVolume = this.measureKernel('outer-volume.smoothen', () =>
+      outerVolume.smoothen({ distance: 0.5, consume: true }),
+    );
 
     outerVolume = this.measureKernel('centre-piece.add', () => this.withCentrePiece(outerVolume));
 
-    outerVolume = this.measureKernel('outer-volume.union-structure', () => outerVolume.union(structure));
+    outerVolume = this.measureKernel('outer-volume.union-structure', () =>
+      outerVolume.union(structure, consume),
+    );
+    drop(structure);
     outerVolume = this.measureKernel('outer-volume.subtract-screw-holes', () =>
-      outerVolume.subtract(screwHoles),
+      outerVolume.subtract(screwHoles, consume),
     );
+    drop(screwHoles);
+    const unprojected = outerVolume;
     outerVolume = this.measureKernel('outer-volume.project-z-slice', () =>
-      outerVolume.projectZSlice({ startZ: 4, endZ: -4 }),
+      unprojected.projectZSlice({ startZ: 4, endZ: -4 }),
     );
+    drop(unprojected);
     const printWeb = this.measureKernel('print-web.create', () => this.printWeb());
-    outerVolume = this.measureKernel('outer-volume.subtract-print-web', () => outerVolume.subtract(printWeb));
+    outerVolume = this.measureKernel('outer-volume.subtract-print-web', () =>
+      outerVolume.subtract(printWeb, consume),
+    );
+    drop(printWeb);
 
-    let result = this.measureKernel('result.subtract-inner-volume', () => outerVolume.subtract(innerVolume));
-    result = this.measureKernel('result.union-fins', () => result.union(fins));
-    result = this.measureKernel('result.union-splitters', () => result.union(splitters));
-    result = this.measureKernel('result.intersect-bounding', () => result.intersect(this.voxBounding));
+    let result = this.measureKernel('result.subtract-inner-volume', () =>
+      outerVolume.subtract(innerVolume, consume),
+    );
+    drop(innerVolume);
+    result = this.measureKernel('result.union-fins', () => result.union(fins, consume));
+    drop(fins);
+    result = this.measureKernel('result.union-splitters', () => result.union(splitters, consume));
+    drop(splitters);
+    result = this.measureKernel('result.intersect-bounding', () =>
+      result.intersect(this.voxBounding, consume),
+    );
 
     const threads = this.measureKernel('io-threads.create', () => this.ioThreads());
-    result = this.measureKernel('result.union-threads', () => result.union(threads));
+    result = this.measureKernel('result.union-threads', () => result.union(threads, consume));
+    drop(threads);
     const ioCuts = this.measureKernel('io-cuts.create', () => this.ioCuts());
-    result = this.measureKernel('result.subtract-io-cuts', () => result.subtract(ioCuts));
+    result = this.measureKernel('result.subtract-io-cuts', () => result.subtract(ioCuts, consume));
+    drop(ioCuts);
     return result;
   }
 
   private measureKernel<T>(stage: string, run: () => T): T {
     const authorBefore = this.authorMs;
     const started = performance.now();
-    const result = run();
+    // Whatever the stage creates on the way is freed when it returns.
+    const result = this.pk.scope(run);
     const authorMs = this.authorMs - authorBefore;
     this.timingRecords.push({ stage, ms: Math.max(0, performance.now() - started - authorMs) });
     return result;
@@ -177,7 +235,7 @@ export class HelixHeatX {
 
   private withCentrePiece(outerVolume: Voxels): Voxels {
     const firstBox = new BaseBox(this.centreBottomFrame, 100, 20, 2);
-    return outerVolume.union(firstBox.voxConstruct(this.pk));
+    return outerVolume.union(firstBox.voxConstruct(this.pk), { consume: true });
   }
 
   // ── InternalFins.cs ────────────────────────────────────────────────────────

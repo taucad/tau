@@ -274,6 +274,42 @@ describe('startDesktopUpdater', () => {
   });
 });
 
+/* W9 R6: a check that fails while this computer is offline is postponed quietly, not reported as a failure. */
+describe('offline checks', () => {
+  it('should postpone a check that fails while offline: quiet, no failure, no retry', async () => {
+    const log = vi.fn();
+    const retry = vi.fn();
+    const updater = startDesktopUpdater(
+      options({
+        log,
+        retry,
+        isOnline: () => false,
+        fetchJson: vi.fn(async () => {
+          throw new Error('net::ERR_INTERNET_DISCONNECTED');
+        }),
+      }),
+    );
+    expect(await updater.check()).toBeUndefined();
+    expect(updater.snapshot().phase).toBe('offline');
+    expect(retry).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalledWith('warn', 'updater.error', expect.anything());
+    expect(log).toHaveBeenCalledWith('info', 'updater.postponed', expect.objectContaining({ reason: 'offline' }));
+  });
+
+  it('should still report a failed check while online', async () => {
+    const updater = startDesktopUpdater(
+      options({
+        isOnline: () => true,
+        fetchJson: vi.fn(async () => {
+          throw new Error('update feed answered 500');
+        }),
+      }),
+    );
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('error');
+  });
+});
+
 describe('staging and restart safety', () => {
   it('should enable staging without ever accepting production metadata', async () => {
     const config = options({

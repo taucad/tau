@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Browser acceptance shares the application's native-module aliases.
@@ -14,7 +15,7 @@ import { uiResolveAlias } from '../../vite.config.js';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tauRuntime()],
   resolve: { alias: uiResolveAlias },
   // Vite's optimizer hash excludes entries; keep this suite's pre-bundle separate from other browser configs.
@@ -53,6 +54,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
     include: ['app/hooks/attachment-image.browser.test.ts'],
     fileParallelism: false,
     testTimeout: 60_000,

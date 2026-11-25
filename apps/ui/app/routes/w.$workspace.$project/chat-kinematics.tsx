@@ -6,7 +6,7 @@ import { KinematicsPane } from '@taucad/workbench-panes/kinematics/kinematics-pa
 import type { KinematicsSource, KinematicsUnitStatus } from '@taucad/workbench-panes/kinematics/kinematics-source';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useProject } from '#hooks/use-project.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
 import { subscribeWorkbenchReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
@@ -81,6 +81,6 @@ export function KinematicsPanelBody(props: Parameters<typeof KinematicsPanelBody
   return availability === 'ready' ? (
     <KinematicsPanelBodyContent {...props} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='list' label='Kinematics' />
   );
 }

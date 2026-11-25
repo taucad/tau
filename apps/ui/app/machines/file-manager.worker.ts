@@ -45,11 +45,11 @@ import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extract
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
-import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
-import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
-import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
-import { homeBackendFromWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
+import { populateBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-mount';
+import type { BundledTypesMountEntry, BundledTypesRoot } from '@taucad/editor-ui/lib/bundled-types-mount';
+import { ensureBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-sentinel';
+import { createLazyBundledTypesReads } from '@taucad/editor-ui/lib/bundled-types-lazy';
+import { homeBackendFromWorkerName, isSafeModeWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
 import { listWorkspaceDirectories } from '@taucad/files-ui/machines/file-manager-sync-fs-adapter';
 import {
   createCheckoutRoutes,
@@ -64,11 +64,15 @@ import { createRevisionLoadReporter } from '#machines/revision-load-telemetry.js
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '@taucad/ui-core/lib/worker-timing-report';
 import { createProjectOpenTimer, markProjectOpen } from '@taucad/project-workspace/utils/project-open-timer';
 import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-open-timer';
-import { createRevisionCompute } from '#machines/revision-compute.js';
+import { createRevisionCompute } from '@taucad/revisions-ui/machines/revision-compute';
 import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
 import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
-import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
-import { createNodeFsPortBroker, servicesUnavailableCode } from '#machines/file-manager.worker.node-port.js';
+import { systemSkillsOverlay } from '@taucad/agent-host-ui/workers/system-skills-overlay';
+import {
+  createNodeFsPortBroker,
+  servicesUnavailableCode,
+} from '@taucad/files-ui/machines/file-manager-worker-node-port';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Handshake for the node filesystem backend (desktop only).
@@ -303,8 +307,8 @@ const installBundledTypes = async (): Promise<void> => {
     return;
   }
   const [{ kernelTypePackageMaps }, { authoringTypeMaps }] = await Promise.all([
-    import('@taucad/api-extractor/kernel-types'),
-    import('@taucad/api-extractor/authoring-types'),
+    loadCode(async () => import('@taucad/api-extractor/kernel-types')),
+    loadCode(async () => import('@taucad/api-extractor/authoring-types')),
   ]);
   const outcome = await ensureBundledTypesMount(
     fileService,
@@ -472,6 +476,8 @@ const pushRecorders = new Map<string, PushRecorder>();
 /* STO-25: each open project's open, timed from its root opening to its first usable view. */
 const projectOpenTimers = new Map<string, ProjectOpenTimer>();
 const revisionRegistry = createWorkerRevisionRegistry({
+  /* W9 R5: safe mode, read once from the name the page created this worker with. */
+  safeMode: isSafeModeWorkerName(self.name),
   /*
    * P31: one project, one store.
    *
@@ -557,13 +563,19 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
     projectOpenTimers.delete(projectId);
   },
-  /* STO-25: `first_view` at the applied checkout, `fully_fetched` once its
-   * background large-object fill has written the last placeholder. */
+  /* STO-25: the applied checkout stands for `first_view` when the page has not
+   * said it showed one earlier, and is where the open's cache is known;
+   * `fully_fetched` once its background large-object fill has written the last
+   * placeholder. */
   observeStatus: (projectId, status) => {
     const timer = projectOpenTimers.get(projectId);
     if (timer !== undefined) {
       markProjectOpen(timer, status);
     }
+  },
+  /* STO-25: the page says when a Tau Cloud open's route shows its first view; that is `first_view`. */
+  firstViewShown: (projectId) => {
+    projectOpenTimers.get(projectId)?.firstView();
   },
   /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
   filesystem: (root) => fileService.createRootedFileSystem(root, undefined, { placeholders: 'raw' }),

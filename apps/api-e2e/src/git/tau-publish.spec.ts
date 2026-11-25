@@ -35,7 +35,15 @@ const expectGit = async (args: readonly string[], cwd: string): Promise<string> 
   return result.stdout;
 };
 
-it('should publish a named graph revision through the CLI and serve its bytes to a viewer', async () => {
+/** The link id in `/s/tau~shr_…`, the reference `GET /v1/shares/:shareId` reads. */
+const shareIdOf = (url: string): string => {
+  const slug = decodeURIComponent(new URL(url).pathname.replace(/^\/s\//u, ''));
+  const reference = slug.split('~')[1] ?? '';
+  expect(reference).toMatch(/^shr_[0-9A-Za-z]{21}$/u);
+  return reference;
+};
+
+it('should publish to the project’s stable cloud link through the CLI, keep the link across publishes, and stop sharing', async () => {
   const owner = await seedTauCloudOwner('publish');
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'tau-publish-e2e-'));
   const projectId = gitE2EProjectId();
@@ -86,45 +94,46 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     environment['TAU_AUTH_TOKEN'] = owner.token;
     environment['TAU_API_URL'] = gitE2EApiUrl;
     environment['TAU_CONFIG_DIR'] = join(temporaryRoot, 'tau-config');
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [
-        '--import',
-        oxcRegister,
-        cliEntry,
-        'publish',
-        versionName,
-        '--project',
-        project,
-        '--entry',
-        entryPath,
-        '--public',
-        '--json',
-      ],
-      {
-        cwd: project,
-        encoding: 'utf8',
-        env: environment,
-        maxBuffer: 64 * 1024 * 1024,
-      },
-    );
-    const publishRecord = JSON.parse(stdout) as unknown;
-    expect(publishRecord).toMatchObject({
+    const publishWithCli = async (
+      args: readonly string[],
+    ): Promise<Readonly<{ publicationId: string; url: string; record: unknown }>> => {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ['--import', oxcRegister, cliEntry, 'publish', ...args, '--project', project, '--entry', entryPath, '--json'],
+        {
+          cwd: project,
+          encoding: 'utf8',
+          env: environment,
+          maxBuffer: 64 * 1024 * 1024,
+        },
+      );
+      const record = JSON.parse(stdout) as unknown;
+      if (
+        typeof record !== 'object' ||
+        record === null ||
+        !('publicationId' in record) ||
+        typeof record.publicationId !== 'string' ||
+        !('url' in record) ||
+        typeof record.url !== 'string'
+      ) {
+        throw new Error('tau publish returned no publication id or link');
+      }
+      return { publicationId: record.publicationId, url: record.url, record };
+    };
+
+    const first = await publishWithCli([versionName, '--public']);
+    expect(first.record).toMatchObject({
       v: 1,
       kind: 'publication',
       ok: true,
       status: 'published',
       tag,
+      name: versionName,
+      visibility: 'public',
     });
-    if (
-      typeof publishRecord !== 'object' ||
-      publishRecord === null ||
-      !('publicationId' in publishRecord) ||
-      typeof publishRecord.publicationId !== 'string'
-    ) {
-      throw new Error('tau publish returned no publication id');
-    }
-    const { publicationId } = publishRecord;
+    const { publicationId } = first;
+    /* The link is the project's, `tau~shr_…`, never a version's `tau~pub_…`. */
+    const shareId = shareIdOf(first.url);
 
     const remoteUrl = `${gitE2EApiUrl}/v1/git/${projectId}.git`;
     const remoteAdvertisement = await expectGit(
@@ -149,11 +158,11 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     expect(remoteReferences.get(`refs/tags/${tag}^{}`)).toBe(revisionId);
     expect(remoteReferences.get(`refs/tags/${tag}`)).not.toBe(revisionId);
 
-    const viewer = await fetch(`${gitE2EApiUrl}/v1/publications/${publicationId}`);
+    const viewer = await fetch(`${gitE2EApiUrl}/v1/shares/${shareId}`);
     expect(viewer.status, await viewer.clone().text()).toBe(200);
     const viewerRecord: unknown = await viewer.json();
     expect(viewerRecord).toMatchObject({
-      publication: { projectId, tag, revisionId, visibility: 'public', entryPath },
+      publication: { id: publicationId, projectId, tag, revisionId, visibility: 'public', entryPath },
       viewerRole: 'public',
       manifest: {
         projectId,
@@ -184,6 +193,46 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     );
     expect(served.status, await served.clone().text()).toBe(200);
     expect(await served.text()).toBe(entryBytes);
+
+    /* An old per-version address is not a link. */
+    const statusOf = async (url: string, init?: RequestInit): Promise<number> => {
+      const response = await fetch(url, init);
+      return response.status;
+    };
+    expect(await statusOf(`${gitE2EApiUrl}/v1/shares/${publicationId}`)).toBe(404);
+
+    /* A second publish of a new revision, unnamed: the same link, its setting kept, showing the new version. */
+    await writeFile(join(project, entryPath), 'cube(12);\n', 'utf8');
+    await expectGit(['commit', '-am', 'second revision'], project);
+    const secondHead = await expectGit(['rev-parse', 'HEAD'], project);
+    const secondRevision = secondHead.trim();
+    const second = await publishWithCli([]);
+    expect(second.url).toBe(first.url);
+    expect(second.record).toMatchObject({ status: 'published', tag: 'v3', visibility: 'public' });
+    const secondName = (second.record as { name?: unknown }).name;
+    expect(typeof secondName === 'string' && secondName.startsWith('Shared ')).toBe(true);
+    const secondView = await fetch(`${gitE2EApiUrl}/v1/shares/${shareId}`);
+    expect(secondView.status, await secondView.clone().text()).toBe(200);
+    const secondRecord: unknown = await secondView.json();
+    expect(secondRecord).toMatchObject({
+      publication: { id: second.publicationId, tag: 'v3', revisionId: secondRevision },
+    });
+
+    /* Stop sharing: the link, a file and the view ping all answer 410 at once. */
+    const stopped = await fetch(`${gitE2EApiUrl}/v1/projects/${projectId}/share`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    expect(stopped.status, await stopped.clone().text()).toBe(204);
+    expect(await statusOf(`${gitE2EApiUrl}/v1/shares/${shareId}`)).toBe(410);
+    expect(
+      await statusOf(
+        `${gitE2EApiUrl}/v1/publications/${second.publicationId}/files?path=${encodeURIComponent(entryPath)}`,
+      ),
+    ).toBe(410);
+    expect(await statusOf(`${gitE2EApiUrl}/v1/publications/${second.publicationId}/views`, { method: 'PATCH' })).toBe(
+      410,
+    );
   } finally {
     await deleteTauCloudOwner(owner);
     await rm(temporaryRoot, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -15,12 +15,17 @@ import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
-const CommunityCardLivePreview = lazy(async () => {
-  const module = await import('#components/community-card-live-preview.js');
-  return { default: module.CommunityCardLivePreview };
-});
+const CommunityCardLivePreview = lazyCode(
+  async () => {
+    const module = await import('#components/community-card-live-preview.js');
+    return { default: module.CommunityCardLivePreview };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 export type CommunityProjectGridProperties = {
   readonly projects: readonly BuiltinProjectCardModel[];

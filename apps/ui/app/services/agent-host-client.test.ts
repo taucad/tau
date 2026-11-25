@@ -126,6 +126,8 @@ class FakeResidentWorker {
   });
 
   public holdNextProvide: Promise<void> | undefined;
+  /** The next provide refuses with this code and registers no host, as a host that failed to open does. */
+  public failNextProvide: string | undefined;
 
   private frozen = false;
   private readonly held: Array<() => void> = [];
@@ -153,6 +155,11 @@ class FakeResidentWorker {
     if (this.errorListener === listener) {
       this.errorListener = undefined;
     }
+  }
+
+  /** A bare Worker `error` event, with neither message nor error: the worker's script did not load (FP10). */
+  public raiseBareError(): void {
+    this.errorListener?.(new Event('error') as ErrorEvent);
   }
 
   /** A Worker `error` event: an uncaught exception in a worker that is still running (D-088). */
@@ -222,6 +229,11 @@ class FakeResidentWorker {
         };
       }
       case 'provide': {
+        const failure = this.failNextProvide;
+        if (failure !== undefined) {
+          this.failNextProvide = undefined;
+          return Promise.reject(Object.assign(new Error('The host did not open.'), { code: failure }));
+        }
         const previous = this.hosts.get(args['projectId'] as string);
         this.hosts.set(args['projectId'] as string, args['hostId'] as string);
         const answer = previous === undefined ? {} : { replaced: previous };
@@ -966,6 +978,92 @@ describe('resident worker death', () => {
   });
 });
 
+/* PL7 staging defects FP10: a worker whose own code failed to load can never load it again, so the page replaces it with
+ * a new worker (a new realm) instead of asking the same worker again; past the bound the failure is the card's. */
+describe('a resident worker whose code failed to load', () => {
+  it('should provide again in a new worker, never in the one whose import failed', async () => {
+    const failed = new FakeResidentWorker();
+    failed.failNextProvide = 'WORKER_LOAD_FAILED';
+    const replacement = new FakeResidentWorker();
+    const workers = [failed, replacement];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(startRun(client, 'chat-load', 'run-1', 'Build.')).resolves.toMatchObject({ status: 'applied' });
+
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(failed.terminate).toHaveBeenCalled();
+    expect(requestsNamed(failed, 'provide')).toHaveLength(1);
+    expect(requestsNamed(replacement, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+
+  it('should retire a worker whose script did not load at once, on its bare error event', async () => {
+    const failed = new FakeResidentWorker();
+    const replacement = new FakeResidentWorker();
+    const workers = [failed, replacement];
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    await startRun(client, 'chat-script', 'run-1', 'Build.');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    failed.raiseBareError();
+
+    expect(failed.terminate).toHaveBeenCalled();
+    await expect(cancelRun(client, 'chat-script', 'run-1')).resolves.toMatchObject({ status: 'applied' });
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    await client.close();
+  });
+
+  it('should stop replacing at the bound and report the code, which the chat shows with Reload', async () => {
+    const workers = Array.from({ length: 4 }, () => {
+      const worker = new FakeResidentWorker();
+      worker.failNextProvide = 'WORKER_LOAD_FAILED';
+      return worker;
+    });
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(startRun(client, 'chat-bound', 'run-1', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    await client.close();
+  });
+
+  it('should start no worker for a later use once the page took the failures over', async () => {
+    const recovery = await import('#lib/worker-realm-recovery.js');
+    const moduleWorker = await import('@taucad/ui-core/lib/worker-factory');
+    const workers = Array.from({ length: 4 }, () => {
+      const worker = new FakeResidentWorker();
+      worker.failNextProvide = 'WORKER_LOAD_FAILED';
+      return worker;
+    });
+    const createWorker = vi.fn(() => workers.shift() as unknown as Worker);
+    const client = createTestClient(createWorker);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    for (let index = 0; index < recovery.workerReplacementBound; index += 1) {
+      recovery.noteWorkerCodeLoadFailure(
+        new moduleWorker.WorkerCodeLoadError('agent-host', new TypeError('Importing a module script failed.')),
+      );
+    }
+
+    await expect(startRun(client, 'chat-later', 'run-1', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+    await expect(startRun(client, 'chat-later', 'run-2', 'Build.')).rejects.toMatchObject({
+      code: 'WORKER_LOAD_FAILED',
+    });
+
+    expect(createWorker).toHaveBeenCalledOnce();
+    recovery.resetWorkerRealmRecovery();
+    await client.close();
+  });
+});
+
 /* RV1-F1, RH-R4, I31: a file-manager reconnect gives each open host fresh bridges; the host and its runs stay. */
 describe('re-brokering project hosts', () => {
   it('should give every open project host fresh bridges under the same host and dispose only the old ones', async () => {
@@ -1046,6 +1144,41 @@ describe('re-brokering project hosts', () => {
     ).toEqual([currentHost]);
     drained.resolve();
     await second.close();
+  });
+
+  /* STO-25 SP6: the worker orders a project's calls, so the page connects once its provide is sent, not answered. */
+  it('should send the connect while its provide is still unanswered, and attach once both answer', async () => {
+    const worker = new FakeResidentWorker();
+    const answered = Promise.withResolvers<void>();
+    worker.holdNextProvide = answered.promise;
+    const client = createTestClient(workerOf(worker));
+    const starting = startRun(client, 'chat-1', 'run-1', 'Build it.');
+
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'connect')).toHaveLength(1);
+    });
+    expect(requestsNamed(worker, 'connect')[0]?.args['hostId']).toBe(
+      requestsNamed(worker, 'provide')[0]?.args['hostId'],
+    );
+    answered.resolve();
+
+    await expect(starting).resolves.toMatchObject({ status: 'applied' });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+
+  /* STO-25 SP6: a connect sent behind a provide that fails is answered `needs`; the provide's error is the connect's. */
+  it("should fail the connect with its provide's error, sending one provide and one connect", async () => {
+    const worker = new FakeResidentWorker();
+    worker.failNextProvide = 'STORAGE_NOT_WRITABLE';
+    const client = createTestClient(workerOf(worker));
+
+    await expect(startRun(client, 'chat-1', 'run-1', 'Build it.')).rejects.toMatchObject({
+      code: 'STORAGE_NOT_WRITABLE',
+    });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    expect(requestsNamed(worker, 'connect')).toHaveLength(1);
+    await client.close();
   });
 
   it('should not let a pending released provide fence a successor during reprovide', async () => {

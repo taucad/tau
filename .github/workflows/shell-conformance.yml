@@ -11,13 +11,15 @@
 #   row never uses `setup-linux-sandbox`, which relaxes that sysctl for the CAD workers.
 # - MAC-A and MAC-X: hosted `macos-26` (arm64) and `macos-26-intel` (x64), Seatbelt through the same
 #   provider. The macOS Terminal rows run with the shipped own-pty Seatbelt rule (operator ruling 2026-11-09).
-# - WIN-ARM is not a row yet: the Windows provider is paused.
+# - WIN-X64: hosted `windows-2025`, the Windows provider over `tau-windows-sandbox.exe` and the fixed-path PowerShell
+#   (`sandbox:test:shell-conformance:windows`), run as an ephemeral standard user after the helper's elevated `setup`.
+#   It runs the `sandbox` rows only. WIN-ARM stays out of scope.
 #
 # Fresh by construction except where reuse is asked for (CF-1): the sandbox, service, host, qualification and Terminal
 # concern targets are cacheable only under the environment fingerprint of `scripts/src/shell-evidence.ts`, which is a
 # fresh nonce unless `TAU_SHELL_EVIDENCE` is `reuse`. Only the merge queue's semantics-tier call and a labelled pull
 # request run ask for reuse; `workflow_dispatch` (including the drift check's) and the candidate gate's call run fresh and still pass
-# `--skip-nx-cache`, `desktop-services-host:test:terminal-conformance` is never cached, and the Linux guests always run fresh. The
+# `--skip-nx-cache`, `desktop-services-host:test:terminal-conformance` is never cached, and the Linux guests and WIN-X64 always run fresh. The
 # stamp step then records each macOS receipt as fresh or as a verdict reused from an Nx hash first proven at another
 # commit, and refuses a reused receipt in a fresh run.
 #
@@ -32,13 +34,12 @@
 # fixed list of names), so the guests stay fresh.
 name: Shell conformance
 
-# Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run in the merge queue
-# when a `ci:shell` project is affected, on demand, when the daily drift check (`drift-check.yml`) sees a
-# runner image or guest package change, and on a pull request only while it carries the `shell-conformance`
-# label. The 02:17 nightly was retired after two green full-tier dispatches (§ 5b of the program's handoff);
-# the watchdog judges the drift check and every candidate's shell gate instead. `release-desktop-staging.yml`
-# calls the rows on the commit it is about to tag, so no desktop candidate exists without five green rows on
-# its own commit.
+# Placement (CI throughput review, operator decision D3 of 2026-11-08): the rows (the five Linux and macOS rows and
+# WIN-X64) run in the merge queue when a `ci:shell` project is affected, on demand, when the daily drift check
+# (`drift-check.yml`) sees a runner image or guest package change, and on a pull request only while it carries the
+# `shell-conformance` label. The 02:17 nightly was retired after two green full-tier dispatches (§ 5b of the program's
+# handoff); the watchdog judges the drift check and every candidate's shell gate instead. `release-desktop-staging.yml`
+# calls the rows on the commit it is about to tag, so no desktop candidate exists without green rows on its own commit.
 #
 # Tiers (shell split blueprint PR 4): a dispatch, the label and the candidate gate pass no
 # `tier` and run the `full` tier, every row and target. The merge queue calls the `semantics` tier from
@@ -179,6 +180,17 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-shell-${{ matrix.row }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # A row with no listed macOS target (a queue run that selected only `native-process-core`, whose rows are
   # Linux-only) is skipped rather than run with an empty receipt directory.
   macos:
@@ -312,3 +324,115 @@ jobs:
           path: out/test-results/shell-conformance/${{ matrix.row }}/
           retention-days: 14
           if-no-files-found: error
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-shell-${{ matrix.row }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # WIN-X64: the Windows provider over `tau-windows-sandbox.exe` and the machine's PowerShell (Q15), on hosted
+  # `windows-2025`. The helper is built from this commit, its elevated `setup` runs once for an ephemeral standard user,
+  # and the suite runs as that user, never elevated (`libs/sandbox/scripts/shell-conformance-windows.ps1`). The row is
+  # the `sandbox` target only, so a queue run that did not list `sandbox` skips it. Always fresh, like the Linux guests:
+  # no remote cache env, `--skip-nx-cache`, and `shell-evidence.ts` has no WIN-X64 fingerprint row, so the target's
+  # runtime input is a fresh nonce. A missing toolchain file, helper, setup or receipt fails a step; nothing skips green.
+  windows:
+    name: Shell conformance on WIN-X64 (windows-2025)
+    needs: select
+    if: >-
+      (github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')) &&
+      contains(fromJSON(needs.select.outputs.projects), 'sandbox')
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TAU_SHELL_CONFORMANCE_ROW: WIN-X64
+      # Always fresh: the Windows row is not a reuse row yet.
+      TAU_SHELL_EVIDENCE: fresh
+      TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}
+    steps:
+      # Digests and the helper build read the bytes Git stores, not a CRLF rewrite of them.
+      - name: Preserve source bytes on Windows
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || '' }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The toolchain the helper crate pins; rustup installs it with its target and components from the file.
+      - name: Install the pinned Rust toolchain
+        working-directory: libs/sandbox/windows-sandbox
+        run: |
+          if (-not (Test-Path -LiteralPath rust-toolchain.toml)) { throw 'libs/sandbox/windows-sandbox/rust-toolchain.toml is missing' }
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install exited $LASTEXITCODE" }
+          rustup show active-toolchain
+          rustc -vV
+
+      - name: Build the Windows sandbox helper
+        if: contains(fromJSON(needs.select.outputs.projects), 'sandbox')
+        timeout-minutes: 20
+        run: |
+          pnpm nx run sandbox:build:windows-sandbox --skip-nx-cache
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $helper = 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe'
+          if (-not (Test-Path -LiteralPath $helper)) { throw "the build produced no $helper" }
+          Get-FileHash -LiteralPath $helper -Algorithm SHA256 | Format-List
+
+      # Elevated, once: the standard user, the installed helper and `setup --for-user <its SID>`.
+      - name: Set up the sandbox for a standard user (elevated)
+        timeout-minutes: 15
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File libs/sandbox/scripts/shell-conformance-windows.ps1 setup
+
+      - name: Run the conformance target as the standard user
+        timeout-minutes: 45
+        env:
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/WIN-X64/receipt.json
+        # The receipt binds `GITHUB_SHA`; a caller's `ref` checks out another commit, so pass the one the row tests.
+        run: |
+          $env:GITHUB_SHA = (git rev-parse HEAD)
+          pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File libs/sandbox/scripts/shell-conformance-windows.ps1 run -TimeoutMinutes 40
+          exit $LASTEXITCODE
+
+      - name: Upload the receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-conformance-WIN-X64
+          path: out/test-results/shell-conformance/WIN-X64/
+          retention-days: 14
+          if-no-files-found: error
+
+      # Whatever happened above: remove the sandbox install, the user and its profile; a failed revoke fails the row.
+      - name: Revoke the sandbox and remove the standard user (elevated)
+        if: always()
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File libs/sandbox/scripts/shell-conformance-windows.ps1 revoke
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-shell-WIN-X64
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

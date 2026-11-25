@@ -324,77 +324,108 @@ internal static class ModelRunner
 
     internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources, out LayoutStability stability)
     {
+        /* D3: the layout holds no per-corner array beyond its own output and two int scratch arrays.
+         * Face vectors and directions are recomputed from the unchanged input wherever they are read,
+         * by the one function that computed them, so every value is bit-identical to storing them; and
+         * edges are grouped per smaller vertex instead of sorted as 64-bit keys with swap buffers. For a
+         * mesh of C corners this keeps about 12 bytes per corner live, where storing faces, directions,
+         * keys and the sort's swap buffers kept about 36. */
+        var sourcePositions = positions;
+        var sourceIndices = indices;
         var minimumArea = float.PositiveInfinity;
         var maximumEdgeSum = 0f;
         var creaseMargin = float.PositiveInfinity;
         var uvAxisMargin = float.PositiveInfinity;
         var vertexCount = positions.Length / 3;
         var creaseCosine = MathF.Cos(MathF.PI / 6);
-        var faces = new Vector3[indices.Length / 3];
-        var directions = new Vector3[faces.Length];
-        var edges = new ulong[indices.Length];
-        var corners = new int[indices.Length];
-        var parents = new int[indices.Length];
-        Array.Fill(parents, -1);
+        // starts[v + 1] counts, then (after the prefix sum) bounds, the corners whose edge's smaller vertex is v.
+        var starts = new int[vertexCount + 1];
         for (var triangle = 0; triangle < indices.Length; triangle += 3)
         {
-            var a = checked((int)indices[triangle]) * 3;
-            var b = checked((int)indices[triangle + 1]) * 3;
-            var c = checked((int)indices[triangle + 2]) * 3;
-            var ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
-            var ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
-            var face = Vector3.Cross(ab, ac);
+            var face = Face(sourcePositions, sourceIndices, triangle / 3, out var ab, out var ac);
             var absolute = Vector3.Abs(face);
             var dominant = MathF.Max(absolute.X, MathF.Max(absolute.Y, absolute.Z));
             var runnerUp = MathF.Max(MathF.Min(absolute.X, absolute.Y), MathF.Min(MathF.Max(absolute.X, absolute.Y), absolute.Z));
             uvAxisMargin = MathF.Min(uvAxisMargin, dominant - runnerUp);
             minimumArea = MathF.Min(minimumArea, face.Length());
             maximumEdgeSum = MathF.Max(maximumEdgeSum, ab.Length() + ac.Length());
-            faces[triangle / 3] = face;
-            directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
             for (var corner = triangle; corner < triangle + 3; corner++)
             {
                 var first = indices[corner];
                 var second = indices[NextCorner(corner)];
-                edges[corner] = first == second ? ulong.MaxValue : ((ulong)Math.Min(first, second) << 32) | Math.Max(first, second);
-                corners[corner] = corner;
+                // Collapsed edges join nothing.
+                if (first != second) starts[Math.Min(first, second)]++;
             }
         }
-
-        // Compact edge adjacency: a linear counting sort, with no scan of a vertex's entire fan.
-        SortEdges(edges, corners, vertexCount);
-        for (var start = 0; start < edges.Length;)
+        for (int vertex = 0, total = 0; vertex <= vertexCount; vertex++)
         {
-            var end = start + 1;
-            while (end < edges.Length && edges[end] == edges[start]) end++;
-            // Boundary, collapsed and nonmanifold edges are shading boundaries. In particular,
-            // do not join an arbitrary pair before discovering a third incident triangle.
-            if (end - start == 2 && edges[start] != ulong.MaxValue)
+            var count = vertex < vertexCount ? starts[vertex] : 0;
+            starts[vertex] = total;
+            total += count;
+        }
+        // Bucket corners by their edge's smaller vertex: starts[v] ends as the end of v's bucket.
+        var corners = new int[indices.Length];
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var first = indices[corner];
+            var second = indices[NextCorner(corner)];
+            if (first != second) corners[starts[Math.Min(first, second)]++] = corner;
+        }
+
+        var parents = new int[indices.Length];
+        Array.Fill(parents, -1);
+        // Within one bucket, corners sharing the larger vertex share the edge. Sorting (larger << 32 | corner)
+        // keys groups them; only an edge with exactly two corners is a smooth candidate. Boundary, collapsed
+        // and nonmanifold edges are shading boundaries: do not join an arbitrary pair before discovering a
+        // third incident triangle. Pairs are read symmetrically and the union-find partition does not depend
+        // on join order, so the bucket order is not observable.
+        var keys = new ulong[16];
+        for (int vertex = 0, start = 0; vertex < vertexCount; start = starts[vertex++])
+        {
+            var count = starts[vertex] - start;
+            if (count < 2) continue;
+            if (keys.Length < count) keys = new ulong[Math.Max(count, keys.Length * 2)];
+            for (var index = 0; index < count; index++)
             {
-                var first = corners[start];
-                var second = corners[start + 1];
-                var dot = Vector3.Dot(directions[first / 3], directions[second / 3]);
-                creaseMargin = MathF.Min(creaseMargin, MathF.Abs(dot - creaseCosine));
-                if (dot >= creaseCosine)
+                var corner = corners[start + index];
+                var larger = Math.Max(indices[corner], indices[NextCorner(corner)]);
+                keys[index] = ((ulong)larger << 32) | (uint)corner;
+            }
+            var bucket = keys.AsSpan(0, count);
+            bucket.Sort();
+            for (var run = 0; run < count;)
+            {
+                var end = run + 1;
+                while (end < count && bucket[end] >> 32 == bucket[run] >> 32) end++;
+                if (end - run == 2)
                 {
-                    var firstEnd = NextCorner(first);
-                    var secondEnd = NextCorner(second);
-                    if (indices[first] == indices[second])
+                    var first = (int)(uint)bucket[run];
+                    var second = (int)(uint)bucket[run + 1];
+                    var dot = Vector3.Dot(Direction(first / 3), Direction(second / 3));
+                    creaseMargin = MathF.Min(creaseMargin, MathF.Abs(dot - creaseCosine));
+                    if (dot >= creaseCosine)
                     {
-                        Join(first, second);
-                        Join(firstEnd, secondEnd);
-                    }
-                    else
-                    {
-                        Join(first, secondEnd);
-                        Join(firstEnd, second);
+                        var firstEnd = NextCorner(first);
+                        var secondEnd = NextCorner(second);
+                        if (indices[first] == indices[second])
+                        {
+                            Join(first, second);
+                            Join(firstEnd, secondEnd);
+                        }
+                        else
+                        {
+                            Join(first, secondEnd);
+                            Join(firstEnd, second);
+                        }
                     }
                 }
+                run = end;
             }
-            start = end;
         }
+        keys = [];
+        starts = [];
 
-        // Reuse the sorted corner buffer as root -> render vertex storage.
+        // Reuse the bucketed corner buffer as root -> render vertex storage.
         Array.Fill(corners, -1);
         var used = new bool[vertexCount];
         var duplicates = new List<int>();
@@ -418,6 +449,10 @@ internal static class ModelRunner
             }
             remapped[corner] = checked((uint)corners[root]);
         }
+        // Release the scratch before the outputs are allocated.
+        corners = [];
+        parents = [];
+        used = [];
         sources = new int[checked(vertexCount + duplicates.Count)];
         for (var vertex = 0; vertex < vertexCount; vertex++) sources[vertex] = vertex;
         if (duplicates.Count > 0)
@@ -433,19 +468,23 @@ internal static class ModelRunner
             }
             positions = expanded;
         }
+        duplicates = [];
         indices = remapped;
         var normals = new float[positions.Length];
         var fanFaces = new int[sources.Length];
         var minimumFanArea = float.PositiveInfinity;
         var maximumFanFaces = 0;
-        for (var corner = 0; corner < indices.Length; corner++)
+        for (var triangle = 0; triangle < indices.Length; triangle += 3)
         {
-            var offset = checked((int)indices[corner]) * 3;
-            var face = faces[corner / 3];
-            fanFaces[offset / 3]++;
-            normals[offset] += face.X;
-            normals[offset + 1] += face.Y;
-            normals[offset + 2] += face.Z;
+            var face = Face(sourcePositions, sourceIndices, triangle / 3, out _, out _);
+            for (var corner = triangle; corner < triangle + 3; corner++)
+            {
+                var offset = checked((int)indices[corner]) * 3;
+                fanFaces[offset / 3]++;
+                normals[offset] += face.X;
+                normals[offset + 1] += face.Y;
+                normals[offset + 2] += face.Z;
+            }
         }
         for (var vertex = 0; vertex < sources.Length; vertex++)
         {
@@ -466,6 +505,12 @@ internal static class ModelRunner
         return normals;
 
         static int NextCorner(int corner) => corner / 3 * 3 + (corner + 1) % 3;
+
+        Vector3 Direction(int triangle)
+        {
+            var face = Face(sourcePositions, sourceIndices, triangle, out _, out _);
+            return face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
+        }
 
         int Find(int corner)
         {
@@ -491,39 +536,16 @@ internal static class ModelRunner
         }
     }
 
-    /*
-     * CH11: orders edge keys (smaller vertex << 32 | larger vertex) ascending, collapsed edges (ulong.MaxValue)
-     * last, as Array.Sort(edges, corners) did, with two stable counting passes: by the larger vertex, then by
-     * the smaller. Equal keys stay adjacent; the order of the corners inside a key may differ from the
-     * comparison sort's, which the pairing below never observes: it reads only pairs, symmetrically, and the
-     * union-find partition does not depend on join order.
-     */
-    internal static void SortEdges(ulong[] edges, int[] corners, int vertexCount)
+    // The unnormalized face vector of one triangle, and its two edges from the first corner. Every
+    // reader of a face goes through here, so a recomputed face is bit-identical to the first.
+    private static Vector3 Face(float[] positions, uint[] indices, int triangle, out Vector3 ab, out Vector3 ac)
     {
-        if (edges.Length < 2) return;
-        var swapEdges = new ulong[edges.Length];
-        var swapCorners = new int[corners.Length];
-        var counts = new int[vertexCount + 2];
-        CountingPass(edges, corners, swapEdges, swapCorners, counts, vertexCount, high: false);
-        Array.Clear(counts);
-        CountingPass(swapEdges, swapCorners, edges, corners, counts, vertexCount, high: true);
-
-        static void CountingPass(ulong[] sourceEdges, int[] sourceCorners, ulong[] targetEdges, int[] targetCorners,
-            int[] counts, int vertexCount, bool high)
-        {
-            // Bucket vertexCount holds collapsed edges, after every vertex bucket.
-            foreach (var edge in sourceEdges) counts[Bucket(edge, vertexCount, high) + 1]++;
-            for (var bucket = 1; bucket < counts.Length; bucket++) counts[bucket] += counts[bucket - 1];
-            for (var index = 0; index < sourceEdges.Length; index++)
-            {
-                var target = counts[Bucket(sourceEdges[index], vertexCount, high)]++;
-                targetEdges[target] = sourceEdges[index];
-                targetCorners[target] = sourceCorners[index];
-            }
-        }
-
-        static int Bucket(ulong edge, int vertexCount, bool high) =>
-            edge == ulong.MaxValue ? vertexCount : (int)(high ? edge >> 32 : edge & uint.MaxValue);
+        var a = checked((int)indices[triangle * 3]) * 3;
+        var b = checked((int)indices[triangle * 3 + 1]) * 3;
+        var c = checked((int)indices[triangle * 3 + 2]) * 3;
+        ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
+        ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
+        return Vector3.Cross(ab, ac);
     }
 
     private static WorkerException RuntimeError(string message) =>

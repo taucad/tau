@@ -56,9 +56,7 @@ export function SharedProjectPassword({
               onPasswordChange(event.target.value);
             }}
           />
-          <p className='text-xs text-muted-foreground'>
-            {sharePasswordLimits.minBytes}–{sharePasswordLimits.maxBytes} UTF-8 bytes required.
-          </p>
+          <p className='text-xs text-muted-foreground'>Use at least {sharePasswordLimits.minBytes} characters.</p>
           {passwordError ? (
             <p id={errorId} className='text-sm text-feature'>
               {passwordError}

@@ -89,6 +89,31 @@ describe('terminal bridge', () => {
     ]);
   });
 
+  it("should carry the person's Set up choice on the open frame, and only that", async () => {
+    const { bridge, answer } = setup();
+    bridge.open(
+      {
+        projectRoot: '/projects/bracket',
+        size: { columns: 80, rows: 24 },
+        setUp: true,
+      },
+      () => undefined,
+    );
+    const host = answer('terminal-1')!;
+    await flush();
+    expect(host.host).toEqual([{ type: 'open', size: { columns: 80, rows: 24 }, setUp: true }]);
+
+    const forged = {
+      projectRoot: '/projects/bracket',
+      size: { columns: 80, rows: 24 },
+      setUp: 'yes',
+    };
+    bridge.open(forged as unknown as Parameters<typeof bridge.open>[0], () => undefined);
+    const plain = answer('terminal-2')!;
+    await flush();
+    expect(plain.host).toEqual([{ type: 'open', size: { columns: 80, rows: 24 } }]);
+  });
+
   it('should deliver a refusal from main as the one final frame', async () => {
     const { answer, open } = setup();
     const { frames } = open();

@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -40,6 +40,8 @@ import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
 import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-testing';
 
+import { processTreeStopLimit, removeInBackground, stopProcessTree } from '#process-teardown.test-utils.js';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
 /* Built, so the runtime children are the shipped child under `--permission`. `cli-e2e:test:scenarios` depends on `cli:build`. */
@@ -52,12 +54,14 @@ const realRunLimit = 900_000;
 
 const disposers: Array<() => Promise<void> | void> = [];
 
+/* Bounded by construction: the daemon's tree stops within `processTreeStopLimit` (a short SIGTERM grace, then SIGKILL
+ * for it and every process it started), and the in-process stubs then close at once, as nothing holds them open. */
 afterEach(async () => {
   for (const dispose of disposers.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- teardown is ordered: the daemon first, then its stubs.
     await dispose();
   }
-});
+}, processTreeStopLimit + 5000);
 
 const listen = async (server: HttpServer): Promise<number> => {
   await new Promise<void>((resolve) => {
@@ -218,32 +222,38 @@ const startServe = async (options: {
     process.stderr.write(`\n--- tau serve output ---\n${output.join('')}\n--- end ---\n`);
     return new Error(reason);
   };
+  let stopping = false;
   child.once('exit', (code) => {
-    origin.reject(report(`tau serve exited early with code ${String(code)}`));
+    if (!stopping) {
+      origin.reject(report(`tau serve exited early with code ${String(code)}`));
+    }
   });
+  /* Nothing here asserts a graceful stop, and the daemon's own (a 5 s close grace and a 5 s SIGTERM grace per runtime
+   * child, then its project's close) can outlast a hook: its tree, native workers included, is stopped within a bound. */
   disposers.push(async () => {
+    stopping = true;
     const directory = process.env['TAU_TEST_FRAME_LOG_DIR'];
     if (directory !== undefined && directory !== '') {
       await mkdir(directory, { recursive: true });
       await writeFile(join(directory, `serve-${String(child.pid)}.log`), output.join(''));
     }
-    if (child.exitCode === null && child.signalCode === null) {
-      const exited = new Promise<void>((resolve) => {
-        child.once('exit', () => {
-          resolve();
-        });
-      });
-      child.kill('SIGTERM');
-      await Promise.race([exited, sleep(10_000)]);
-      child.kill('SIGKILL');
-    }
+    const stopped = await stopProcessTree(child);
+    process.stderr.write(
+      `tau serve ${String(child.pid)} stopped ${stopped.graceful ? 'on SIGTERM' : 'by SIGKILL'} in ${String(stopped.elapsed)} ms${stopped.survivors.length > 0 ? `; still running: ${stopped.survivors.join(', ')}` : ''}\n`,
+    );
   });
+  let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => {
+    timer = setTimeout(() => {
       reject(report('tau serve never announced its agent channel'));
-    }, 120_000).unref();
+    }, 120_000);
+    timer.unref();
   });
-  return Promise.race([origin.promise, deadline]);
+  try {
+    return await Promise.race([origin.promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /** Run one agent turn over the daemon and wait for it to settle. */
@@ -453,8 +463,10 @@ describe('tau serve native kernels (W11, W22 daemon row)', () => {
     scratch = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'tsn-'));
   });
 
+  /* Off the hook: the scratch holds a prepared dependency store (about 1 GB in tier 4b), whose removal outlasted the
+   * 10 s hook timeout on darwin-arm64. */
   afterAll(async () => {
-    await rm(scratch, { recursive: true, force: true });
+    await removeInBackground(scratch);
   });
 
   it(
@@ -683,8 +695,10 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
     scratch = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'tsd-'));
   });
 
+  /* Off the hook: the scratch holds a prepared dependency store (about 1 GB in tier 4b), whose removal outlasted the
+   * 10 s hook timeout on darwin-arm64. */
   afterAll(async () => {
-    await rm(scratch, { recursive: true, force: true });
+    await removeInBackground(scratch);
   });
 
   it(

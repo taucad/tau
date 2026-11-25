@@ -6,6 +6,12 @@ import { wireUsageSnapshotSchema } from '@taucad/billing';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import UsagePage from '#routes/usage/route.js';
 
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+
 const useUsageSnapshot = vi.hoisted(() => vi.fn());
 const useCredits = vi.hoisted(() => vi.fn());
 const useOpenHolds = vi.hoisted(() => vi.fn());
@@ -14,15 +20,17 @@ const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
 const useCloudProjects = vi.hoisted(() => vi.fn());
 const useChatName = vi.hoisted(() => vi.fn());
+const getChatRecordsForResource = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useCloudProjects }));
-vi.mock('#routes/usage/use-chat-name.js', () => ({ useChatName }));
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ getChatRecordsForResource }) }));
+vi.mock('@taucad/billing-ui/components/usage/use-chat-name', () => ({ useChatName }));
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: () => ({ tier: 'pro', isResolved: true }),
 }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
-vi.mock('#db/billing-snapshot-store.js', () => ({
+vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({
   canonicalUsageQueryKey: () => 'key',
   useBillingRevisionMinimum,
   useSavedUsage,
@@ -283,7 +291,7 @@ describe('UsagePage', () => {
     const detail = screen.getByTestId('usage-event-detail');
     expect(detail).toHaveTextContent('Bracket redesign');
     expect(detail).not.toHaveTextContent('chat-a');
-    expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a');
+    expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a', getChatRecordsForResource);
   });
 
   it('reads no local storage until a row is opened', () => {
@@ -433,7 +441,7 @@ describe('UsagePage', () => {
     renderPage();
 
     expect(screen.getByTestId('usage-freshness')).toHaveTextContent(
-      /Offline — saved usage for a@example.test, last updated .+\. Reconnect for the latest usage\./u,
+      /Offline — saved usage for a@example.test, last updated .+\. Go online for the latest usage\./u,
     );
     expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     expect(screen.queryByRole('button', { name: /Models/u })).not.toBeInTheDocument();

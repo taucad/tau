@@ -38,7 +38,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: ({ children }: { readonly children?: ReactNode }) => <span>{children}</span>,
 }));
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span aria-hidden /> }));
-vi.mock('#components/tier-badge.js', () => ({ ProBadge: () => <span>Pro</span> }));
+vi.mock('@taucad/billing-ui/components/tier-badge', () => ({ ProBadge: () => <span>Pro</span> }));
 
 /* A server render reads its environment from process.env, as the SSR server is configured. */
 vi.stubEnv('TAU_API_URL', 'http://localhost:4000');

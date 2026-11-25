@@ -59,6 +59,10 @@
  *                            (`deploy-ui.yml`), never the public host. Unset: only the new deploy's index is written.
  *   TAU_RETAIN_ASSETS_SKIP   `1` retains nothing and asks the live deploy nothing, with a warning: the emergency
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
+ *   TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE
+ *                            `1` ships without retention, with a warning, when the live deploy cannot be reached
+ *                            after the retries (staging, whose tabs reload into the new build). Any other failure
+ *                            still fails the deploy. Production leaves it unset.
  *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
  *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
  *
@@ -623,6 +627,18 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
 /** The environment variable that skips retention for one deploy, when the live origin is down and a fix must ship. */
 export const skipRetentionVariable = 'TAU_RETAIN_ASSETS_SKIP';
 
+/** The environment variable that lets a deploy ship without retention when the live deploy cannot be reached. */
+export const shipIfUnreachableVariable = 'TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE';
+
+/**
+ * The live deploy could not be reached at all: the request failed, timed out or kept answering 408, 429 or 5xx through
+ * every retry. Only this failure may be shipped past (`TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE`, staging); an index that
+ * answers but is wrong, or an asset that fails its integrity, always fails the deploy.
+ */
+export class LiveIndexUnreachableError extends Error {
+  public override readonly name = 'LiveIndexUnreachableError';
+}
+
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
 const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
   new Error(
@@ -642,7 +658,7 @@ const readLiveIndex = async (
     response = await fetchWithRetry(`${origin}/${fileName}`, transport);
   } catch (error) {
     // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
-    throw unreadableIndex(origin, fileName, String(error));
+    throw new LiveIndexUnreachableError(unreadableIndex(origin, fileName, String(error)).message, { cause: error });
   }
   // No index yet: only a 404. The first deploy that runs this on a site whose catch-all answers 200 skips once.
   if (response.status === 404) {
@@ -984,6 +1000,31 @@ export const stampRetainedBuildFloor = async (buildDirectory: string, floor: num
   return stamped;
 };
 
+/**
+ * Retain the previous assets, or, when the live deploy cannot be reached and the caller allows it, ship with none.
+ *
+ * @param options - As {@link retainPreviousAssets}.
+ * @param fallback - Whether an unreachable live deploy ships without retention, and where the warning goes.
+ * @returns What {@link retainPreviousAssets} returns, from the retaining pass or the pass that keeps nothing.
+ */
+export const retainOrShipWithout = async (
+  options: Parameters<typeof retainPreviousAssets>[0],
+  fallback: { readonly shipIfUnreachable: boolean; readonly warn: (message: string) => void },
+): ReturnType<typeof retainPreviousAssets> => {
+  try {
+    return await retainPreviousAssets(options);
+  } catch (error) {
+    if (!fallback.shipIfUnreachable || !(error instanceof LiveIndexUnreachableError) || options.skip === true) {
+      throw error;
+    }
+    fallback.warn(
+      `::warning::${error.message} ${shipIfUnreachableVariable}=1: this deploy ships with NO previous assets. Pages ` +
+        'open across it reload into the new build when a lazy import fails.',
+    );
+    return retainPreviousAssets({ ...options, skip: true });
+  }
+};
+
 const main = async (): Promise<void> => {
   const configured = process.env['TAU_RETAIN_ASSETS_FROM']?.trim();
   const origin = configured === undefined || configured === '' ? undefined : configured;
@@ -1003,13 +1044,15 @@ const main = async (): Promise<void> => {
       `::warning::The build wrote no ${buildRecordFileName} record: the deploy records no builds and its /health/build reports no retained floor.`,
     );
   }
-  const { retained, bytes, storedBytes, index, runtimes, floor } = await retainPreviousAssets({
-    clientDirectory: join(buildDirectory, 'client'),
-    origin,
-    skip,
-    store,
-    buildId,
-  });
+  const { retained, bytes, storedBytes, index, runtimes, floor } = await retainOrShipWithout(
+    { clientDirectory: join(buildDirectory, 'client'), origin, skip, store, buildId },
+    {
+      shipIfUnreachable: process.env[shipIfUnreachableVariable]?.trim() === '1',
+      warn: (message) => {
+        console.warn(message);
+      },
+    },
+  );
   console.log(
     `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB, ${String(Math.round(storedBytes / 1024))} KiB of it from the store) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} assets and ${String(runtimes.assets.length)} runtime files served.`,
   );

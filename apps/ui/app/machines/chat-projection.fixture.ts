@@ -99,7 +99,7 @@ export const compactRow = (input: unknown): ProjectionFact => {
   });
 };
 
-const checkpoint = { tauInternal: { streamState: 'checkpoint' } } as const;
+const checkpoint = { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } } as const;
 
 const skillCall = (id: string, name: string): Record<string, unknown> => ({
   type: 'toolCall',

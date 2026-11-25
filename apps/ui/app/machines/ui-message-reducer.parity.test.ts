@@ -322,7 +322,7 @@ const steeringMidStream = (): readonly ChatProjectionEvent[] => {
         id: 'step-1',
         role: 'assistant',
         content: [{ type: 'text', text: 'Drafting' }],
-        metadata: { tauInternal: { streamState: 'checkpoint' } },
+        metadata: { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } },
       },
     }),
     logRow(4, { type: 'message.appended', message: { id: 'steer:1', role: 'user', content: 'Make it red.' } }),

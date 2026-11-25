@@ -12,6 +12,8 @@ const world = vi.hoisted(() => ({
   identity: 'verified' as 'verified' | 'unverified' | 'signed-out' | 'unknown',
   /* What the chat's state says, as the two selectors of this owner read it. */
   awaitsSignIn: true,
+  /* A refusal for want of a session that no Resume answers: a refused send or edit. */
+  refusedSignIn: false,
   failureId: 'run:run_1:1' as string | undefined,
   logRead: true,
   transcript: 'loaded' as 'loading' | 'loaded' | 'empty',
@@ -38,7 +40,7 @@ vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('#hooks/active-chat-provider.js', () => ({ useActiveChatSession: () => ({ activeChatId: world.chatId }) }));
 vi.mock('#utils/sign-in-return.js', () => {
   return {
-    selectAwaitsSignIn: () => world.awaitsSignIn,
+    selectSignInFailureId: () => (world.awaitsSignIn || world.refusedSignIn ? world.failureId : undefined),
     /* The decision itself is `sign-in-return.test.ts`'s; here it is fed this suite's facts in place of a projection. */
     signInReturnStep: (facts: SignInReturnFacts) => {
       if (facts.identity === 'signed-out') {
@@ -57,9 +59,6 @@ vi.mock('#utils/sign-in-return.js', () => {
     },
   };
 });
-vi.mock('#utils/run-auto-resume-plan.js', () => ({
-  selectVisibleChatErrorEntry: () => (world.failureId === undefined ? undefined : { id: world.failureId }),
-}));
 vi.mock('#hooks/use-chat.js', async () => {
   const { useSyncExternalStore } = await import('react');
   return {
@@ -128,6 +127,7 @@ describe('ChatSignInReturn (launch audit N-2)', () => {
       chatId: 'chat_1',
       identity: 'verified',
       awaitsSignIn: true,
+      refusedSignIn: false,
       failureId: 'run:run_1:1',
       logRead: true,
       transcript: 'loaded',
@@ -271,6 +271,15 @@ describe('ChatSignInReturn (launch audit N-2)', () => {
 
       change({ failureId: 'run:run_1:2' });
       expect(refetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should ask for a refused send too, which no Resume answers', () => {
+      world.awaitsSignIn = false;
+      world.refusedSignIn = true;
+      world.failureId = 'refusal:gesture:g1';
+      arriveAt('/w/home/p?chat=chat_1');
+
+      expect(refetch).toHaveBeenCalledTimes(1);
     });
 
     it('should not ask while signed out, or for a failure that is not a sign-in', () => {

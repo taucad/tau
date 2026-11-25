@@ -7,7 +7,7 @@ import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 import type { VisibleFailureSource } from '#utils/run-auto-resume-plan.js';
-import { selectAwaitsSignIn, signInReturnStep } from '#utils/sign-in-return.js';
+import { selectAwaitsSignIn, selectSignInFailureId, signInReturnStep } from '#utils/sign-in-return.js';
 import type { SignInReturnFacts } from '#utils/sign-in-return.js';
 
 /* The caught-up log of one run that failed on its first attempt with `error`. */
@@ -90,6 +90,20 @@ describe('selectAwaitsSignIn', () => {
     expect(selectAwaitsSignIn(failed)).toBe(false);
     /* The run under the refusal is resumable, but it is not what the sign-in was asked for. */
     expect(selectAwaitsSignIn({ ...failed, persistedError: refusedSend })).toBe(false);
+  });
+});
+
+describe('selectSignInFailureId', () => {
+  it('should name a sign-in failure whether or not a Resume answers it, and nothing else', () => {
+    const failed = failedRun(rateLimited);
+    const refusedSend = refusalOfGesture(
+      parseAdmissionFailureForPersistence(new Error(JSON.stringify(unauthenticated))),
+      { kind: 'send', projection: failed.projection, createId: () => 'g2' },
+    );
+
+    expect(selectSignInFailureId(failedRun(unauthenticated))).toBeDefined();
+    expect(selectSignInFailureId({ ...failed, persistedError: refusedSend })).toBe('refusal:gesture:g2');
+    expect(selectSignInFailureId(failed)).toBeUndefined();
   });
 });
 

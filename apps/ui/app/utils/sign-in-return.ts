@@ -48,6 +48,21 @@ export const selectAwaitsSignIn = (state: VisibleFailureSource): boolean => {
 };
 
 /**
+ * The identity of the chat's visible failure when it is a refusal for want of a session, resumable or not: a refused
+ * send, edit or retry is one too, and its card is what tells the person to sign in.
+ *
+ * @param state - The chat's projection, attachment and errors.
+ * @returns The failure's identity, or `undefined` when the visible failure is not a sign-in one.
+ * @public
+ */
+export const selectSignInFailureId = (state: VisibleFailureSource): string | undefined => {
+  const entry = selectVisibleChatErrorEntry(state);
+  return entry !== undefined && cardOf(entry.error.code, entry.error.category).category === errorCategory.auth
+    ? entry.id
+    : undefined;
+};
+
+/**
  * What to do with an armed return marker.
  *
  * - `wait`: an answer is still coming (who is signed in, which chat is shown, the log, the transcript).

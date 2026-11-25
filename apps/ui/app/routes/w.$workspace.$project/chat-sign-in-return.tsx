@@ -9,8 +9,7 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useIdentity } from '#hooks/use-identity.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
-import { selectAwaitsSignIn, signInReturnStep } from '#utils/sign-in-return.js';
+import { selectSignInFailureId, signInReturnStep } from '#utils/sign-in-return.js';
 
 /* Module scope: the setter is memoised on the codec's identity. */
 const signInReturnParameter = stringParameter();
@@ -97,10 +96,9 @@ export function ChatSignInReturn(): undefined {
     }
   }, [activeChatId, isArmed, key, step]);
 
-  /* The failed attempt whose refusal contradicts a signed-in page, asked about once. */
-  const refusedAttempt = useChatSelector((state) =>
-    selectAwaitsSignIn(state) ? selectVisibleChatErrorEntry(state)?.id : undefined,
-  );
+  /* The failure whose refusal contradicts a signed-in page, asked about once: a refused send or edit as much as a run
+   * that waits, since either card is drawn from the page's answer of who is signed in. */
+  const refusedAttempt = useChatSelector(selectSignInFailureId);
   const asked = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (refusedAttempt === undefined || identity !== 'verified' || isArmed || asked.current === refusedAttempt) {

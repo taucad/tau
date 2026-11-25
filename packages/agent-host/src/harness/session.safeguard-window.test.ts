@@ -96,4 +96,45 @@ describe('safeguards across turns', () => {
       'Four.',
     );
   });
+
+  /* A reminder stands for the turn it was given in: the same loop in a later turn is reminded again, under a reminder
+   * of its own, before it is ended. */
+  it('should remind a later turn that repeats the same loop, and keep the chat readable', async () => {
+    const file = createMemoryEventLogFile();
+    const session = async (runId: string, transport: ModelTransport) =>
+      createAgentSession({
+        chatId: 'chat-1',
+        runId,
+        leaderEpoch: runId,
+        systemPrompt: 'system',
+        model,
+        modelTransport: transport,
+        toolRegistry: failingRegistry,
+        eventLog: await file.open(),
+      });
+    for (const [index, runId] of ['run-1', 'run-2'].entries()) {
+      const looping = scriptedTransport(
+        Array.from({ length: 10 }, (_, call) => failingExport(`${runId}-call-${String(call)}`)),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one turn after the other, on one chat.
+      const turn = await session(runId, looping);
+      // oxlint-disable-next-line no-await-in-loop -- one turn after the other, on one chat.
+      await turn.prompt({ id: `user-${String(index)}`, role: 'user', content: 'Export the part.' });
+      // oxlint-disable-next-line no-await-in-loop -- one turn after the other, on one chat.
+      await turn.close();
+      expect(looping.requests).toHaveLength(6);
+    }
+
+    const log = await file.open();
+    const events = await log.read();
+    const safeguards = events.flatMap((event) =>
+      event.type === 'safeguard.recorded' ? [`${event.runId}:${event.action}`] : [],
+    );
+    expect(safeguards).toEqual(['run-1:nudge', 'run-1:terminate', 'run-2:nudge', 'run-2:terminate']);
+    const answering = scriptedTransport([]);
+    const next = await session('run-3', answering);
+    await next.prompt({ id: 'user-3', role: 'user', content: 'What is 2 + 2?' });
+    await next.close();
+    expect(answering.requests).toHaveLength(1);
+  });
 });

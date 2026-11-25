@@ -1716,7 +1716,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       if (reminder?.role !== 'user') {
         throw new TypeError('A safeguard nudge must commit the exact user reminder it delivers.');
       }
-      const id = `tau:safeguard:${decision.signature}`;
+      /* A signature is reminded once per window, not once per chat: a later turn that repeats the loop is reminded
+       * again, so the reminder's id is its own, and the signature stays its anchor. */
+      const id = `tau:safeguard:${decision.signature}:${createId()}`;
       const metadata = {
         tauInternal: {
           kind: 'safeguard',

@@ -329,8 +329,8 @@ export const isPublicAddress = (address: string): boolean => {
   return !blocked.check(address, family === 4 ? 'ipv4' : 'ipv6');
 };
 
-/* Check that `url` may be fetched and return the address to connect to: the first of its host's addresses, all of
- * which must be public. The fetch connects there rather than resolving the name again. */
+/* Check that `url` may be fetched and return the addresses to connect to: every address of its host, all of which
+ * must be public. The fetch connects to one of them, falling back across them, rather than resolving the name again. */
 const assertPublicUrl = async (
   url: URL,
   lookup: WebResearchDependencies['lookup'],

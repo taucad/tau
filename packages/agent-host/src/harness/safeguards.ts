@@ -47,8 +47,16 @@ export type SafeguardDetection =
       readonly eventIndexes: readonly number[];
     };
 
-/** Pure safeguard detector over normalized tool executions. @public */
-export type SafeguardDetector = (events: readonly ToolEventSummary[]) => SafeguardDetection;
+/**
+ * Pure safeguard detector over normalized tool executions. `reminded` holds the signatures whose reminder the model
+ * has been given in this window: a detector that ends a run does so only for a loop it reminded first.
+ *
+ * @public
+ */
+export type SafeguardDetector = (
+  events: readonly ToolEventSummary[],
+  reminded: ReadonlySet<string>,
+) => SafeguardDetection;
 
 /** Tunable safeguard trigger counts. @public */
 export type SafeguardThresholds = {
@@ -279,9 +287,12 @@ export const pollingToolNames: ReadonlySet<string> = new Set(['check_job', 'get_
 
 const callSignature = (event: ToolEventSummary): string | undefined =>
   event.argsHash ? `${event.toolName}:${event.argsHash}` : undefined;
-/* The same call answered the same way: the identical-call detector's unit. */
+/* The same call answered the same way: the identical-call detector's unit. A call that failed is the identical-error
+ * detector's, which reminds sooner, so one loop is never reminded twice for the same calls. */
 const answeredCallSignature = (event: ToolEventSummary): string | undefined =>
-  event.argsHash && event.resultHash ? `${event.toolName}:${event.argsHash}:${event.resultHash}` : undefined;
+  event.argsHash && event.resultHash && !event.isError
+    ? `${event.toolName}:${event.argsHash}:${event.resultHash}`
+    : undefined;
 const errorSignature = (event: ToolEventSummary): string | undefined =>
   event.argsHash ? `${event.toolName}:${event.argsHash}:${event.errorHash ?? '-'}` : undefined;
 const indexes = (events: readonly ToolEventSummary[]): number[] => events.map((event) => event.index);
@@ -299,7 +310,7 @@ Identical retries will not change the result. Stop and choose ONE of:
 Do NOT call \`${event.toolName}\` with these arguments again.`;
 
 const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] => [
-  (events) => {
+  (events, reminded) => {
     const tail = events.at(-1);
     const signature = tail?.isError ? errorSignature(tail) : undefined;
     if (!tail || !signature) {
@@ -309,7 +320,8 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
     for (let index = events.length - 1; index >= 0 && errorSignature(events[index]!) === signature; index--) {
       count++;
     }
-    if (count >= thresholds.identicalErrorTerminate) {
+    /* Ended only once reminded: a batch of parallel calls can carry the count past both thresholds in one step. */
+    if (count >= thresholds.identicalErrorTerminate && reminded.has(signature)) {
       return {
         kind: 'terminate',
         pattern: anomalyPattern.identicalError,
@@ -328,7 +340,7 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
         }
       : { kind: 'clear' };
   },
-  (events) => {
+  (events, reminded) => {
     const tail = events.at(-1);
     const signature = tail && !pollingToolNames.has(tail.toolName) ? answeredCallSignature(tail) : undefined;
     if (!tail || !signature) {
@@ -340,7 +352,7 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
     }
     /* A proven loop: the same call answered the same way this many times since the person spoke, past the reminder
      * the model was given at `identicalCall`. Nothing the next identical call returns can change what the agent does. */
-    if (count >= thresholds.identicalCallTerminate) {
+    if (count >= thresholds.identicalCallTerminate && reminded.has(`${signature}:same-result`)) {
       return {
         kind: 'terminate',
         pattern: anomalyPattern.identicalCall,
@@ -598,8 +610,12 @@ export const createAgentSafeguards = (
      * across it to the terminate threshold. */
     const { isPersonsMessage } = options;
     const lastSpoke = isPersonsMessage ? messages.findLastIndex((message) => isPersonsMessage(message)) : -1;
-    const summarized = await summarizeToolEvents(messages, hash);
-    const events = lastSpoke === -1 ? summarized : summarized.filter((event) => event.index > lastSpoke);
+    /* Only the window is read: each result's whole answer is hashed, and nothing before the person spoke counts. */
+    const windowEvents = await summarizeToolEvents(messages.slice(lastSpoke + 1), hash);
+    const events = windowEvents.map((event) => ({
+      ...event,
+      index: event.index + lastSpoke + 1,
+    }));
     let selected: SafeguardRecord | undefined;
     /* A reminder stands for the window it was given in: a later turn that repeats the same loop is reminded again
      * before the loop can end it, as the end's reason says. */
@@ -616,7 +632,7 @@ export const createAgentSafeguards = (
       }
     }
     for (const detector of detectors) {
-      const detection = detector(events);
+      const detection = detector(events, given);
       if (detection.kind === 'clear' || (detection.kind === 'nudge' && given.has(detection.signature))) {
         continue;
       }

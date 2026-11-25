@@ -77,6 +77,8 @@ describe('AgentSafeguards', () => {
       record: async () => undefined,
       hash: async (input) => `hash:${input}`,
     });
+    /* The first read of six identical failures reminds; the loop is ended only once it was reminded. */
+    await safeguards.transformContext(repeatedCalls(6, true));
     await safeguards.transformContext(repeatedCalls(6, true));
     const base = vi.fn() as unknown as StreamFn;
     const stream = await safeguards.wrapStreamFn(base)(stubModel, normalizeContext({ messages: [] }));
@@ -246,6 +248,8 @@ describe('AgentSafeguards', () => {
     });
 
     it("should keep counting across the safeguards' own reminder, which is not the person speaking", async () => {
+      const reminder = person('<system-reminder>\nStop retrying.\n</system-reminder>');
+      const failingSignature = `read_file:hash:{"targetFile":"main.ts"}:hash:E:bad`;
       const recorded: SafeguardRecord[] = [];
       const safeguards = createAgentSafeguards({
         record: async (entry) => {
@@ -253,9 +257,10 @@ describe('AgentSafeguards', () => {
         },
         hash: async (input) => `hash:${input}`,
         isPersonsMessage,
+        /* The reminder this run was given, read from its provenance as the session reads it. */
+        nudgeSignatureOf: (message) => (message === reminder ? failingSignature : undefined),
       });
       const base = vi.fn() as unknown as StreamFn;
-      const reminder = person('<system-reminder>\nStop retrying.\n</system-reminder>');
 
       await safeguards.transformContext([
         person('Export the part.'),
@@ -268,6 +273,24 @@ describe('AgentSafeguards', () => {
       expect(recorded.map((entry) => entry.kind)).toEqual(['terminate']);
       expect(base).not.toHaveBeenCalled();
     });
+  });
+
+  /* One reply can carry several parallel calls, so one read can find the count past both thresholds. */
+  it('should remind, not end, a loop whose count passes both thresholds before it was reminded', async () => {
+    const recorded: SafeguardRecord[] = [];
+    const safeguards = createAgentSafeguards({
+      record: async (entry) => {
+        recorded.push(entry);
+      },
+      hash: async (input) => `hash:${input}`,
+    });
+
+    await safeguards.transformContext(repeatedCalls(2, true));
+    await safeguards.transformContext(repeatedCalls(6, true));
+    expect(recorded.map((entry) => entry.kind)).toEqual(['nudge']);
+
+    await safeguards.transformContext(repeatedCalls(7, true));
+    expect(recorded.map((entry) => entry.kind)).toEqual(['nudge', 'terminate']);
   });
 
   /* Slice (a): a grep that could not search a pending file has not found nothing. */

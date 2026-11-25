@@ -2,7 +2,9 @@ import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
 import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import { viewerTouchContext, useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { FlipHorizontal, Ruler } from 'lucide-react';
+import { FlipHorizontal, MessageSquarePlus, Ruler } from 'lucide-react';
+import { CommentControl, CommentOptions } from '#cad/comment-control.jsx';
+import { commentPinsStore, useCommentPins } from '#cad/comment-pins.store.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { Separator } from '@taucad/ui/components/separator';
 import { Button } from '@taucad/ui/components/button';
@@ -18,7 +20,7 @@ import type { ViewerOperationTimeout } from '#cad/viewer-settings.jsx';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
 
-type Tool = 'section' | 'measure';
+type Tool = 'section' | 'measure' | 'comment';
 
 /** Never the first thing on its line, nor after an empty leading group. */
 const Hairline = ({ className = 'mx-0' }: { readonly className?: string }): React.JSX.Element => (
@@ -306,6 +308,7 @@ function ViewerControlsBody({
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   const isMeasureInputReady = useGraphicsSelector((state) => state.context.isMeasureInputReady);
   const measurementCount = useGraphicsSelector((state) => state.context.measurements.length);
+  const isCommentActive = useCommentPins((state) => state.isActive);
   const [measurementsExpanded, setMeasurementsExpanded] = useState(false);
   // Counted, so a phrase said twice in a row is a new node and is announced again.
   const [announcement, setAnnouncement] = useState({ phrase: '', count: 0 });
@@ -329,7 +332,7 @@ function ViewerControlsBody({
 
   return (
     <div ref={barRef} data-slot='viewer-controls' className={layout.bar} style={barStyle}>
-      {!is2dGeometry && (isSectionViewActive || isMeasureActive) ? (
+      {!is2dGeometry && (isSectionViewActive || isMeasureActive || isCommentActive) ? (
         <div data-slot='viewer-tool-rows' className={layout.toolRows}>
           {isSectionViewActive ? (
             <ToolRow
@@ -372,6 +375,18 @@ function ViewerControlsBody({
               )}
             </ToolRow>
           ) : null}
+          {isCommentActive ? (
+            <ToolRow
+              tool='comment'
+              name='Commenting'
+              icon={<MessageSquarePlus className='size-4 text-viewer-tool-active' />}
+              onDone={() => {
+                commentPinsStore.setActive(false);
+              }}
+            >
+              <CommentOptions />
+            </ToolRow>
+          ) : null}
         </div>
       ) : null}
       {aboveControls}
@@ -401,6 +416,7 @@ function ViewerControlsBody({
             <>
               <SectionViewControl shortcut={keys.section} onStart={focusSectionRow} />
               <MeasureControl shortcut={keys.measure} onStart={focusMeasureRow} />
+              <CommentControl shortcut='C' />
               <Hairline />
             </>
           )}

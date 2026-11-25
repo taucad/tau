@@ -36,6 +36,7 @@
   },
   "exports": {
     "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
+    "./cad/comment-pins.store": "./src/cad/comment-pins.store.ts",
     "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
     "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",

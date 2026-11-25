@@ -12,10 +12,19 @@ import { useCameraSelector, useGraphicsSelector } from '#hooks/use-graphics.jsx'
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 import type { OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
+import { useCommentPins } from '#cad/comment-pins.store.js';
 
 const MeasureTool = React.lazy(async () => {
   const module = await import('#graphics/three/react/measure-tool.jsx');
   return { default: module.MeasureTool };
+});
+const CommentPins = React.lazy(async () => {
+  const module = await import('#graphics/three/react/comment-pins.jsx');
+  return { default: module.CommentPins };
+});
+const CommentSceneBridge = React.lazy(async () => {
+  const module = await import('#graphics/three/react/comment-pins.jsx');
+  return { default: module.CommentSceneBridge as unknown as React.ComponentType };
 });
 const SectionHandles = React.lazy(async () => {
   const module = await import('#graphics/three/react/section-handles.jsx');
@@ -83,6 +92,9 @@ export const Controls = React.memo(function ({
   const shouldMountMeasure = useGraphicsSelector(
     (state) => state.context.isMeasureActive || state.context.measurements.some((measurement) => measurement.isPinned),
   );
+  const shouldMountComments = useCommentPins(
+    (state) => state.isActive || state.pins.length > 0 || state.historyPins.length > 0,
+  );
   const projectionKind = useCameraSelector((state) => selectCameraProjection(state).kind);
   /*
    * The section plane picker: an external Three resource the view cube draws beside it while Section is on, and the
@@ -120,6 +132,8 @@ export const Controls = React.memo(function ({
       <ViewerCameraControls feel={controlProps} />
       <React.Suspense fallback={null}>
         {shouldMountMeasure ? <MeasureTool /> : null}
+        {shouldMountComments ? <CommentPins /> : null}
+        <CommentSceneBridge />
         {isSectionViewActive ? <SectionHandles planePicker={planePicker} /> : null}
       </React.Suspense>
       {/* The cube mounts with its picker, so its adapter starts once, with everything it draws. */}

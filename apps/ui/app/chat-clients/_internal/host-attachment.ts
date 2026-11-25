@@ -11,6 +11,18 @@ import {
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionEvent } from '#machines/chat-projection.logic.js';
 
+/**
+ * Where the attachment stands. A loss carries the error that ended the read when one did, so the chat can tell a host
+ * this page can never load (FP10: past the page's worker bound) from a connection it will dial again.
+ *
+ * @public
+ */
+export type HostAttachmentStatus = Readonly<{
+  type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
+  reason?: string;
+  error?: unknown;
+}>;
+
 /** A read-only connection into one chat's projection. @public */
 export type HostAttachmentInput = Readonly<{
   chatId: string;
@@ -21,10 +33,7 @@ export type HostAttachmentInput = Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
     send: (event: Extract<ChatProjectionEvent, { type: 'batch' | 'catch-up' | 'live' | 'clear-live' }>) => void;
   }>;
-  onStatus?: (event: {
-    type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
-    reason?: string;
-  }) => void;
+  onStatus?: (event: HostAttachmentStatus) => void;
 }>;
 
 /** Follow the host's one log reader; an idle chat attaches without waiting on an empty read. @public */
@@ -52,10 +61,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     const { sourceGeneration: _sourceGeneration, ...modelEvent } = event;
     input.projection.send({ type: 'live', event: modelEvent });
   };
-  const report = (event: {
-    type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
-    reason?: string;
-  }): void => {
+  const report = (event: HostAttachmentStatus): void => {
     if (!closed) {
       sendBack(event);
       input.onStatus?.(event);
@@ -183,17 +189,17 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           pending.bytes += bytes;
           pending.events.push(event);
         },
-        () => {
+        (error) => {
           if (!closed && !terminalRefusal) {
             pending = undefined;
             liveUnavailable = true;
             clearLive();
-            report({ type: 'attachment.lost', reason: 'live subscriber ended' });
+            report({ type: 'attachment.lost', reason: 'live subscriber ended', error });
           }
         },
       );
     } catch (error) {
-      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
+      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error), error });
     }
   };
 
@@ -378,7 +384,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       unsubscribe = client.subscribe(
         { chatId: input.chatId, ...selectPosition(input.projection.getSnapshot().context) },
         () => undefined,
-        () => {
+        (error) => {
           if (readerClosed() || readerFenced) {
             return;
           }
@@ -386,7 +392,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           liveUnavailable = true;
           clearLive();
           if (!terminalRefusal) {
-            report({ type: 'attachment.lost', reason: 'subscriber ended' });
+            report({ type: 'attachment.lost', reason: 'subscriber ended', error });
           }
         },
         (answer) => {
@@ -407,7 +413,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       );
     } catch (error) {
       if (!readerClosed()) {
-        report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
+        report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error), error });
       }
     }
   };

@@ -249,21 +249,25 @@ export type AgentHostClient = {
    * Follow one chat's durable rows from `cursor`: one outstanding long-poll read at a time (SC-R14).
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
    *
-   * `onEnded` hears the follow stop for any reason but its own unsubscribe: no later row reaches `listener`.
+   * `onEnded` hears the follow stop for any reason but its own unsubscribe, with the error that stopped it when one
+   * did: no later row reaches `listener`.
    * `position` is the row's cursor in the log; it restarts at 0 when the follow starts over (SC-R12).
    */
   subscribe(
     input: AgentHostReadInput,
     listener: (chatId: string, event: AgentLogEvent, position?: number) => void,
-    onEnded?: () => void,
+    onEnded?: (error?: unknown) => void,
     /** The exact read batch or refusal, for a projection that owns the cursor. */
     onAnswer?: (answer: ReadAnswer) => ReadRequest['last'] | void,
   ): () => void;
-  /** Read-only, non-durable preview for one chat; it never admits, retries, or settles a run. */
+  /**
+   * Read-only, non-durable preview for one chat; it never admits, retries, or settles a run. `onEnded` hears it stop as
+   * `subscribe`'s does.
+   */
   subscribeLive(
     chatId: string,
     listener: (chatId: string, event: SourceLiveEvent) => void,
-    onEnded?: () => void,
+    onEnded?: (error?: unknown) => void,
   ): () => void;
   close(): Promise<void>;
 };
@@ -385,21 +389,24 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
     );
 
   /** Run one consumer for as long as its subscription lives; a failure other than the unsubscribe is the client's. */
-  const consume = (run: (signal: AbortSignal) => Promise<void>, onEnded?: () => void): (() => void) => {
+  const consume = (run: (signal: AbortSignal) => Promise<void>, onEnded?: (error?: unknown) => void): (() => void) => {
     const operation = new AbortController();
     streamSubscriptions.add(operation);
     const drive = async (): Promise<void> => {
+      /* What stopped the stream, for its owner: a host whose code cannot load is told apart from a lost connection. */
+      let failure: unknown;
       try {
         await transport.ready;
         await run(operation.signal);
       } catch (error) {
+        failure = error;
         if (!operation.signal.aborted && !(error instanceof AgentHostWorkerError && error.code === 'LEADERSHIP_LOST')) {
           transportFailure ??= toWorkerError(error, 'WORKER_STREAM_FAILED');
         }
       } finally {
         streamSubscriptions.delete(operation);
         if (!operation.signal.aborted) {
-          onEnded?.();
+          onEnded?.(failure);
         }
       }
     };

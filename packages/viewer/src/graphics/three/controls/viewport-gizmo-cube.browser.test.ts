@@ -442,6 +442,7 @@ it('should measure Tau’s view cube under each field of view slider value', asy
   }
 });
 
+// Expected-failure: @rifont until 2026-12-15
 it.fails('should keep Tau’s view cube’s size under the field of view slider while the triad shows', async () => {
   const { reference, widths } = await measureFrontFaceWidths();
   for (const [index, slider] of gizmoFieldOfViewSliders.entries()) {

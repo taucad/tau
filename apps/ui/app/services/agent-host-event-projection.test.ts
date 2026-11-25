@@ -1340,7 +1340,7 @@ describe('projectAgentHostEvent', () => {
    * daemon's own log from cursor 0 emits each durable text block once, under an
    * id derived from the message id the log carries. The second copy came from
    * the AI SDK continuing the trailing assistant message on a resume (see
-   * `browser-agent-host-transport.ts`, `registerAgentHostRunReset`); this pins
+   * the since-deleted `browser-agent-host-transport.ts`, `registerAgentHostRunReset`); this pins
    * the layer it did *not* come from, on the real log.
    */
   it('projects each assistant text of a real daemon log exactly once from cursor 0', () => {

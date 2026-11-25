@@ -449,7 +449,7 @@ describe('desktop in-project turn replay', () => {
    * `for await` loops — nothing orders one against the other. The transport
    * feeds both into one queue in arrival order and returns from `enqueueEvent`
    * for a live event *before* its `leaderEpoch:sequence` dedup
-   * (`browser-agent-host-transport.ts:652-661`), so a live row is never
+   * (the since-deleted `browser-agent-host-transport.ts`), so a live row was never
    * deduplicated or dropped on the native path. Projected late
    * (`agent-host-event-projection.ts:583-592`), `tool-input-end` becomes a
    * second `tool-input-available`, and the AI SDK rewinds the settled part to

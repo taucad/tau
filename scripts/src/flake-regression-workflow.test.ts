@@ -14,7 +14,10 @@ const text = readFileSync(resolve(workflows, 'flake-regression.yml'), 'utf8');
 type Step = { readonly name: string; readonly run?: string; readonly with?: Record<string, string> };
 type Workflow = {
   readonly name: string;
-  readonly on: Record<string, { readonly workflows?: string[]; readonly types?: string[]; readonly inputs?: Record<string, unknown> }>;
+  readonly on: Record<
+    string,
+    { readonly workflows?: string[]; readonly types?: string[]; readonly inputs?: Record<string, unknown> }
+  >;
   readonly permissions: Record<string, string>;
   readonly jobs: Record<
     string,
@@ -54,7 +57,13 @@ describe('flake regression workflow', () => {
     const ledger = load(readFileSync(resolve(workflows, 'flake-ledger.yml'), 'utf8')) as Workflow;
     expect(Object.keys(workflow.on)).toEqual(['workflow_run', 'workflow_dispatch']);
     expect(workflow.on['workflow_run']).toEqual({ workflows: [ledger.name], types: ['completed'] });
-    expect(Object.keys(workflow.on['workflow_dispatch']?.inputs ?? {})).toEqual(['id', 'good', 'bad', 'modes', 'dry-run']);
+    expect(Object.keys(workflow.on['workflow_dispatch']?.inputs ?? {})).toEqual([
+      'id',
+      'good',
+      'bad',
+      'modes',
+      'dry-run',
+    ]);
     expect(job?.if).toContain("github.event.workflow_run.conclusion == 'success'");
   });
 
@@ -63,9 +72,9 @@ describe('flake regression workflow', () => {
     expect(job?.permissions).toEqual({ actions: 'write', contents: 'read', issues: 'write' });
     expect(job?.environment).toBeUndefined();
     expect(text).not.toMatch(/secrets\./u);
-    expect(steps.find((step) => step.name === 'Checkout the scripts and project roots')?.with?.['persist-credentials']).toBe(
-      false,
-    );
+    expect(
+      steps.find((step) => step.name === 'Checkout the scripts and project roots')?.with?.['persist-credentials'],
+    ).toBe(false);
   });
 
   it('should run one bisect at a time and stop on the flake agent kill switch', () => {

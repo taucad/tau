@@ -29,7 +29,9 @@ import type { ReproIdentity } from '#flake-regression.js';
 type Call = { readonly method: string; readonly path: string; readonly body?: unknown };
 
 /** A client answering from a handler, recording every request; an unanswered path is a 404. */
-const fakeGitHub = (handler: (method: string, path: string, body?: unknown) => unknown): { github: Client; calls: Call[] } => {
+const fakeGitHub = (
+  handler: (method: string, path: string, body?: unknown) => unknown,
+): { github: Client; calls: Call[] } => {
   const calls: Call[] = [];
   const answer = (method: string, path: string, body?: unknown): unknown => {
     calls.push({ method, path, ...(body === undefined ? {} : { body }) });
@@ -62,7 +64,10 @@ const commitsPage = (path: string): unknown => {
   const numbers = Array.from({ length: 100 }, (_, index) => head - (page - 1) * 100 - index).filter((n) => n >= 1);
   return numbers.map((n) => ({
     sha: commitSha(n),
-    commit: { message: n === culpritCommit ? 'feat(scripts): Drain the queue in batches (#4321)\n\nBody.' : `chore: Commit ${n}` },
+    commit: {
+      message:
+        n === culpritCommit ? 'feat(scripts): Drain the queue in batches (#4321)\n\nBody.' : `chore: Commit ${n}`,
+    },
     author: { login: n === culpritCommit ? 'queue-author' : 'someone' },
   }));
 };
@@ -99,6 +104,9 @@ const repository = (comments: string[] = []) =>
     return undefined;
   });
 
+/** The `body` field of a request body. */
+const bodyOf = (call: Call | undefined): string => (call?.body as { body?: string } | undefined)?.body ?? '';
+
 let directory: string | undefined;
 afterEach(() => {
   if (directory) {
@@ -115,10 +123,7 @@ const seededStore = () => {
   return fileStore(path);
 };
 
-const invoke = async (
-  options: Partial<InvocationOptions>,
-  setup: { comments?: string[]; stub?: StubOptions } = {},
-) => {
+const invoke = async (options: Partial<InvocationOptions>, setup: { comments?: string[]; stub?: StubOptions } = {}) => {
   const { github, calls } = repository(setup.comments);
   const stub = stubProber(setup.stub ?? { culprit: culpritCommit, rates: { 'cpu:stress': 0.3, 'repeat:alone': 0.05 } });
   const identities: ReproIdentity[] = [];
@@ -144,9 +149,18 @@ describe('flake regression invocation', () => {
     const { result, calls, requests, identities } = await invoke({});
 
     expect(result.candidates.map((candidate) => candidate.id)).toEqual([regressedId]);
-    expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit), mode: 'cpu:stress' });
+    expect(result.bisected?.result).toMatchObject({
+      outcome: 'culprit',
+      culprit: commitSha(culpritCommit),
+      mode: 'cpu:stress',
+    });
     expect(identities).toEqual([
-      { project: 'scripts', target: 'test', file: 'scripts/src/victim.test.ts', test: 'victim should settle the queue' },
+      {
+        project: 'scripts',
+        target: 'test',
+        file: 'scripts/src/victim.test.ts',
+        test: 'victim should settle the queue',
+      },
     ]);
     // First flaky: the onset run's commit; last stable: the push before it, which already flakes, so the bisect backs off.
     expect(requests[0]?.sha).toBe(commitSha(323));
@@ -159,9 +173,9 @@ describe('flake regression invocation', () => {
       '/repos/taucad/tau/issues/77/comments',
     ]);
     expect(sends[0]?.body).toMatchObject({ title: `Flaky regression: ${regressedId}`, labels: [...issueLabels] });
-    expect((sends[0]?.body as { body: string }).body).toContain(identityMarker(regressedId));
-    expect((sends[1]?.body as { body: string }).body).toContain(bisectMarker(323, 'started', '2026-11-20T00:00:00.000Z'));
-    const named = (sends[2]?.body as { body: string }).body;
+    expect(bodyOf(sends[0])).toContain(identityMarker(regressedId));
+    expect(bodyOf(sends[1])).toContain(bisectMarker(323, 'started', '2026-11-20T00:00:00.000Z'));
+    const named = bodyOf(sends[2]);
     expect(named).toContain(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'));
     expect(named).toContain(`culprit [${commitSha(culpritCommit).slice(0, 12)}]`);
     expect(named).toContain('`feat(scripts): Drain the queue in batches (#4321)` (#4321) by `queue-author`');
@@ -171,10 +185,15 @@ describe('flake regression invocation', () => {
   it('should not bisect an onset again once its bisect is done or still running', async () => {
     for (const status of ['done', 'started'] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one invocation per status
-      const { result, calls, requests } = await invoke({}, { comments: [bisectMarker(323, status, '2026-11-19T22:00:00.000Z')] });
+      const { result, calls, requests } = await invoke(
+        {},
+        { comments: [bisectMarker(323, status, '2026-11-19T22:00:00.000Z')] },
+      );
       expect(result.bisected).toBeUndefined();
       expect(requests).toEqual([]);
-      expect(calls.filter((call) => call.method === 'POST').map((call) => call.path)).toEqual(['/repos/taucad/tau/issues']);
+      expect(calls.filter((call) => call.method === 'POST').map((call) => call.path)).toEqual([
+        '/repos/taucad/tau/issues',
+      ]);
       expect(result.markdown).toContain('No candidate waits for a bisect.');
     }
   });
@@ -312,7 +331,7 @@ describe('the flake-repro prober', () => {
     };
     return { value, dispatched, sleeps, calls };
   };
-  const run = (status: string, conclusion: string | null) => ({
+  const run = (status: string, conclusion: string | undefined) => ({
     id: 41,
     status,
     conclusion,
@@ -323,7 +342,7 @@ describe('the flake-repro prober', () => {
   });
 
   it('should dispatch flake-repro.yml at the commit, wait for the run and read its report', async () => {
-    const { value, dispatched, sleeps } = deps([run('in_progress', null), run('completed', 'success')]);
+    const { value, dispatched, sleeps } = deps([run('in_progress', undefined), run('completed', 'success')]);
     const result = await reproProber(value)({ sha: commitSha(9), modes: 'repeat,cpu', attempts: 30, minutes: 120 });
     expect(dispatched).toEqual([
       {
@@ -360,14 +379,24 @@ describe('the flake-repro prober', () => {
 
   it('should report a run without a report, or one that never finished, as no verdict', async () => {
     const missing = deps([run('completed', 'failure')], { artifact: false });
-    expect(await reproProber(missing.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 })).toMatchObject({
+    expect(
+      await reproProber(missing.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 }),
+    ).toMatchObject({
       rows: [],
       error: 'no report (failure)',
     });
-    const stuck = deps([run('queued', null)]);
+    const stuck = deps([run('queued', undefined)]);
     let clock = Date.parse('2026-11-20T00:00:00.000Z');
-    stuck.value = { ...stuck.value, now: () => new Date((clock += 3_600_000)) };
-    expect(await reproProber(stuck.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 })).toMatchObject({
+    stuck.value = {
+      ...stuck.value,
+      now: () => {
+        clock += 3_600_000;
+        return new Date(clock);
+      },
+    };
+    expect(
+      await reproProber(stuck.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 }),
+    ).toMatchObject({
       rows: [],
       error: 'the run did not finish in time',
     });
@@ -376,9 +405,9 @@ describe('the flake-repro prober', () => {
   it('should read only well-formed rows of a report', () => {
     expect(reportRows(undefined)).toEqual([]);
     expect(reportRows({ rows: 'no' })).toEqual([]);
-    expect(reportRows({ rows: [{ mode: 'repeat', variant: 'alone', outcomes: { passed: 2, failed: -1, error: 1.5 } }] })).toEqual([
-      { key: 'repeat:alone', outcomes: { passed: 2 } },
-    ]);
+    expect(
+      reportRows({ rows: [{ mode: 'repeat', variant: 'alone', outcomes: { passed: 2, failed: -1, error: 1.5 } }] }),
+    ).toEqual([{ key: 'repeat:alone', outcomes: { passed: 2 } }]);
   });
 });
 

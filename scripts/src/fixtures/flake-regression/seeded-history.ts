@@ -77,21 +77,24 @@ export const seededLedger = (): LedgerState => {
   ];
   for (let n = 1; n <= pushes; n += 1) {
     const rows = [stableId, ...flakes.map(([id]) => id)].map((id) =>
-      row(id, n, flakes.some(([flaky, runs]) => flaky === id && runs.includes(n))),
+      row(
+        id,
+        n,
+        flakes.some(([flaky, runs]) => flaky === id && runs.includes(n)),
+      ),
     );
     ingestRun(state, { run: pushRun(n), rows, artifacts: 1, rejected: 0 });
   }
   return state;
 };
 
-/** A small deterministic generator (mulberry32), so a probe's draws depend only on its commit and seed. */
+/** A small deterministic generator (Park–Miller), so a probe's draws depend only on its commit and seed. */
 const random = (seed: number): (() => number) => {
-  let value = seed >>> 0;
+  const modulus = 2_147_483_647;
+  let value = (seed % (modulus - 1)) + 1;
   return () => {
-    value = (value + 0x6d_2b_79_f5) >>> 0;
-    let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
-    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+    value = (value * 48_271) % modulus;
+    return value / modulus;
   };
 };
 

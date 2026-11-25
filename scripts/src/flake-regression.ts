@@ -56,6 +56,9 @@ export const bisectLimits = {
   maximumCleanAttempts: 400,
 } as const;
 
+/** {@link bisectLimits}' shape, for overrides. */
+export type BisectLimits = { readonly [Key in keyof typeof bisectLimits]: number };
+
 /** The modes the first probe runs when the caller names none: the base rate, contention and collisions. */
 export const defaultModes = 'repeat,cpu,parallel';
 
@@ -90,7 +93,9 @@ export const latestOnset = (identity: IdentityState, threshold = stableExecution
     if (!event) {
       return 0;
     }
-    return before ? Math.max(0, event.execution - before.execution - 1) : (identity.stableBefore ?? 0) + event.execution - 1;
+    return before
+      ? Math.max(0, event.execution - before.execution - 1)
+      : (identity.stableBefore ?? 0) + event.execution - 1;
   };
   let start = events.length - 1;
   while (start > 0 && gap(start) < threshold) {
@@ -137,21 +142,26 @@ export const identityMarker = (id: string): string =>
 export const bisectMarker = (onsetRun: number, status: 'started' | 'done', at: string): string =>
   `<!-- flake-regression-bisect onset=${onsetRun} status=${status} at=${at} -->`;
 
-/** A bisect of this onset that finished, or one started less than `staleHours` ago and presumably still running. */
+/** A started bisect with no result after this long died with its job (the job's limit is six hours). */
+const staleBisectHours = 7;
+
+/** A bisect of this onset that finished, or one started less than seven hours ago and presumably still running. */
 export const bisectRecorded = (
   comments: readonly string[],
   onsetRun: number,
   now: Date,
-  staleHours = 7,
 ): 'done' | 'running' | undefined => {
-  const pattern = new RegExp(String.raw`<!-- flake-regression-bisect onset=${onsetRun} status=(started|done) at=(\S+) -->`, 'u');
+  const pattern = new RegExp(
+    String.raw`<!-- flake-regression-bisect onset=${onsetRun} status=(started|done) at=(\S+) -->`,
+    'u',
+  );
   let running = false;
   for (const body of comments) {
     const match = pattern.exec(body);
     if (match?.[1] === 'done') {
       return 'done';
     }
-    if (match?.[1] === 'started' && now.getTime() - Date.parse(match[2] ?? '') < staleHours * 3_600_000) {
+    if (match?.[1] === 'started' && now.getTime() - Date.parse(match[2] ?? '') < staleBisectHours * 3_600_000) {
       running = true;
     }
   }
@@ -181,7 +191,7 @@ export const reproIdentity = (
   projectRoot: string,
 ): ReproIdentity | undefined => {
   const prefix = `${identity.project} › `;
-  const file = identity.file;
+  const { file } = identity;
   if (!id.startsWith(prefix) || file === undefined || !id.startsWith(`${prefix}${file}${separator}`)) {
     return undefined;
   }
@@ -327,7 +337,7 @@ export type BisectInput = {
   readonly modes: string;
   readonly prober: Prober;
   /** Overrides of {@link bisectLimits}, for tests. */
-  readonly limits?: Partial<typeof bisectLimits>;
+  readonly limits?: Partial<BisectLimits>;
 };
 
 /**
@@ -335,15 +345,14 @@ export type BisectInput = {
  * flakes from that commit on. Never more than `limits.probes` probes or `limits.minutes` runner-minutes.
  */
 export const bisectRegression = async (input: BisectInput): Promise<BisectResult> => {
-  const bounds = { ...bisectLimits, ...input.limits };
+  const bounds: BisectLimits = { ...bisectLimits, ...input.limits };
   const { history, prober } = input;
   const bad = history.length - 1;
   const probes: ProbeLog[] = [];
   let minutes = 0;
-  let mode: string | undefined;
   let required = 0;
-  let firstFailures: number | undefined;
-  let firstAttempts: number | undefined;
+  /** The variant the first probe chose, and what it reproduced there. */
+  const chosen: { mode?: string; failures?: number; attempts?: number } = {};
   const verdicts = new Map<number, Verdict>();
 
   /** The range as it stands: the newest clean index below the oldest flaky one. */
@@ -351,7 +360,10 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     const flakyIndexes = [...verdicts].filter(([, verdict]) => verdict === 'flaky').map(([index]) => index);
     const flakyIndex = flakyIndexes.length > 0 ? Math.min(...flakyIndexes) : undefined;
     const cleanIndexes = [...verdicts]
-      .filter(([index, verdict]) => (verdict === 'clean' || verdict === 'absent') && (flakyIndex === undefined || index < flakyIndex))
+      .filter(
+        ([index, verdict]) =>
+          (verdict === 'clean' || verdict === 'absent') && (flakyIndex === undefined || index < flakyIndex),
+      )
       .map(([index]) => index);
     const cleanIndex = cleanIndexes.length > 0 ? Math.max(...cleanIndexes) : undefined;
     return {
@@ -364,16 +376,19 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     outcome,
     ...range(),
     introduced: false,
-    mode,
-    failures: firstFailures,
-    attempts: firstAttempts,
-    required: mode === undefined ? undefined : required,
+    mode: chosen.mode,
+    failures: chosen.failures,
+    attempts: chosen.attempts,
+    required: chosen.mode === undefined ? undefined : required,
     probes,
     minutes,
     ...extra,
   });
   /** Run one probe at `index`, or report that the budget does not allow it. */
-  const probe = async (index: number, request: { modes: string; attempts: number }): Promise<ProbeReport | 'budget'> => {
+  const probe = async (
+    index: number,
+    request: { modes: string; attempts: number },
+  ): Promise<ProbeReport | 'budget'> => {
     const left = bounds.minutes - minutes;
     if (probes.length >= bounds.probes || left < bounds.minimumProbeMinutes) {
       return 'budget';
@@ -401,11 +416,11 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
   };
   /** The verdict of the bisect's variant at `index`. */
   const classify = async (index: number): Promise<Verdict | 'budget'> => {
-    const report = await probe(index, { modes: mode ?? '', attempts: required });
+    const report = await probe(index, { modes: chosen.mode ?? '', attempts: required });
     if (report === 'budget') {
       return 'budget';
     }
-    const row = report.rows.find((entry) => entry.key === mode);
+    const row = report.rows.find((entry) => entry.key === chosen.mode);
     const verdict = verdictOf(row, required);
     log(report, row, verdict);
     verdicts.set(index, verdict);
@@ -413,7 +428,9 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
   };
 
   if (history.length < 2 || input.good < 0 || input.good >= bad) {
-    throw new Error(`bisect: the last stable commit must come before the flaky one (good ${input.good}, ${history.length} commits)`);
+    throw new Error(
+      `bisect: the last stable commit must come before the flaky one (good ${input.good}, ${history.length} commits)`,
+    );
   }
 
   // 1. The flaky commit, in every requested mode: the variant with the highest rate drives the rest.
@@ -430,16 +447,16 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
   }
   log(first, best, 'flaky');
   verdicts.set(bad, 'flaky');
-  mode = best.key;
-  firstFailures = failuresOf(best);
-  firstAttempts = ranOf(best);
-  required = cleanAttempts(firstFailures, firstAttempts) ?? bounds.minimumCleanAttempts;
+  chosen.mode = best.key;
+  chosen.failures = failuresOf(best);
+  chosen.attempts = ranOf(best);
+  required = cleanAttempts(chosen.failures, chosen.attempts) ?? bounds.minimumCleanAttempts;
   if (required > bounds.maximumCleanAttempts) {
     return finish('rate-too-low');
   }
 
   // 2. Bracket: the last stable commit must be clean; if it flakes, double the distance back.
-  let good = input.good;
+  let { good } = input;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- each probe decides the next
     const verdict = await classify(good);
@@ -563,7 +580,7 @@ export const renderBisectComment = (input: {
           : 'is the first commit where the test flakes under stress; its parent ' +
             `${commitLink(result.clean)} passed ${result.required ?? 0} straight attempts.`),
       '',
-      'The culprit\'s author or agent fixes or reverts it; the operator decides whether the test is quarantined in the ' +
+      "The culprit's author or agent fixes or reverts it; the operator decides whether the test is quarantined in the " +
         'meantime (class `flaky-regression`). It is not quarantined automatically.',
     );
   } else {

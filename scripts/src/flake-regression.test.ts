@@ -89,7 +89,11 @@ describe('flaky-regression detection', () => {
 
   it('should measure the stable run from the event before it, and need at least 300', () => {
     const stable = identity([event(10), event(311), event(330)], { executions: 340, stableBefore: 0 });
-    expect(latestOnset(stable)).toMatchObject({ stableBefore: 300, onset: { execution: 311 }, previous: { execution: 10 } });
+    expect(latestOnset(stable)).toMatchObject({
+      stableBefore: 300,
+      onset: { execution: 311 },
+      previous: { execution: 10 },
+    });
     expect(isFlakyRegression(stable)).toBe(true);
 
     const short = identity([event(10), event(310), event(330)], { executions: 340, stableBefore: 0 });
@@ -124,13 +128,18 @@ describe('flaky-regression detection', () => {
     expect(bisectRecorded([bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z')], 323, now)).toBe('done');
     expect(bisectRecorded([bisectMarker(323, 'started', '2026-11-20T10:00:00.000Z')], 323, now)).toBe('running');
     expect(bisectRecorded([bisectMarker(323, 'started', '2026-11-20T01:00:00.000Z')], 323, now)).toBeUndefined();
-    expect(bisectRecorded([bisectMarker(400, 'done', '2026-11-19T00:00:00.000Z'), 'unrelated'], 323, now)).toBeUndefined();
+    expect(
+      bisectRecorded([bisectMarker(400, 'done', '2026-11-19T00:00:00.000Z'), 'unrelated'], 323, now),
+    ).toBeUndefined();
   });
 });
 
 describe('the bisect under stress', () => {
   it('should attribute a seeded regression to its commit when the last stable commit is clean', async () => {
-    const { prober, requests } = stubProber({ culprit: culpritCommit, rates: { 'cpu:stress': 0.3, 'repeat:alone': 0.05 } });
+    const { prober, requests } = stubProber({
+      culprit: culpritCommit,
+      rates: { 'cpu:stress': 0.3, 'repeat:alone': 0.05 },
+    });
     const history = historyTo(330);
     const result = await bisectRegression({ history, good: 199, modes: 'repeat,cpu,parallel', prober });
     expect(result).toMatchObject({
@@ -181,7 +190,7 @@ describe('the bisect under stress', () => {
   });
 
   it('should refuse a rate that needs more passes per clean verdict than a probe may run', async () => {
-    const { prober, requests } = stubProber({ culprit: 1, rates: { 'repeat:alone': 0.05 } });
+    const { prober, requests } = stubProber({ culprit: 1, rates: { 'repeat:alone': 0.02 } });
     const result = await bisectRegression({
       history: historyTo(60),
       good: 9,
@@ -228,11 +237,19 @@ describe('the bisect under stress', () => {
     const { prober } = stubProber({ culprit: culpritCommit, rates: { 'repeat:alone': 0.5 }, broken: [322] });
     const result = await bisectRegression({ history: historyTo(330, 300), good: 0, modes: 'repeat', prober });
     expect(result.outcome).toBe('inconclusive');
-    expect(result.probes.at(-1)).toMatchObject({ sha: commitSha(322), verdict: 'inconclusive', error: 'no report (failure)' });
+    expect(result.probes.at(-1)).toMatchObject({
+      sha: commitSha(322),
+      verdict: 'inconclusive',
+      error: 'no report (failure)',
+    });
     const empty = stubProber({ culprit: 1, rates: {}, broken: [330] });
-    expect((await bisectRegression({ history: historyTo(330, 300), good: 0, modes: 'repeat', prober: empty.prober })).outcome).toBe(
-      'inconclusive',
-    );
+    const noReport = await bisectRegression({
+      history: historyTo(330, 300),
+      good: 0,
+      modes: 'repeat',
+      prober: empty.prober,
+    });
+    expect(noReport.outcome).toBe('inconclusive');
   });
 
   it('should refuse a last stable commit that is not before the flaky one', async () => {

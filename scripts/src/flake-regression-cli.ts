@@ -73,20 +73,22 @@ const queueSlackMinutes = 60;
 type Commit = {
   readonly sha: string;
   readonly commit?: { readonly message?: string };
-  readonly author?: { readonly login?: string } | null;
+  /** `null` for an author GitHub does not know; read only with `?.`. */
+  readonly author?: { readonly login?: string };
 };
 type Run = {
   readonly id: number;
   readonly head_sha?: string;
   readonly status?: string;
-  readonly conclusion?: string | null;
+  /** `null` while the run is going; read only with `??` or a comparison. */
+  readonly conclusion?: string;
   readonly created_at: string;
   readonly run_started_at?: string;
   readonly updated_at: string;
   readonly html_url: string;
   readonly display_title?: string;
 };
-type Issue = { readonly number: number; readonly body?: string | null; readonly pull_request?: unknown };
+type Issue = { readonly number: number; readonly body?: string; readonly pull_request?: unknown };
 
 // ---------------------------------------------------------------------------------------------------------------
 // The commits.
@@ -117,7 +119,9 @@ export const historyTo = async (
   const commits: Commit[] = [];
   for (let page = 1; commits.length < limit; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order
-    const batch = await github.get<Commit[]>(`/repos/${github.repository}/commits?sha=${head}&per_page=100&page=${page}`);
+    const batch = await github.get<Commit[]>(
+      `/repos/${github.repository}/commits?sha=${head}&per_page=100&page=${page}`,
+    );
     commits.push(...batch);
     if (batch.length < 100) {
       break;
@@ -177,7 +181,7 @@ const issueComments = async (github: Client, issue: number): Promise<string[]> =
   const bodies: string[] = [];
   for (let page = 1; page <= 10; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until a short one
-    const comments = await github.get<Array<{ body?: string | null }>>(
+    const comments = await github.get<Array<{ body?: string }>>(
       `/repos/${github.repository}/issues/${issue}/comments?per_page=100&page=${page}`,
     );
     bodies.push(...comments.map((comment) => comment.body ?? ''));
@@ -248,7 +252,11 @@ const runMinutes = (run: Run): number =>
   Math.max(0, Date.parse(run.updated_at) - Date.parse(run.run_started_at ?? run.created_at)) / 60_000;
 
 /** The dispatched run: by the id the API returned, else the newest dispatch of the workflow at this commit. */
-const locateRun = async (deps: ReproDeps, id: number | undefined, sha: string, since: string): Promise<number | undefined> => {
+const locateRun = async (
+  deps: ReproDeps,
+  dispatched: { readonly id: number | undefined; readonly sha: string; readonly since: string },
+): Promise<number | undefined> => {
+  const { id, sha, since } = dispatched;
   if (id !== undefined) {
     return id;
   }
@@ -270,10 +278,12 @@ const locateRun = async (deps: ReproDeps, id: number | undefined, sha: string, s
 
 /** Whether a failed run was refused by `flake-repro.yml`'s gate (its `Admit the run` step failed). */
 const refusedByGate = async (github: Client, run: number): Promise<boolean> => {
-  const body = await github.get<{ jobs: Array<{ steps?: Array<{ name: string; conclusion?: string | null }> }> }>(
+  const body = await github.get<{ jobs: Array<{ steps?: Array<{ name: string; conclusion?: string }> }> }>(
     `/repos/${github.repository}/actions/runs/${run}/jobs`,
   );
-  return body.jobs.some((job) => job.steps?.some((step) => step.name === 'Admit the run' && step.conclusion === 'failure'));
+  return body.jobs.some((job) =>
+    job.steps?.some((step) => step.name === 'Admit the run' && step.conclusion === 'failure'),
+  );
 };
 
 /** A {@link Prober} that dispatches `flake-repro.yml` at the commit, waits for it and reads its report. */
@@ -297,7 +307,7 @@ export const reproProber =
         minutes: String(request.minutes),
       });
       // oxlint-disable-next-line no-await-in-loop -- as above
-      const id = await locateRun(deps, dispatched, request.sha, since);
+      const id = await locateRun(deps, { id: dispatched, sha: request.sha, since });
       if (id === undefined) {
         return { sha: request.sha, rows: [], minutes, error: 'the dispatched run was not found' };
       }
@@ -329,13 +339,25 @@ export const reproProber =
       );
       const artifact = artifacts.artifacts.find((entry) => entry.name === `flake-repro-${id}` && !entry.expired);
       if (!artifact) {
-        return { sha: request.sha, rows: [], minutes, run: { id, url }, error: `no report (${run.conclusion ?? 'unknown'})` };
+        return {
+          sha: request.sha,
+          rows: [],
+          minutes,
+          run: { id, url },
+          error: `no report (${run.conclusion ?? 'unknown'})`,
+        };
       }
       // oxlint-disable-next-line no-await-in-loop -- as above
       const zip = await github.getBytes(`/repos/${github.repository}/actions/artifacts/${artifact.id}/zip`);
       // oxlint-disable-next-line no-await-in-loop -- as above
       const rows = reportRows(await deps.readReport(zip));
-      return { sha: request.sha, rows, minutes, run: { id, url }, ...(rows.length === 0 ? { error: 'an empty report' } : {}) };
+      return {
+        sha: request.sha,
+        rows,
+        minutes,
+        run: { id, url },
+        ...(rows.length === 0 ? { error: 'an empty report' } : {}),
+      };
     }
     return { sha: request.sha, rows: [], minutes, error: `the repro gate refused ${gateRetries + 1} dispatches` };
   };
@@ -359,7 +381,8 @@ const dispatchWith =
       },
     );
     if (!response.ok) {
-      throw new Error(`dispatch ${options.workflow}: GitHub API ${response.status} ${(await response.text()).slice(0, 200)}`);
+      const detail = await response.text();
+      throw new Error(`dispatch ${options.workflow}: GitHub API ${response.status} ${detail.slice(0, 200)}`);
     }
     if (response.status === 204) {
       return undefined;
@@ -374,7 +397,9 @@ const unzipReport = async (zip: Uint8Array<ArrayBuffer>): Promise<unknown> => {
     const path = join(directory, 'report.zip');
     await writeFile(path, zip);
     // The report is data from a run of pull-request code: parsed, never executed.
-    return JSON.parse(execFileSync('unzip', ['-p', path, 'report.json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+    return JSON.parse(
+      execFileSync('unzip', ['-p', path, 'report.json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
+    );
   } catch {
     return undefined;
   } finally {
@@ -393,7 +418,7 @@ export const projectRoots = (root: string): Map<string, string> => {
     .filter((file) => posix.basename(file) === 'project.json');
   for (const file of files) {
     try {
-      const name = (JSON.parse(readFileSync(join(root, file), 'utf8')) as { name?: unknown }).name;
+      const { name } = JSON.parse(readFileSync(join(root, file), 'utf8')) as { name?: unknown };
       if (typeof name === 'string') {
         roots.set(name, posix.dirname(file));
       }
@@ -441,10 +466,57 @@ const manualCandidate = (id: string, identity: IdentityState): RegressionCandida
   return onset ? { id, identity, ...onset } : undefined;
 };
 
+/** Bisect one candidate between its last stable and first flaky commits, and name the result on its issue. */
+const bisectCandidate = async (
+  chosen: { readonly candidate: RegressionCandidate; readonly issue: number },
+  options: InvocationOptions,
+  deps: InvocationDeps,
+): Promise<{ result: BisectResult; comment: string }> => {
+  const { github } = deps;
+  const { candidate, issue } = chosen;
+  const root = deps.roots.get(candidate.identity.project);
+  const identity = root === undefined ? undefined : reproIdentity(candidate.id, candidate.identity, root);
+  const failing = await runSha(github, candidate.onset.failedRun);
+  const bad = options.bad ?? failing.sha;
+  const good = options.good ?? (await lastStableSha(github, failing.createdAt, bad));
+  const history = await historyTo(github, bad);
+  const goodIndex = good === undefined ? -1 : history.shas.indexOf(good);
+  let result: BisectResult = { outcome: 'inconclusive', candidates: 0, introduced: false, probes: [], minutes: 0 };
+  if (identity) {
+    await comment(
+      github,
+      issue,
+      `${bisectMarker(candidate.onset.failedRun, 'started', deps.now().toISOString())}\n\nBisecting under stress between ` +
+        `${good ?? 'the oldest commit of the window'} and ${bad} (at most ${bisectLimits.probes} \`flake-repro.yml\` probes and ${bisectLimits.minutes} runner-minutes).\n`,
+    );
+    result = await bisectRegression({
+      history: history.shas,
+      good: Math.max(0, goodIndex),
+      modes: options.modes,
+      prober: deps.prober(identity),
+    });
+  } else {
+    (deps.log ?? console.error)(`${candidate.id}: no project root or test name to dispatch a repro with`);
+  }
+  const body = renderBisectComment({
+    result,
+    onsetRun: candidate.onset.failedRun,
+    culprit: result.culprit === undefined ? undefined : (history.info.get(result.culprit) ?? { sha: result.culprit }),
+    repository: github.repository,
+    now: deps.now(),
+  });
+  await comment(github, issue, body);
+  return { result, comment: body };
+};
+
 /** Detect, flag and bisect: everything one run of `flake-regression.yml` does. */
 export const runInvocation = async (options: InvocationOptions, deps: InvocationDeps): Promise<InvocationResult> => {
   const { github } = deps;
-  const log = deps.log ?? ((line: string) => console.error(line));
+  const log =
+    deps.log ??
+    ((line: string) => {
+      console.error(line);
+    });
   const state = await deps.store.read();
   if (!state) {
     return { candidates: [], issues: new Map(), markdown: '## Flaky regressions (FQ-12)\n\nNo ledger state yet.\n' };
@@ -494,42 +566,17 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
     return { candidates, issues, markdown: `${lines.join('\n')}\n` };
   }
 
-  const { candidate, issue } = chosen;
-  const root = deps.roots.get(candidate.identity.project);
-  const identity = root === undefined ? undefined : reproIdentity(candidate.id, candidate.identity, root);
-  const failing = await runSha(github, candidate.onset.failedRun);
-  const bad = options.bad ?? failing.sha;
-  const good = options.good ?? (await lastStableSha(github, failing.createdAt, bad));
-  const history = await historyTo(github, bad);
-  const goodIndex = good === undefined ? -1 : history.shas.indexOf(good);
-  let result: BisectResult;
-  if (!identity) {
-    result = { outcome: 'inconclusive', candidates: 0, introduced: false, probes: [], minutes: 0 };
-    log(`${candidate.id}: no project root or test name to dispatch a repro with`);
-  } else {
-    await comment(
-      github,
-      issue,
-      `${bisectMarker(candidate.onset.failedRun, 'started', deps.now().toISOString())}\n\nBisecting under stress between ` +
-        `${good ?? 'the oldest commit of the window'} and ${bad} (at most ${bisectLimits.probes} \`flake-repro.yml\` probes and ${bisectLimits.minutes} runner-minutes).\n`,
-    );
-    result = await bisectRegression({
-      history: history.shas,
-      good: goodIndex === -1 ? 0 : goodIndex,
-      modes: options.modes,
-      prober: deps.prober(identity),
-    });
-  }
-  const body = renderBisectComment({
-    result,
-    onsetRun: candidate.onset.failedRun,
-    culprit: result.culprit === undefined ? undefined : (history.info.get(result.culprit) ?? { sha: result.culprit }),
-    repository: github.repository,
-    now: deps.now(),
-  });
-  await comment(github, issue, body);
-  lines.push('', `Bisected ${candidate.id.replaceAll('`', "'")} on #${issue}: ${result.outcome}${result.culprit ? ` ${result.culprit}` : ''}.`);
-  return { candidates, issues, bisected: { id: candidate.id, issue, result, comment: body }, markdown: `${lines.join('\n')}\n` };
+  const { result, comment: body } = await bisectCandidate(chosen, options, deps);
+  lines.push(
+    '',
+    `Bisected ${chosen.candidate.id.replaceAll('`', "'")} on #${chosen.issue}: ${result.outcome}${result.culprit ? ` ${result.culprit}` : ''}.`,
+  );
+  return {
+    candidates,
+    issues,
+    bisected: { id: chosen.candidate.id, issue: chosen.issue, result, comment: body },
+    markdown: `${lines.join('\n')}\n`,
+  };
 };
 
 const main = async (args: readonly string[]): Promise<number> => {

@@ -2,7 +2,6 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { useWaitClock } from '@taucad/ui/hooks/use-wait-clock';
 import { cn } from '@taucad/ui/utils/cn';
 import type { ModelAvailability } from '#hooks/use-project-availability.js';
-import { CoveringSheetNotice, useIsCoveringSheet } from '#routes/w.$workspace.$project/covering-sheet.js';
 import { useWaitStart } from '#hooks/use-wait-start.js';
 import { isProjectFilesFailure } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 
@@ -142,7 +141,7 @@ type SkeletonDelayStyle = React.CSSProperties & Partial<Record<`--${string}`, st
  * one region of the open that says it is running, and the route's announcement the one that says it aloud.
  *
  * When the wait fails the bars stop and the body is empty: the viewer says the failure, once, with its one action. In a
- * phone sheet at full that covers the viewer, the body says it instead ({@link CoveringSheetNotice}).
+ * phone sheet at full that covers the viewer, the sheet's host says it over the body instead (`CoveringSheetFailure`).
  *
  * The wrapper carries `aria-busy` and the pane's name while the wait runs; the bars are hidden from assistive
  * technology, and nothing here is live.
@@ -163,7 +162,6 @@ export function ProjectWaitSkeleton({
   readonly className?: string;
 }): React.JSX.Element {
   const isWaiting = isRunning(state);
-  const isCovering = useIsCoveringSheet();
   const { startedAt } = useWaitStart(isWaiting);
   const { timing, wait } = useWaitClock({ active: isWaiting, startedAt });
   const Shape = shapes[shape];
@@ -187,7 +185,6 @@ export function ProjectWaitSkeleton({
           <Shape />
         </div>
       ) : null}
-      {!isWaiting && isCovering ? <CoveringSheetNotice wait={state} /> : null}
     </div>
   );
 }

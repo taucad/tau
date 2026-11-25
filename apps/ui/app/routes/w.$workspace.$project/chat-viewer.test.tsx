@@ -1946,6 +1946,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     /* The pill's words are laid out from the wait's start and revealed by CSS from 1,000 ms (UI Policy § 6). The open
        waits for this first check, so the pill says the open's one label (Progressive Loading Policy rule 18). */
     expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Opening project…');
+    /* The open waits for it, so the route's announcement speaks for it: the pill is seen, not announced. */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).not.toHaveAttribute('role');
     /* The geometry unit, and so the kernel, waits for the files: the stage creates none during the check. */
     expect(mockProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
@@ -2005,6 +2007,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     const pill = document.querySelector('[data-slot="wait-indicator-body"]');
     expect(pill).toHaveTextContent('Downloading model files…');
     expect(pill).toHaveTextContent('25%');
+    /* A wait after the open is its own group: the route's announcement is quiet, so the pill says it (rule 22). */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Downloading model files' })).not.toBeInTheDocument();
   });

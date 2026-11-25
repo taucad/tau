@@ -339,7 +339,10 @@ function WhereYouAre(): React.JSX.Element {
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
       <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
         {isUnknown ? (
-          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+          /* From the wait ladder's 300 ms mark, on a wrapper so the pill keeps its pulse (rule 16). */
+          <span aria-hidden className='inline-flex wait-skeleton'>
+            <Skeleton className='h-6 w-24 rounded-full' />
+          </span>
         ) : (
           <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
         )}

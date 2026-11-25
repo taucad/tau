@@ -484,8 +484,9 @@ function FloatingPanelContentHeaderActions({
   className,
 }: FloatingPanelContentHeaderActionsProps): React.JSX.Element {
   const isMobile = useIsMobile();
-  const isInsideDrawer = useIsInsideDrawer();
   const depth = React.useContext(FloatingPanelContentDepthContext);
+  /* Only the host provides it, and only for its covering sheet. Not gated on being inside the drawer: the Terminal
+     sheet renders through a portal outside the drawer's React tree. */
   const sheetStatus = React.useContext(SheetHeaderStatusContext);
   return (
     <div
@@ -503,7 +504,7 @@ function FloatingPanelContentHeaderActions({
       )}
       data-slot='floating-panel-content-header-actions'
     >
-      {isMobile && isInsideDrawer && depth <= 1 ? sheetStatus : null}
+      {isMobile && depth <= 1 ? sheetStatus : null}
       {children}
     </div>
   );

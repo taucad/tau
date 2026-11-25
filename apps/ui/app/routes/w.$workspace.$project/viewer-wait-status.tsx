@@ -255,6 +255,12 @@ type ViewerWaitModel = Readonly<{
   isStallable: boolean;
   /** The session reports the open's file check slow. */
   isSlowCheck: boolean;
+  /**
+   * Whether the wait is the project's open, or a wait for the model's files the open bore. The route's announcement
+   * speaks for those, so their indicators are seen, not announced; a wait that starts after the open is its own group
+   * and says itself (rule 22).
+   */
+  isOpen: boolean;
   /** The wait's timing and counts, which the detail line keys its marks on. */
   clock: ReturnType<typeof useWaitClock>;
   /** The download's numbers while the wait runs. */
@@ -296,6 +302,7 @@ function useViewerWaitModel(wait: ViewerWait | undefined): ViewerWaitModel {
     hasWaited: shownWait !== undefined,
     isStallable,
     isSlowCheck,
+    isOpen,
     clock,
     numbers: measured?.numbers,
     indicator: {
@@ -341,7 +348,7 @@ export function ViewerWaitStatus({
   readonly wait: ViewerWait | undefined;
   readonly children?: React.ReactNode;
 }): React.JSX.Element {
-  const { isActive, hasWaited, isStallable, isSlowCheck, clock, numbers, indicator } = useViewerWaitModel(wait);
+  const { isActive, hasWaited, isStallable, isSlowCheck, isOpen, clock, numbers, indicator } = useViewerWaitModel(wait);
   const { timing } = clock;
   /* The pill mounts with the stage's first running wait and stays for its hold; a failure drops it at once. */
   const isPillShown = hasWaited && (wait === undefined || isActive);
@@ -351,7 +358,7 @@ export function ViewerWaitStatus({
     <div className='relative'>
       <div className='group/viewer-wait grid justify-items-center *:[grid-area:1/1]'>
         <div data-slot='viewer-wait-status' className='flex items-center justify-center gap-1.5'>
-          {isPillShown ? <WaitIndicator {...indicator} variant='pill' live={false} /> : null}
+          {isPillShown ? <WaitIndicator {...indicator} variant='pill' live={!isOpen} /> : null}
           {isSlowCheck ? <ModelFilesRetry /> : null}
         </div>
         {children === undefined ? null : (
@@ -381,15 +388,24 @@ export function ViewerWaitStatus({
 /**
  * The viewer's status where a phone sheet at full covers the viewer (rule 17): the same words in the sheet header's
  * trailing slot, in the indicator's inline skin, so the status moves instead of being shown twice. The covered viewer
- * is inert. Running waits only, with the stalled download's slow words and its one "Try again"; a failure is the
- * covering sheet's body notice (`CoveringSheetNotice`).
+ * is inert. Running waits only, with the stalled download's slow words and its one "Try again", or the slow file
+ * check's retry; no percentage, which the stage keeps from going backwards; a failure is the covering sheet's notice
+ * (`CoveringSheetFailure`).
  *
  * @param props - The viewer's wait, `undefined` once there is none.
  * @returns The header slot's indicator.
  */
 export function ViewerWaitInline({ wait }: { readonly wait: ViewerWait | undefined }): React.JSX.Element {
-  const { indicator } = useViewerWaitModel(wait);
-  return <WaitIndicator {...indicator} variant='inline' live={false} />;
+  const { indicator, isOpen, isSlowCheck } = useViewerWaitModel(wait);
+  /* No percentage: the stage owns the record that keeps it from going backwards (rule 18), and a header mounted later
+     would start a record of its own. The label and the slow words carry the wait here. */
+  return (
+    <span className='inline-flex items-center gap-1.5'>
+      <WaitIndicator {...indicator} progress={undefined} variant='inline' live={!isOpen} />
+      {/* The slow check's retry: the inert viewer's own is out of reach. */}
+      {isSlowCheck ? <ModelFilesRetry /> : null}
+    </span>
+  );
 }
 
 /**

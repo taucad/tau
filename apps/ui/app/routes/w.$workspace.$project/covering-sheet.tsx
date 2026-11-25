@@ -1,6 +1,7 @@
 import { createContext, createElement, useContext, useId } from 'react';
 import { AlertTriangle, CloudOff } from 'lucide-react';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
+import { isProjectFilesFailure } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useViewerWaitFailure, ViewerWaitInline } from '#routes/w.$workspace.$project/viewer-wait-status.js';
 import type { ViewerWait } from '#routes/w.$workspace.$project/viewer-wait-status.js';
 
@@ -55,6 +56,33 @@ function CoveringSheetWaitStatus(): React.JSX.Element {
 }
 
 /**
+ * The viewer's failure over the body of the sheet that covers it, whatever the sheet shows: a pane still waiting, or one
+ * whose own content is here (an open chat while the model's files fail). The phone host draws it once over the sheet's
+ * surface, so the covered, inert viewer's failure and its one action stay reachable (rule 21).
+ *
+ * @returns The notice over the sheet's body, or nothing while the viewer's wait has not failed or the sheet does not
+ *   cover it.
+ */
+export function CoveringSheetFailure(): React.ReactNode {
+  const isCovering = useIsCoveringSheet();
+  return isCovering ? <CoveringSheetViewerFailure /> : null;
+}
+
+function CoveringSheetViewerFailure(): React.ReactNode {
+  const availability = useModelAvailability();
+  const hasFailed = availability === 'filesFailed' || isProjectFilesFailure(availability);
+  if (!hasFailed) {
+    return null;
+  }
+  return (
+    /* Only the notice takes the pointer: the sheet's own content around it stays usable. */
+    <div className='pointer-events-none absolute inset-0 z-10'>
+      <CoveringSheetNotice wait={availability} />
+    </div>
+  );
+}
+
+/**
  * A failed wait's one notice, in the body of the sheet that covers the viewer: the viewer's own failure words and its
  * one action ("Try again", or "Open History" where a sign-in or a decision is needed). A labelled group, not an alert:
  * the route's announcement says a failed open (rule 22). Offline keeps its own glyph.
@@ -74,7 +102,7 @@ export function CoveringSheetNotice({ wait }: { readonly wait: ViewerWait }): Re
         role={failure.live === false ? 'group' : 'alert'}
         aria-labelledby={titleId}
         data-slot='covering-sheet-notice'
-        className='flex w-fit max-w-[min(24rem,100%)] flex-col items-center gap-2 rounded-md border border-feature/40 bg-background/90 p-3 text-center shadow-sm'
+        className='pointer-events-auto flex w-fit max-w-[min(24rem,100%)] flex-col items-center gap-2 rounded-md border border-feature/40 bg-background/90 p-3 text-center shadow-sm'
       >
         <div className='flex items-start gap-2 text-left'>
           {/* The icon sits in a box one line of the first text tall, so it is centred on that line (UI Policy § 5). */}

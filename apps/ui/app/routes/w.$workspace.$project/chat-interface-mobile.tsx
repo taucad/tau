@@ -29,7 +29,11 @@ import {
   FloatingPanelContentTitle,
   SheetHeaderStatusContext,
 } from '#components/ui/floating-panel.js';
-import { CoveringSheetProvider, CoveringSheetStatus } from '#routes/w.$workspace.$project/covering-sheet.js';
+import {
+  CoveringSheetFailure,
+  CoveringSheetProvider,
+  CoveringSheetStatus,
+} from '#routes/w.$workspace.$project/covering-sheet.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
@@ -729,7 +733,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                       height: `calc(${sheetHeight} - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
                     }}
                   >
-                    <div className='flex h-full flex-1 flex-col'>
+                    <div className='relative flex h-full flex-1 flex-col'>
                       {activeTab === 'terminal' ? (
                         <div ref={attachTerminalSlot} className='size-full' />
                       ) : (
@@ -737,6 +741,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                           <MobileSurface id={activeTab} />
                         </Suspense>
                       )}
+                      {/* The covered viewer's failure, over whatever the sheet shows (rule 21). */}
+                      <CoveringSheetFailure />
                     </div>
                   </section>
                 </DrawerContent>

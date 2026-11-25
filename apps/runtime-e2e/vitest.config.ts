@@ -10,6 +10,15 @@ import { configDefaults, defineConfig } from 'vitest/config';
  */
 const timingGates = ['src/benchmarks/native-speedup.bench.test.ts', 'src/benchmarks/parameter-commit.bench.test.ts'];
 
+/*
+ * The handle ledger rebuilds each heavy matrix model nine times on single-thread
+ * wasm (planetary-gear-system's tier-off test takes 153 s alone on a Linux host).
+ * Run next to the other suites on the hosted macOS runner, the same tests took
+ * 300-322 s and a different model's test crossed the per-test budget each night
+ * (#342). It runs on its own after the suites and before the timing gates.
+ */
+const isolatedSuites = ['src/replicad-handle-ledger.test.ts'];
+
 const shared = {
   environment: 'node',
   // Fixture render + geospec suites are heavy (cold OCCT wasm); give them room.
@@ -27,7 +36,21 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { ...shared, name: 'suites', exclude: [...configDefaults.exclude, ...timingGates] },
+        test: {
+          ...shared,
+          name: 'suites',
+          exclude: [...configDefaults.exclude, ...timingGates, ...isolatedSuites],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          ...shared,
+          name: 'isolated',
+          include: isolatedSuites,
+          fileParallelism: false,
+          sequence: { groupOrder: 1 },
+        },
       },
       {
         extends: true,
@@ -36,7 +59,7 @@ export default defineConfig({
           name: 'timing-gates',
           include: timingGates,
           fileParallelism: false,
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 2 },
         },
       },
     ],

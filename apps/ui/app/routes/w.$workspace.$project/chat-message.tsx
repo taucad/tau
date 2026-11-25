@@ -812,9 +812,9 @@ function AssistantParts({
       focusedRef.current = undefined;
       return;
     }
-    // Focus left for the page. A node the fold unmounted is gone by then; one still here, the reader left.
+    // Focus left for the page, or the window lost it. Only a click away leaves the node here and unfocused.
     queueMicrotask(() => {
-      if (target.isConnected && focusedRef.current === target) {
+      if (target.isConnected && document.activeElement !== target && focusedRef.current === target) {
         focusedRef.current = undefined;
       }
     });

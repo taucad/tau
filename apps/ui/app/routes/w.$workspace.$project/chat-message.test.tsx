@@ -779,6 +779,25 @@ describe('ChatMessage older turn fold', () => {
     expect(document.body).toHaveFocus();
   });
 
+  it('still moves focus to the fold line when the window lost focus while the turn ran', async () => {
+    const elsewhere: MyUIMessage = { ...narrated, id: 'msg-window-away' };
+    setMessages([elsewhere]);
+    const { rerender } = render(<ChatMessage messageId={elsewhere.id} />);
+    const [firstLine] = screen.getAllByRole('button', { expanded: false });
+    await act(async () => {
+      firstLine!.focus();
+      // Switching apps or tabs: blur without a related target, while the line stays the active element.
+      firstLine!.dispatchEvent(new FocusEvent('blur', { relatedTarget: null }));
+      firstLine!.dispatchEvent(new FocusEvent('focusout', { relatedTarget: null, bubbles: true }));
+      await Promise.resolve();
+    });
+
+    setMessages([finished(elsewhere, 7532)]);
+    rerender(<ChatMessage messageId={elsewhere.id} footer={null} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toHaveFocus();
+  });
+
   it('leaves focus where the reader moved it, and never pulls it back into an older turn', () => {
     const left: MyUIMessage = { ...narrated, id: 'msg-focus-left' };
     setMessages([left]);

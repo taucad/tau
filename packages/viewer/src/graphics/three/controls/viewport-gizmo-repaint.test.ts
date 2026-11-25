@@ -149,6 +149,32 @@ describe('view cube pole views', () => {
       new THREE.Matrix4().lookAt(end.pose.direction, new THREE.Vector3(), end.pose.up),
     );
     expect(presented.angleTo(reported)).toBeLessThan(0.01);
+    // The camera presents the cube's own pose: no tilt off the pole the cube stopped at (TA carry-over 1).
+    expect(new THREE.Vector3(...view.direction).angleTo(end.pose.direction)).toBeLessThan(1e-9);
+    expect(new THREE.Vector3(...view.up).angleTo(end.pose.up)).toBeLessThan(1e-9);
     gizmo.dispose();
+  });
+
+  /*
+   * A drag on the cube toward a pole: every pose the cube reports, however near the pole, reaches the camera as it is,
+   * so the view keeps moving toward the pole and never jumps back off it (invariant I2, no snap).
+   */
+  it('should hand the camera every pose of a drag toward the pole unchanged', () => {
+    const up = new THREE.Vector3(0, 0, 1);
+    const renderFrame = { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 } as const;
+    const polars = [1e-1, 1e-2, 2e-3, 1e-3, 9e-4, 5e-4, 2e-4, 1e-4];
+    const presented = polars.map((polar) => {
+      const direction = new THREE.Vector3(Math.sin(polar), 0, Math.cos(polar));
+      const pose = readViewportGizmoPose({
+        pose: { direction, up },
+        target: new THREE.Vector3(),
+        renderFrame,
+        verticalSpan: 1,
+      });
+      return new THREE.Vector3(...pose.direction).angleTo(up);
+    });
+    for (const [index, polar] of polars.entries()) {
+      expect(presented[index]).toBeCloseTo(polar, 9);
+    }
   });
 });

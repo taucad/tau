@@ -16,6 +16,7 @@
  */
 
 import { Topic } from '@taucad/events';
+import { safeModeRefusal, withoutTauCloud } from '#machines/safe-mode-revision-port.js';
 import {
   awaitCheckoutCuts,
   awaitSyncSettled,
@@ -345,6 +346,8 @@ export type WorkerProjectRevisions = Readonly<{
 export type WorkerProjectRevisionsOptions = Readonly<{
   projectId: string;
   port: RevisionPort;
+  /** This page load started in safe mode: nothing reaches Tau Cloud (W9 R5). Known at creation, never read live. */
+  safeMode?: boolean;
   /** A task-scoped transport with its own abort signal, sharing this project's rooted Git store. */
   candidatePort?: (signal: AbortSignal) => RevisionPort;
   /**
@@ -536,11 +539,23 @@ export const createRemoteAttention = (): RemoteAttention => {
 /**
  * Start one project's revision tree in this worker.
  *
- * @param options - The port and the checkout routes.
+ * @param given - The port and the checkout routes; in safe mode, the port is gated from Tau Cloud.
  * @returns The running tree, its projection and its commands.
  * @public
  */
-export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOptions): WorkerProjectRevisions => {
+export const createWorkerProjectRevisions = (given: WorkerProjectRevisionsOptions): WorkerProjectRevisions => {
+  /* W9 R5: in safe mode every leg that addresses Tau Cloud is refused before any request, stated, never retried. */
+  const { candidatePort } = given;
+  const options: WorkerProjectRevisionsOptions =
+    given.safeMode === true
+      ? {
+          ...given,
+          port: withoutTauCloud(given.port),
+          ...(candidatePort === undefined
+            ? {}
+            : { candidatePort: (signal: AbortSignal) => withoutTauCloud(candidatePort(signal)) }),
+        }
+      : given;
   const { projectId } = options;
   const candidateStorage = new IndexedDbStorageProvider();
   const candidateConsent = async (): Promise<boolean> => {
@@ -786,6 +801,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * The origin is read per request, so a page that names it later is heard.
      */
     remoteMoves: (input, handlers) => {
+      if (options.safeMode === true) {
+        /* No long poll to Tau Cloud in safe mode. */
+        return () => undefined;
+      }
       const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
         watchRevisionStream(
           {
@@ -820,7 +839,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     },
     /* D18: the owner's usage for the Sync region, with the page's own session. */
     remoteStorage: async () => {
-      const apiBaseUrl = options.apiBaseUrl?.();
+      const apiBaseUrl = options.safeMode === true ? undefined : options.apiBaseUrl?.();
       return apiBaseUrl === undefined
         ? undefined
         : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
@@ -828,6 +847,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     /* P51: connecting registers the project before anything asks the remote
      * for an advertisement it would otherwise answer `404`. */
     registerRemoteProject: async (id) => {
+      if (options.safeMode === true) {
+        throw safeModeRefusal();
+      }
       let name: string | undefined;
       try {
         const filesystem = await options.filesystem(`/projects/${id}`);
@@ -858,6 +880,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       );
     },
     publishPublication: async (input) => {
+      if (options.safeMode === true) {
+        throw safeModeRefusal();
+      }
       const apiBaseUrl = options.apiBaseUrl?.();
       if (apiBaseUrl === undefined) {
         throw new Error(publishFailureMessage(401));
@@ -2015,6 +2040,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
 
 /** What the registry needs from the worker it runs in. @public */
 export type WorkerRevisionRegistryOptions = Readonly<{
+  /** This page load started in safe mode: every project's Tau Cloud legs are refused (W9 R5). */
+  safeMode?: boolean;
   /** Browser-only scoped candidate transport; absent on native/host-served roots. */
   createCandidatePort?: (
     projectId: string,
@@ -2294,6 +2321,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     const revisions = (async (): Promise<WorkerProjectRevisions> =>
       createWorkerProjectRevisions({
         projectId,
+        ...(options.safeMode === true ? { safeMode: true } : {}),
         attention,
         port: await options.createPort(
           projectId,

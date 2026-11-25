@@ -300,6 +300,8 @@ export const refusals = {
   REMOTE_REAUTHORIZATION_REQUIRED: { owner: 'revisions', retry: 'never' },
   REMOTE_REF_CONFLICT: { owner: 'revisions', retry: 'never' },
   REMOTE_REJECTED: { owner: 'revisions', retry: 'never' },
+  /** Safe mode refuses Tau Cloud before any request; only a normal restart ends it (W9 R5). */
+  REMOTE_SAFE_MODE: { owner: 'revisions', retry: 'never' },
   REMOTE_UNAUTHORIZED: { owner: 'revisions', retry: 'never' },
   REMOTE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   UNKNOWN_REVISION: { owner: 'revisions', retry: 'never' },

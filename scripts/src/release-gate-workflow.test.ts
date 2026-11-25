@@ -347,12 +347,13 @@ describe('release-gate.yml', () => {
     expect(stepUsing(rows, 'actions/checkout@')?.with).toEqual(gatedCheckout);
     // Every step of a queue row but its checkout and its artifact upload is the gate row's, verbatim, except that
     // the gate row, which checks out the candidate, takes the apt installer from its own commit's copy at `.tau-ci`
-    // (one more step; apt-resilience.test.ts pins it).
+    // (one more step; apt-resilience.test.ts pins it) and runs its infra-retry.sh from there too.
     const own = new Set([stepUsing(row, 'actions/checkout@'), stepUsing(row, 'actions/upload-artifact@')]);
     for (const step of (row.steps ?? []).filter((candidate) => !own.has(candidate))) {
       const gateStep = stepNamed(rows, step.name ?? '');
       const uses = gateStep?.uses?.replace(/^\.\/\.tau-ci\//u, './');
-      expect(gateStep === undefined ? undefined : { ...gateStep, uses }, step.name).toEqual(step);
+      const run = gateStep?.run?.replaceAll('./.tau-ci/.github/', './.github/');
+      expect(gateStep === undefined ? undefined : { ...gateStep, uses, run }, step.name).toEqual(step);
     }
     expect(rows.steps?.length).toBe((row.steps?.length ?? 0) + 1);
   });

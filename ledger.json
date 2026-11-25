@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T12:21:38.571Z",
+  "updatedAt": "2026-11-25T13:45:12.391Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1587,6 +1587,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45624895145,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2833",
+      "sha": "aa3ffa69efbfe2f30ed43a4730fe4620f8a8d79c",
+      "at": "2026-11-25T13:44:58Z",
+      "conclusion": "success",
+      "artifacts": 15,
+      "counted": 3227,
+      "replayed": 17153,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -1639,12 +1652,12 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-plugin:test:e2e": {
-      "executions": 3,
-      "tests": 81,
+      "executions": 4,
+      "tests": 108,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "agent-tools:test": {
       "executions": 3,
@@ -2295,12 +2308,12 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     },
     "lsp:verify-browser": {
-      "executions": 3,
-      "tests": 3,
+      "executions": 4,
+      "tests": 4,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "manifold:test": {
       "executions": 3,
@@ -2607,12 +2620,12 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     },
     "scripts:test:e2e": {
-      "executions": 8,
-      "tests": 464,
+      "executions": 9,
+      "tests": 522,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "settings-ui:test": {
       "executions": 3,
@@ -2687,12 +2700,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "tau-examples:test": {
-      "executions": 3,
-      "tests": 300,
+      "executions": 4,
+      "tests": 400,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "taucad-ui:test": {
       "executions": 1,
@@ -2743,44 +2756,44 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 4,
-      "tests": 60,
+      "executions": 5,
+      "tests": 75,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 6,
-      "tests": 18,
+      "executions": 7,
+      "tests": 21,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 6,
-      "tests": 60,
+      "executions": 7,
+      "tests": 70,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 6,
-      "tests": 258,
+      "executions": 7,
+      "tests": 301,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 12,
-      "tests": 12,
+      "executions": 14,
+      "tests": 14,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui-kit:test": {
       "executions": 1,
@@ -2799,20 +2812,20 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 10,
-      "tests": 610,
+      "executions": 12,
+      "tests": 732,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "ui:verify-browser": {
-      "executions": 5,
-      "tests": 660,
+      "executions": 6,
+      "tests": 792,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "units:test": {
       "executions": 1,
@@ -2831,12 +2844,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "viewer:test": {
-      "executions": 3,
-      "tests": 8147,
+      "executions": 4,
+      "tests": 10861,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T12:15:10Z"
+      "lastSeen": "2026-11-25T13:44:58Z"
     },
     "vite:test": {
       "executions": 1,
@@ -2919,5 +2932,53 @@
       "lastSeen": "2026-11-25T12:15:10Z"
     }
   },
-  "identities": {}
+  "identities": {
+    "ui-e2e › src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:development",
+      "file": "src/picovoxel-multi.spec.ts",
+      "firstSeen": "2026-11-25T13:44:58Z",
+      "lastSeen": "2026-11-25T13:44:58Z",
+      "lastFailure": "2026-11-25T13:44:58Z",
+      "executions": 2,
+      "failures": 0,
+      "retriedPasses": 1,
+      "passStreak": 1,
+      "variants": {
+        "linux-x64 browser=firefox": {
+          "executions": 1,
+          "failures": 0,
+          "events": 1,
+          "lastSeen": "2026-11-25T13:44:58Z"
+        },
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 0,
+          "events": 0,
+          "lastSeen": "2026-11-25T13:44:58Z"
+        }
+      },
+      "events": [
+        {
+          "kind": "retry",
+          "at": "2026-11-25T13:44:58Z",
+          "run": 45624895145,
+          "attempt": 1,
+          "failedRun": 45624895145,
+          "failedAttempt": 1,
+          "variant": "linux-x64 browser=firefox",
+          "hash": "17432310908498893304",
+          "execution": 1,
+          "error": "AssertionError: expected false to be true // Object.is equality"
+        }
+      ],
+      "openFailures": [],
+      "passHashes": [
+        "linux-x64 browser=firefox 17432310908498893304",
+        "linux-x64 browser=chromium 15250156430106686899"
+      ],
+      "failureShas": [],
+      "aliases": []
+    }
+  }
 }

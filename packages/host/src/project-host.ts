@@ -104,6 +104,7 @@ export type ProjectHostOptions = Pick<
   | 'checkoutsDirectory'
   | 'gitExecutable'
   | 'apiBaseUrl'
+  | 'safeMode'
   | 'tauCredential'
   | 'syncTelemetryPlacement'
   | 'syncTelemetryConsent'
@@ -475,6 +476,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
+    ...(options.safeMode === true ? { safeMode: true } : {}),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
     ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
     ...(options.syncTelemetryConsent === undefined ? {} : { syncTelemetryConsent: options.syncTelemetryConsent }),

@@ -58,6 +58,11 @@ type DeploymentProxy = {
   asked: number;
   /** Every Tau Cloud read the shell made through the proxy (`/v1/projects`, billing, cloud agents), by path. */
   readonly cloudReads: string[];
+  /**
+   * Tau's API unreachable for the shell, main and renderer alike: every connection is reset before it is read, as an
+   * unreachable network answers (W9 R1). The machine itself still reports online, which is the harder case.
+   */
+  offline: boolean;
   payments: PaymentStubs | undefined;
   readonly close: () => Promise<void>;
 };
@@ -115,6 +120,7 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     route: 'pass',
     asked: 0,
     cloudReads: [],
+    offline: false,
     payments: undefined,
     close: async () => undefined,
   };
@@ -217,6 +223,10 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     return false;
   };
   const server: Server = createServer((incoming, outgoing) => {
+    if (proxy.offline) {
+      incoming.socket.destroy();
+      return;
+    }
     const requestUrl = new URL(incoming.url ?? '/', 'http://proxy');
     if (tauCloudReadPath.test(requestUrl.pathname) && incoming.method !== 'OPTIONS') {
       proxy.cloudReads.push(requestUrl.pathname);
@@ -372,6 +382,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       proxy.route = 'pass';
       proxy.asked = 0;
       proxy.cloudReads.length = 0;
+      proxy.offline = false;
       proxy.payments = undefined;
     }
   });
@@ -483,49 +494,40 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     await first.close();
     session = undefined;
 
+    /* A real offline launch: Tau's API is unreachable from the first request, for main and the renderer alike. The
+     * machine still reports online, so nothing here relies on `navigator.onLine`. */
+    proxy.offline = true;
     const { session: second } = await launch({
       relaunch: { profileRoot, token: token! },
     });
-    const setOffline = async (offline: boolean): Promise<void> => {
-      await second.application.evaluate(async ({ session: electronSession }, isOffline) => {
-        electronSession.defaultSession.enableNetworkEmulation({
-          offline: isOffline,
-        });
-      }, offline);
-      await second.application.context().setOffline(offline);
-    };
-    await setOffline(true);
-    try {
-      await second.page.reload({ waitUntil: 'load' });
-      expect(await second.page.evaluate(() => navigator.onLine)).toBe(false);
 
-      /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
-      const footer = footerOf(second);
-      await expectVisible(footer, launchTimeout);
-      await expectVisible(composerOf(second.page), launchTimeout);
-      await footer.click();
-      const menu = second.page.getByRole('menu');
-      await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
-      expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
-      await second.page.evaluate(() => {
-        (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
-      });
+    /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
+    const footer = footerOf(second);
+    await expectVisible(footer, launchTimeout);
+    await expectVisible(composerOf(second.page), launchTimeout);
+    await footer.click();
+    const menu = second.page.getByRole('menu');
+    await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
+    expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
+    await second.page.evaluate(() => {
+      (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
+    });
 
-      /* The network returns: within A3's 10 s, with no reload, the session verifies and Billing appears. */
-      await setOffline(false);
-      await expect
-        .poll(async () => menu.getByText('Can’t reach Tau').count(), {
-          timeout: 10_000,
-        })
-        .toBe(0);
-      await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)$/u }), 10_000);
-      await expectVisible(footer, 10_000);
-      expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
-        true,
-      );
-    } finally {
-      await setOffline(false);
-    }
+    /* The network returns: within A3's 10 s, with no reload and no event from the machine, the session verifies and
+     * Billing appears. */
+    proxy.offline = false;
+    await expect
+      .poll(async () => menu.getByText('Can’t reach Tau').count(), {
+        timeout: 10_000,
+      })
+      .toBe(0);
+    await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)\b/u }), 10_000);
+    /* The open menu makes the rest of the page inert; close it to read the footer again. */
+    await second.page.keyboard.press('Escape');
+    await expectVisible(footer, 10_000);
+    expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
+      true,
+    );
   });
 
   it('shows the funded surfaces against a funded API, and /usage with the balance', async () => {

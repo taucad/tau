@@ -1787,6 +1787,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     systemPrompt: desktopAgentSystemPrompt,
     tauApiUrl: environment['TAU_API_URL']!,
     tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+    /* W9 R5: safe mode reaches the project hosts too, so their revisions make no Tau Cloud request. */
+    ...(safeMode ? { safeMode: true } : {}),
   };
   const externalAgents = createExternalAgentDiscovery({
     resolveFrom: import.meta.url,

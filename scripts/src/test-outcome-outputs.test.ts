@@ -29,12 +29,16 @@ const outcomeOutput = (target: string): string =>
 
 type CommandOptions = { readonly command?: unknown; readonly commands?: readonly unknown[] };
 
+/** The command of a run-commands entry written as an object. */
+const commandOf = (entry: unknown): string => {
+  const { command } = entry as { command?: unknown };
+  return typeof command === 'string' ? command : '';
+};
+
 /** The shell text a run-commands target executes. */
 const commandText = (target: TargetConfiguration): string => {
   const options = (target.options ?? {}) as CommandOptions;
-  const commands = (options.commands ?? []).map((entry) =>
-    typeof entry === 'string' ? entry : String((entry as { command?: unknown }).command ?? ''),
-  );
+  const commands = (options.commands ?? []).map((entry) => (typeof entry === 'string' ? entry : commandOf(entry)));
   return [typeof options.command === 'string' ? options.command : '', ...commands].join('\n');
 };
 

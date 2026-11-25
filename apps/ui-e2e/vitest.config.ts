@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { resolve } from 'node:path';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config bootstraps this server-side command before test aliases exist.
@@ -14,7 +14,6 @@ import { missingLiveGithubVariables } from './src/support/github-identity.ts';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config resolves the run's flag state before aliases exist.
 import { flagStateVariable, resolveFlagState } from './src/support/flag-state.ts';
 
-const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
 const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
 const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
@@ -138,7 +137,7 @@ export default defineConfig({
     setupFiles: [resolve(import.meta.dirname, 'src/support/test-lifecycle.ts')],
     testTimeout: 300_000,
     hookTimeout: 300_000,
-    retry: isCi ? 2 : 0,
+    retry: testRetry(),
     fileParallelism: false,
     provide: {
       crossOriginIsolation: !disableCoi,

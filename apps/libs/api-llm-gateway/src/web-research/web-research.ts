@@ -8,7 +8,11 @@
  * @module
  */
 import { lookup as dnsLookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
+import type { LookupFunction } from 'node:net';
+import { Readable } from 'node:stream';
 
 import { z } from 'zod';
 
@@ -27,15 +31,86 @@ const tavilySearchUrl = 'https://api.tavily.com/search';
 /** One resolved address, as `dns.lookup(host, { all: true })` returns it. */
 export type ResolvedAddress = Readonly<{ address: string; family: number }>;
 
-/** Injected I/O, so tests run without the network. */
+/**
+ * Injected I/O, so tests run without the network.
+ *
+ * A page fetch passes `address`: the address its host was checked to resolve to. The fetch must connect there and
+ * nowhere else, so a name that resolves somewhere else the second time it is asked cannot steer it.
+ */
 export type WebResearchDependencies = Readonly<{
-  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  fetch: (url: string, init: RequestInit, address?: ResolvedAddress) => Promise<Response>;
   lookup: (hostname: string) => Promise<readonly ResolvedAddress[]>;
 }>;
 
-/** The default dependencies: the platform fetch and the system resolver. */
+/**
+ * GET `url` over a connection to `address`, whatever its host resolves to now. TLS still verifies the certificate
+ * against the URL's host name. The body is asked for uncompressed, since nothing here inflates it.
+ *
+ * @param url - The URL to request.
+ * @param init - The request's headers and signal; the method is always GET and redirects are returned, not followed.
+ * @param address - The checked address to connect to.
+ * @returns The response, with its body as a web stream.
+ */
+export const fetchAtAddress = async (url: string, init: RequestInit, address: ResolvedAddress): Promise<Response> =>
+  new Promise<Response>((resolve, reject) => {
+    const target = new URL(url);
+    /* Node's connect asks with `all: true` (happy eyeballs) and wants a list back; otherwise one address. */
+    const lookup: LookupFunction = (_hostname, options, callback) => {
+      if (options.all === true) {
+        callback(null, [{ address: address.address, family: address.family }]);
+      } else {
+        callback(null, address.address, address.family);
+      }
+    };
+    const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
+      target,
+      {
+        method: 'GET',
+        headers: { ...Object.fromEntries(new Headers(init.headers).entries()), 'accept-encoding': 'identity' },
+        lookup,
+      },
+      (response) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            headers.append(name, item);
+          }
+        }
+        const status = response.statusCode ?? 502;
+        /* A null-body status cannot carry a stream; drain it. */
+        const empty = status === 204 || status === 304 || (status >= 100 && status < 200);
+        if (empty) {
+          response.resume();
+        }
+        resolve(
+          new Response(empty ? null : (Readable.toWeb(response) as unknown as ReadableStream), {
+            status,
+            statusText: response.statusMessage,
+            headers,
+          }),
+        );
+      },
+    );
+    request.once('error', reject);
+    const { signal } = init;
+    const abort = (): void => {
+      request.destroy(signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal?.aborted === true) {
+      abort();
+    } else {
+      signal?.addEventListener('abort', abort, { once: true });
+      request.once('close', () => {
+        signal?.removeEventListener('abort', abort);
+      });
+    }
+    request.end();
+  });
+
+/** The default dependencies: the platform fetch (a page fetch connects to its checked address) and the system resolver. */
 export const defaultWebResearchDependencies: WebResearchDependencies = {
-  fetch: async (url, init) => globalThis.fetch(url, init),
+  fetch: async (url, init, address) =>
+    address === undefined ? globalThis.fetch(url, init) : fetchAtAddress(url, init, address),
   lookup: async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }),
 };
 
@@ -184,7 +259,9 @@ export const isPublicAddress = (address: string): boolean => {
   return !blocked.check(address, family === 4 ? 'ipv4' : 'ipv6');
 };
 
-const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup']): Promise<void> => {
+/* Check that `url` may be fetched and return the address to connect to: the first of its host's addresses, all of
+ * which must be public. The fetch connects there rather than resolving the name again. */
+const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup']): Promise<ResolvedAddress> => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Unsupported URL scheme ${url.protocol}`);
   }
@@ -193,9 +270,11 @@ const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup
   }
   const host = url.hostname.replace(/^\[(.*)\]$/u, '$1');
   const addresses = isIP(host) === 0 ? await lookup(host) : [{ address: host, family: isIP(host) }];
-  if (addresses.length === 0 || !addresses.every(({ address }) => isPublicAddress(address))) {
+  const [first] = addresses;
+  if (first === undefined || !addresses.every(({ address }) => isPublicAddress(address))) {
     throw new Error(`${url.hostname} does not resolve to a public address`);
   }
+  return first;
 };
 
 const entities: Readonly<Record<string, string>> = {
@@ -315,16 +394,20 @@ const fetchPage = async (
   const bounded = withTimeout(signal);
   for (let hop = 0; ; hop += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
-    await assertPublicUrl(current, dependencies.lookup);
+    const address = await assertPublicUrl(current, dependencies.lookup);
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
-    const response = await dependencies.fetch(current.href, {
-      redirect: 'manual',
-      signal: bounded,
-      headers: {
-        'user-agent': userAgent,
-        accept: 'text/html, text/markdown, application/pdf, text/*;q=0.9, */*;q=0.1',
+    const response = await dependencies.fetch(
+      current.href,
+      {
+        redirect: 'manual',
+        signal: bounded,
+        headers: {
+          'user-agent': userAgent,
+          accept: 'text/html, text/markdown, application/pdf, text/*;q=0.9, */*;q=0.1',
+        },
       },
-    });
+      address,
+    );
     const location = response.headers.get('location');
     if (response.status >= 300 && response.status < 400 && location !== null) {
       if (hop >= maxRedirects) {

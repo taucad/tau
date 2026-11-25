@@ -849,7 +849,7 @@ export function RevisionSyncRegion({
   const showMeter = remote.storage !== undefined && (percentage >= 75 || remote.overQuota.length > 0);
   /* WifiOff leads while offline; removed access is calm; red only for a damaged copy (A1 item 12). */
   const GlyphIcon =
-    role === 'revoked'
+    role === 'revoked' || sync.reason === 'safeMode'
       ? CloudOff
       : sync.online
         ? sync.reason === 'damaged'

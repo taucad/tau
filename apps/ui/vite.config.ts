@@ -773,6 +773,9 @@ export default defineConfig(({ command, mode }) => {
     },
 
     test: {
+      // Jsdom installs `localStorage` only where Node has none: Node 25+ turns its own accessor on, which hides
+      // jsdom's, so the workers keep Node 24's default (docs/policy/react-testing-policy.md, Environment).
+      execArgv: ['--no-experimental-webstorage'],
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
       // Keep mock library matchers on this runner's Vitest instance; externalizing it can load a second peer instance.

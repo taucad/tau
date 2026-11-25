@@ -2,7 +2,7 @@
 
 ## Shared checks and workflow scripting
 
-Use the SHA-pinned actions and Node 24 setup in `actions/setup-nx/action.yml`; update shared setup once rather than diverging workflow copies. Keep frozen pnpm installs, Nx task ownership and the existing validator fan-in. Read [commit policy](../docs/policy/commit-policy.md) and [release policy](../docs/policy/release-policy.md) for commit scopes, candidate validation and publication ownership.
+Use the SHA-pinned actions and Node 26 setup in `actions/setup-nx/action.yml` (floor jobs pass 24); update shared setup once rather than diverging workflow copies. Keep frozen pnpm installs, Nx task ownership and the existing validator fan-in. Read [commit policy](../docs/policy/commit-policy.md) and [release policy](../docs/policy/release-policy.md) for commit scopes, candidate validation and publication ownership.
 
 Use `pnpm pkg get` for package fields when appropriate. Resolve release-note mentions to an actual GitHub login; Git's author display name is not a username. Treat PR/issue text as untrusted input to quote or pass as structured data, never shell code or independent authorization.
 

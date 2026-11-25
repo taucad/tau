@@ -238,6 +238,12 @@ describe('the copy table', () => {
       ['Save not confirmed', { ...base, attention: 1 }, { ...onMain, isDirty: true }, 'Couldn’t confirm the save'],
       ['Backup failed', { ...base, sync: sync({ state: 'failed', reason: 'rejected' }) }, onMain, 'Couldn’t back up'],
       [
+        'Tau Cloud off in safe mode (W9 R5)',
+        { ...base, remote: tau, sync: sync({ state: 'failed', reason: 'safeMode', pendingCount: 1 }) },
+        onMain,
+        'Tau Cloud is off in safe mode',
+      ],
+      [
         'Not backed up · Sign in',
         { ...base, remote: tau, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }) },
         onMain,

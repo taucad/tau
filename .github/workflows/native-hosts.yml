@@ -238,7 +238,16 @@ jobs:
       - name: Accept glibc 2.28 selection and refuse musl
         if: matrix.arch == 'x64' && matrix.project == 'cli'
         run: |
-          node_root=$(dirname "$(dirname "$(command -v node)")")
+          # The CLI's floor Node, not setup-nx's: these rows are a glibc 2.28 user's host, and the official Node 26
+          # binary also links libatomic.so.1, which debian:10 and rockylinux:8 do not ship (and `--network=none`
+          # cannot install). Node 24 needs glibc 2.28 alone, like the CLI's own floor (`engines.node >=24`).
+          floor=v24.20.0
+          name="node-$floor-linux-x64"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.xz" "https://nodejs.org/dist/$floor/$name.tar.xz"
+          curl -fsSL --retry 3 "https://nodejs.org/dist/$floor/SHASUMS256.txt" | grep " $name.tar.xz\$" \
+            | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
+          node_root="$RUNNER_TEMP/$name"
           expect_blocked() {
             local name=$1 filter=$2 options=$3 image=$4
             shift 4

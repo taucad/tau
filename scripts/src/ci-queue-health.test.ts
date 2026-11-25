@@ -12,7 +12,9 @@ import {
   countConclusions,
   criticalPath,
   failedJobs,
+  countInfraRetries,
   failedSuites,
+  infraRetryEvents,
   fetchOrder,
   firstFailedJob,
   jobWaits,
@@ -162,6 +164,72 @@ describe('ci queue health', () => {
       const exitOnly = lintAnnotations.filter((annotation) => annotation.path === '.github');
       expect(failedSuites(lint, exitOnly)).toEqual(["step: Run the lane's tasks"]);
       expect(failedSuites(job({ steps: undefined }), [])).toEqual([]);
+    });
+
+    describe('infrastructure step retries', () => {
+      const retried = (step: string, attempt: number, signature: string): Annotation => ({
+        path: '.github',
+        annotation_level: 'warning',
+        title: 'infra-retry',
+        message: `${step} attempt ${attempt} of 3 failed: ${signature}; retrying in 10s`,
+      });
+      const exhausted = (step: string, signature: string): Annotation => ({
+        path: '.github',
+        annotation_level: 'failure',
+        title: 'infra-retry',
+        message: `${step} failed after 3 attempts: ${signature}`,
+      });
+
+      it('should read retried and exhausted events and skip other annotations', () => {
+        expect(
+          infraRetryEvents([
+            retried('apt-install', 1, 'connection-failed'),
+            exhausted('playwright-install', 'timeout'),
+            { path: '.github', annotation_level: 'warning', title: 'infra-retry', message: 'something else' },
+            {
+              path: '.github',
+              annotation_level: 'warning',
+              title: 'other',
+              message: 'apt-install attempt 1 of 3 failed: x; retrying in 1s',
+            },
+            ...lintAnnotations,
+          ]),
+        ).toEqual([
+          { step: 'apt-install', signature: 'connection-failed', exhausted: false },
+          { step: 'playwright-install', signature: 'timeout', exhausted: true },
+        ]);
+      });
+
+      it('should name a job that failed in setup as infrastructure, not by its step or file', () => {
+        const lint = firstFailedJob(failure.jobs)!;
+        expect(
+          failedSuites(lint, [
+            retried('apt-install', 1, 'dpkg-interrupted'),
+            exhausted('apt-install', 'dpkg-interrupted'),
+            ...lintAnnotations,
+          ]),
+        ).toEqual(['infrastructure: apt-install (dpkg-interrupted)']);
+        // A retry that recovered leaves the job named by what failed afterwards.
+        expect(failedSuites(lint, [retried('apt-install', 1, 'dns'), ...lintAnnotations])).toEqual([
+          'app/components/chat/chat-composer-static-bar.tsx (typescript(no-unnecessary-boolean-literal-compare))',
+        ]);
+      });
+
+      it('should count events by step and signature, most frequent first', () => {
+        expect(
+          countInfraRetries([
+            { run: run({ id: 1 }), annotations: [retried('apt-install', 1, 'dns'), retried('apt-install', 2, 'dns')] },
+            {
+              run: run({ id: 2 }),
+              annotations: [retried('pnpm-download', 1, 'connection-reset'), exhausted('apt-install', 'dns')],
+            },
+            { run: run({ id: 3 }) },
+          ]),
+        ).toEqual([
+          { step: 'apt-install', signature: 'dns', retries: 2, exhausted: 1 },
+          { step: 'pnpm-download', signature: 'connection-reset', retries: 1, exhausted: 0 },
+        ]);
+      });
     });
 
     it('should group failed runs by lane with their suites and newest examples', () => {
@@ -550,6 +618,12 @@ describe('ci queue health', () => {
       );
       expect(markdown).toContain('| Plan affected lanes | 2 |');
       expect(markdown).not.toContain('had no failed job');
+      expect(markdown).toContain('No `infra-retry` events in the failed jobs whose annotations were read.');
+      const retries = renderMarkdown({
+        ...report,
+        infraRetries: [{ step: 'apt-install', signature: 'connection-failed', retries: 3, exhausted: 1 }],
+      });
+      expect(retries).toContain('| apt-install | connection-failed | 3 | 1 |');
     });
 
     it('should say so when nothing failed, note unattributed runs and escape table cells', () => {

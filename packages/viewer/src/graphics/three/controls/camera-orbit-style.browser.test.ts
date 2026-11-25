@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type CameraControlsImpl from 'camera-controls';
-import { Raycaster, Scene, Vector3 } from 'three';
-import type { Camera } from 'three';
+import { Matrix4, PerspectiveCamera, Quaternion, Raycaster, Scene, Vector3 } from 'three';
+import type { Camera, Vector4, WebGLRenderer } from 'three';
+import { ViewportGizmo } from 'three-viewport-gizmo';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import type { RootState } from '@react-three/fiber';
@@ -13,6 +14,9 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
 import { asCameraActor } from '#graphics/graphics-camera.js';
 import type { CameraInputRouting, OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
+import { readViewportGizmoPose, viewportGizmoOptions } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /*
  * The orbit styles in a real browser (roll Finding 10, TA5): the view's camera is the graphics child presented by the
@@ -63,7 +67,7 @@ const poleView = {
   up: [1, 0, 0],
 } as const;
 
-/** A rolled view just off the pole, as far as the view cube tilts a top view off it. */
+/** A rolled view just off the pole (1.1e-3 rad), outside the camera's parallel guard: Turntable straightens it. */
 const nearPoleView = {
   ...cameraView,
   direction: [0.0011, 0, 1],
@@ -406,5 +410,146 @@ describe('orbit style in the browser (TA5)', () => {
     // The drag left the pole about the world up: the view is upright.
     expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);
     expect(roll(viewer)).toBeLessThan(1e-6);
+  });
+});
+
+/*
+ * TA carry-over 1: a top or bottom face click presents the pose the view cube reported, through the camera actor and
+ * the real `camera-controls`, in both orbit styles. The camera takes a view as near the pole as the cube keeps it, so
+ * nothing tilts it further off: the presented orientation is the cube's, and a Turntable drag from it stays upright.
+ */
+describe('view cube pole views through the controls (TA carry-over 1)', () => {
+  /** The renderer surface the cube reads while it builds; it never draws here. */
+  const renderer = {
+    domElement: document.createElement('canvas'),
+    getViewport: (target: Vector4) => target.set(0, 0, 800, 600),
+    getScissor: (target: Vector4) => target.set(0, 0, 800, 600),
+    getScissorTest: () => false,
+  } as unknown as WebGLRenderer;
+
+  const clickPole = async (viewer: Viewer, orbitStyle: OrbitStyle, sign: 1 | -1) => {
+    const camera = new PerspectiveCamera();
+    camera.up.copy(worldUp);
+    camera.position.set(...cameraView.direction);
+    camera.lookAt(0, 0, 0);
+    const style = readViewportGizmoStyle({
+      container: document.body,
+      colorScheme: 'light',
+      isHighContrast: false,
+      accentColor: '#008c7d',
+    });
+    const gizmo = new ViewportGizmo(
+      camera,
+      renderer,
+      viewportGizmoOptions({
+        style,
+        upDirection: 'z',
+        orbitStyle,
+        container: document.body,
+        placeTopRight: false,
+        size: 96,
+        styleConfig: resolveViewportGizmoStyleConfig({
+          gizmoStyle: 'cube',
+          colors: style,
+          radius: viewportGizmoMetrics.radius,
+        }),
+      }),
+    );
+    try {
+      const end = await gizmo.lookFrom(new Vector3(0, 0, sign), { animated: false });
+      const pose = readViewportGizmoPose({
+        pose: end.pose,
+        target: new Vector3(),
+        renderFrame: viewer.rig.renderFrame,
+        verticalSpan: cameraView.verticalSpan,
+      });
+      viewer.graphics.getSnapshot().context.cameraRef.send({ type: 'poseObserved', source: 'gizmo', ...pose });
+      viewer.settle();
+      return end.pose;
+    } finally {
+      gizmo.dispose();
+    }
+  };
+
+  it.each([
+    ['turntable', 1],
+    ['turntable', -1],
+    ['free', 1],
+    ['free', -1],
+  ] as const)('presents the %s cube’s pole view, side %d, as the cube reported it', async (orbitStyle, sign) => {
+    const viewer = mountViewer(orbitStyle);
+    const reported = await clickPole(viewer, orbitStyle, sign);
+    const view = readView(viewer);
+    expect(view.direction.angleTo(reported.direction)).toBeLessThan(1e-9);
+    expect(view.up.angleTo(reported.up)).toBeLessThan(1e-9);
+    // The native camera `camera-controls` wrote: the cube's orientation, roll included.
+    const cube = new Quaternion().setFromRotationMatrix(
+      new Matrix4().lookAt(reported.direction, new Vector3(), reported.up),
+    );
+    expect(viewer.rig.activeCamera.quaternion.angleTo(cube)).toBeLessThan(1e-6);
+  });
+
+  it('drags on upright from the cube’s top view in Turntable, down off the pole', async () => {
+    const viewer = mountViewer('turntable');
+    await clickPole(viewer, 'turntable', 1);
+    const directions = verticalDrag(viewer, { steps: 10, step: -12 });
+    expect(directions.every((direction) => isFiniteVector(direction))).toBe(true);
+    expect(largestStep(directions)).toBeLessThan(0.2);
+    expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(0.99);
+    expect(roll(viewer)).toBeLessThan(1e-6);
+  });
+});
+
+/*
+ * TA carry-over 5, by roll rulings C, E and F: Free orbit is the trackball drag, so a keyboard orbit step turns as a
+ * drag of the same travel does, about the screen's axes, and goes on through both poles; Turntable keeps the world up
+ * as its axis, so its steps stop at the pole and stay upright, as its drag does.
+ */
+describe('keyboard orbit steps per orbit style (TA carry-over 5)', () => {
+  /** Holds one orbit arrow key down for `steps` steps, reading the view after each, as the viewer's shortcut does. */
+  const orbitSteps = (viewer: Viewer, direction: 'up' | 'down' | 'left' | 'right', steps: number): Vector3[] => {
+    const directions = [readView(viewer).direction];
+    for (let index = 0; index < steps; index += 1) {
+      viewer.graphics.send({ type: 'navigateCamera', step: { kind: 'orbit', direction } });
+      viewer.settle();
+      directions.push(readView(viewer).direction);
+    }
+    return directions;
+  };
+
+  it('stops Turntable steps at the pole, upright', () => {
+    const viewer = mountViewer('turntable');
+    const directions = orbitSteps(viewer, 'down', 24);
+    expect(poles(directions)).toEqual({ top: false, bottom: true });
+    expect(directions.at(-1)!.angleTo(directions.at(-2)!)).toBeLessThan(1e-6);
+    expect(roll(viewer)).toBeLessThan(1e-6);
+  });
+
+  it.each(['down', 'up'] as const)('turns Free orbit %s steps through both poles, one step at a time', (direction) => {
+    const viewer = mountViewer('free');
+    const directions = orbitSteps(viewer, direction, 24);
+    expect(poles(directions)).toEqual({ top: true, bottom: true });
+    // Every step is one step's turn: no clamp at a pole and no jump past it.
+    for (const [index, next] of directions.slice(1).entries()) {
+      expect(next.angleTo(directions[index]!)).toBeCloseTo(Math.PI / 12, 6);
+    }
+    // 24 steps of 15° make one full turn about the screen's horizontal axis: back to the start, upright again.
+    expect(directions.at(-1)!.angleTo(directions[0]!)).toBeLessThan(1e-6);
+    expect(lastSource(viewer)).toBe('input');
+  });
+
+  it('turns Free orbit side steps about the screen up, once steps have rolled it off the world up', () => {
+    const viewer = mountViewer('free');
+    orbitSteps(viewer, 'down', 6);
+    const screenUp = (): Vector3 => new Vector3(0, 1, 0).applyQuaternion(viewer.rig.activeCamera.quaternion);
+    const { direction } = readView(viewer);
+    const up = screenUp();
+    const directions = orbitSteps(viewer, 'left', 24);
+    // A side step keeps the screen up and turns the view about it: a full circle through the same up.
+    expect(screenUp().angleTo(up)).toBeLessThan(1e-6);
+    expect(directions.at(-1)!.angleTo(direction)).toBeLessThan(1e-6);
+    for (const next of directions) {
+      expect(Math.abs(next.dot(up))).toBeLessThan(1e-6);
+    }
   });
 });

@@ -21,6 +21,7 @@ import {
   viewportGizmoNodeMaterials,
 } from '#graphics/three/controls/viewport-gizmo-styles.js';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { gizmoFieldOfView } from '#graphics/three/utils/gizmo.utils.js';
 
 const measureCoverage = (
   data: ArrayLike<number>,
@@ -351,3 +352,100 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
     }
   },
 );
+
+/*
+ * TA carry-over 2 (H3 Finding 3): Tau's view cube keeps its apparent size under the field of view slider. The
+ * library moves its camera to hold the projected size of a unit cube's front face across `fieldOfView`, but the
+ * outline it draws is nearer the centre than that face: Tau's cube shows the axis triad, which draws the whole scene
+ * at 0.7, and the rounded cube's outline is its bevel, a radius in from the face. So the cube shrinks at wide angles
+ * (about 5 % at slider 90 on 3.0.0-beta.5) and grows at narrow ones (about 8 % at slider 0). Measured as the coverage
+ * of the cube's middle row looking straight at a face, against the row at the library's default field of view (26°),
+ * which every slider value should keep within 1 %. `it.fails` until Tau takes a three-viewport-gizmo with the fix
+ * (P13-L4 report), then it becomes `it`; the harness check beside it passes before and after, so the expected failure
+ * is the size, not the harness.
+ */
+const gizmoFieldOfViewSliders = [0, 60, 90] as const;
+
+const measureFrontFaceWidths = async (): Promise<Readonly<{ reference: number; widths: number[] }>> => {
+  await page.viewport(500, 500);
+  const canvas = document.createElement('canvas');
+  document.body.append(canvas);
+  const renderer = await createRenderer('viewport', 'webgl', { canvas, preserveDrawingBuffer: true });
+  renderer.setSize(384, 384);
+  renderer.setClearColor(0, 0);
+  renderer.toneMapping = NoToneMapping;
+  const camera = new PerspectiveCamera(45, 1, 0.1, 100);
+  camera.up.set(0, 0, 1);
+  camera.position.set(0, -7, 0);
+  camera.lookAt(new Vector3());
+  const style = readViewportGizmoStyle({
+    container: document.body,
+    colorScheme: 'light',
+    isHighContrast: false,
+    accentColor: '#008c7d',
+  });
+  // Tau's default style, the rounded cube with the axis triad.
+  const { options } = resolveViewportGizmoStyleConfig({
+    gizmoStyle: 'cube',
+    colors: style,
+    radius: viewportGizmoMetrics.radius,
+  });
+  const gizmo = new ViewportGizmo(camera, renderer, {
+    ...options,
+    up: { x: 0, y: 0, z: 1 },
+    size: 320,
+    container: document.body,
+    placement: 'top-left',
+    offset: { top: 0, left: 0 },
+  });
+  const copy = document.createElement('canvas');
+  copy.width = 384;
+  copy.height = 384;
+  const context = copy.getContext('2d', { willReadFrequently: true })!;
+  const scene = new Scene();
+  /** The cube's width along its middle row, in pixels, antialiased edges counted by their coverage. */
+  const width = (): number => {
+    renderer.render(scene, camera);
+    gizmo.update();
+    gizmo.render();
+    context.clearRect(0, 0, 384, 384);
+    context.drawImage(canvas, 0, 0);
+    const row = context.getImageData(0, 160, 384, 1).data;
+    let coverage = 0;
+    for (let x = 0; x < 384; x++) {
+      coverage += row[x * 4 + 3]! / 255;
+    }
+    return coverage;
+  };
+  try {
+    expect(gizmo.options.triad.enabled).toBe(true);
+    await gizmo.compile();
+    const reference = width();
+    const widths = gizmoFieldOfViewSliders.map((slider) => {
+      gizmo.set({ fieldOfView: gizmoFieldOfView(slider) });
+      return width();
+    });
+    return { reference, widths };
+  } finally {
+    gizmo.dispose();
+    renderer.dispose();
+    canvas.remove();
+  }
+};
+
+it('should measure Tau’s view cube under each field of view slider value', async () => {
+  const { reference, widths } = await measureFrontFaceWidths();
+  // The triad's cube is about 150 pixels across at size 320; each slider value draws one of a similar size.
+  expect(reference).toBeGreaterThan(100);
+  for (const width of widths) {
+    expect(Math.abs(width / reference - 1)).toBeLessThan(0.2);
+  }
+});
+
+// Expected-failure: @rifont until 2026-12-15
+it.fails('should keep Tau’s view cube’s size under the field of view slider while the triad shows', async () => {
+  const { reference, widths } = await measureFrontFaceWidths();
+  for (const [index, slider] of gizmoFieldOfViewSliders.entries()) {
+    expect(Math.abs(widths[index]! / reference - 1), `slider ${slider}`).toBeLessThan(0.01);
+  }
+});

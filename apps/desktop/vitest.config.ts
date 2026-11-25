@@ -21,10 +21,15 @@ export default defineConfig({
      * compute-store workers. An unreachable tiering budget stops the wrapper tier-up that usually takes that
      * reference; `--no-wasm-code-gc` removes the only path that frees dying code, which also covers the lookups
      * instantiation makes. V8 flags are process-wide: worker threads reject them in `execArgv` and NODE_OPTIONS
-     * refuses them, so the forks pool passes them from here. Remove once Node 24 ships the V8 backport (9b8ca54d5a,
-     * 68210d500a; nodejs/node#66376) or CI leaves Node 24. */
+     * refuses them, so the forks pool passes them from here. Node 26's V8 14.6 carries the fix (9b8ca54d5a,
+     * 68210d500a) and Node 24's 13.6 does not (Brain research/node-26-ci-migration.md, Finding 1), so the flags are set
+     * on V8 13 only. CI runs this suite on Node 26 alone (the app ships on Electron's own V8 15, and the Node 24 floor
+     * lane runs published packages only), so they now only cover a local run on Node 24, the `engines.node` floor.
+     * Remove once Node 24 ships the backport (nodejs/node#66376) or the floor leaves Node 24. */
     pool: 'forks',
-    execArgv: ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc'],
+    execArgv: process.versions.v8.startsWith('13.')
+      ? ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc']
+      : [],
     reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',

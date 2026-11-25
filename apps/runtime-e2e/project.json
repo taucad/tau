@@ -141,6 +141,16 @@
         "description": "Full compute reuse qualification campaign: seven models, matrix, scrub, agent loop, history gate and stop latency, arms alternated in pairs. Writes out/reports/compute-qualify/<stamp>."
       }
     },
+    "compute-agent-edit": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/agent-edit.mts --pairs 7",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Agent-lifecycle one-part edit against the editor's latency for the same edit: editor (live document), agent (edit_file then evaluate_model) and watch (edit_file seen by the editor's watched document), alternated in pairs. Pass --model and --out after --."
+      }
+    },
     "compute-qualify-summarize": {
       "command": "node --import @oxc-node/core/register src/compute-baseline/harness/qualify-summarize.mts --pins src/compute-baseline/qualification-baselines.json",
       "options": {

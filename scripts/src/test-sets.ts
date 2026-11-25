@@ -53,4 +53,5 @@ export const workspaceTests = [
   'src/validate-workflows.test.ts',
   'src/viewer-parity-graph.test.ts',
   'src/vitest-browser-ownership.test.ts',
+  'src/vitest-webstorage.test.ts',
 ];

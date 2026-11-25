@@ -14,6 +14,8 @@ import {
   planBuildRetention,
   planRetention,
   readOwnBuildId,
+  LiveIndexUnreachableError,
+  retainOrShipWithout,
   retainPreviousAssets,
   retainedGenerationsCap,
   retentionWindow,
@@ -442,6 +444,90 @@ describe('retainPreviousAssets', () => {
     await expect(
       retainPreviousAssets({ clientDirectory: client, origin, wait: async () => undefined }),
     ).rejects.toThrow(/could not read the live asset index/u);
+  });
+
+  describe('retainOrShipWithout', () => {
+    const noWait = async (): Promise<void> => undefined;
+    const shipping = (warnings: string[]) => ({
+      shipIfUnreachable: true,
+      warn: (message: string) => {
+        warnings.push(message);
+      },
+    });
+
+    it('should ship with no previous assets, and warn, when the live deploy cannot be reached', async () => {
+      const { origin } = await startLiveDeploy({}, undefined);
+      await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout({ clientDirectory: client, origin, wait: noWait }, shipping(warnings));
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toStrictEqual([expect.stringMatching(/^::warning::.*NO previous assets/u)]);
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should ship past a live index that keeps failing with a server error', async () => {
+      const live = await startLiveDeploy({}, indexOf([]), () => 'unavailable');
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toHaveLength(1);
+    });
+
+    it('should still fail the deploy when the live deploy cannot be reached and shipping is not allowed', async () => {
+      const { origin } = await startLiveDeploy({}, undefined);
+      await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+      await expect(
+        retainOrShipWithout(
+          { clientDirectory: client, origin, wait: noWait },
+          { shipIfUnreachable: false, warn: () => undefined },
+        ),
+      ).rejects.toBeInstanceOf(LiveIndexUnreachableError);
+    });
+
+    it.each<{
+      readonly label: string;
+      readonly files: Record<string, string>;
+      readonly index?: ServedAssetsIndex;
+      readonly fault?: { readonly status: number };
+    }>([
+      {
+        label: 'answers an HTML page where the index should be',
+        files: { [servedAssetsIndexFileName]: '<!DOCTYPE html>' },
+      },
+      {
+        label: 'serves an asset that fails its integrity',
+        files: { 'assets/route-OLD1.js': 'tampered' },
+        index: indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      },
+      { label: 'refuses the index request', files: {}, index: indexOf([]), fault: { status: 403 } },
+    ])(
+      'should still fail the deploy, even when shipping is allowed, when the live deploy $label',
+      async ({ files, index, fault }) => {
+        const live = await startLiveDeploy(files, index, (path) =>
+          path === servedAssetsIndexFileName ? fault : undefined,
+        );
+        const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+        const warnings: string[] = [];
+
+        await expect(
+          retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings)),
+        ).rejects.toThrow();
+        expect(warnings).toStrictEqual([]);
+      },
+    );
   });
 
   it('should publish an index of its own assets, asking nothing, when retention is skipped on purpose', async () => {

@@ -190,6 +190,11 @@ export const createShellCapture = (
 
   const drain = async (stream: 'stdout' | 'stderr', chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<void> => {
     for await (const chunk of chunks) {
+      /* Once `finish` has started, a late chunk is still read off the stream but neither written nor counted, so the
+         result's byte counts match what the log holds. */
+      if (finished) {
+        continue;
+      }
       keep(tails[stream], chunk, inlineBytes);
       retain(chunk);
     }

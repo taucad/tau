@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,10 +24,10 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('s
   it('should release the custody it holds on close, leaving no file handle for garbage collection', async () => {
     const base = await mkdtemp(join(tmpdir(), 'tau-provider-close-'));
     const other = createShellCustody({ directory: join(base, 'records'), sessionDirectory: join(base, 'sessions') });
+    const child = spawn(process.execPath, ['--expose-gc', fixture, base, 'close'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     try {
-      const child = spawn(process.execPath, ['--expose-gc', fixture, base, 'close'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
       let stderr = '';
       child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
         stderr += chunk;
@@ -50,6 +51,12 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('s
       expect(await exited, stderr).toBe(0);
       expect(stderr).not.toMatch(/garbage collection/u);
     } finally {
+      /* A failed assertion leaves the fixture waiting on stdin for `drop`: end it so no process outlives the test. */
+      if (child.exitCode === null && child.signalCode === null) {
+        const gone = once(child, 'exit');
+        child.kill('SIGKILL');
+        await gone;
+      }
       await other.close();
       await rm(base, { recursive: true, force: true });
     }

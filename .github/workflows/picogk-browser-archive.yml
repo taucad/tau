@@ -101,6 +101,14 @@ jobs:
         uses: ./.github/actions/apt-install
         with:
           packages: ninja-build cmake
+      # Node 25 and later ship without corepack: install the 0.35.0 that Node 24.20.0 bundled, as setup-nx does.
+      - name: Provide corepack in the selected Node
+        run: |
+          for attempt in 1 2 3; do
+            npm install --global --no-audit --no-fund corepack@0.35.0 && break
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
       - run: corepack enable && ./.github/actions/apt-install/infra-retry.sh pnpm-install pnpm install --frozen-lockfile
       - name: Acquire the managed dependency the package declares
         # Staging copies the one managed dependency out of this machine's NuGet cache, at the
@@ -246,6 +254,14 @@ jobs:
         with:
           name: picogk-parity-inputs
           path: out/inputs
+      # Node 25 and later ship without corepack: install the 0.35.0 that Node 24.20.0 bundled, as setup-nx does.
+      - name: Provide corepack in the selected Node
+        run: |
+          for attempt in 1 2 3; do
+            npm install --global --no-audit --no-fund corepack@0.35.0 && break
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
       - run: corepack enable && pnpm install --frozen-lockfile
       # This job's workspace is PicoVoxel, so Tau's apt installer comes from a sparse checkout beside it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -304,6 +320,14 @@ jobs:
         with:
           name: picogk-parity-inputs
           path: out/inputs
+      # Node 25 and later ship without corepack: install the 0.35.0 that Node 24.20.0 bundled, as setup-nx does.
+      - name: Provide corepack in the selected Node
+        run: |
+          for attempt in 1 2 3; do
+            npm install --global --no-audit --no-fund corepack@0.35.0 && break
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
       - run: corepack enable && pnpm install --frozen-lockfile
       # This job's workspace is PicoVoxel, so Tau's apt installer comes from a sparse checkout beside it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -362,6 +386,14 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '26.13.1'
+      # Node 25 and later ship without corepack: install the 0.35.0 that Node 24.20.0 bundled, as setup-nx does.
+      - name: Provide corepack in the selected Node
+        run: |
+          for attempt in 1 2 3; do
+            npm install --global --no-audit --no-fund corepack@0.35.0 && break
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
       - run: corepack enable && ./.github/actions/apt-install/infra-retry.sh pnpm-install pnpm install --frozen-lockfile
       - name: Run the native desktop suites
         id: suites

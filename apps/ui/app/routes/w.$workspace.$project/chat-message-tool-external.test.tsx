@@ -16,6 +16,7 @@ import {
   ChatMessageToolExternal,
   externalToolKinds,
   externalToolPresentation,
+  sanitizeAgentFailure,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -605,6 +606,52 @@ describe('the external tool-call renderer', () => {
     await user.click(header);
     expect(screen.getByText(/^GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1$/u).tagName).toBe('PRE');
     expect(document.body.textContent).not.toContain('formatted_output');
+  });
+
+  it('reads a stopped call as stopped when its name is a 500-character command', async () => {
+    const user = userEvent.setup();
+    const command = `pnpm geospec run ${'x'.repeat(483)}`;
+    expect(command).toHaveLength(500);
+    const errorText = JSON.stringify({
+      errorCode: 'USER_INTERRUPTED',
+      message: 'Interrupted by user.',
+      toolCallId: 'call-stop',
+      toolName: command,
+    });
+    const part: DynamicToolUIPart = {
+      type: 'dynamic-tool',
+      toolName: command,
+      toolCallId: 'call-stop',
+      state: 'output-error',
+      input: { command },
+      errorText,
+    };
+
+    renderExternal(part);
+    const header = screen.getByRole('button', { name: /^Stopped pnpm geospec run x+…$/u });
+    await user.click(header);
+    expect(screen.getByText('Interrupted by user.')).toBeVisible();
+    expect(document.body.textContent).not.toContain('errorCode');
+  });
+
+  it('bounds a failure envelope field by field, and drops the fields the card does not read', () => {
+    const bounded: unknown = JSON.parse(
+      sanitizeAgentFailure(
+        JSON.stringify({
+          errorCode: 'IO_ERROR',
+          message: `HTTP 502 ‮${'m'.repeat(600)}`,
+          toolName: 'n'.repeat(600),
+          rawOutput: { bulk: 'r'.repeat(600) },
+        }),
+      ),
+    );
+
+    expect(bounded).toEqual({
+      errorCode: 'IO_ERROR',
+      message: `HTTP 502 ${'m'.repeat(391)}…`,
+      toolName: `${'n'.repeat(200)}…`,
+    });
+    expect(sanitizeAgentFailure('x'.repeat(600))).toHaveLength(401);
   });
 
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {

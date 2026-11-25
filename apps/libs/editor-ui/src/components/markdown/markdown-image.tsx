@@ -35,11 +35,12 @@ export function MarkdownImage({
 }: ComponentProps<'img'> & { readonly node?: unknown }): React.JSX.Element | undefined {
   const source = typeof src === 'string' ? src : undefined;
   const host = source === undefined ? undefined : remoteImageHost(source, pageUrl());
-  const [loaded, setLoaded] = useState(false);
+  /* The source the person approved, not a flag: a later source in the same place asks again. */
+  const [approved, setApproved] = useState<string | undefined>(undefined);
   if (source === undefined || source === '') {
     return undefined;
   }
-  if (host === undefined || loaded) {
+  if (host === undefined || approved === source) {
     return <img {...properties} src={source} alt={alt} referrerPolicy='no-referrer' loading='lazy' />;
   }
   return (
@@ -48,7 +49,7 @@ export function MarkdownImage({
       className='inline-flex max-w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 align-middle text-xs text-muted-foreground hover:bg-muted'
       title={source}
       onClick={() => {
-        setLoaded(true);
+        setApproved(source);
       }}
     >
       <ImageIcon className='size-3.5 shrink-0' aria-hidden />

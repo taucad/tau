@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import { remoteImageHost } from '#components/markdown/markdown-image.js';
+import { MarkdownImage, remoteImageHost } from '#components/markdown/markdown-image.js';
 
 afterEach(cleanup);
 
@@ -46,6 +46,19 @@ describe('MarkdownImage', () => {
     const image = container.querySelector('img');
     expect(image).toHaveAttribute('src', 'https://elsewhere.example/diagram.png');
     expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('should ask again when the same image takes another remote source', () => {
+    const { container, rerender } = render(<MarkdownImage src='https://elsewhere.example/a.png' alt='plot' />);
+    fireEvent.click(screen.getByRole('button', { name: 'plot from elsewhere.example: load' }));
+    expect(container.querySelector('img')).toHaveAttribute('src', 'https://elsewhere.example/a.png');
+
+    rerender(<MarkdownImage src='https://elsewhere.example/a.png' alt='plot' />);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'https://elsewhere.example/a.png');
+
+    rerender(<MarkdownImage src='https://other.example/b.png?d=secret' alt='plot' />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('button', { name: 'plot from other.example: load' })).toBeInTheDocument();
   });
 
   it('should load an image from this origin at once', async () => {

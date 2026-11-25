@@ -360,9 +360,8 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
  * at 0.7, and the rounded cube's outline is its bevel, a radius in from the face. So the cube shrinks at wide angles
  * (about 5 % at slider 90 on 3.0.0-beta.5) and grows at narrow ones (about 8 % at slider 0). Measured as the coverage
  * of the cube's middle row looking straight at a face, against the row at the library's default field of view (26°),
- * which every slider value should keep within 1 %. `it.fails` until Tau takes a three-viewport-gizmo with the fix
- * (P13-L4 report), then it becomes `it`; the harness check beside it passes before and after, so the expected failure
- * is the size, not the harness.
+ * which every slider value should keep within 1 %. 3.0.0-beta.6 fixes this in the library: the rounded cube's
+ * distance is solved over its outline (fork #83). The harness check beside it guards the measurement itself.
  */
 const gizmoFieldOfViewSliders = [0, 60, 90] as const;
 
@@ -442,8 +441,7 @@ it('should measure Tau’s view cube under each field of view slider value', asy
   }
 });
 
-// Expected-failure: @rifont until 2026-12-15
-it.fails('should keep Tau’s view cube’s size under the field of view slider while the triad shows', async () => {
+it('should keep Tau’s view cube’s size under the field of view slider while the triad shows', async () => {
   const { reference, widths } = await measureFrontFaceWidths();
   for (const [index, slider] of gizmoFieldOfViewSliders.entries()) {
     expect(Math.abs(widths[index]! / reference - 1), `slider ${slider}`).toBeLessThan(0.01);

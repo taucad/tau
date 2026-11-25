@@ -2189,6 +2189,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       /* Pi's abort result is provisional while the already-dispatched tool still owns the real result. */
       return;
     }
+    if (event.type === 'turn_end') {
+      /* The batch is over, and whatever pi appends next belongs to a later step. A tool the stream dispatched that
+       * pi then never ran (the run was stopped between the reply that made the call and its batch, where pi answers
+       * the first call with a provisional result and skips the rest) records its own result now, directly after its
+       * call. Left to the end of the loop it landed after the assistant row the stopped run writes next, and every
+       * later request carried two results for the one call. */
+      await settlePrestartedTools();
+    }
     await appendAgentEvent({ event, record, toolInputIds, toolOutputs, committedMessageIds, createId });
     if (event.type === 'agent_end') {
       lastFinal = [...event.messages].reverse().find((message) => message.role === 'assistant');

@@ -121,12 +121,12 @@
     "apps/libs/project-library/src/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/libs/project-library/src/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/libs/project-library/src/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/libs/project-library/src/runtime/project-library-commands.ts": "802c35515c20a1388bbbea8086656aa9961529bff52a2e94d11293ebe502d4c4",
+    "apps/libs/project-library/src/runtime/project-library-commands.ts": "de0c94d29b4daea141dcceee7b46113dd4ae9ed63b9a576205914b786cb8ec4f",
     "apps/libs/project-library/src/runtime/project-library-workspace.ts": "c9ff92fbcb960d0b8512371473668fd64db26ff66f4e477c1c7a8f84ce50193e",
     "apps/libs/project-library/src/runtime/project-library.ts": "9cdcf0462b3930a3eab54df4d0f257c116530beb92860a5faeffcc73c8563b78"
   },
   "specs": {
-    "LibraryCatalog.tla": "93b4a752b83f861ba6e51dfdb0d9f0d24771cd049f61b7e93c16720aa0c16fb6"
+    "LibraryCatalog.tla": "059164c0924935b77f4d2f56544ca209e329fec38fb655c3a4281dc783ba0cd9"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

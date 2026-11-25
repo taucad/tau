@@ -4,6 +4,7 @@ import { useSession } from '@better-auth-ui/react';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
+import { defaultProjectName } from '@taucad/ui-core/constants/project-names';
 import { namingImageUrls } from '@taucad/project-library/runtime/project-library-commands';
 import type { InitialMessageAttachment } from '@taucad/project-library/runtime/project-library-commands';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
@@ -24,7 +25,10 @@ export type NameAheadRequest = (
 export type ProjectNameAhead = Readonly<{
   /** Note the draft changed; `pasted` asks at once instead of after the pause. */
   update: (draft: NameAheadDraft, pasted: boolean) => void;
-  /** The name for a submitted draft: a held answer or the request in flight for it; `undefined` if neither covers it. */
+  /**
+   * The name for a submitted draft: a held answer or the request in flight for it (`New Project` if that fails);
+   * `undefined` if neither covers it.
+   */
   take: (draft: NameAheadDraft) => Promise<string | undefined>;
   dispose: () => void;
 }>;
@@ -116,8 +120,12 @@ export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAh
     },
     async take(draft) {
       clearTimeout(timer);
-      const text = draft.text.trim();
-      return latest !== undefined && covers(latest, text, attachmentsKey(draft.attachments)) ? latest.name : undefined;
+      const entry = latest;
+      if (entry === undefined || !covers(entry, draft.text.trim(), attachmentsKey(draft.attachments))) {
+        return undefined;
+      }
+      /* The request for this text failed: today's fallback, not a second request at creation. */
+      return (await entry.name) ?? defaultProjectName;
     },
     dispose() {
       clearTimeout(timer);
@@ -145,10 +153,10 @@ export function useProjectNameAhead(): Readonly<{
   const attachments = useSelector(draftActorRef, (state) => state.context.draftAttachments);
   const nameAhead = useMemo(
     () =>
-      createProjectNameAhead(async (draft, { projectId }) =>
-        // ponytail: the name client takes no signal yet, so an aborted request is dropped, not cancelled on the wire.
+      createProjectNameAhead(async (draft, { projectId, signal }) =>
         generate({
           projectId,
+          signal,
           text: draft.text,
           imageUrls: await namingImageUrls(recordFiles, { attachments: draft.attachments, attachmentSource }),
         }),

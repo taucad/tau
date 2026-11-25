@@ -11,6 +11,8 @@ export type ProjectNameInput = {
    * image data URL — a document, an `attachments/` reference — is not sent.
    */
   readonly imageUrls?: readonly string[];
+  /** Cancels the request, which is otherwise bounded at 10 s. */
+  readonly signal?: AbortSignal;
 };
 
 const imageDataUrlPattern = /^data:(image\/[^,;]+)[,;]/;
@@ -30,7 +32,7 @@ export const useProjectNameClient = (): ProjectNameClient => {
       });
       const text = input.text.trim();
       const textParts: MyUIMessage['parts'] = text ? [{ type: 'text', text }] : [];
-      return generateFromParts([...files, ...textParts], input.projectId);
+      return generateFromParts([...files, ...textParts], input.projectId, input.signal);
     },
     [generateFromParts],
   );

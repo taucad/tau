@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NameAheadDraft, NameAheadRequest } from '#components/chat/use-project-name-ahead.js';
 
 const mockGenerate =
-  vi.fn<(input: { projectId: string; text: string; imageUrls?: readonly string[] }) => Promise<string>>();
+  vi.fn<
+    (input: { projectId: string; text: string; imageUrls?: readonly string[]; signal?: AbortSignal }) => Promise<string>
+  >();
 const session = vi.hoisted(() => ({ signedIn: true }));
 /** The draft actor as `useSelector` reads it: a snapshot and its listeners. */
 const draft = vi.hoisted(() => {
@@ -156,6 +158,18 @@ describe('createProjectNameAhead', () => {
     expect(request.mock.calls[3]?.[1].projectId).not.toBe(request.mock.calls[0]?.[1].projectId);
   });
 
+  it('should fall back to the default name when the request awaited at submit fails, without asking again', async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    nameAhead.update(textDraft('A wall bracket for a pipe'), true);
+
+    const taken = nameAhead.take(textDraft('A wall bracket for a pipe'));
+    calls[0]?.reply.reject(new Error('offline'));
+
+    await expect(taken).resolves.toBe('New Project');
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it('should ask again after a failed answer', async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
@@ -201,8 +215,24 @@ describe('useProjectNameAhead', () => {
     expect(mockGenerate).toHaveBeenCalledTimes(1);
     const [input] = mockGenerate.mock.calls[0] ?? [];
     expect(input).toMatchObject({ text: 'A wall bracket for a pipe', imageUrls: [] });
+    expect(input?.signal).toBeInstanceOf(AbortSignal);
     expect(input?.projectId).toMatch(/^proj_/);
     await expect(result.current.take(textDraft('A wall bracket for a pipe'))).resolves.toBe('Pipe Wall Bracket');
+  });
+
+  it('should cancel a superseded request through the signal it passes to the name client', async () => {
+    renderHook(() => useProjectNameAhead());
+
+    act(() => {
+      draft.type('A wall bracket for a pipe');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+    act(() => {
+      draft.type('A phone stand with a cable slot');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+
+    expect(mockGenerate.mock.calls.map(([input]) => input.signal?.aborted)).toEqual([true, false]);
   });
 
   it('should ask at once after a paste', async () => {

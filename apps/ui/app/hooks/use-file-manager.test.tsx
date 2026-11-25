@@ -349,6 +349,9 @@ const newTestRuntimeWith = (options: Parameters<typeof createAppRuntime>[0]): Re
 beforeEach(() => {
   testClock = new StepClock();
   readsHome = false;
+  /* Module-level bridge hooks outlive the test that set them; reset them so shuffled order cannot leak one. */
+  readFileForBridge = undefined;
+  readyForBridge = undefined;
   testRuntime = newTestRuntime();
 });
 

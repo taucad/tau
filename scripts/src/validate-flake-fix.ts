@@ -500,6 +500,29 @@ export const facts = (tokens: readonly Token[]): Facts => {
     return cursor;
   };
 
+  type Open = Frame & { readonly open: string };
+
+  /** An object literal: which call it is an argument of (and that call's string name), or which keyed array holds it. */
+  const objectFrame = (index: number, top: Open | undefined): Open => {
+    const previous = tokens[index - 1]?.value;
+    const isArgument = top?.kind === 'call' && (previous === '(' || previous === ',');
+    const argumentOf = isArgument ? top.callee : undefined;
+    const first = isArgument && top.commas.length > 0 ? tokens.slice(top.start + 1, top.commas[0]) : [];
+    const subject = first.length === 1 && first[0]!.type === 'string' ? first[0]!.value : undefined;
+    const elementOf =
+      top?.kind === 'group' && top.open === '[' && top.key !== undefined && (previous === '[' || previous === ',')
+        ? `${top.key}[]`
+        : undefined;
+    return { kind: 'object', argumentOf, elementOf, subject, open: '{' };
+  };
+
+  /** An array literal, with the key it is bound to (`projects: [`). */
+  const arrayFrame = (index: number): Open => {
+    const key = tokens[index - 2];
+    const bound = tokens[index - 1]?.value === ':' && (key?.type === 'ident' || key?.type === 'string');
+    return bound ? { kind: 'group', key: key.value, open: '[' } : { kind: 'group', open: '[' };
+  };
+
   for (const [index, token] of tokens.entries()) {
     if (token.type !== 'punct') {
       continue;
@@ -514,21 +537,8 @@ export const facts = (tokens: readonly Token[]): Facts => {
           ? { kind: 'group', open: '(' }
           : { kind: 'call', callee, curriedFrom, start: index, commas: [], open: '(' },
       );
-    } else if (value === '{') {
-      const previous = tokens[index - 1]?.value;
-      const isArgument = top?.kind === 'call' && (previous === '(' || previous === ',');
-      const argumentOf = isArgument ? top.callee : undefined;
-      const first = isArgument && top.commas.length > 0 ? tokens.slice(top.start + 1, top.commas[0]) : [];
-      const subject = first.length === 1 && first[0]!.type === 'string' ? first[0]!.value : undefined;
-      const elementOf =
-        top?.kind === 'group' && top.open === '[' && top.key !== undefined && (previous === '[' || previous === ',')
-          ? `${top.key}[]`
-          : undefined;
-      stack.push({ kind: 'object', argumentOf, elementOf, subject, open: '{' });
-    } else if (value === '[') {
-      const key = tokens[index - 2];
-      const bound = tokens[index - 1]?.value === ':' && (key?.type === 'ident' || key?.type === 'string');
-      stack.push(bound ? { kind: 'group', key: key.value, open: '[' } : { kind: 'group', open: '[' });
+    } else if (value === '{' || value === '[') {
+      stack.push(value === '{' ? objectFrame(index, top) : arrayFrame(index));
     } else if (value in closers) {
       // Unbalanced input (a lexer misread) pops until the matching opener rather than throwing.
       let frame = stack.pop();
@@ -1235,14 +1245,16 @@ export const readChanges = (base: string, head: string): { changes: Change[]; me
 
 const usage = 'Usage: node scripts/src/validate-flake-fix.ts --base <rev> --head <rev> [--message-file <path>]';
 
-/** An option's value, `undefined` when the option is absent, or `null` when it is present without a value. */
-const option = (args: readonly string[], name: string): string | null | undefined => {
+const missing = Symbol('missing value');
+
+/** An option's value, `undefined` when the option is absent, or `missing` when it is present without a value. */
+const option = (args: readonly string[], name: string): string | typeof missing | undefined => {
   const index = args.indexOf(name);
   if (index === -1) {
     return undefined;
   }
   const value = args[index + 1];
-  return value === undefined || value === '' || value.startsWith('--') ? null : value;
+  return value === undefined || value === '' || value.startsWith('--') ? missing : value;
 };
 
 /** Escapes an Actions workflow-command property value (the toolkit's `escapeProperty`). */
@@ -1269,7 +1281,7 @@ const main = (args: readonly string[]): number => {
   const base = option(args, '--base');
   const head = option(args, '--head');
   const messageFile = option(args, '--message-file');
-  if (typeof base !== 'string' || typeof head !== 'string' || messageFile === null) {
+  if (typeof base !== 'string' || typeof head !== 'string' || messageFile === missing) {
     console.error(usage);
     return 2;
   }

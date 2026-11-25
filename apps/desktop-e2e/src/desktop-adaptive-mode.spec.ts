@@ -521,7 +521,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
         timeout: 10_000,
       })
       .toBe(0);
-    await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)$/u }), 10_000);
+    await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)\b/u }), 10_000);
     await expectVisible(footer, 10_000);
     expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
       true,

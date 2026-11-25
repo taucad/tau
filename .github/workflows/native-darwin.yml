@@ -183,7 +183,6 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
           save-pnpm-store: ${{ github.event_name == 'push' }}
 
       # Build123d's pinned darwin-arm64 closure (about 230 MB of wheels and CPython) is the seed,
@@ -302,7 +301,6 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       # The SDK is installed in this job only, so its DOTNET_ROOT never reaches the native rows.
@@ -339,7 +337,6 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: '24.10.0'
           save-pnpm-store: 'false'
 
       - name: Run the benchmark gates

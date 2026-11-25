@@ -9,10 +9,12 @@ export default defineConfig({
      * a wrapper tier-up on another thread can take a reference to it before seeing it is dying, so the wrapper
      * is freed twice. `--no-wasm-code-gc` removes the only path that frees dying code. V8 flags are process-wide:
      * worker threads reject them in `execArgv` and NODE_OPTIONS refuses them, so the suite runs in forks that
-     * inherit the flag from here. Remove once Node 24 ships the V8 backport (9b8ca54d5a, 68210d500a;
-     * nodejs/node#66376) or CI leaves Node 24. */
+     * inherit the flag from here. Node 26's V8 14.6 carries the fix (9b8ca54d5a, 68210d500a) and Node 24's 13.6 does
+     * not (Brain research/node-26-ci-migration.md, Finding 1), so the flag is set on V8 13 only: in CI that is the
+     * Node 24 floor lane (`ci.yml` `node-floor`), and the Node 26 lanes run with wasm code GC on, as users do. Remove
+     * once Node 24 ships the backport (nodejs/node#66376) or the `engines.node` floor leaves Node 24. */
     pool: 'forks',
-    execArgv: ['--no-wasm-code-gc'],
+    execArgv: process.versions.v8.startsWith('13.') ? ['--no-wasm-code-gc'] : [],
     /* The kernel's generated source map and font, so `vitest` started outside Nx's `test` target finds them too. */
     globalSetup: ['./vitest.global-setup.ts'],
     typecheck: {

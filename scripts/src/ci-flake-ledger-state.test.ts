@@ -92,8 +92,10 @@ const C = 'host › src/b.test.ts > retries > should settle';
 const now = new Date('2026-11-25T12:00:00Z');
 const identity = (state: LedgerState, id: string): IdentityState => {
   const found = state.identities[id];
-  expect(found, id).toBeDefined();
-  return found as IdentityState;
+  if (!found) {
+    throw new Error(`${id} is not in the state`);
+  }
+  return found;
 };
 
 describe('parseOutcomes', () => {
@@ -110,10 +112,10 @@ describe('parseOutcomes', () => {
   });
 
   it('should reject an unknown schema, a line that is not JSON and a row with a bad field', () => {
-    const good = readFileSync(
-      resolve(import.meta.dirname, 'fixtures/flake-ledger/run-1001-attempt-1.outcomes.jsonl'),
-      'utf8',
-    ).split('\n')[0] as string;
+    const good =
+      readFileSync(resolve(import.meta.dirname, 'fixtures/flake-ledger/run-1001-attempt-1.outcomes.jsonl'), 'utf8')
+        .split('\n')
+        .at(0) ?? '';
     const parsed = parseOutcomes(
       [
         good,
@@ -168,18 +170,11 @@ describe('ingestRun', () => {
   it('should record a retried pass inside one task as a retry event', () => {
     const state = emptyState(now);
     const { events } = ingestRun(state, { run: run1, rows: fixture('run-1001-attempt-1'), artifacts: 1, rejected: 0 });
-    expect(events).toEqual([
-      {
-        id: C,
-        event: expect.objectContaining({
-          kind: 'retry',
-          run: 1001,
-          failedRun: 1001,
-          variant: 'linux-x64',
-          execution: 1,
-        }),
-      },
-    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      id: C,
+      event: { kind: 'retry', run: 1001, failedRun: 1001, variant: 'linux-x64', execution: 1 },
+    });
     expect(identity(state, C)).toMatchObject({ executions: 1, failures: 0, retriedPasses: 1 });
   });
 
@@ -195,21 +190,20 @@ describe('ingestRun', () => {
       rejected: 0,
     });
     expect(result.record).toMatchObject({ attempt: 2, counted: 1 });
-    expect(result.events).toEqual([
-      {
-        id: A,
-        event: expect.objectContaining({
-          kind: 'same-hash',
-          run: 1001,
-          attempt: 2,
-          failedRun: 1001,
-          failedAttempt: 1,
-          hash: '111',
-          execution: 1,
-          error: 'AssertionError: expected 1 to be 2',
-        }),
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      id: A,
+      event: {
+        kind: 'same-hash',
+        run: 1001,
+        attempt: 2,
+        failedRun: 1001,
+        failedAttempt: 1,
+        hash: '111',
+        execution: 1,
+        error: 'AssertionError: expected 1 to be 2',
       },
-    ]);
+    });
     expect(identity(state, A)).toMatchObject({ executions: 2, failures: 1, passStreak: 1, openFailures: [] });
     expect(isIngested(state, 1001, 2)).toBe(true);
   });
@@ -248,7 +242,8 @@ describe('ingestRun', () => {
       artifacts: 1,
       rejected: 0,
     });
-    expect(events).toEqual([{ id: A, event: expect.objectContaining({ kind: 'same-hash', run: 3, execution: 3 }) }]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ id: A, event: { kind: 'same-hash', run: 3, execution: 3 } });
   });
 
   it('should not pair a failure and a pass of one hash on different variants', () => {
@@ -303,7 +298,11 @@ describe('lineage pairs', () => {
     });
     expect(events).toEqual([]);
     expect(candidates).toHaveLength(1);
-    return candidates[0] as NonNullable<(typeof candidates)[0]>;
+    const [candidate] = candidates;
+    if (!candidate) {
+      throw new Error('no lineage candidate');
+    }
+    return candidate;
   };
 
   it('should propose the next passing run of the same pull request and record it once the diff matches', () => {

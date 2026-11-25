@@ -84,26 +84,20 @@ describe('flake ledger workflow', () => {
     const checkout = Object.values(workflow.jobs)
       .flatMap((job) => job.steps)
       .find((step) => step.uses?.startsWith('actions/checkout@'));
-    const sparse = String(checkout?.with?.['sparse-checkout'] ?? '')
-      .split('\n')
-      .filter((line) => line !== '');
+    const listed = checkout?.with?.['sparse-checkout'];
+    const sparse = (typeof listed === 'string' ? listed : '').split('\n').filter((line) => line !== '');
     const imported = new Set<string>(['scripts/src/ci-flake-ledger-ingest-cli.ts']);
-    for (let changed = true; changed; ) {
-      changed = false;
-      for (const file of [...imported]) {
-        const source = readFileSync(resolve(import.meta.dirname, '../..', file), 'utf8');
-        for (const match of source.matchAll(/from '#([\w-]+)\.js'/gu)) {
-          const next = `scripts/src/${match[1]}.ts`;
-          if (!imported.has(next)) {
-            imported.add(next);
-            changed = true;
-          }
-        }
-        expect(source, file).not.toMatch(/from '(?!node:|#)[^']+'/u);
+    // A Set's iteration visits what is added during it, so this walks the whole import graph.
+    for (const file of imported) {
+      const source = readFileSync(resolve(import.meta.dirname, '../..', file), 'utf8');
+      for (const match of source.matchAll(/from '#([\w-]+)\.js'/gu)) {
+        imported.add(`scripts/src/${match[1]}.ts`);
       }
+      // Only `node:` modules and workspace-local `#` imports: the job installs nothing.
+      expect(source, file).not.toMatch(/from '(?!node:|#)[^']+'/u);
     }
-    expect(sparse).toEqual(
-      expect.arrayContaining([...imported, 'scripts/package.json', 'scripts/src/flake-ledger.json']),
-    );
+    for (const file of [...imported, 'scripts/package.json', 'scripts/src/flake-ledger.json']) {
+      expect(sparse).toContain(file);
+    }
   });
 });

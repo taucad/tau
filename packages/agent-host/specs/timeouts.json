@@ -622,6 +622,14 @@
       "owner": "W10"
     },
     {
+      "id": "E42",
+      "bound": "ACP lent turn drain: busy.flushing, then busy.recording, each bounded; past it the turn ends from closed after the close ladder (launch audit E-1)",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpDrainTimeout",
+      "class": "External edge",
+      "owner": "launch audit E-1 (taucad/tau#2815)"
+    },
+    {
       "id": "E23",
       "bound": "ACP text checkpoint",
       "site": "packages/host/src/acp/session.ts",

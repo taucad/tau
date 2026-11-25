@@ -36,6 +36,14 @@ const notStartedTitles: Readonly<Record<ShellNotStartedCode, string>> = {
   'launch-failed': 'Did not start',
 };
 
+/** The closed row's verb: it never opens itself, so the verb is where a command that did not succeed says so. */
+const closedVerbOf = (output: ShellOutput, succeeded: boolean): string => {
+  if (output.status === 'not-started') {
+    return notStartedTitles[output.code];
+  }
+  return succeeded ? 'Ran' : 'Attempted';
+};
+
 /** "exit 0", "timed out after 30 s": how the command ended, in the person's words. */
 const endingOf = (output: ShellOutput): string => {
   switch (output.status) {
@@ -160,7 +168,7 @@ function ShellBody({
 
 /**
  * The transcript's record of one `shell` call: the command as written, where it ran, how it ended, any extra access
- * with the agent's reason labelled as its words, and the bounded output. Folded when it exited 0.
+ * with the agent's reason labelled as its words, and the bounded output. Always folded until the reader opens it.
  *
  * @param props - The tool part this message carries.
  * @param props.part - The `shell` invocation, in whatever state it is in.
@@ -202,7 +210,7 @@ export function ChatMessageToolShell({ part }: { readonly part: ShellInvocation 
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={SquareTerminal} />
             <ChatToolCardTitle>
-              <ChatToolLabel verb={output.status === 'not-started' ? notStartedTitles[output.code] : 'Ran'}>
+              <ChatToolLabel verb={closedVerbOf(output, succeeded)}>
                 <ChatToolDescription className='font-mono'>{commandLine(part.input?.command)}</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>

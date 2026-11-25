@@ -28,6 +28,7 @@ import {
   groupAssistantParts,
   findLastMeaningfulPartIndex,
   isActivityPartActive,
+  splitWorkingNarrative,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
 import { AtReferenceChip } from '@taucad/chat-surfaces/components/chat/at-reference-chip';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
@@ -36,6 +37,7 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup, ChatActivityRow } from '@taucad/chat-ui/components/chat-activity-group';
+import { ChatWorkedFold } from '@taucad/chat-ui/components/chat-worked-fold';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
 import { reportTourAction } from '#components/tour/tour-actions.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -747,34 +749,52 @@ const AssistantActivityGroup = memo(function AssistantActivityGroup({
 function AssistantParts({
   parts,
   messageId,
+  isPastTurn,
 }: {
   readonly parts: readonly MyMessagePart[];
   readonly messageId: string;
+  readonly isPastTurn: boolean;
 }): React.JSX.Element {
   const groups = useMemo(() => groupAssistantParts(parts), [parts]);
   const lastGroupIndex = groups.length - 1;
   const isMessageActive = useChatSelector(
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
+  /* Folded when the next request is sent, never while the turn is read live, so no text leaves under the reader. */
+  const fold = useMemo(
+    () => (isPastTurn && !isMessageActive ? splitWorkingNarrative(groups) : undefined),
+    [groups, isPastTurn, isMessageActive],
+  );
+  const renderGroup = (group: ActivityGroup): React.JSX.Element => {
+    const groupIndex = groups.indexOf(group);
+    return (
+      <AssistantActivityGroup
+        key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
+        group={group}
+        groupIndex={groupIndex}
+        messageId={messageId}
+        isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
+        isMessageActive={isMessageActive}
+      />
+    );
+  };
 
+  if (fold === undefined) {
+    return <>{groups.map((group) => renderGroup(group))}</>;
+  }
   return (
     <>
-      {groups.map((group, groupIndex) => (
-        <AssistantActivityGroup
-          key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
-          group={group}
-          groupIndex={groupIndex}
-          messageId={messageId}
-          isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
-          isMessageActive={isMessageActive}
-        />
-      ))}
+      <ChatWorkedFold summary={fold.summary}>{fold.narrative.map((group) => renderGroup(group))}</ChatWorkedFold>
+      {fold.kept.map((group) => renderGroup(group))}
+      {fold.answer.map((group) => renderGroup(group))}
     </>
   );
 }
 
 type ChatMessageProperties = {
   readonly messageId: string;
+  /** A later request follows this message's turn, so its working narrative folds to one line. */
+  readonly isPastTurn?: boolean;
   /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
   readonly footer?: React.ReactNode;
 };
@@ -814,7 +834,11 @@ function ChatMessageTimestamp({
 }
 
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
-export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
+export const ChatMessage = memo(function ({
+  messageId,
+  footer,
+  isPastTurn = false,
+}: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
   const userMessagePreviewCharacterLimit = 220 * (userMessageCollapseRowThreshold + 1);
@@ -1038,7 +1062,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                   ))}
                 </div>
               ) : (
-                <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
+                <AssistantParts parts={inlineParts} messageId={displayMessage.id} isPastTurn={isPastTurn} />
               )}
             </ChatMessageSurface>
           </When>

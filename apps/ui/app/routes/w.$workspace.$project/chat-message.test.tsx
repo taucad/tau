@@ -625,6 +625,94 @@ describe('ChatMessage activity composition', () => {
   });
 });
 
+describe('ChatMessage older turn fold', () => {
+  const read = (toolCallId: string): MyUIMessage['parts'][number] => ({
+    type: 'tool-read_file',
+    toolCallId,
+    state: 'output-available',
+    input: { targetFile: 'main.scad' },
+    output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+  });
+  const failedShell: MyUIMessage['parts'][number] = {
+    type: 'tool-shell',
+    toolCallId: 'shell-1',
+    state: 'output-error',
+    input: { command: 'pnpm test' },
+    errorText: 'exit 1',
+  };
+  const exported: MyUIMessage['parts'][number] = {
+    type: 'tool-export_model',
+    toolCallId: 'export-1',
+    state: 'input-available',
+    input: { targetFile: 'main.scad', to: 'stl' },
+  };
+  const narrated: MyUIMessage = {
+    id: 'msg-narrated',
+    role: 'assistant',
+    parts: [
+      { type: 'text', text: 'Reading the model first.' },
+      read('read-1'),
+      { type: 'text', text: 'Now the tests.' },
+      failedShell,
+      exported,
+      read('read-2'),
+      { type: 'text', text: 'The nut is 8 mm across flats.' },
+    ],
+  };
+
+  it('folds the narrative of a turn a later request follows, and keeps its answer and deliverables in view', () => {
+    setMessages([narrated]);
+
+    render(<ChatMessage messageId={narrated.id} isPastTurn />);
+
+    const line = screen.getByRole('button', { name: /^Worked · read files, commands failed$/u });
+    expect(line).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
+    expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Now the tests.')).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('chat-activity-group')).toHaveLength(0);
+
+    fireEvent.click(line);
+
+    const narrative = screen.getByRole('region', { name: 'Working narrative' });
+    expect(within(narrative).getByText('Reading the model first.')).toBeVisible();
+    expect(within(narrative).getByText('Now the tests.')).toBeVisible();
+    expect(within(narrative).getAllByTestId('chat-activity-group')).toHaveLength(3);
+    expect(within(narrative).queryByText('The nut is 8 mm across flats.')).not.toBeInTheDocument();
+  });
+
+  it('keeps the latest turn as it was read live', () => {
+    setMessages([narrated]);
+
+    render(<ChatMessage messageId={narrated.id} />);
+
+    expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
+    expect(screen.getByText('Reading the model first.')).toBeVisible();
+  });
+
+  it('does not fold a message that is still streaming', () => {
+    setMessages([narrated], 'streaming');
+
+    render(<ChatMessage messageId={narrated.id} isPastTurn />);
+
+    expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
+  });
+
+  it('leaves a turn whose narrative is one line alone', () => {
+    const message: MyUIMessage = {
+      id: 'msg-one-line',
+      role: 'assistant',
+      parts: [read('read-1'), { type: 'text', text: 'Done.' }],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} isPastTurn />);
+
+    expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('chat-activity-group')).toHaveLength(1);
+  });
+});
+
 describe('ChatMessage assistant actions', () => {
   it('does not render retry actions below assistant messages', () => {
     setMessages([assistantMessage('msg-1', 'Hello there')]);

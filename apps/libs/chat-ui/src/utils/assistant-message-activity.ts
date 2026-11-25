@@ -474,6 +474,48 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
   return groups;
 };
 
+/** An older turn's groups, split into the working narrative its fold holds and what stays in view. */
+export type WorkingNarrative = {
+  /** Commentary and activity before the last tool call, in order: what the fold holds. */
+  readonly narrative: readonly ActivityGroup[];
+  /** Decisions and deliverables from that stretch, kept in view below the fold in their own order. */
+  readonly kept: readonly ActivityGroup[];
+  /** Everything after the last tool call: the turn's answer. */
+  readonly answer: readonly ActivityGroup[];
+  /** The fold line's detail, naming every tool family the narrative ran, with its shortfall counts. */
+  readonly summary: string;
+};
+
+/**
+ * Split an older turn's groups at its last tool call: what came before is its working narrative, what came after is
+ * its answer.
+ *
+ * Commentary text and activity fold; a decision, a deliverable or an attachment never does, so those stay in view.
+ * A narrative of one line is left alone, because a fold over one line only restates it.
+ *
+ * @param groups - The turn's groups, from {@link groupAssistantParts}.
+ * @returns The split, or `undefined` when there is nothing worth folding.
+ */
+export const splitWorkingNarrative = (groups: readonly ActivityGroup[]): WorkingNarrative | undefined => {
+  const lastToolGroup = groups.findLastIndex((group) => group.kind === 'aggregated' && group.category === 'research');
+  if (lastToolGroup === -1) {
+    return undefined;
+  }
+  const narrative: ActivityGroup[] = [];
+  const kept: ActivityGroup[] = [];
+  for (const group of groups.slice(0, lastToolGroup + 1)) {
+    const isCommentary = group.kind === 'singleton' && group.part.type === 'text';
+    (group.kind === 'aggregated' || isCommentary ? narrative : kept).push(group);
+  }
+  if (narrative.length < 2) {
+    return undefined;
+  }
+  const toolParts = narrative.flatMap((group) =>
+    group.kind === 'aggregated' ? group.parts.filter((part) => cachedCategory(part) === 'research') : [],
+  );
+  return { narrative, kept, answer: groups.slice(lastToolGroup + 1), summary: describeActivity(toolParts) };
+};
+
 const partCategories = new WeakMap<MyMessagePart, ActivityCategory>();
 const activityGroups = new WeakMap<MyMessagePart, ActivityGroup[]>();
 const cachedCategory = (part: MyMessagePart): ActivityCategory => {

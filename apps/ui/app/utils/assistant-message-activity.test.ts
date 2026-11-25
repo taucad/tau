@@ -4,6 +4,7 @@ import type { AgentLiveEvent } from '@taucad/agent-host';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
+import type { ActivityGroup } from '@taucad/chat-ui/utils/assistant-message-activity';
 import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import { projectAgentHostEvent, projectAgentHostLiveEvent } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
@@ -12,6 +13,7 @@ import {
   describeActivity,
   findLastMeaningfulPartIndex,
   groupAssistantParts,
+  splitWorkingNarrative,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
 import pingPongTurnLog from '#utils/__fixtures__/in-project-ping-pong-turn.jsonl?raw';
@@ -250,6 +252,63 @@ describe('assistant message activity', () => {
 
     expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'write', 'research']);
     expect(groups[3]).toMatchObject({ kind: 'aggregated', partIndices: [3, 4] });
+  });
+});
+
+describe('an older turn split at its last tool call', () => {
+  const partsOf = (groups: readonly ActivityGroup[]): Part[] =>
+    groups.flatMap((group) => (group.kind === 'singleton' ? [group.part] : [...group.parts]));
+
+  it('folds commentary and activity before the last tool call, and keeps the answer after it', () => {
+    const parts = [
+      text('Reading first.'),
+      tool('tool-read_file'),
+      text('Now the tests.'),
+      tool('tool-shell', 'output-error'),
+      text('It is 8 mm across flats.'),
+      text('Anything else?'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(split?.summary).toBe('Read files, commands failed');
+    expect(partsOf(split!.narrative)).toEqual(parts.slice(0, 4));
+    expect(split?.kept).toEqual([]);
+    expect(partsOf(split!.answer)).toEqual(parts.slice(4));
+  });
+
+  it('keeps a deliverable, a decision and an attachment in view, in their order, below the fold', () => {
+    const exported = tool('tool-export_model');
+    const question = tool('tool-ask_questions');
+    const file: Part = { type: 'file', mediaType: 'image/png', url: 'blob:x' };
+    const parts = [
+      text('Exporting.'),
+      exported,
+      tool('tool-read_file'),
+      question,
+      file,
+      tool('tool-read_file'),
+      text('Done.'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.kept)).toEqual([exported, question, file]);
+    expect(partsOf(split!.narrative)).toEqual([parts[0], parts[2], parts[5]]);
+  });
+
+  it.each([
+    ['no tool call', [text('Just an answer.')]],
+    ['one activity line', [tool('tool-read_file'), text('Done.')]],
+    ['one thought and nothing else before the answer', [reasoning('Plan'), text('Answer')]],
+  ])('leaves a turn with %s alone', (_label, parts) => {
+    expect(splitWorkingNarrative(groupAssistantParts(parts))).toBeUndefined();
+  });
+
+  it('folds a stopped turn that never answered', () => {
+    const parts = [text('Trying.'), tool('tool-read_file'), tool('tool-shell', 'output-error')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual(parts);
+    expect(split?.answer).toEqual([]);
   });
 });
 

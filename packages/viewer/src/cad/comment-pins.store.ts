@@ -80,8 +80,10 @@ type CommentPinsState = {
   pins: readonly CommentPin[];
   /** The pin whose comment is being written or read. */
   openPinId: string | undefined;
-  /** Pins from an earlier message, shown read-only. */
+  /** Pins from an earlier message, shown read-only. While any are shown, draft pins are not drawn. */
   historyPins: readonly CommentPin[];
+  /** The saved pin being moved without a drag: the next surface click re-anchors it. */
+  movingPinId: string | undefined;
 };
 
 type Listener = () => void;
@@ -97,6 +99,8 @@ export type CommentPinsStore = {
   movePin: (id: string, anchor: CommentPinAnchor, view?: CommentPinView) => void;
   removePin: (id: string) => void;
   openPin: (id: string | undefined) => void;
+  /** Starts or ends the no-drag move of a pin. */
+  setMoving: (id: string | undefined) => void;
   clear: () => void;
   showHistory: (pins: readonly CommentPin[]) => void;
   /** DOM heads register here; the scene moves them every frame without a React render. */
@@ -116,7 +120,13 @@ export type CommentPinsStore = {
  * @returns The store.
  */
 export function createCommentPinsStore(): CommentPinsStore {
-  let state: CommentPinsState = { isActive: false, pins: [], openPinId: undefined, historyPins: [] };
+  let state: CommentPinsState = {
+    isActive: false,
+    pins: [],
+    openPinId: undefined,
+    historyPins: [],
+    movingPinId: undefined,
+  };
   const listeners = new Set<Listener>();
   const heads = new Map<string, HTMLElement>();
   const screens = new Map<string, CommentPinScreen>();
@@ -146,10 +156,16 @@ export function createCommentPinsStore(): CommentPinsStore {
       };
     },
     setActive(isActive) {
-      set({ isActive, openPinId: isActive ? state.openPinId : undefined });
+      // Commenting is on the draft: an earlier message's pins leave the viewer.
+      set({
+        isActive,
+        openPinId: isActive ? state.openPinId : undefined,
+        historyPins: isActive ? [] : state.historyPins,
+        movingPinId: undefined,
+      });
     },
     addPin(pin) {
-      set({ pins: [...state.pins, pin], openPinId: pin.id });
+      set({ pins: [...state.pins, pin], openPinId: pin.id, historyPins: [] });
     },
     updateComment(id, comment) {
       set({ pins: state.pins.map((pin) => (pin.id === id ? { ...pin, comment } : pin)) });
@@ -162,17 +178,28 @@ export function createCommentPinsStore(): CommentPinsStore {
       set({
         pins: state.pins.filter((pin) => pin.id !== id),
         openPinId: state.openPinId === id ? undefined : state.openPinId,
+        movingPinId: state.movingPinId === id ? undefined : state.movingPinId,
       });
     },
     openPin(id) {
-      set({ openPinId: id });
+      // Opening a draft pin ends the view of an earlier message's pins.
+      const isDraft = id !== undefined && state.pins.some((pin) => pin.id === id);
+      set({ openPinId: id, historyPins: isDraft ? [] : state.historyPins });
+    },
+    setMoving(id) {
+      set({ movingPinId: id });
     },
     clear() {
       screens.clear();
-      set({ pins: [], openPinId: undefined });
+      set({ pins: [], openPinId: undefined, movingPinId: undefined });
     },
     showHistory(pins) {
-      set({ historyPins: pins });
+      set({
+        historyPins: pins,
+        openPinId: undefined,
+        movingPinId: undefined,
+        isActive: pins.length > 0 ? false : state.isActive,
+      });
     },
     registerHead(id, element) {
       if (element) {

@@ -331,6 +331,7 @@ export function CommentPins(): React.JSX.Element {
   const isActive = useCommentPins((state) => state.isActive);
   const pins = useCommentPins((state) => state.pins);
   const historyPins = useCommentPins((state) => state.historyPins);
+  const movingPinId = useCommentPins((state) => state.movingPinId);
   const [ghost, setGhost] = useState<SurfaceHit>();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
 
@@ -390,7 +391,7 @@ export function CommentPins(): React.JSX.Element {
 
   // Placing: a primary press that ends where it began is a pin; a drag stays an orbit.
   useEffect(() => {
-    if (!isActive) {
+    if (!isActive && !movingPinId) {
       setGhost(undefined);
       return undefined;
     }
@@ -420,10 +421,35 @@ export function CommentPins(): React.JSX.Element {
       }
       const hit = pick(event.clientX, event.clientY);
       if (!hit) {
-        commentPinsStore.openPin(undefined);
+        // A click off the model closes the open card; a move in progress keeps waiting for a surface.
+        if (!movingPinId) {
+          commentPinsStore.openPin(undefined);
+        }
         return;
       }
       const toTuple = (vector: THREE.Vector3): [number, number, number] => [vector.x, vector.y, vector.z];
+      if (movingPinId) {
+        commentPinsStore.movePin(
+          movingPinId,
+          {
+            point: fromThreeRenderPoint({ renderFrame, point: hit.point }) as [number, number, number],
+            normal: toTuple(hit.normal),
+            renderPoint: toTuple(hit.point),
+            renderNormal: toTuple(hit.normal),
+            componentId: hit.componentId,
+            componentLabel: hit.componentId
+              ? (manifest?.nodesById[hit.componentId]?.name ?? hit.componentId)
+              : undefined,
+            geometryKey,
+          },
+          readView(),
+        );
+        commentPinsStore.setMoving(undefined);
+        commentPinsStore.openPin(undefined);
+        setGhost(undefined);
+        invalidate();
+        return;
+      }
       commentPinsStore.addPin({
         id: `pin_${Math.random().toString(36).slice(2, 10)}`,
         comment: '',
@@ -456,7 +482,7 @@ export function CommentPins(): React.JSX.Element {
       pointerTarget.removeEventListener('pointerleave', onLeave);
       pointerTarget.style.cursor = previousCursor;
     };
-  }, [geometryKey, invalidate, isActive, manifest, pick, pointerTarget, readView]);
+  }, [geometryKey, invalidate, isActive, manifest, movingPinId, pick, pointerTarget, readView]);
 
   // Returning to a pin's recorded view.
   useEffect(
@@ -479,13 +505,14 @@ export function CommentPins(): React.JSX.Element {
 
   return (
     <>
-      {pins.map((pin, index) => (
+      {/* An earlier message's pins replace the draft's while they are shown: one set of numbers at a time. */}
+      {(historyPins.length > 0 ? [] : pins).map((pin, index) => (
         <PinMarker key={pin.id} pin={pin} number={index + 1} variant='draft' />
       ))}
       {historyPins.map((pin, index) => (
         <PinMarker key={pin.id} pin={pin} number={index + 1} variant='history' />
       ))}
-      {ghost && isActive ? (
+      {ghost && (isActive || movingPinId) ? (
         <PinMarker
           pin={{
             id: 'ghost',

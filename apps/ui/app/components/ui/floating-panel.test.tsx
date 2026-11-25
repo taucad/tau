@@ -62,6 +62,13 @@ function setMobileDrawerContext(): void {
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
+/* Every case starts on a wide screen outside a drawer: a case that set a phone or a drawer must not decide what a later
+ * one sees, whatever order the cases run in. */
+beforeEach(() => {
+  mockUseIsMobile.mockReset().mockReturnValue(false);
+  mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
+});
+
 describe('FloatingPanelContentHeader', () => {
   it('matches the desktop Dockview tab-strip height', () => {
     renderInPanel(<FloatingPanelContentHeader>Title</FloatingPanelContentHeader>);

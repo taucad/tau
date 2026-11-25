@@ -21,6 +21,7 @@ import {
 import type {
   AgentTurnContext,
   ClientMetricEntry,
+  admissionPhases,
   agentSafeguardPatterns,
   evaluationClasses,
   lookupOutcomes,
@@ -438,6 +439,136 @@ const foldCallOutput = (facts: TurnFacts, call: CallFacts, chunk: Readonly<Recor
 /** Runs this tab is already tracking; a Resume re-admits the same run. */
 const tracked = new Set<string>();
 
+/** One phase of a turn's submit to admitted (C3). @public */
+export type AdmissionPhase = (typeof admissionPhases)[number];
+
+/** What the page measured about one run's admission (C3); each fact is optional and merges with earlier ones. @public */
+export type TurnAdmissionFacts = Readonly<{
+  /** Seconds per phase; a phase not measured is left out. */
+  admissionDelay?: Readonly<Partial<Record<AdmissionPhase, number>>>;
+  /** Whether the project host was composed for this turn (`cold`) or already open (`warm`). */
+  hostStart?: 'cold' | 'warm';
+  /** Whether the chat was open or re-opened after its idle eviction. */
+  chatState?: 'open' | 'reopened';
+  /** Whether the admission awaited a deployment-answer request instead of reading a fresh answer (C7). */
+  deploymentRefetched?: boolean;
+}>;
+
+/** One run's recorded delivery facts, read once when its `agent.turn` entry is reported. */
+type TurnDelivery = {
+  admission: TurnAdmissionFacts;
+  /** Each folded tool result by call id: `true` when timed, `false` when excluded. */
+  readonly folded: Map<string, boolean>;
+  /** Seconds from each timed result's output row to the first frame showing it settled. */
+  readonly shown: Map<string, number>;
+};
+
+/** Runs with recorded facts; a run never tracked (refused before admission) is evicted oldest-first past the bound. */
+const deliveries = new Map<string, TurnDelivery>();
+// ponytail: FIFO bound instead of per-run expiry; more concurrent runs per tab than this are not expected.
+const deliveryBound = 256;
+
+const deliveryOf = (runId: string): TurnDelivery => {
+  const existing = deliveries.get(runId);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created: TurnDelivery = { admission: {}, folded: new Map(), shown: new Map() };
+  deliveries.set(runId, created);
+  if (deliveries.size > deliveryBound) {
+    deliveries.delete(deliveries.keys().next().value!);
+  }
+  return created;
+};
+
+/**
+ * Record what the page measured about a run's admission (B4, C3), for its `agent.turn` entry. Call it as each phase
+ * ends; facts merge, and phases merge by name. Synchronous and never throws, so a measurement can never fail a send.
+ *
+ * @param runId - The run.
+ * @param facts - The facts measured so far.
+ * @public
+ */
+export const recordTurnAdmission = (runId: string, facts: TurnAdmissionFacts): void => {
+  quietly(() => {
+    const delivery = deliveryOf(runId);
+    delivery.admission = {
+      ...delivery.admission,
+      ...facts,
+      admissionDelay: { ...delivery.admission.admissionDelay, ...facts.admissionDelay },
+    };
+  });
+};
+
+/**
+ * Record that a run's tool result was folded into the chat (B4). `timed` is false for a result the page cannot time:
+ * a replayed run, a hidden page, or a host on another machine's clock. A timed result not shown settled by the time the
+ * turn is reported counts as unsettled.
+ *
+ * @param runId - The run.
+ * @param callId - The tool call.
+ * @param timed - Whether the result's delay can be measured.
+ * @public
+ */
+export const recordToolResultFolded = (runId: string, callId: string, timed: boolean): void => {
+  quietly(() => {
+    deliveryOf(runId).folded.set(callId, timed);
+  });
+};
+
+/**
+ * Record the first frame that showed a timed tool result settled (B4).
+ *
+ * @param runId - The run.
+ * @param callId - The tool call.
+ * @param shownDelay - Seconds from the output row's host `recordedAt` to that frame.
+ * @public
+ */
+export const recordToolResultShown = (runId: string, callId: string, shownDelay: number): void => {
+  quietly(() => {
+    const delivery = deliveryOf(runId);
+    if (delivery.folded.get(callId) === true && !delivery.shown.has(callId)) {
+      delivery.shown.set(callId, Math.max(0, shownDelay));
+    }
+  });
+};
+
+/** The run's recorded delivery fields for its entry, and forget them; none when the page recorded nothing. */
+const takeDeliveryOf = (
+  runId: string,
+): Pick<
+  AgentTurnDetail,
+  | 'toolResults'
+  | 'toolResultsExcluded'
+  | 'toolResultsUnsettled'
+  | 'toolResultDelayMax'
+  | 'admissionDelay'
+  | 'hostStart'
+  | 'chatState'
+  | 'deploymentRefetched'
+> => {
+  const delivery = deliveries.get(runId);
+  deliveries.delete(runId);
+  if (delivery === undefined) {
+    return {};
+  }
+  const { admissionDelay, ...labels } = delivery.admission;
+  const timed = [...delivery.folded.values()].filter(Boolean).length;
+  const delays = [...delivery.shown.values()];
+  return {
+    ...(delivery.folded.size === 0
+      ? {}
+      : {
+          toolResults: timed,
+          toolResultsExcluded: delivery.folded.size - timed,
+          toolResultsUnsettled: timed - delays.length,
+          ...(delays.length === 0 ? {} : { toolResultDelayMax: Math.max(...delays) }),
+        }),
+    ...(admissionDelay === undefined || Object.keys(admissionDelay).length === 0 ? {} : { admissionDelay }),
+    ...labels,
+  };
+};
+
 /** The turn's kernel, carried only when the person allows usage metrics; its presence is that consent. @public */
 export type AgentTurnUsageMetrics = Readonly<{ kernelId: AgentTurnContext['kernelId'] }>;
 
@@ -775,6 +906,7 @@ export const trackAgentTurn = (
       reopened = true;
       return;
     }
+    const delivery = takeDeliveryOf(runId);
     finish();
     report({
       name: IngestEntryName.AGENT_TURN,
@@ -784,6 +916,7 @@ export const trackAgentTurn = (
         ...outcomeOf(run?.lifecycle, run?.failure?.code),
         ...(timeToFirstUpdate === undefined ? {} : { timeToFirstUpdate }),
         ...toolCallsOf(facts, usageMetrics !== undefined),
+        ...delivery,
         ...tokensOf(facts),
         ...loopOf(run, initialRun),
         ...(usageMetrics === undefined
@@ -809,6 +942,7 @@ export const trackAgentTurn = (
     unsubscribe();
     clearTimeout(abandon);
     tracked.delete(runId);
+    deliveries.delete(runId);
   }
   check();
 };

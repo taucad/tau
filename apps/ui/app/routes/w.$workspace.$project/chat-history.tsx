@@ -5,6 +5,7 @@ import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } f
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 import { XIcon } from 'lucide-react';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -315,11 +316,17 @@ const ExpandedChatHistory = memo(function ({
     chatTextareaRef.current?.focus();
   }, []);
   const location = useLocation();
+  const isComposerFocusRequested = location.state?.focusChatComposer === true;
+  /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
+   * when the navigation commits lands on an inert composer and is dropped. It is given once the requested chat is the
+   * one presented (a URL naming no chat presents whatever it opens). */
+  const requestedChatId = projectChatIdFromSearch(location.search);
+  const isRequestedChatPresented = requestedChatId === undefined || requestedChatId === activeChatId;
   useEffect(() => {
-    if (location.state?.focusChatComposer === true) {
+    if (isComposerFocusRequested && isRequestedChatPresented) {
       chatTextareaRef.current?.focus();
     }
-  }, [location.state]);
+  }, [isComposerFocusRequested, isRequestedChatPresented, location.key]);
 
   // Empty-cancel: the persistence machine has lifted the cancelled user
   // message back into the composer draft (via the store's

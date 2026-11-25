@@ -11,6 +11,7 @@ const mockConsumeDraft = vi.fn(async () => undefined);
 const mockPresentLocationError = vi.fn(() => false);
 const mockRefresh = vi.fn(async () => undefined);
 const mockFocus = vi.fn();
+const mockTakeName = vi.fn<(draft: { text: string }) => Promise<string | undefined>>();
 let routerLocationState: unknown;
 let locationKey = 0;
 let capturedTextarea: ChatTextareaProperties | undefined;
@@ -77,6 +78,9 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   }),
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('#components/chat/use-project-name-ahead.js', () => ({
+  useProjectNameAhead: () => ({ take: mockTakeName, onPasteCapture: vi.fn() }),
+}));
 
 const { NewProjectChatComposer } = await import('#components/chat/new-project-chat-composer.js');
 
@@ -109,6 +113,7 @@ describe('NewProjectChatComposer', () => {
     draftAttachments = [];
     attachmentSource = undefined;
     routerLocationState = null;
+    mockTakeName.mockResolvedValue(undefined);
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'workshop', projectSlug: 'bracket' } });
   });
 
@@ -174,6 +179,31 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft).toHaveBeenCalledOnce();
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
+  });
+
+  /* C1: a name held from writing the prompt is the project's name, so the create asks for none. */
+  it('creates the project under the name held for the submitted draft', async () => {
+    draftAttachments = [{ hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 3 }];
+    mockTakeName.mockResolvedValue('Pipe Wall Bracket');
+    render(<NewProjectChatComposer />);
+
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'A wall bracket for a pipe', attachments: [] });
+    });
+
+    expect(mockTakeName).toHaveBeenCalledWith({
+      text: 'A wall bracket for a pipe',
+      attachments: [{ hash: 'a'.repeat(64), mediaType: 'image/png' }],
+    });
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: 'Pipe Wall Bracket' }));
+  });
+
+  it('leaves naming to the create when no name is held', async () => {
+    render(<NewProjectChatComposer />);
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'A wall bracket for a pipe', attachments: [] });
+    });
+    expect(mockCreateProject.mock.calls[0]?.[0]).not.toHaveProperty('projectName');
   });
 
   it('creates an entry-less Auto project when the remembered choice is Auto (blueprint D3)', async () => {

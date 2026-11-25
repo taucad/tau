@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
@@ -81,6 +81,13 @@ vi.mock('#hooks/use-sidebar-status.js', () => ({ useProjectSidebarRow: () => sta
 vi.mock('#hooks/use-project-availability.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useModelAvailability: () => state.model,
+}));
+/* The covering sheet's header status reads the session's open; the shell under test has no sessions provider. */
+vi.mock('#hooks/use-sessions.js', () => ({
+  useSessions: () => ({
+    getSnapshot: () => ({ context: { status: {} } }),
+    subscribe: () => ({ unsubscribe: () => undefined }),
+  }),
 }));
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -228,6 +235,13 @@ function evaluate(source: string): number {
   };
   return sum();
 }
+
+/* Testing Library unmounts a test's tree after this file's `afterEach`, so a Terminal still mounted then reports its
+ * close after the counters were cleared: clear them before each test too, so no test sees another's unmount. */
+beforeEach(() => {
+  terminal.mounted.mockClear();
+  terminal.closed.mockClear();
+});
 
 afterEach(() => {
   state.drawerOpen = false;
@@ -547,7 +561,8 @@ describe('ChatInterfaceMobile', () => {
     renderShell();
 
     const surface = await screen.findByRole('region', { name: 'Share' });
-    const frameTitle = within(surface).getByRole('heading', { name: 'Share project' });
+    /* The share frame is a lazy chunk: wait for it, not only for the sheet's surface, which is there at once. */
+    const frameTitle = await within(surface).findByRole('heading', { name: 'Share project' });
     // Jsdom applies no Tailwind; the wrapper's rule is what hides the frame heading on the phone.
     expect(frameTitle.closest('[class*="[&_[data-slot=share-pane-title]]:hidden"]')).not.toBeNull();
     expect(within(surface).getByRole('region', { name: 'Share project' })).toBeInTheDocument();

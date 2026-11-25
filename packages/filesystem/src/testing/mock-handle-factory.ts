@@ -42,6 +42,66 @@ export type MockRootHandleOptions = {
   nativeMove?: boolean;
   /** Called on every native `move()` call, before it resolves or throws. */
   onMove?: (from: string, to: string) => void;
+  /**
+   * Called once for every browser file call a handle or its `File` answers, before it resolves or throws: the cost a
+   * provider pays in calls to the browser's file backend (fast-path blueprint FW0).
+   */
+  onBrowserCall?: (call: MockBrowserCall) => void;
+  /**
+   * Milliseconds a written file's `lastModified` is rounded down to, as a coarse filesystem records it (FAT's 2 s,
+   * an old network share's 1 s). `Infinity` freezes every `lastModified` at 0, as a backend that keeps no time. Default
+   * 1: the clock as it is.
+   */
+  timestampGranularity?: number;
+};
+
+/** A write's `lastModified` under the root's timestamp granularity. */
+const stampOf = (options: MockRootHandleOptions): number => {
+  const granularity = options.timestampGranularity ?? 1;
+  if (granularity === Number.POSITIVE_INFINITY) {
+    return 0;
+  }
+  return Math.floor(Date.now() / granularity) * granularity;
+};
+
+/**
+ * The browser file calls {@link MockRootHandleOptions.onBrowserCall} names: one per handle method or `File` read the
+ * provider awaits. An `entries()` or `keys()` iteration counts once, however many children it yields.
+ *
+ * @public
+ */
+export type MockBrowserCall =
+  | 'getFileHandle'
+  | 'getDirectoryHandle'
+  | 'removeEntry'
+  | 'entries'
+  | 'keys'
+  | 'isSameEntry'
+  | 'getFile'
+  | 'createWritable'
+  | 'createSyncAccessHandle'
+  | 'move'
+  | 'arrayBuffer'
+  | 'text'
+  | 'stream'
+  | 'slice';
+
+/** A `File` whose reads report themselves as browser calls. */
+const countedFile = (file: File, onBrowserCall: MockRootHandleOptions['onBrowserCall']): File => {
+  if (onBrowserCall === undefined) {
+    return file;
+  }
+  for (const call of ['arrayBuffer', 'text', 'stream', 'slice'] as const) {
+    const original = file[call].bind(file) as (...arguments_: unknown[]) => unknown;
+    Object.defineProperty(file, call, {
+      configurable: true,
+      value: (...arguments_: unknown[]): unknown => {
+        onBrowserCall(call);
+        return original(...arguments_);
+      },
+    });
+  }
+  return file;
 };
 
 /** Each directory's child table, so a file handle can move itself between directories. */
@@ -124,10 +184,12 @@ class MockWritableStream {
 class MockSyncAccessHandle {
   private readonly _entry: FileEntry;
   private readonly _writeLimit: number;
+  private readonly _options: MockRootHandleOptions;
 
-  public constructor(entry: FileEntry, writeLimit: number) {
+  public constructor(entry: FileEntry, options: MockRootHandleOptions) {
     this._entry = entry;
-    this._writeLimit = writeLimit;
+    this._options = options;
+    this._writeLimit = options.syncWriteLimit ?? Number.POSITIVE_INFINITY;
     entry.syncHandleOpen = true;
   }
 
@@ -154,7 +216,7 @@ class MockSyncAccessHandle {
     }
     this._entry.content.set(view.subarray(0, written), at);
     if (written > 0) {
-      this._entry.lastModified = Date.now();
+      this._entry.lastModified = stampOf(this._options);
     }
     return written;
   }
@@ -197,6 +259,7 @@ class MockFileHandle {
     this._parent = parent;
     if (options.nativeMove === true) {
       this.move = async (destination, newName): Promise<void> => {
+        options.onBrowserCall?.('move');
         options.onMove?.(name, newName);
         const target = childrenOf.get(destination);
         if (target === undefined) {
@@ -218,28 +281,34 @@ class MockFileHandle {
     }
     if (options.syncAccess !== false) {
       this.createSyncAccessHandle = async (): Promise<MockSyncAccessHandle> => {
+        options.onBrowserCall?.('createSyncAccessHandle');
         options.onAcquireWriteApi?.('sync');
         if (entry.syncHandleOpen === true || entry.exclusiveWritableOpen === true) {
           throw new DOMException(`Sync access handle already open: ${name}`, 'NoModificationAllowedError');
         }
-        return new MockSyncAccessHandle(entry, options.syncWriteLimit ?? Number.POSITIVE_INFINITY);
+        return new MockSyncAccessHandle(entry, options);
       };
     }
   }
 
   public async getFile(): Promise<File> {
+    this._options.onBrowserCall?.('getFile');
     if (this._parent.get(this.name) !== this._entry) {
       throw new DOMException(`File not found: ${this.name}`, 'NotFoundError');
     }
-    return new File([this._entry.content], this.name, {
-      lastModified: this._entry.lastModified,
-    });
+    return countedFile(
+      new File([this._entry.content], this.name, {
+        lastModified: this._entry.lastModified,
+      }),
+      this._options.onBrowserCall,
+    );
   }
 
   public async createWritable(options?: {
     keepExistingData?: boolean;
     mode?: 'exclusive' | 'siloed';
   }): Promise<MockWritableStream> {
+    this._options.onBrowserCall?.('createWritable');
     this._options.onAcquireWriteApi?.('writable');
     if (this._entry.syncHandleOpen === true || this._entry.exclusiveWritableOpen === true) {
       throw new DOMException(`Exclusive writable already open: ${this.name}`, 'NoModificationAllowedError');
@@ -252,7 +321,7 @@ class MockFileHandle {
       options?.keepExistingData ? this._entry.content : new Uint8Array(),
       (data) => {
         this._entry.content = data;
-        this._entry.lastModified = Date.now();
+        this._entry.lastModified = stampOf(this._options);
       },
       () => {
         if (exclusive) {
@@ -263,6 +332,7 @@ class MockFileHandle {
   }
 
   public async isSameEntry(other: FileSystemHandle): Promise<boolean> {
+    this._options.onBrowserCall?.('isSameEntry');
     return other instanceof MockFileHandle && other._entry === this._entry;
   }
 }
@@ -291,6 +361,7 @@ class MockDirectoryHandle {
   }
 
   public async getFileHandle(name: string, options?: { create?: boolean }): Promise<MockFileHandle> {
+    this._options.onBrowserCall?.('getFileHandle');
     const existing = this._children.get(name);
     if (existing?.kind === 'file') {
       return new MockFileHandle(name, existing, { options: this._options, parent: this._children });
@@ -299,7 +370,7 @@ class MockDirectoryHandle {
       throw new DOMException('Is a directory', 'TypeMismatchError');
     }
     if (options?.create) {
-      const entry: FileEntry = { kind: 'file', content: new Uint8Array(0), lastModified: Date.now() };
+      const entry: FileEntry = { kind: 'file', content: new Uint8Array(0), lastModified: stampOf(this._options) };
       this._children.set(name, entry);
       return new MockFileHandle(name, entry, { options: this._options, parent: this._children });
     }
@@ -307,6 +378,7 @@ class MockDirectoryHandle {
   }
 
   public async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<MockDirectoryHandle> {
+    this._options.onBrowserCall?.('getDirectoryHandle');
     const existing = this._children.get(name);
     if (existing?.kind === 'directory') {
       return existing.handle;
@@ -323,6 +395,7 @@ class MockDirectoryHandle {
   }
 
   public async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
+    this._options.onBrowserCall?.('removeEntry');
     const entry = this._children.get(name);
     if (!entry) {
       throw new DOMException(`Entry not found: ${name}`, 'NotFoundError');
@@ -334,6 +407,7 @@ class MockDirectoryHandle {
   }
 
   public async *entries(): AsyncGenerator<[string, MockFileHandle | MockDirectoryHandle]> {
+    this._options.onBrowserCall?.('entries');
     for (const [name, entry] of this._children) {
       yield entry.kind === 'file'
         ? [name, new MockFileHandle(name, entry, { options: this._options, parent: this._children })]
@@ -342,12 +416,14 @@ class MockDirectoryHandle {
   }
 
   public async *keys(): AsyncGenerator<string> {
+    this._options.onBrowserCall?.('keys');
     for (const name of this._children.keys()) {
       yield name;
     }
   }
 
   public async isSameEntry(other: FileSystemHandle): Promise<boolean> {
+    this._options.onBrowserCall?.('isSameEntry');
     return other instanceof MockDirectoryHandle && other._identity === this._identity;
   }
 

@@ -216,7 +216,7 @@ describe('release-gate.yml', () => {
     expect(run).toContain('lint) pnpm nx run-many -t lint --parallel=1 ;;');
     expect(run).toContain('typecheck) pnpm nx run-many -t typecheck --parallel=1 ;;');
     expect(run).toContain('build) pnpm nx run-many -t build size check-desktop-payload --parallel=1 ;;');
-    expect(run).toContain('pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:quarantined');
+    expect(run).toContain('pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:nightly-only');
     expect(run).toContain('cross-root-reads) pnpm nx run scripts:validate-cross-root-reads ;;');
     expect(sweep?.if).toBe("needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''");
   });
@@ -324,7 +324,7 @@ describe('release-gate.yml', () => {
     const suites = 'Run API suites (real PostgreSQL + MinIO)';
     expect(stepNamed(api, suites)?.env).toEqual(stepNamed(ciApi, suites)?.env);
     expect(stepNamed(api, suites)?.run).toBe(
-      'pnpm nx run-many -t test --projects tag:scope:api --exclude tag:ci:quarantined --parallel=1 --outputStyle=static',
+      'pnpm nx run-many -t test --projects tag:scope:api --exclude tag:ci:nightly-only --parallel=1 --outputStyle=static',
     );
     const names = (api.steps ?? []).map((step) => step.name);
     expect(names.indexOf('Apply the protected migration job')).toBeLessThan(names.indexOf(suites));
@@ -394,7 +394,7 @@ describe('release-gate.yml', () => {
           'test:e2e:b': {},
         }),
         scripts: project(['type:tool'], { 'test:e2e:queue': queue('test:e2e'), 'test:e2e': {} }),
-        'runtime-e2e': project(['ci:quarantined'], { 'test:e2e:queue': queue('test:e2e'), 'test:e2e': {} }),
+        'runtime-e2e': project(['ci:nightly-only'], { 'test:e2e:queue': queue('test:e2e'), 'test:e2e': {} }),
         ui: project([], { test: {} }),
       });
       expect(result.status).toBe(0);

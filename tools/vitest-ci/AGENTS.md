@@ -15,6 +15,9 @@ Shared Vitest reporter list and the CI test outcome recorder for every Tau test 
 
 - `src/test-reporters.ts` (`@taucad/vitest-ci`): `testReporters`, the list every Vitest config uses
 - `src/outcome-reporter.ts` (`@taucad/vitest-ci/outcome-reporter`): `OutcomeReporter` and the outcome row schema
+- `src/quarantine.ts` (`@taucad/vitest-ci/quarantine`): the `quarantine.json` schema, bounds, never-quarantine set and entry rules, shared with `scripts:validate-quarantine`
+- `src/quarantine-verdict.ts` (`@taucad/vitest-ci/quarantine-verdict`): `QuarantineVerdict`, the task's pass/fail verdict under quarantine
+- `quarantine.schema.json`: JSON Schema of a project's `quarantine.json`, kept equal to `src/quarantine.ts` by its test
 - `package.json`
 - `project.json`
 
@@ -45,5 +48,7 @@ Then follow the [AGENTS policy](../../docs/policy/agents-md-policy.md), the [pro
 Keep this file limited to verified local entrypoints, invariants and checks. Put cross-project standards in their policy owner and repeatable procedures in a shared skill.
 
 ## Project notes
+
+- `QuarantineVerdict` must stay after `OutcomeReporter` in `testReporters`: Vitest calls `onTestRunEnd` on each reporter in list order, and the verdict reads the outcome file the recorder has just written. It only lowers Vitest's exit code when every failure is an excused quarantined failure; it never lowers a code set before the run ended.
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.

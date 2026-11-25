@@ -69,7 +69,7 @@
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"],
+      "inputs": ["default", "^production", "serviceEnvironment", "{projectRoot}/quarantine.json"],
       "outputs": [
         "{workspaceRoot}/out/reports/coverage/{projectRoot}",
         "{workspaceRoot}/out/test-results/{projectName}/test.outcomes.jsonl"
@@ -220,7 +220,8 @@
       "!{projectRoot}/vitest.config.*",
       "!{projectRoot}/**/*.md",
       "!{projectRoot}/specs/**/*",
-      "!{projectRoot}/**/react-event-layer.ceiling.json"
+      "!{projectRoot}/**/react-event-layer.ceiling.json",
+      "!{projectRoot}/quarantine.json"
     ]
   },
   "release": {

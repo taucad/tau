@@ -2,7 +2,7 @@
 import { act, render, screen, cleanup } from '@testing-library/react';
 import { useLayoutEffect } from 'react';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { mock } from 'vitest-mock-extended';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSession, ChatSessionDeps } from '#services/chat-session-store.js';

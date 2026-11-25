@@ -1,5 +1,5 @@
 {
-  "$comment": "Guard G3 (scripts/check-critical-budget.mts): each route class's interactive tier on the web client build, per build variant. Growth past the tolerance fails, and so does landing under the budget by more than the ratchet margin until it is lowered (--write). Raising a budget names its reason in the commit.",
+  "$comment": "Guard G3 (scripts/check-critical-budget.mts): each route class's interactive tier on the web client build, in the one adaptive entry (adaptive app deployment mode W12; written from main with --write, gate G1). Growth past the tolerance fails, and so does landing under the budget by more than the ratchet margin until it is lowered (--write). Raising a budget names its reason in the commit.",
   "tolerance": {
     "bytes": 0.01,
     "requests": 2
@@ -9,31 +9,17 @@
     "requests": 5
   },
   "variants": {
-    "self-host": {
+    "adaptive": {
       "project": {
-        "brotliBytes": 1928788,
-        "requests": 305,
-        "largestChunkBrotliBytes": 167393,
+        "brotliBytes": 1970956,
+        "requests": 308,
+        "largestChunkBrotliBytes": 167234,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1230036,
+        "brotliBytes": 1260153,
         "requests": 225,
-        "largestChunkBrotliBytes": 140852,
-        "knownHeavy": {}
-      }
-    },
-    "cloud": {
-      "project": {
-        "brotliBytes": 1956998,
-        "requests": 314,
-        "largestChunkBrotliBytes": 167319,
-        "knownHeavy": {}
-      },
-      "home": {
-        "brotliBytes": 1252118,
-        "requests": 236,
-        "largestChunkBrotliBytes": 140921,
+        "largestChunkBrotliBytes": 137594,
         "knownHeavy": {}
       }
     }

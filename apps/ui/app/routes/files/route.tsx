@@ -1,5 +1,5 @@
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import {
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FileSystemBackend } from '@taucad/types';
-import { ExternalLink } from '#components/external-link.js';
+import { ExternalLink } from '@taucad/editor-ui/components/external-link';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Loader } from '@taucad/ui/components/loader';
@@ -31,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 import { checkHandlePermission, getWorkspace, listWorkspaces } from '@taucad/files-ui/filesystem/handle-store';
 import type { HomeStorageBackend, Workspace } from '@taucad/files-ui/filesystem/handle-store';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
@@ -39,9 +39,14 @@ import { toast } from '@taucad/ui/components/sonner';
 import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
+import {
+  folderStatusOf,
+  useRootStatuses,
+  workspaceStorageRootKey,
+} from '@taucad/files-ui/components/filesystem/folder-status';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 
@@ -311,6 +316,7 @@ function ColumnShell({
   isLoading,
   isDisabled,
   emptyHint,
+  errorMessage,
   unsupportedHint,
   treeActionHandlers,
   topRight,
@@ -325,6 +331,8 @@ function ColumnShell({
   readonly isLoading: boolean;
   readonly isDisabled: boolean;
   readonly emptyHint?: string;
+  /** Why the column's root could not be listed; shown instead of the empty hint, never as an empty column. */
+  readonly errorMessage?: string;
   readonly unsupportedHint?: string;
   readonly treeActionHandlers: TreeActionHandlers;
   readonly topRight?: React.ReactNode;
@@ -383,14 +391,24 @@ function ColumnShell({
             <div className='flex h-32 items-center justify-center'>
               <Loader className='size-6' />
             </div>
-          ) : fileTree.length === 0 ? (
-            <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>
-              {emptyHint ?? 'No files found'}
-            </div>
+          ) : errorMessage === undefined ? (
+            fileTree.length === 0 ? (
+              <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>
+                {emptyHint ?? 'No files found'}
+              </div>
+            ) : (
+              <Tree elements={fileTree} onExpand={onExpand}>
+                {renderTree(fileTree, treeActionHandlers)}
+              </Tree>
+            )
           ) : (
-            <Tree elements={fileTree} onExpand={onExpand}>
-              {renderTree(fileTree, treeActionHandlers)}
-            </Tree>
+            <div role='alert' className='flex h-32 flex-col items-center justify-center gap-1 p-4 text-center text-sm'>
+              <span className='flex items-center gap-2 font-medium'>
+                <AlertCircle className='size-4 shrink-0 text-warning' aria-hidden='true' />
+                Couldn’t list this folder
+              </span>
+              <span className='line-clamp-3 text-xs break-all text-muted-foreground'>{errorMessage}</span>
+            </div>
           )}
         </div>
       )}
@@ -478,15 +496,26 @@ export default function FilesRoute(): React.JSX.Element {
 }
 
 function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorageBackend }): React.JSX.Element {
-  const { scopedStorage, workspace } = useFileManager();
+  const { scopedStorage, workspace, fileManagerRef } = useFileManager();
+  const rootStatuses = useRootStatuses(fileManagerRef);
   const { projects } = useProjects();
 
   // Per-cache-key (backend | webaccess:<workspaceId>) loaded directories
   const [loadedDirectories, setLoadedDirectories] = useState<Record<string, Map<string, FileTreeNode[]>>>({});
   const [rootLoading, setRootLoading] = useState<Record<string, boolean>>({});
+  /* Why a column's root could not be listed: shown in the column, never as an empty one (R2). */
+  const [rootErrors, setRootErrors] = useState<Record<string, string | undefined>>({});
   const inflightRef = useRef<Set<string>>(new Set());
 
-  const [workspaceColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
+  const [grantedColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
+  /* A folder with access granted shows the file service's published status, not the grant alone (D2, U3). */
+  const workspaceColumns = useMemo((): WorkspaceColumnState[] => {
+    const byKey = new Map(rootStatuses.map((root) => [root.storageRootKey, root] as const));
+    return grantedColumns.map((column) => {
+      const root = column.status === 'connected' ? byKey.get(workspaceStorageRootKey(column.workspace)) : undefined;
+      return root === undefined ? column : { ...column, status: folderStatusOf(root) };
+    });
+  }, [grantedColumns, rootStatuses]);
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
   const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
   const telemetry = useWorkspaceTelemetry();
@@ -567,7 +596,17 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           directories.set(directoryPath, nodes);
           return { ...previous, [cacheKey]: directories };
         });
-      } catch {
+        if (directoryPath === '/') {
+          setRootErrors((previous) => ({ ...previous, [cacheKey]: undefined }));
+        }
+      } catch (error) {
+        console.warn(`[files] could not list ${cacheKey}:${directoryPath}`, error);
+        if (directoryPath === '/') {
+          setRootErrors((previous) => ({
+            ...previous,
+            [cacheKey]: error instanceof Error ? error.message : String(error),
+          }));
+        }
         setLoadedDirectories((previous) => {
           const directories = new Map(previous[cacheKey] ?? []);
           directories.set(directoryPath, []);
@@ -695,7 +734,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
       throw error;
     }
   }, [projectManager, reloadWorkspaceColumns, telemetry]);
@@ -708,7 +747,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
         toast.success(`Connected workspace "${connected.workspace.name}"`);
       }
     } catch {
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
     }
   }, [projectManager, reloadWorkspaceColumns]);
 
@@ -720,7 +759,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
         disconnected = await workspace.disconnectWorkspace(target.workspaceId);
       } catch (error) {
         console.error('Failed to disconnect workspace:', error);
-        toast.error('Failed to disconnect workspace.');
+        toast.error('Couldn’t disconnect the folder. Try again.');
         return;
       } finally {
         setBusyWorkspaceId(undefined);
@@ -750,7 +789,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
               restored = await workspace.restoreWorkspaceHandle(target.workspaceId, disconnected.handle);
             } catch (error) {
               console.error('Failed to undo workspace disconnect:', error);
-              toast.error('Failed to reconnect workspace.');
+              toast.error('Couldn’t reconnect the folder. Try again.');
               return;
             }
             try {
@@ -857,7 +896,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
   return (
     <PageContent className='flex flex-col gap-4'>
       <PageHeader title='Files' />
-      {isDesktopTarget() ? <WorkspaceConnections /> : undefined}
+      {isDesktopTarget() ? <WorkspaceConnections shouldGroupNotFound /> : undefined}
 
       {/* A document page (D4.4): the columns flow and the shell scrolls; each column's tree keeps a bounded height. */}
       <div className='grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
@@ -867,6 +906,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           subtitle={homeColumn.description}
           fileTree={projectTreeForKey(makeBackendKey(homeBackend))}
           isLoading={rootLoading[makeBackendKey(homeBackend)] ?? false}
+          errorMessage={rootErrors[makeBackendKey(homeBackend)]}
           isDisabled={false}
           treeActionHandlers={buildTreeActionHandlers(homeBackend)}
           onRefresh={() => {
@@ -906,6 +946,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
                     subtitle='On your disk'
                     fileTree={projectTreeForKey(cacheKey)}
                     isLoading={rootLoading[cacheKey] ?? false}
+                    errorMessage={rootErrors[cacheKey]}
                     isDisabled={column.status !== 'connected'}
                     emptyHint='No projects yet'
                     treeActionHandlers={buildTreeActionHandlers('webaccess', column.workspace.workspaceId)}

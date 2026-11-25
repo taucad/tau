@@ -1,7 +1,8 @@
 /**
  * Admit a qualification run's T-B22.4 recovery rows (`qualification-recovery.mts`) before its receipts are published:
  * exactly the scope's rows, each passed, all on one A and B. Reads every downloaded `desktop-route-recovery-*`
- * artifact under `out/qualification-recovery` and writes the admitted set to `out/qualification-receipts`.
+ * artifact under `out/qualification-recovery` and writes the admitted set to `out/qualification-recovery-receipts`.
+ * It stays out of `out/qualification-receipts`, which the route-row collector that runs next requires to be fresh.
  */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -24,8 +25,8 @@ const receipts = await Promise.all(
     .map(async (name) => JSON.parse(await readFile(join(root, name, 'recovery-receipt.json'), 'utf8')) as unknown),
 );
 const admitted = assertRecoveryReceipts(scope, receipts);
-await mkdir('out/qualification-receipts', { recursive: true });
-await writeFile('out/qualification-receipts/recovery-receipts.json', JSON.stringify(admitted, undefined, 2), {
+await mkdir('out/qualification-recovery-receipts', { recursive: true });
+await writeFile('out/qualification-recovery-receipts/recovery-receipts.json', JSON.stringify(admitted, undefined, 2), {
   flag: 'wx',
 });
 console.log(`Admitted ${String(admitted.length)} T-B22.4 recovery row(s) for scope ${scope}.`);

@@ -15,7 +15,7 @@ import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-detai
  * the refusal's fields stay in Tau Debug.
  *
  * The support address is the one the account-closure notices already use
- * (`account-closure-settings.tsx`).
+ * (`account-closure-settings` in `@taucad/billing-ui`).
  *
  * @param properties - Card class and the raw refusal for Tau Debug.
  * @returns The notice.

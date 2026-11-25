@@ -1,6 +1,12 @@
+import type * as DeploymentModeModule from '#cloud/deployment-mode.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { searchSettings, settingsSections } from '#components/settings/settings-registry.js';
 import { experimentalFeatureFlagNames } from '#flags/flag.constants.js';
+
+vi.mock('#cloud/deployment-mode.js', async () => ({
+  ...(await vi.importActual<typeof DeploymentModeModule>('#cloud/deployment-mode.js')),
+  initialDeploymentMode: { state: 'funded', basis: 'confirmed', environment: 'development' },
+}));
 
 afterEach(() => {
   vi.unstubAllEnvs();

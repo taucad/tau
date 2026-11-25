@@ -44,7 +44,7 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/NOTICE"]
     },
     "test:e2e:queue": {
       "executor": "nx:noop",

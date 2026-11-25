@@ -170,8 +170,10 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
 };
 
 /* Descendants are admitted because projects live *inside* a granted root (`userData/home/<project>`,
- * `<picked>/<project>`); the `sep` suffix keeps `…/home-evil` from matching `…/home`. */
-const isWithin = (candidate: string, root: string): boolean => candidate === root || candidate.startsWith(root + sep);
+ * `<picked>/<project>`); the `sep` suffix keeps `…/home-evil` from matching `…/home`. A filesystem root (`/`, `C:\`)
+ * already ends in the separator, so it is not given a second one. */
+const isWithin = (candidate: string, root: string): boolean =>
+  candidate === root || candidate.startsWith(root.endsWith(sep) ? root : root + sep);
 
 /**
  * The canonical spelling of `directory` when it lies inside an admitted root, touching only the roots it names (B30).

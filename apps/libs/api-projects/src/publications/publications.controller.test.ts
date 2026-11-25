@@ -8,7 +8,7 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ZodValidationException, ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '@taucad/api-auth';
-import { ProjectShareController } from '#publications/project-share.controller.js';
+import { ProjectShareController, SharesController } from '#publications/project-share.controller.js';
 import {
   PublicationsController,
   fileRequestFailureOutcome,
@@ -31,6 +31,7 @@ function validatePublishRequest(body: unknown): PublishRequestDto {
 describe('PublicationsController', () => {
   let controller: PublicationsController;
   let projectShareController: ProjectShareController;
+  let sharesController: SharesController;
   let service: PublicationsService;
   let fileRequestMetricAdd: ReturnType<typeof vi.fn>;
   let module: TestingModule;
@@ -38,12 +39,12 @@ describe('PublicationsController', () => {
   beforeEach(async () => {
     const mockService = {
       publishFromRevision: vi.fn(),
-      getPublicationForViewer: vi.fn(),
+      getShareForViewer: vi.fn(),
       getProjectShareEnvelope: vi.fn(),
-      listAccessGrants: vi.fn(),
-      inviteAccess: vi.fn(),
-      revokeAccess: vi.fn(),
-      updateVisibility: vi.fn(),
+      updateProjectShare: vi.fn(),
+      stopProjectShare: vi.fn(),
+      inviteProjectShareAccess: vi.fn(),
+      revokeProjectShareAccess: vi.fn(),
       recordView: vi.fn(),
       resolvePublicationFile: vi.fn(),
       openPublicationFile: vi.fn(),
@@ -52,7 +53,7 @@ describe('PublicationsController', () => {
     fileRequestMetricAdd = vi.fn();
 
     module = await Test.createTestingModule({
-      controllers: [PublicationsController, ProjectShareController],
+      controllers: [PublicationsController, ProjectShareController, SharesController],
       providers: [
         {
           provide: PublicationsService,
@@ -76,6 +77,7 @@ describe('PublicationsController', () => {
 
     controller = module.get(PublicationsController);
     projectShareController = module.get(ProjectShareController);
+    sharesController = module.get(SharesController);
     service = module.get(PublicationsService);
   });
 
@@ -91,23 +93,45 @@ describe('PublicationsController', () => {
       revisionId: 'a'.repeat(40),
       entryPath: 'main.ts',
       visibility: 'private',
-      title: 'Hello',
     };
 
     vi.mocked(service.publishFromRevision).mockResolvedValue({
       id: 'pub_test',
       urls: {
-        view: 'https://example/s/tau~pub_test',
-        share: 'https://example/s/tau~pub_test',
+        view: 'https://example/s/tau~shr_test',
+        share: 'https://example/s/tau~shr_test',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
+      share: { id: 'shr_test', url: 'https://example/s/tau~shr_test', visibility: 'private' },
+      version: { tag: 'v1' },
     });
 
     const payload = await controller.publish('owner-1', validatePublishRequest(request));
 
     expect(service.publishFromRevision).toHaveBeenCalledWith({ ownerId: 'owner-1', request });
     expect(payload.id).toBe('pub_test');
+  });
+
+  it('should strip the fields a publish no longer takes', () => {
+    const body = validatePublishRequest({
+      projectId: 'proj',
+      projectName: 'Demo',
+      tag: 'v1',
+      revisionId: 'a'.repeat(40),
+      entryPath: 'main.ts',
+      title: 'Old title',
+      sharedEmails: ['a@b.test'],
+      notifyRecipients: true,
+    });
+
+    expect(body).toEqual({
+      projectId: 'proj',
+      projectName: 'Demo',
+      tag: 'v1',
+      revisionId: 'a'.repeat(40),
+      entryPath: 'main.ts',
+    });
   });
 
   it('should refuse a publish body that carries no named version', () => {
@@ -117,12 +141,11 @@ describe('PublicationsController', () => {
         projectName: 'Demo',
         entryPath: 'main.ts',
         visibility: 'public',
-        title: 'Hello',
       }),
     ).toThrow(ZodValidationException);
   });
 
-  it('should delegate viewer lookups to PublicationsService with viewer id', async () => {
+  it('should delegate cloud link viewer lookups to PublicationsService with viewer id', async () => {
     const entryPath = 'main.ts';
     const publicationWire: PublicationWireRow = {
       id: 'pub_x',
@@ -144,12 +167,12 @@ describe('PublicationsController', () => {
       unpublishedAt: null,
     };
 
-    vi.mocked(service.getPublicationForViewer).mockResolvedValue({
+    vi.mocked(service.getShareForViewer).mockResolvedValue({
       publication: publicationWire,
       viewerRole: 'owner',
       urls: {
-        view: 'https://example/s/tau~pub_x',
-        share: 'https://example/s/tau~pub_x',
+        view: 'https://example/s/tau~shr_x',
+        share: 'https://example/s/tau~shr_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -166,10 +189,10 @@ describe('PublicationsController', () => {
       files: { [entryPath]: 'https://cdn.example/blobs/abc' },
     });
 
-    const response = await controller.getPublication('pub_x', 'owner-1');
+    const response = await sharesController.getShare('shr_x', 'owner-1');
 
-    expect(service.getPublicationForViewer).toHaveBeenCalledWith({
-      publicationId: 'pub_x',
+    expect(service.getShareForViewer).toHaveBeenCalledWith({
+      shareId: 'shr_x',
       viewerUserId: 'owner-1',
     });
     expect(response.publication.id).toBe('pub_x');
@@ -177,7 +200,7 @@ describe('PublicationsController', () => {
 
   it('should pass undefined viewerUserId when OptionalUser resolves undefined', async () => {
     const entryPath = 'main.ts';
-    vi.mocked(service.getPublicationForViewer).mockResolvedValue({
+    vi.mocked(service.getShareForViewer).mockResolvedValue({
       publication: {
         id: 'pub_x',
         projectId: 'proj',
@@ -199,8 +222,8 @@ describe('PublicationsController', () => {
       },
       viewerRole: 'public',
       urls: {
-        view: 'https://example/s/tau~pub_x',
-        share: 'https://example/s/tau~pub_x',
+        view: 'https://example/s/tau~shr_x',
+        share: 'https://example/s/tau~shr_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -217,10 +240,10 @@ describe('PublicationsController', () => {
       files: { [entryPath]: 'https://cdn.example/blobs/abc' },
     });
 
-    await controller.getPublication('pub_x', undefined);
+    await sharesController.getShare('shr_x', undefined);
 
-    expect(service.getPublicationForViewer).toHaveBeenCalledWith({
-      publicationId: 'pub_x',
+    expect(service.getShareForViewer).toHaveBeenCalledWith({
+      shareId: 'shr_x',
       viewerUserId: undefined,
     });
   });
@@ -237,93 +260,84 @@ describe('PublicationsController', () => {
     });
   });
 
-  it('should delegate publication access invite to PublicationsService', async () => {
-    vi.mocked(service.inviteAccess).mockResolvedValue({
-      id: 'pva_1',
-      publicationId: 'pub_x',
+  it('should delegate a link invite to PublicationsService and answer its email outcome', async () => {
+    vi.mocked(service.inviteProjectShareAccess).mockResolvedValue({
+      id: 'sga_1',
       recipientEmail: 'friend@example.com',
       status: 'active',
       createdAt: new Date().toISOString(),
       revokedAt: null,
+      email: { status: 'skipped', reason: 'daily_cap' },
     });
 
-    const response = await controller.inviteAccess('pub_x', 'owner-1', {
+    const response = await projectShareController.inviteAccess('proj_x', 'owner-1', {
       email: 'friend@example.com',
       notifyRecipient: true,
     });
 
-    expect(service.inviteAccess).toHaveBeenCalledWith({
-      publicationId: 'pub_x',
+    expect(service.inviteProjectShareAccess).toHaveBeenCalledWith({
+      projectId: 'proj_x',
       ownerId: 'owner-1',
       recipientEmail: 'friend@example.com',
       notifyRecipient: true,
     });
-    expect(response.recipientEmail).toBe('friend@example.com');
+    expect(response.email).toEqual({ status: 'skipped', reason: 'daily_cap' });
   });
 
-  it('should delegate access listing to PublicationsService', async () => {
-    vi.mocked(service.listAccessGrants).mockResolvedValue({
-      grants: [
-        {
-          id: 'pva_1',
-          publicationId: 'pub_x',
-          recipientEmail: 'friend@example.com',
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          revokedAt: null,
-        },
-      ],
-    });
-
-    const response = await controller.listAccess('pub_x', 'owner-1');
-
-    expect(service.listAccessGrants).toHaveBeenCalledWith({ publicationId: 'pub_x', ownerId: 'owner-1' });
-    expect(response.grants).toHaveLength(1);
-  });
-
-  it('should delegate access revocation to PublicationsService', async () => {
-    vi.mocked(service.revokeAccess).mockResolvedValue({
-      id: 'pva_1',
-      publicationId: 'pub_x',
+  it('should delegate removing an invited address to PublicationsService', async () => {
+    vi.mocked(service.revokeProjectShareAccess).mockResolvedValue({
+      id: 'sga_1',
       recipientEmail: 'friend@example.com',
       status: 'revoked',
       createdAt: new Date().toISOString(),
       revokedAt: new Date().toISOString(),
     });
 
-    const response = await controller.revokeAccess('pub_x', 'pva_1', 'owner-1');
+    const response = await projectShareController.revokeAccess('proj_x', 'sga_1', 'owner-1');
 
-    expect(service.revokeAccess).toHaveBeenCalledWith({
-      publicationId: 'pub_x',
+    expect(service.revokeProjectShareAccess).toHaveBeenCalledWith({
+      projectId: 'proj_x',
       ownerId: 'owner-1',
-      accessId: 'pva_1',
+      accessId: 'sga_1',
     });
     expect(response.status).toBe('revoked');
   });
 
-  it('should delegate visibility updates to PublicationsService', async () => {
-    vi.mocked(service.updateVisibility).mockResolvedValue({
-      id: 'pub_x',
+  it('should delegate who can open the link to PublicationsService', async () => {
+    const share: Awaited<ReturnType<PublicationsService['updateProjectShare']>> = {
+      id: 'shr_x',
+      url: 'https://example/s/tau~shr_x',
       visibility: 'public',
-    });
+      status: 'active',
+      stoppedAt: null,
+      publishedAt: new Date().toISOString(),
+      currentVersion: { publicationId: 'pub_x', tag: 'v1', revisionId: 'a'.repeat(40) },
+      access: { grants: [] },
+    };
+    vi.mocked(service.updateProjectShare).mockResolvedValue(share);
 
-    const response = await controller.updateVisibility('pub_x', 'owner-1', {
-      visibility: 'public',
-    });
+    const response = await projectShareController.updateProjectShare('proj_x', 'owner-1', { visibility: 'public' });
 
-    expect(service.updateVisibility).toHaveBeenCalledWith({
-      publicationId: 'pub_x',
+    expect(service.updateProjectShare).toHaveBeenCalledWith({
+      projectId: 'proj_x',
       ownerId: 'owner-1',
       visibility: 'public',
     });
-    expect(response).toEqual({ id: 'pub_x', visibility: 'public' });
+    expect(response).toEqual(share);
+  });
+
+  it('should delegate stop sharing to PublicationsService', async () => {
+    vi.mocked(service.stopProjectShare).mockResolvedValue(undefined);
+
+    await projectShareController.stopProjectShare('proj_x', 'owner-1');
+
+    expect(service.stopProjectShare).toHaveBeenCalledWith({ projectId: 'proj_x', ownerId: 'owner-1' });
   });
 
   it('should delegate project share envelope lookup to PublicationsService', async () => {
     vi.mocked(service.getProjectShareEnvelope).mockResolvedValue({
       project: { id: 'proj_x', name: 'Tray', description: null },
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
+      share: null,
     });
 
     const response = await projectShareController.getProjectShare('proj_x', 'owner-1');
@@ -447,7 +461,6 @@ describe('PublishRequestDto validation (ZodValidationPipe)', () => {
     revisionId: 'a'.repeat(40),
     entryPath: 'main.ts',
     visibility: 'private',
-    title: 'T',
   } as const;
 
   it('accepts a pointer into the graph', () => {
@@ -475,12 +488,10 @@ describe('PublishRequestDto validation (ZodValidationPipe)', () => {
     }).toThrow(ZodValidationException);
   });
 
-  it('refuses shared emails on a public publication', () => {
-    expect(() => {
-      pipe.transform(
-        { ...valid, visibility: 'public', sharedEmails: ['a@b.test'] },
-        { type: 'body', metatype: PublishRequestDto },
-      );
-    }).toThrow(ZodValidationException);
+  it('accepts a body without visibility, which keeps the link setting', () => {
+    const { visibility: _visibility, ...withoutVisibility } = valid;
+    expect(pipe.transform(withoutVisibility, { type: 'body', metatype: PublishRequestDto })).not.toHaveProperty(
+      'visibility',
+    );
   });
 });

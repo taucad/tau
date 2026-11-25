@@ -9,6 +9,8 @@ describe('SharedProjectPassword', () => {
   it('validates normalized UTF-8 bytes instead of character count', () => {
     const props = { isOpening: false, onPasswordChange: vi.fn(), onSubmit: vi.fn() };
     const { rerender } = render(<SharedProjectPassword {...props} password={'e\u0301'.repeat(15)} />);
+    expect(screen.getByText('Use at least 32 characters.')).toBeVisible();
+    expect(screen.queryByText(/UTF-8|bytes/u)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open project' })).toBeDisabled();
     rerender(<SharedProjectPassword {...props} password={'é'.repeat(16)} />);
     expect(screen.getByRole('button', { name: 'Open project' })).toBeEnabled();

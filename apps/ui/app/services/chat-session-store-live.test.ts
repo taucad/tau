@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import type { ProviderMessage } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentHostClient } from '#services/agent-host-client.js';

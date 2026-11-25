@@ -272,12 +272,19 @@ export const acknowledgeHealthyAppImage = (options: {
   }
 };
 
-/** Prepare large I/O before saving; commit is a bounded synchronous same-directory rename boundary. */
+/**
+ * Prepare large I/O before saving; commit is a bounded synchronous same-directory rename boundary.
+ *
+ * `allowUnacknowledged` is for a launch that never became healthy (D8, B22): an image with no health record may then
+ * still update forward to a newer signed release. Its health record is not advanced, so the retained recovery image
+ * stays the last one that was healthy. An image that has a record must always still have its retained healthy copy.
+ */
 export const prepareAppImageInstallation = async (options: {
   current: string;
   expectedCurrent: string;
   candidate: AppImageCandidate;
   checkpoint?: (phase: AppImageCheckpoint) => void;
+  allowUnacknowledged?: boolean;
 }): Promise<AppImageInstallation> => {
   const current = validateAppImageLocation(options.current);
   const { candidate } = options;
@@ -313,13 +320,15 @@ export const prepareAppImageInstallation = async (options: {
       throw new Error('Current AppImage digest changed');
     }
     const health = readHealth(current);
-    if (!health) {
+    if (!health && options.allowUnacknowledged !== true) {
       throw new Error('AppImage must acknowledge healthy startup before an update');
     }
-    const healthy = recoveryPath(current, health.healthy.sha512);
-    ownedRegularFile(healthy);
-    if (appImageDigest(healthy) !== health.healthy.sha512) {
-      throw new Error('Healthy AppImage recovery is unavailable');
+    if (health) {
+      const healthy = recoveryPath(current, health.healthy.sha512);
+      ownedRegularFile(healthy);
+      if (appImageDigest(healthy) !== health.healthy.sha512) {
+        throw new Error('Healthy AppImage recovery is unavailable');
+      }
     }
     const source = await open(candidate.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {

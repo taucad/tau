@@ -1,7 +1,10 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // `scripts/*.test.mts` are `node:test` scripts owned by the `test:scripts` target, so vitest only claims src.
+    include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     environment: 'node',
     typecheck: {
       enabled: true,
@@ -9,7 +12,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/libs/sandbox',

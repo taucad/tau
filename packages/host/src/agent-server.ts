@@ -40,7 +40,7 @@ import type { NodeMachineChannelHandle, NodeMachineHost } from '@taucad/runtime/
 import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { agentSubprotocol, createLoopbackHandOff, sessionOfSubprotocols } from '#hand-off.js';
 import { isolationHeaders, serveStaticUi } from '#static-ui.js';
-import type { StaticUiHandler } from '#static-ui.js';
+import type { StaticUiHandler, StaticUiWasmMount } from '#static-ui.js';
 
 /** Cookie the daemon-served UI presents on its same-origin upgrade. @public */
 export const hostSessionCookieName = 'tau_host_session';
@@ -156,6 +156,8 @@ export type AgentServerOptions = {
   readonly allowedOrigins?: readonly string[] | undefined;
   /** Absolute directory of a prebuilt Tau UI to serve at `/`. */
   readonly uiRoot?: string | undefined;
+  /** WebAssembly directories served beside the UI (`tau serve`'s same-origin engines); ignored without `uiRoot`. */
+  readonly uiWasmMounts?: readonly StaticUiWasmMount[] | undefined;
   /**
    * Host-local Tau MCP endpoint served at `${pathPrefix}/mcp` (X4).
    *
@@ -231,7 +233,12 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
   const sockets = new Set<WebSocket>();
   const staticUi: StaticUiHandler | undefined = options.uiRoot
-    ? serveStaticUi({ root: options.uiRoot, cookieName: hostSessionCookieName, cookieValue: options.token })
+    ? serveStaticUi({
+        root: options.uiRoot,
+        cookieName: hostSessionCookieName,
+        cookieValue: options.token,
+        wasmMounts: options.uiWasmMounts,
+      })
     : undefined;
 
   const ownOrigins = (): readonly string[] => {

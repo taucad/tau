@@ -1,0 +1,281 @@
+name: Timing budgets
+
+# The timing-budget lane (CI decomposition ruling D-DC17, operator Q3 option B, 2026-11-24). The nine
+# timing-budget specs of `ui-e2e` (`test:e2e:timing-budgets`: frame, load, latency and resource budgets, about
+# 107 browser-minutes, red under #2286, #2287 and #2288) measure runner speed as much as the product, so they
+# left the `test:e2e` nightly shards and run here, and nowhere else, on every push to `main` whose commits
+# affect a project with that target. Every project with `ui` in its graph is one: the selector is the target,
+# so no job here names a project.
+#
+# Non-gating: nothing requires this workflow. One concurrency group cancels a superseded run, so a burst of
+# pushes is checked once, at the newest commit, and a regression is attributed to the commits since the last
+# run that finished. `nx affected` diffs against that run's commit (cancelled runs do not count), so commits a
+# cancelled run never checked stay in the next one's range.
+#
+# Each spec is its own job: `metadata.shards` equals the number of files in the target, so Vitest's
+# `--shard=<index>/<count>` gives every job exactly one. When the jobs end, `report` posts the run and every
+# spec's result as one comment on each owner issue (`metadata.owners`, spec to issue), and updates that comment
+# in place on later runs rather than adding another (scripts/src/timing-budget-report.ts).
+#
+# Field trace validation (formal-verification policy): every chat log the specs capture is validated against
+# ChatLog.tla, as the nightly validated them over its `test:e2e` shards. A job holds only its own spec's logs, so
+# `chat-logs` validates them once all the jobs end, per project: alone, a spec that opens no chat would fail the
+# empty-capture rule, and a known defect another spec exercises would read as fixed.
+#
+# TODO(D-DC17): once every spec here is green, the release gate (release-gate.yml) requires this lane. It does
+# not yet: the specs are red under their owner issues, and the lane has no authority until they are green.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: timing-budgets-main
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
+  # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+  TAU_API_URL: http://localhost:4000
+  TAU_WEBSOCKET_URL: ws://localhost:4001
+  TAU_FRONTEND_URL: http://localhost:3000
+
+jobs:
+  plan:
+    name: Plan timing budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    outputs:
+      suites: ${{ steps.suites.outputs.suites }}
+      owners: ${{ steps.suites.outputs.owners }}
+      projects: ${{ steps.suites.outputs.projects }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The newest run of this workflow on `main` that finished (passed or failed; a cancelled run checked
+      # nothing). With none, or a commit no longer in `main`'s history, `nx-set-shas` picks the base instead.
+      - name: Find the commit the last finished run checked
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/timing-budgets.yml/runs?branch=main&event=push&status=completed&per_page=50" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")][0].head_sha // ""')
+          if [ -n "$base" ] && ! git merge-base --is-ancestor "$base" HEAD; then
+            base=''
+          fi
+          echo "Last checked commit: ${base:-none}"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+          affected-base: ${{ steps.base.outputs.base }}
+
+      - name: List the affected timing-budget suites
+        id: suites
+        run: |
+          # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON and drops Nx's log lines.
+          # A target splits into `metadata.shards` jobs, each passing `--shard=<index>/<count>` to the target.
+          # Every slug starts `<project>--shard-`, which `chat-logs` downloads each project's logs by.
+          set -euo pipefail
+          suites='[]'
+          owners='[]'
+          for project in $(pnpm nx show projects --affected --with-target test:e2e:timing-budgets --json | tail -1 | jq -r '.[]'); do
+            config=$(pnpm nx show project "$project" --json | tail -1)
+            target=$(jq -c '.targets["test:e2e:timing-budgets"]' <<< "$config")
+            shards=$(jq '.metadata.shards // 1' <<< "$target")
+            suites=$(jq -c --arg project "$project" --argjson shards "$shards" \
+              '. + [range(1; $shards + 1) as $i | {project: $project}
+                + if $shards > 1
+                  then {shard: "\($i)/\($shards)", label: "\($project) \($i)/\($shards)", slug: "\($project)--shard-\($i)-of-\($shards)"}
+                  else {shard: "", label: $project, slug: "\($project)--shard-1-of-1"}
+                  end]' <<< "$suites")
+            owners=$(jq -c --arg project "$project" --argjson config "$config" --argjson target "$target" \
+              '. + [$target.metadata.owners // {} | to_entries[] | {project: $project, root: $config.root, spec: .key, issue: .value}]' \
+              <<< "$owners")
+          done
+          echo "Timing-budget suites: $suites"
+          echo "Owner issues: $owners"
+          echo "suites=$suites" >> "$GITHUB_OUTPUT"
+          echo "owners=$owners" >> "$GITHUB_OUTPUT"
+          # The projects whose chat logs `chat-logs` validates once, across their jobs.
+          echo "projects=$(jq -c '[.[].project] | unique' <<< "$suites")" >> "$GITHUB_OUTPUT"
+
+  budgets:
+    name: Timing budget (${{ matrix.suite.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [plan]
+    if: needs.plan.outputs.suites != '[]'
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # Every timing-budget spec runs in the `chromium` instance only.
+      - name: Install Chromium for Vitest Browser (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
+      - name: Install Chromium for Vitest Browser
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
+
+      # The nightly's software WebGPU profile, so a budget reads the same here as it did there. A step-level
+      # bound below the job's, so the diagnostics and the report upload still run; streamed, because Nx holds a
+      # task's output until it ends and a timed-out step loses it.
+      - name: Run the timing-budget spec
+        timeout-minutes: 45
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+          PROJECT: ${{ matrix.suite.project }}
+          SHARD: ${{ matrix.suite.shard }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:timing-budgets --projects "$PROJECT" --parallel=1 --outputStyle=stream ${SHARD:+"--shard=$SHARD"}
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload the timing-budget report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: timing-budget-report-${{ matrix.suite.slug }}
+          path: out/test-results/timing-budgets/report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-browser-diagnostics-timing-budgets-${{ matrix.suite.slug }}
+          path: out/test-results/vitest-browser
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the spec's chat logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-logs-${{ matrix.suite.slug }}
+          path: out/test-results/chat-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Field trace validation, as e2e-nightly.yml's `e2e-chat-logs` does for a sharded suite: every job's chat logs
+  # together, so the empty-capture and vanished-defect rules judge the nine specs as one suite. A superseded
+  # (cancelled) run validates nothing.
+  chat-logs:
+    name: Validate chat logs (${{ matrix.project }} timing budgets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [plan, budgets]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.suites != '[]' }}
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Download the jobs' chat logs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: chat-logs-${{ matrix.project }}--shard-*
+          path: out/test-results/chat-logs
+          merge-multiple: true
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
+
+      - name: Upload chat log verdicts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-log-verdicts-timing-budgets-${{ matrix.project }}
+          path: out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # One comment per owner issue, updated in place. A superseded (cancelled) run posts nothing: the run that
+  # cancelled it reports instead.
+  report:
+    name: Update the owner issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [plan, budgets]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.suites != '[]' }}
+    permissions:
+      contents: 'read'
+      actions: 'read'
+      issues: 'write'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # No report at all (every job failed before Vitest wrote one) still reports: each spec reads "no result".
+      - name: Download the timing-budget reports
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: timing-budget-report-*
+          path: out/timing-budget-reports
+
+      - name: Post the results to the owner issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OWNERS: ${{ needs.plan.outputs.owners }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: node scripts/src/timing-budget-report.ts --reports out/timing-budget-reports --summary "$GITHUB_STEP_SUMMARY"

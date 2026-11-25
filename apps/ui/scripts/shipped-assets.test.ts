@@ -5,7 +5,8 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { withVerbatimAssetsAside } from '#scripts/with-verbatim-assets-aside.mts';
-import { verifyShippedAssets } from '#scripts/verify-shipped-assets.mts';
+import { verifyPrecacheRevisions, verifyShippedAssets } from '#scripts/verify-shipped-assets.mts';
+import { precacheEntries } from '#scripts/precache-list.ts';
 
 const workspace = resolve(import.meta.dirname, '../../..');
 const fixtureRoot = resolve(import.meta.dirname, '../node_modules/.cache');
@@ -174,5 +175,31 @@ describe('files the UI build ships', () => {
       const verify = command.indexOf('node scripts/verify-shipped-assets.mts build/client');
       expect(verify).toBeGreaterThan(command.indexOf('ui:sourcemaps'));
     }
+  });
+
+  it('should hold every revisioned service worker precache entry to its file after the last deploy step', async () => {
+    const client = await createClient();
+    await expect(verifyPrecacheRevisions(client)).resolves.toEqual({ checked: 0, problems: [] });
+    await writeFile(join(client, 'service-worker.js'), 'self.addEventListener("fetch", () => {});\n');
+    await expect(verifyPrecacheRevisions(client)).resolves.toEqual({
+      checked: 0,
+      problems: ['service-worker-precache.json: missing beside a built service worker'],
+    });
+
+    await mkdir(join(client, 'w/__shell/__shell'), { recursive: true });
+    await writeFile(join(client, 'w/__shell/__shell/index.html'), '<!DOCTYPE html><title>Tau</title>');
+    const entries = precacheEntries(['/assets/app-a1b2c3d4.js', '/w/__shell/__shell/index.html'], (path) =>
+      new TextEncoder().encode(
+        path === 'assets/app-a1b2c3d4.js' ? compiled['assets/app-a1b2c3d4.js'] : '<!DOCTYPE html><title>Tau</title>',
+      ),
+    );
+    await writeFile(join(client, '..', 'service-worker-precache.json'), JSON.stringify(entries));
+    // A debug-id rewrite of a hashed chunk is allowed: it carries no revision.
+    await appendFile(join(client, 'assets/app-a1b2c3d4.js'), sentrySnippet);
+    await expect(verifyPrecacheRevisions(client)).resolves.toEqual({ checked: 1, problems: [] });
+
+    await appendFile(join(client, 'w/__shell/__shell/index.html'), '<!-- rewritten -->');
+    const { problems } = await verifyPrecacheRevisions(client);
+    expect(problems).toEqual([expect.stringMatching(/^\/w\/__shell\/__shell\/index\.html: precached with revision /u)]);
   });
 });

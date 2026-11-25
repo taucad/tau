@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
+import { computeStoreWorkspace } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 
 import type { ComputeStoreWorkerData } from '#compute-store.worker.js';
@@ -12,10 +13,11 @@ export type ComputeStoreConnection = ReturnType<typeof connectSqliteComputeStore
 export type ComputeStoreHost = Readonly<{
   /**
    * The connection for one project, opened on first use; the worker starts with the first connection.
-   * @param workspace - The project root, which names that project's store file.
+   * @param root - The project root. Its project identity names the store file, so its worktrees, linked checkouts
+   *   and copies share one; a root without identity names its own.
    * @returns The project's connection, the same one until the worker exits.
    */
-  connect(workspace: string): ComputeStoreConnection;
+  connect(root: string): ComputeStoreConnection;
   /**
    * Dispose every connection and stop the worker.
    * @returns Once the worker has stopped.
@@ -33,8 +35,9 @@ const computeStoreWorkerModulePath = (): string =>
 
 /**
  * Run the durable compute store in a worker thread, as `tau serve` and Tau Desktop do: one SQLite file per project
- * under `directory`, shared by every Tau process that opens that project. A worker that exits or fails is replaced by
- * the next connection, and the connections it served are disposed.
+ * under `directory`, shared by every Tau process that opens that project or one of its worktrees or copies
+ * (`computeStoreWorkspace`). A worker that exits or fails is replaced by the next connection, and the connections it
+ * served are disposed.
  *
  * @internal
  * @param options - The store directory and the reporter of a worker failure.
@@ -56,7 +59,8 @@ export const createComputeStoreHost = (
     worker = undefined;
   };
   return {
-    connect(workspace) {
+    connect(root) {
+      const workspace = computeStoreWorkspace(root);
       const existing = connections.get(workspace);
       if (existing) {
         return existing;

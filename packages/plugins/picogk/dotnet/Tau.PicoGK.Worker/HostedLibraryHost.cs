@@ -181,15 +181,74 @@ internal sealed record CapturedScene(
     IReadOnlyList<Issue> Warnings,
     MaterialResources? Resources = null, WorkCounters? WorkCounters = null);
 
-internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor)
+/// <summary>
+/// One immutable viewer geometry generation. A surface or mesh keeps the native lease taken at
+/// <c>Add</c> — the geometry as it was then, whatever the author does to the source afterwards — and
+/// is copied into managed arrays only if it is still in the scene when the scene is extracted (D3).
+/// A preview the model later removes is never read back. PolyLines, which are small and whose bounds
+/// the viewer needs at once, are copied at <c>Add</c>.
+/// </summary>
+internal sealed class GeometrySnapshot
 {
+    private float[]? positions;
+    private uint[]? indices;
+    private TauGeometryCapture? capture;
+
+    internal GeometrySnapshot(string kind, float[] positions, uint[] indices, ColorFloat? lineColor)
+    {
+        Kind = kind;
+        LineColor = lineColor;
+        this.positions = positions;
+        this.indices = indices;
+        PositionCount = positions.Length;
+        IndexCount = indices.Length;
+    }
+
+    // A leased surface or mesh, read back through its placement prototype.
+    internal GeometrySnapshot(string kind, TauGeometryCapture capture)
+    {
+        Kind = kind;
+        this.capture = capture;
+        PositionCount = capture.PositionCount;
+        IndexCount = capture.IndexCount;
+    }
+
+    internal string Kind { get; }
+    internal ColorFloat? LineColor { get; }
+    internal int PositionCount { get; }
+    internal int IndexCount { get; }
+    // Read only by scene extraction, after ReadBack.
+    internal float[] Positions => positions!;
+    internal uint[] Indices => indices!;
     internal (Library Library, string Kind, ulong Generation) Identity { get; init; }
     internal int Owners { get; set; }
     internal long LayoutBytes { get; set; }
     internal Dictionary<(Matrix4x4 Source, Matrix4x4 Baked), PrototypeLayout> Layouts { get; } = [];
     internal Dictionary<(Matrix4x4 Source, Matrix4x4 Baked), ExtractedComponent> TexturedLayouts { get; } = [];
     internal BBox3? CachedBounds { get; set; }
-    internal long ByteLength => checked(((long)Positions.Length + Indices.Length) * sizeof(uint));
+    internal long ByteLength => checked(((long)PositionCount + IndexCount) * sizeof(uint));
+
+    /// <summary>Copies the leased native geometry into managed arrays once, then releases the lease.</summary>
+    /// <returns>Whether this call made the copy.</returns>
+    internal bool ReadBack()
+    {
+        if (capture is null) return false;
+        var readPositions = new float[PositionCount];
+        var readIndices = new uint[IndexCount];
+        Mesh.TauCopyPrototype(capture, readPositions, readIndices);
+        positions = readPositions;
+        indices = readIndices;
+        Release();
+        return true;
+    }
+
+    /// <summary>Releases the native lease, if any. Arrays already read back stay readable.</summary>
+    internal void Release()
+    {
+        var lease = capture;
+        capture = null;
+        lease?.Dispose();
+    }
 }
 
 internal sealed record PrototypeLayout(ExtractedComponent Component, int[] Sources, LayoutStability? Stability);
@@ -227,7 +286,9 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private readonly Task pump;
 #endif
     private readonly List<SceneObject> objects = [];
-    private readonly Dictionary<object, SceneObject> objectIndex = new(ReferenceEqualityComparer.Instance);
+    // Weak, like the identities above: the scene owns its geometry leases, so it need not keep an author's
+    // Voxels alive. A previewed intermediate the model has dropped can be finalized mid-build (D3).
+    private readonly ConditionalWeakTable<object, SceneObject> objectIndex = new();
     private readonly ConditionalWeakTable<object, ComponentIdentity> componentIdentities = new();
     private ConditionalWeakTable<object, AuthoredName> authoredNames = new();
     private readonly Dictionary<int, Material> materials = [];
@@ -749,7 +810,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             authoredNames.Add(identity, new AuthoredName(name));
         }
         objects.EnsureCapacity(objects.Count + 1);
-        objectIndex.EnsureCapacity(objectIndex.Count + 1);
         var item = new SceneObject(
             componentIdentity.Id,
             group,
@@ -765,14 +825,15 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             objectIndex.Remove(identity);
             ReleaseGeometry(existing.Geometry);
         }
+        objectIndex.AddOrUpdate(identity, item);
         lock (geometryGate) publication.Geometry.Owners++;
         objects.Add(item);
-        objectIndex.Add(identity, item);
     }
 
     private void RemoveObject(object identity)
     {
-        if (!objectIndex.Remove(identity, out var item)) return;
+        if (!objectIndex.TryGetValue(identity, out var item)) return;
+        objectIndex.Remove(identity);
         objects.Remove(item);
         ReleaseGeometry(item.Geometry);
     }
@@ -782,53 +843,67 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         if (!objectIndex.TryGetValue(identity, out var item)) return;
         var replacement = item with { Matrix = matrix };
         objects[objects.IndexOf(item)] = replacement;
-        objectIndex[identity] = replacement;
+        objectIndex.AddOrUpdate(identity, replacement);
     }
 
     private GeometryPublication SnapshotGeometry(object source)
     {
         ArgumentNullException.ThrowIfNull(source);
         var construction = Stopwatch.StartNew();
-        using var capture = source switch
+        var capture = source switch
         {
             Mesh mesh => mesh.TauAcquireGeometry(),
             Voxels voxels => voxels.TauAcquireGeometry(),
             PolyLine line => line.TauAcquireGeometry(),
             _ => throw new ArgumentException("Unsupported PicoGK viewer geometry.", nameof(source)),
         };
-        construction.Stop();
-        var kind = source is PolyLine ? "lines" : "triangles";
-        var placement = source is PolyLine ? (TauMeshPlacement?)null : Mesh.TauReadPlacement(capture);
-        var key = (capture.Library, kind, placement?.PrototypeGeneration ?? capture.Generation);
-        lock (geometryGate)
+        // The lease becomes the snapshot's; every other path releases it here.
+        GeometrySnapshot? leased = null;
+        try
         {
-            capturedSnapshots++;
-            if (source is Voxels) meshConstruction += construction.Elapsed.TotalMilliseconds;
-            if (geometry.TryGetValue(key, out var existing))
+            construction.Stop();
+            var kind = source is PolyLine ? "lines" : "triangles";
+            var placement = source is PolyLine ? (TauMeshPlacement?)null : Mesh.TauReadPlacement(capture);
+            var key = (capture.Library, kind, placement?.PrototypeGeneration ?? capture.Generation);
+            lock (geometryGate)
             {
-                existing.Owners++;
-                return new(existing, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(existing));
+                capturedSnapshots++;
+                if (source is Voxels) meshConstruction += construction.Elapsed.TotalMilliseconds;
+                if (geometry.TryGetValue(key, out var existing))
+                {
+                    existing.Owners++;
+                    return new(existing, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(existing));
+                }
+                GeometrySnapshot snapshot;
+                if (placement is null)
+                {
+                    var positions = new float[capture.PositionCount];
+                    var indices = new uint[capture.IndexCount];
+                    var extraction = Stopwatch.StartNew();
+                    capture.Copy(positions, indices);
+                    extraction.Stop();
+                    meshExtraction += extraction.Elapsed.TotalMilliseconds;
+                    snapshot = new GeometrySnapshot(kind, positions, indices, capture.Color) { Identity = key, Owners = 1 };
+                    CountReadBack(snapshot);
+                }
+                else snapshot = leased = new GeometrySnapshot(kind, capture) { Identity = key, Owners = 1 };
+                geometry.Add(key, snapshot);
+                geometryBytes += snapshot.ByteLength;
+                return new(snapshot, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(snapshot));
             }
-            var bytes = checked(((long)capture.PositionCount + capture.IndexCount) * sizeof(uint));
-            var extraction = Stopwatch.StartNew();
-            var positions = new float[capture.PositionCount];
-            var indices = new uint[capture.IndexCount];
-            if (placement is null) capture.Copy(positions, indices);
-            else Mesh.TauCopyPrototype(capture, positions, indices);
-            extraction.Stop();
-            meshExtraction += extraction.Elapsed.TotalMilliseconds;
-            var snapshot = new GeometrySnapshot(kind, positions, indices, source is PolyLine ? capture.Color : (ColorFloat?)null)
-            {
-                Identity = key,
-                Owners = 1,
-            };
-            geometry.Add(key, snapshot);
-            geometryBytes += bytes;
-            geometryCopies++;
-            inputVertices += positions.Length / 3;
-            inputIndices += indices.Length;
-            return new(snapshot, placement?.Matrix ?? Matrix4x4.Identity, placement?.IsPlaced ?? false, placement?.Bounds ?? BoundsOf(snapshot));
         }
+        finally
+        {
+            if (leased is null) capture.Dispose();
+        }
+    }
+
+    // Counted where the copy happens, so the work counters report read-backs actually made.
+    private void CountReadBack(GeometrySnapshot snapshot)
+    {
+        geometryCopies++;
+        inputVertices += snapshot.PositionCount / 3;
+        inputIndices += snapshot.IndexCount;
     }
 
     private void ReleaseGeometry(GeometrySnapshot snapshot)
@@ -841,7 +916,20 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             snapshot.LayoutBytes = 0;
             snapshot.Layouts.Clear();
             snapshot.TexturedLayouts.Clear();
+            snapshot.Release();
             geometryBytes -= snapshot.ByteLength;
+        }
+    }
+
+    private void ReadBack(GeometrySnapshot snapshot)
+    {
+        lock (geometryGate)
+        {
+            var extraction = Stopwatch.StartNew();
+            if (!snapshot.ReadBack()) return;
+            extraction.Stop();
+            meshExtraction += extraction.Elapsed.TotalMilliseconds;
+            CountReadBack(snapshot);
         }
     }
 
@@ -861,9 +949,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         var projectedMaterials = new Dictionary<global::PicoGK.Material, JsonElement>(ReferenceEqualityComparer.Instance);
         foreach (var item in objects.Where(item => !hiddenGroups.Contains(item.Group)))
         {
-            if (item.Geometry.Positions.Length == 0 || item.Geometry.Indices.Length == 0) continue;
+            if (item.Geometry.PositionCount == 0 || item.Geometry.IndexCount == 0) continue;
             if (item.Name is { } name && !names.Add(name))
                 throw InvalidName($"Duplicate PicoGK authored name '{name}' in the final scene.");
+            ReadBack(item.Geometry);
             var matrix = MatrixFor(item);
             var material = MaterialFor(item);
             var authored = material.Authored;

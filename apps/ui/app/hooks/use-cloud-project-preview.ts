@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
+import { useRuntimeSafeMode } from '#hooks/use-runtime-safe-mode.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 class PreviewResponseError extends Error {
   public readonly status: number;
@@ -90,10 +91,12 @@ export const useCloudProjectPreview = (
   retry: () => Promise<unknown>;
 } => {
   const userId = useRevisionSessionUser()?.id;
+  /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read. */
+  const isSafeMode = useRuntimeSafeMode();
   const query = useQuery({
     queryKey: ['cloud-project-preview', userId ?? null, projectId],
     queryFn: async ({ signal }) => (await fetchCloudProjectPreview(projectId, signal)) ?? null,
-    enabled: isVisible && userId !== undefined,
+    enabled: isVisible && userId !== undefined && !isSafeMode,
     // Recheck access whenever a card remounts/focus returns; no cross-account placeholder data.
     staleTime: 0,
     gcTime: 0,

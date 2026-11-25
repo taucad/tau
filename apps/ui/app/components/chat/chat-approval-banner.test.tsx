@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
+import { createContext, useCallback, useContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MyUIMessage } from '@taucad/chat';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
+import type * as AgentSignIns from '#components/terminal/agent-sign-ins.js';
 import { agentJob, createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { initialChatProjection, reduceChatProjection, selectOpenApprovals } from '#machines/chat-projection.logic.js';
@@ -19,20 +21,44 @@ let projection: ChatProjection | undefined;
 let isDebug = false;
 vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'machines' || isDebug }));
 let activeExecution: CombinedChatState['activeExecution'];
+let attachedHostId: CombinedChatState['attachedHostId'];
 let machines: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
 
+/** The chat a banner belongs to; two banners in one render stand for two chats. */
+const ChatIdContext = createContext('chat-1');
+const regenerate = vi.fn<(chatId: string) => void>();
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: <T,>(selector: (state: CombinedChatState) => T): T =>
-    selector({ messages, activeExecution, projection } as CombinedChatState),
+    selector({ messages, activeExecution, attachedHostId, projection } as CombinedChatState),
+  useChatContext: () => ({ activeChatId: useContext(ChatIdContext) }),
+  useChatActions: () => {
+    const chatId = useContext(ChatIdContext);
+    return {
+      regenerate: useCallback(() => {
+        regenerate(chatId);
+      }, [chatId]),
+    };
+  },
 }));
 vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({ respondToToolApproval }),
 }));
 vi.mock('#hooks/use-machines.js', () => ({ useMachinesFacet: () => machines }));
 const openPanel = vi.fn();
+const setWorkbenchOpen = vi.fn();
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
-  useProjectWorkspace: () => ({ openPanel }),
+  useProjectWorkspace: () => ({ openPanel, setWorkbenchOpen }),
 }));
+
+let signInBridge: unknown;
+const requestAgentSignIn = vi.fn<(agentId: string, chatId?: string) => void>();
+vi.mock('#components/terminal/agent-sign-ins.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentSignIns>();
+  /* Recorded and real: the card's request is what binds a sign-in's success to its chat. */
+  requestAgentSignIn.mockImplementation(actual.requestAgentSignIn);
+  return { ...actual, desktopAgentSignInBridge: () => signInBridge, requestAgentSignIn };
+});
+const { reportAgentSignInExit } = await import('#components/terminal/agent-sign-ins.js');
 
 const { ChatApprovalBanner, pendingAgentHostApprovals, pendingApprovals } =
   await import('#components/chat/chat-approval-banner.js');
@@ -588,7 +614,208 @@ describe('a login an external agent is waiting on', () => {
     expect(screen.getByText('codex login')).toBeInTheDocument();
     /* Named for whoever the descriptor called this agent; no discovery has run
      * in this test, so the id stands in for the product name. */
-    expect(screen.getByRole('region', { name: 'Sign in to codex' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'codex needs you to sign in' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve|deny/iu })).toBeNull();
+  });
+
+  describe("offering the agent's own sign-in in Tau's Terminal", () => {
+    /** A profile-driven agent no vendor ships: the action is generic, keyed by nothing but the id. */
+    const loginFor = (agentId: string) =>
+      approvalMessage({
+        interruptId: 'login-5',
+        kind: 'approval',
+        prompt: `${agentId} is not logged in.`,
+        options: [],
+        login: {
+          agentId,
+          methods: [{ id: 'cli-login', name: 'Sign in', terminalCommand: `${agentId} account sign-in` }],
+        },
+      });
+
+    beforeEach(() => {
+      signInBridge = undefined;
+      requestAgentSignIn.mockClear();
+      openPanel.mockClear();
+      setWorkbenchOpen.mockClear();
+      regenerate.mockClear();
+      attachedHostId = undefined;
+    });
+
+    it("names the card apart from the sign-in tab, which is named 'Sign in to' its agent", () => {
+      messages = [loginFor('acme')];
+      renderBanner();
+
+      expect(screen.queryByRole('region', { name: 'Sign in to acme' })).toBeNull();
+      expect(screen.getByRole('region', { name: 'acme needs you to sign in' })).toBeInTheDocument();
+    });
+
+    it('offers the sign-in from the host whose log refused the turn, before any agent is picked after a relaunch', () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = undefined;
+      attachedHostId = 'desktop';
+      messages = [loginFor('acme')];
+      renderBanner();
+
+      expect(screen.getByRole('button', { name: "Sign in in Tau's Terminal" })).toBeInTheDocument();
+    });
+
+    it('offers no sign-in when the refusing host is another one, whatever the composer is on', () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'desktop' } as unknown as typeof activeExecution;
+      attachedHostId = 'daemon-1';
+      messages = [loginFor('acme')];
+      renderBanner();
+
+      expect(screen.queryByRole('button', { name: "Sign in in Tau's Terminal" })).toBeNull();
+    });
+
+    const renderBanner = () =>
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+    it('opens a sign-in tab for any agent this desktop runs, filled in and not run', async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
+
+      expect(requestAgentSignIn).toHaveBeenCalledExactlyOnceWith('acme', 'chat-1');
+      expect(setWorkbenchOpen).toHaveBeenCalledExactlyOnceWith(true);
+      /* The sign-in is its own workbench tab; the person's shell is not opened for it. */
+      expect(openPanel).not.toHaveBeenCalled();
+      /* The copyable command stays for a terminal of the person's own. */
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
+
+    it('keeps only the command to copy when the agent runs on another host', () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'daemon-1' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(screen.queryByRole('button', { name: "Sign in in Tau's Terminal" })).toBeNull();
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
+
+    it('keeps only the command to copy where this page has no local Terminal', () => {
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(screen.queryByRole('button', { name: "Sign in in Tau's Terminal" })).toBeNull();
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
+
+    it('tries the turn again by itself once the sign-in it asked for exits 0, as Try again would', async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'beta', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('beta')];
+      const { rerender } = renderBanner();
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
+
+      act(() => {
+        reportAgentSignInExit('beta', 0);
+      });
+      rerender(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(regenerate).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the card and shows the exit status when the sign-in fails, without trying again', () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'gamma', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('gamma')];
+      renderBanner();
+
+      act(() => {
+        reportAgentSignInExit('gamma', 2);
+      });
+
+      expect(regenerate).not.toHaveBeenCalled();
+      expect(screen.getByRole('region', { name: 'gamma needs you to sign in' })).toBeInTheDocument();
+      expect(screen.getByText(/exit code 2/u)).toBeInTheDocument();
+    });
+
+    it("leaves another agent's card alone", () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'delta', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('delta')];
+      renderBanner();
+
+      act(() => {
+        reportAgentSignInExit('epsilon', 0);
+      });
+
+      expect(regenerate).not.toHaveBeenCalled();
+    });
+
+    it("carries on only the chat that asked for the sign-in, never another chat's card for the same agent", async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'eta', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('eta')];
+      render(
+        <TooltipProvider>
+          {/* The other chat's card comes first, so it is the first to see the success. */}
+          <ChatIdContext value='chat-other'>
+            <ChatApprovalBanner />
+          </ChatIdContext>
+          <ChatIdContext value='chat-asking'>
+            <ChatApprovalBanner />
+          </ChatIdContext>
+        </TooltipProvider>,
+      );
+      const [, asking] = screen.getAllByRole('button', { name: "Sign in in Tau's Terminal" });
+      await userEvent.click(asking!);
+
+      act(() => {
+        reportAgentSignInExit('eta', 0);
+      });
+
+      expect(regenerate).toHaveBeenCalledExactlyOnceWith('chat-asking');
+    });
+
+    it('shows the card again, without another retry, when the retried turn still needs a sign-in', async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'zeta', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('zeta')];
+      const { rerender } = renderBanner();
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
+      act(() => {
+        reportAgentSignInExit('zeta', 0);
+      });
+
+      /* The retry is a new run, and it refused for the same reason. */
+      const retried: MyUIMessage = { ...loginFor('zeta'), id: 'assistant-2' };
+      messages = [retried];
+      rerender(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(regenerate).toHaveBeenCalledOnce();
+      expect(screen.getByRole('region', { name: 'zeta needs you to sign in' })).toBeInTheDocument();
+    });
   });
 });

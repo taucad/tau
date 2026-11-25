@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import {
   createDefaultKernelOptions,
   createDebugKernelOptions,
@@ -52,6 +52,7 @@ describe('kernel-worker constants', () => {
       'smlib',
       'gltf',
       'brep',
+      'cadmpeg',
       'assimp',
       'replicad',
       'zoo',
@@ -113,6 +114,40 @@ describe('kernel-worker constants', () => {
       runtimeConfig: expectedConfig,
     });
     expect(options).not.toHaveProperty('tessellation');
+  });
+
+  /* PL7 staging verification 2026-11-21, row 5: the runtime worker's script failed to load and its owner, the CAD
+   * unit, saw only a closed channel. The factory now tells the owner first, through the kernel options. */
+  it('should tell the owner when the runtime worker’s code fails to load', async () => {
+    const workers: EventTarget[] = [];
+    const stub = (globalThis as { Worker?: unknown }).Worker;
+    (globalThis as { Worker?: unknown }).Worker = class FailingWorker extends EventTarget {
+      public postMessage = noop;
+      public terminate = noop;
+      public constructor() {
+        super();
+        workers.push(this);
+      }
+    };
+    try {
+      const onWorkerCodeLoadFailure = vi.fn();
+      const options = createDefaultKernelOptions({
+        fileSystem: fromMemoryFs(),
+        runtimeConfig: expectedConfig,
+        onWorkerCodeLoadFailure,
+      });
+      const transport = options.transport.materialize();
+      await transport.open();
+
+      workers[0]?.dispatchEvent(new Event('error'));
+
+      expect(onWorkerCodeLoadFailure).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ code: 'WORKER_LOAD_FAILED', worker: 'runtime' }),
+      );
+      await transport.close();
+    } finally {
+      (globalThis as { Worker?: unknown }).Worker = stub;
+    }
   });
 
   it('should keep worker-reachable kernel option builders free of environment value imports', async () => {

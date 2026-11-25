@@ -2,12 +2,12 @@
   "alphabet": [],
   "sources": {
     "src/harness/session.ts#pendingAttemptWaits": "ee80ddcf01eee2bba2b1c3dbc3ec1b048ee261e26f957fa1327a7fe95a1a33e6",
-    "src/harness/session.ts#prepareInvocation": "b679fdd5aaeaa48d1926ec69239fa8d8007971d3e6502cae862fe92f6d998072",
+    "src/harness/session.ts#prepareInvocation": "268a938da27802a695c24c9ec3157d70f95d809d511c1f397fb04495d9af5c30",
     "src/harness/session.ts#settledInvocation": "e8521790a4d2c28101ff015d23ba9bafcbd7ae22eb909c145f0788fa666a605d",
-    "src/host/tau-agent-host.ts#resolveInvocations": "049962067520c0f715338f81f5b4a4526b173455bb9c9b9557eddacbdbe01529"
+    "src/host/tau-agent-host.ts#resolveInvocations": "cf038b009d024662976b0c438ac57de59ff42883ea9b5a7e5f1cc6ba1006751f"
   },
   "specs": {
-    "StopSettlement.tla": "c40f5c93d72f2deccd1b10acc017103260508929f362a9491bdf69f39e5fee98"
+    "StopSettlement.tla": "a15384e116f10fc3628e8e176515487ba2c7b861af035d47240a7681f5f47552"
   },
   "tables": {}
 }

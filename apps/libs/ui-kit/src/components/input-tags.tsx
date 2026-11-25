@@ -65,6 +65,8 @@ export type TagsTriggerProps = {
   readonly placeholder?: string;
   readonly className?: string;
   readonly inputAriaLabel?: string;
+  /** Ids of the helper or error text that describes the input. */
+  readonly inputAriaDescribedBy?: string;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
   readonly disabled?: boolean;
 };
@@ -73,6 +75,7 @@ export function TagsTrigger({
   className,
   placeholder = 'Type to add tags…',
   inputAriaLabel,
+  inputAriaDescribedBy,
   disabled,
 }: TagsTriggerProps): React.JSX.Element {
   const { tags, onTagsChange, value, setValue, onOpenChange } = useTagsContext();
@@ -170,6 +173,7 @@ export function TagsTrigger({
             id={id}
             type='text'
             aria-label={inputAriaLabel ?? placeholder}
+            aria-describedby={inputAriaDescribedBy}
             value={value}
             disabled={disabled}
             placeholder={tags.length === 0 ? placeholder : ''}

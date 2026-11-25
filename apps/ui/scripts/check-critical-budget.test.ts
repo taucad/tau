@@ -2,15 +2,21 @@
 import { describe, expect, it } from 'vitest';
 import type { ModuleIdManifest, ModuleIdManifestChunk } from '@taucad/vite/module-id-manifest';
 import {
-  buildVariantOf,
   compareWithBudget,
   findEarlyKernelPreloads,
+  findPrecacheProblems,
+  findSplitRouteModules,
   findWarmManifestProblems,
   measureClass,
   preloadHrefs,
 } from '#scripts/check-critical-budget.mts';
 import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
-import type { ClassBudget, ClassMeasure } from '#scripts/check-critical-budget.mts';
+import type {
+  ClassBudget,
+  ClassMeasure,
+  RouterManifest,
+  WrittenPrecacheEntry,
+} from '#scripts/check-critical-budget.mts';
 
 const manifest = {
   'app/entry.client.tsx': { file: 'assets/entry.client-a.js', imports: ['_react-b.js'] },
@@ -201,19 +207,6 @@ describe('preloadHrefs', () => {
   });
 });
 
-describe('buildVariantOf', () => {
-  it('should tell a cloud build from a self-host build by its boundary modules', () => {
-    expect(buildVariantOf(moduleIds)).toBe('cloud');
-    expect(
-      buildVariantOf({
-        ...moduleIds,
-        chunks: [chunk('assets/root-c.js', ['apps/ui/app/cloud/commercial-features.self-host.ts'])],
-      }),
-    ).toBe('self-host');
-    expect(() => buildVariantOf({ ...moduleIds, chunks: [] })).toThrow(/cloud or a self-host/u);
-  });
-});
-
 describe('findWarmManifestProblems (PL8)', () => {
   const closures = new Map([
     ['home', ['assets/entry.client-a.js', 'assets/react-b.js', 'assets/root-c.js', 'assets/root-c.css']],
@@ -254,6 +247,159 @@ describe('findWarmManifestProblems (PL8)', () => {
     ]);
     expect(findWarmManifestProblems({ warm: undefined, closures, manifest, moduleIds })).toEqual([
       expect.stringMatching(/__shell\/warm\.json is missing/u),
+    ]);
+  });
+});
+
+describe('findSplitRouteModules (React Router 8 migration B8, RR6)', () => {
+  const manifest = (routes: RouterManifest['routes']): RouterManifest => ({
+    entry: { module: '/assets/entry.client-a.js', imports: [] },
+    routes,
+  });
+
+  it('should pass a manifest whose routes load one module each, as today', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          root: { module: '/assets/root-a.js' },
+          'routes/import.$': { module: '/assets/route-b.js', imports: ['/assets/chunk-c.js'] },
+        }),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('should name every split module, which loads outside the patched stale-build fallback', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          'routes/import.$': {
+            module: '/assets/route-b.js',
+            clientLoaderModule: '/assets/route-b-client-loader.js',
+          },
+          'routes/projects_': { module: '/assets/route-d.js', hydrateFallbackModule: '/assets/route-d-fallback.js' },
+        }),
+      ),
+    ).toStrictEqual([
+      'routes/import.$ splits clientLoaderModule /assets/route-b-client-loader.js',
+      'routes/projects_ splits hydrateFallbackModule /assets/route-d-fallback.js',
+    ]);
+  });
+});
+
+describe('findPrecacheProblems (PL7, shell invariant 8)', () => {
+  const closures = new Map([
+    ['home', ['assets/entry.client-a.js', 'assets/react-b.js', 'assets/root-c.js', 'assets/root-c.css']],
+  ]);
+  const documents = ['/__shell/home/index.html'];
+  const expected = [...documents, ...(closures.get('home') ?? []).map((file) => `/${file}`), '/fonts/Geist.woff2'];
+  const entry = (url: string): WrittenPrecacheEntry => ({
+    url,
+    revision: url.startsWith('/assets/') ? null : 'a1b2',
+  });
+  const check = (
+    entries: readonly WrittenPrecacheEntry[] | undefined,
+    generated: readonly string[] = expected,
+  ): string[] =>
+    findPrecacheProblems({ entries, expected: generated, closures, workerClassIds: ['home'], manifest, moduleIds });
+
+  it('should accept the generated list: documents and fonts revisioned, hashed files not', () => {
+    expect(check(expected.map((url) => entry(url)))).toEqual([]);
+  });
+
+  it('should refuse an entry added by hand and one the registry generates but the list lacks', () => {
+    expect(
+      check([...expected.filter((url) => url !== '/fonts/Geist.woff2'), '/robots.txt'].map((url) => entry(url))),
+    ).toEqual([
+      "precache: /fonts/Geist.woff2 is generated from the registry but not in the worker's list",
+      "precache: /robots.txt is in the worker's list but not generated from the registry",
+    ]);
+  });
+
+  it('should refuse a heavy chunk, its stylesheet, a kernel, a worker and a wasm file', () => {
+    const heavy = [
+      '/assets/three-e.js',
+      '/assets/three-e.css',
+      '/assets/kernel-g.js',
+      '/assets/kernel.worker-h.js',
+      '/assets/opencascade-i.wasm',
+    ];
+    expect(
+      check(
+        [...expected, ...heavy].map((url) => entry(url)),
+        [...expected, ...heavy],
+      ),
+    ).toEqual([
+      expect.stringMatching(/\/assets\/three-e\.js belongs with the three module/u),
+      expect.stringMatching(/\/assets\/three-e\.css belongs with the three module/u),
+      expect.stringMatching(/\/assets\/kernel-g\.js belongs with the kernels module/u),
+      'precache: /assets/kernel.worker-h.js is a wasm, worker or runtime asset',
+      'precache: /assets/opencascade-i.wasm is a wasm, worker or runtime asset',
+    ]);
+  });
+
+  it('should refuse a revision on a hashed file, none on a document, and any integrity', () => {
+    expect(
+      check([
+        { url: '/__shell/home/index.html', revision: null },
+        { url: '/assets/entry.client-a.js', revision: 'a1b2' },
+        { url: '/assets/react-b.js', revision: null, integrity: 'sha384-x' },
+        ...expected.slice(3).map((url) => entry(url)),
+      ]),
+    ).toEqual([
+      'precache: /__shell/home/index.html carries no content revision',
+      'precache: /assets/entry.client-a.js is hashed by name but carries a revision',
+      'precache: /assets/react-b.js carries url, revision, integrity; only url and revision are allowed',
+    ]);
+  });
+
+  it('should require each answered class’s interactive tier, and a written list', () => {
+    const withoutRoot = expected.filter((url) => url !== '/assets/root-c.js');
+    expect(
+      check(
+        withoutRoot.map((url) => entry(url)),
+        withoutRoot,
+      ),
+    ).toEqual(["precache: home's interactive tier holds /assets/root-c.js, which the worker does not precache"]);
+    expect(check(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
+  });
+
+  it('should require an empty written list from a kill switch build', () => {
+    const killSwitch = (entries: readonly WrittenPrecacheEntry[] | undefined): string[] =>
+      findPrecacheProblems({
+        entries,
+        expected,
+        closures,
+        workerClassIds: ['home'],
+        manifest,
+        moduleIds,
+        killSwitch: true,
+      });
+    expect(killSwitch([])).toEqual([]);
+    expect(killSwitch([entry('/__shell/home/index.html')])).toEqual([
+      'precache: /__shell/home/index.html is listed, but the kill switch worker precaches nothing',
+    ]);
+    expect(killSwitch(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
+  });
+
+  it('should require every file a shell names in markup or script text, the icon sprites aside (D4)', () => {
+    const named = new Map([
+      [
+        '/__shell/home/index.html',
+        ['/assets/entry.client-a.js', '/assets/manifest-db2a97cf.js', '/assets/sprite-BWGdUwqw.svg'],
+      ],
+    ]);
+    expect(
+      findPrecacheProblems({
+        entries: expected.map((url) => entry(url)),
+        expected,
+        closures,
+        workerClassIds: ['home'],
+        manifest,
+        moduleIds,
+        named,
+      }),
+    ).toEqual([
+      'precache: /__shell/home/index.html names /assets/manifest-db2a97cf.js, which the worker does not precache',
     ]);
   });
 });

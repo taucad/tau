@@ -31,6 +31,13 @@ const temporaryLogPath = async (): Promise<string> => {
 };
 
 afterEach(async () => {
+  /* A log handle left open would otherwise be closed by the collector at some later moment, which Node 26 makes an
+   * uncaught ERR_INVALID_STATE: collect now, so it fails here. `--expose-gc` comes from vitest.config.ts. */
+  for (let round = 0; round < 3; round++) {
+    (globalThis as { gc?: () => void }).gc?.();
+    // oxlint-disable-next-line no-await-in-loop -- each round lets the collector's cleanup callbacks run.
+    await sleep(20);
+  }
   await Promise.all(
     temporaryDirectories.splice(0).map(async (directory) => {
       await rm(directory, { recursive: true, force: true });
@@ -270,11 +277,14 @@ describe('Node event log', () => {
       await once(worker, 'message');
       await rm(`${filePath}.lock`, { force: true });
 
+      /* On Linux the defect admits this writer; it is closed either way, so no handle is left to garbage collection
+       * (an uncaught ERR_INVALID_STATE on Node 26). */
+      const attempt = createNodeEventLog({ filePath, access: 'write' });
       try {
-        await expect(createNodeEventLog({ filePath, access: 'write' })).rejects.toMatchObject({
-          code: 'WRITER_LOCKED',
-        });
+        await expect(attempt).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
       } finally {
+        const admitted = await attempt.catch(() => undefined);
+        await admitted?.close();
         await worker.terminate();
       }
       const next = await createNodeEventLog({ filePath, access: 'write' });

@@ -1,0 +1,101 @@
+{
+  "name": "@taucad/billing-ui",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app billing feature: plan, credits and usage pieces that read no app state",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/billing-ui"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/billing-ui#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "billing",
+    "credits",
+    "usage"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./components/billing/account-closure-settings": "./src/components/billing/account-closure-settings.tsx",
+    "./components/billing/auto-reload-settings": "./src/components/billing/auto-reload-settings.tsx",
+    "./components/billing/billing-primitives": "./src/components/billing/billing-primitives.tsx",
+    "./components/billing/cancel-plan-settings": "./src/components/billing/cancel-plan-settings.tsx",
+    "./components/billing/monthly-credits-meter": "./src/components/billing/monthly-credits-meter.tsx",
+    "./components/billing/plan-cards": "./src/components/billing/plan-cards.tsx",
+    "./components/billing/topup-modal": "./src/components/billing/topup-modal.tsx",
+    "./components/billing/use-billing-binding": "./src/components/billing/use-billing-binding.ts",
+    "./components/settings/billing-settings": "./src/components/settings/billing-settings.tsx",
+    "./components/tier-badge": "./src/components/tier-badge.tsx",
+    "./components/usage/activity-names": "./src/components/usage/activity-names.ts",
+    "./components/usage/charts/credit-usage-tooltip": "./src/components/usage/charts/credit-usage-tooltip.tsx",
+    "./components/usage/charts/usage-bar-chart": "./src/components/usage/charts/usage-bar-chart.tsx",
+    "./components/usage/charts/usage-line-chart": "./src/components/usage/charts/usage-line-chart.tsx",
+    "./components/usage/charts/usage-pie-chart": "./src/components/usage/charts/usage-pie-chart.tsx",
+    "./components/usage/chat-message-usage": "./src/components/usage/chat-message-usage.tsx",
+    "./components/usage/columns": "./src/components/usage/columns.tsx",
+    "./components/usage/credits": "./src/components/usage/credits.ts",
+    "./components/usage/provider-colors": "./src/components/usage/provider-colors.ts",
+    "./components/usage/reserved-table": "./src/components/usage/reserved-table.tsx",
+    "./components/usage/usage-summary-cards": "./src/components/usage/usage-summary-cards.tsx",
+    "./components/usage/usage-table": "./src/components/usage/usage-table.tsx",
+    "./components/usage/use-chat-name": "./src/components/usage/use-chat-name.ts",
+    "./components/usage/use-usage-filters": "./src/components/usage/use-usage-filters.ts",
+    "./db/billing-snapshot-database": "./src/db/billing-snapshot-database.ts",
+    "./db/billing-snapshot-store": "./src/db/billing-snapshot-store.ts",
+    "./hooks/use-auto-reload-enabled": "./src/hooks/use-auto-reload-enabled.ts",
+    "./lib/billing-lifecycle-client": "./src/lib/billing-lifecycle-client.ts",
+    "./lib/billing-payment-client": "./src/lib/billing-payment-client.ts",
+    "./lib/pending-payment-actions": "./src/lib/pending-payment-actions.ts",
+    "./lib/pending-payment-actions-purge": "./src/lib/pending-payment-actions-purge.ts",
+    "./providers/billing-legal-links-provider": "./src/providers/billing-legal-links-provider.tsx",
+    "./providers/financial-session-provider": "./src/providers/financial-session-provider.tsx",
+    "./utils/credits.utils": "./src/utils/credits.utils.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
+    "fake-indexeddb": "catalog:",
+    "oxc-transform-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@tanstack/react-table": "^8.21.3",
+    "@taucad/billing": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/settings-ui": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/ui-kit": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "date-fns": "catalog:",
+    "lucide-react": "catalog:",
+    "react-day-picker": "^10.0.1",
+    "react-router": "catalog:",
+    "recharts": "^3.8.1",
+    "sonner": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}

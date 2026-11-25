@@ -175,8 +175,9 @@ describe('useThumbnailGenerator', () => {
         ao: {
           radiusPixels: 960 * 0.01 * 2,
           intensity: 0.75,
-          distanceFalloff: 1,
-          thicknessRatio: 1 / 0.09,
+          distanceFalloff: 0.5,
+          falloffEndRatio: 22,
+          falloffRange: 0.8,
           denoiseDepthTolerance: 0.1,
           samples: 16,
           resolutionScale: 0.5,

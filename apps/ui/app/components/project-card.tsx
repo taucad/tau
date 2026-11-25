@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { Box, Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
@@ -9,6 +9,7 @@ import { Card } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 type ProjectCardProps = React.ComponentProps<typeof Card> & {
   readonly linkLabel: string;
@@ -50,10 +51,14 @@ const projectCardGraphicsOptions = {
  */
 export const projectCardPreviewByteLimit = 16 * 1024 * 1024;
 
-const CadPreviewViewer = lazy(async () => {
-  const module = await import('#components/cad-preview.js');
-  return { default: module.CadPreviewViewer };
-});
+const CadPreviewViewer = lazyCode(
+  async () => {
+    const module = await import('#components/cad-preview.js');
+    return { default: module.CadPreviewViewer };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 export function ProjectCard({
   to,

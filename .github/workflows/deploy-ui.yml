@@ -16,6 +16,12 @@
 #     `packages/plugins/picogk/browser-host.pin.json`). A deploy never builds, downloads or embeds
 #     the host: its producer publishes every blob when the host's inputs change, before the pin lands
 #     (charter picogk-interim-digest-consumer, D9), and the browser verifies each one before use.
+#   - Both builds load each cadmpeg engine (native CAD import) the first time a file of its format is
+#     opened, as one gzip blob from the same dependency host (`CADMPEG_ENGINES_BASE` below, the same
+#     `dependencies_base`; the digests come from the installed `cadmpeg-ts/digests`). No engine is in the
+#     build. The engines of a `cadmpeg-ts` version are mirrored by `dependency-files-publish.yml` with
+#     `cadmpeg-version` before the bump merges (ci.yml proves both hosts serve them), and the browser
+#     verifies and decompresses each one before use (cadmpeg engine delivery charter, D2, D8, D11).
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
@@ -103,7 +109,7 @@ jobs:
             # retain_from: the Netlify origin of the deploy now live, whose recent assets the new one keeps.
             # Not the public host: tau.new is still served by Fly, and taucad.dev goes through a router.
             # dependencies_base: the environment's digest mirror (`blobs/sha256/<hex>`), which serves the pinned
-            # PicoGK browser host to that environment's UI.
+            # PicoGK browser host and the cadmpeg engines to that environment's UI.
             staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev; retain_from=https://staging--taucad-staging.netlify.app; dependencies_base=https://dependencies.taucad.dev ;;
             production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new; retain_from=https://taucad-prod-us.netlify.app; dependencies_base=https://dependencies.tau.new ;;
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
@@ -153,11 +159,15 @@ jobs:
       # file walk does not follow links, so the link must be the doubled side.
       #
       # Through the link, the CLI also finds the React Router server function as
-      # a framework function, but traces its `build/server/server.js` import under
+      # a framework function, but traces its `build/server/index.js` import under
       # `apps/ui/apps/ui/` and ships it without the server build. So
       # `apps/ui/netlify.toml` names `.netlify/v1/functions` as the functions
       # directory too: the same file bundled from there is a user function, which
-      # outranks the framework copy and carries the server build.
+      # outranks the framework copy and carries the server build. The function
+      # (`react-router-server.mjs`, written by `@netlify/vite-plugin-react-router`
+      # 4.x) imports the server build `build/server/index.js` and, at run time,
+      # the adapter's `@netlify/vite-plugin-react-router/serverless` handler, which
+      # resolves from the workspace root's dependencies.
       - name: Point the Netlify CLI's package path at apps/ui/.netlify
         working-directory: apps/ui
         run: mkdir -p apps/ui && ln -sfn ../../.netlify apps/ui/.netlify
@@ -206,6 +216,10 @@ jobs:
           # Emergency only: a live origin that cannot be read fails the deploy, so a fix
           # must say on purpose that it ships without retention (logged as a warning).
           TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
+          # Staging only: a live deploy that cannot be reached after the retries, or will not serve an asset its
+          # index lists (Netlify has answered the runners 403), ships without retention, with a warning, instead of
+          # failing; open staging tabs reload into the new build. Production stays strict.
+          TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE: ${{ inputs.environment == 'staging' && '1' || '' }}
           # Runtime bundle files kept between deploys (the cache restored above).
           TAU_RETAIN_ASSETS_STORE: ${{ github.workspace }}/out/retained-runtime-store
           # This environment's digest mirror, which serves the pinned PicoGK browser host
@@ -213,6 +227,9 @@ jobs:
           # `ui:build` keys on it through `picogk-browser-assets-cache-key.ts`, and a base
           # without a pin fails the build.
           PICOGK_BROWSER_MIRROR_BASE: ${{ steps.site.outputs.dependencies_base }}
+          # The same host serves the cadmpeg engines by digest (`layout: 'digest'`; the loader verifies the
+          # gzip, decompresses it and verifies the module). `ui:build` keys on it.
+          CADMPEG_ENGINES_BASE: ${{ steps.site.outputs.dependencies_base }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

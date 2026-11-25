@@ -52,8 +52,8 @@ describe('standalone-project oracle', () => {
     try {
       const expected = {
         replicad: {
-          replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.1',
-          'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1',
+          replicad: 'npm:@taulabs/replicad@1.2.1-beta.1',
+          'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@1.2.1-beta.0',
         },
         opencascadejs: { libcascade: '3.1.0' },
         tscircuit: {

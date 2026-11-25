@@ -6,6 +6,7 @@ import {
   candidateRunNumber,
   judge,
   judgeCandidates,
+  judgeRuns,
   maxAge,
   scheduledWorkflows,
 } from '#nightly-watchdog.js';
@@ -64,7 +65,63 @@ describe('nightly watchdog', () => {
   it('should find every scheduled workflow in the repository, including itself', async () => {
     const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
     const files = found.map((workflow) => workflow.file);
-    expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'formal-nightly.yml', 'nightly-watchdog.yml']));
+    expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'nightly-watchdog.yml', 'release-gate.yml']));
+    // Retired nightlies (§ 5b): the release gate and the drift check replace them, so the watchdog skips them.
+    expect(files).not.toContain('formal-nightly.yml');
+    expect(files).not.toContain('shell-conformance.yml');
+  });
+
+  describe('a workflow scheduled more than once a day (release gate, C3)', () => {
+    const gate: ScheduledWorkflow = {
+      file: 'release-gate.yml',
+      name: 'Release gate',
+      crons: ['17 2 * * *', '23 10 * * *', '47 21 * * *'],
+    };
+
+    it('should watch the release gate as a daily scheduled workflow', async () => {
+      const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
+      expect(found.find((workflow) => workflow.file === 'release-gate.yml')).toMatchObject({
+        name: 'Release gate',
+        crons: gate.crons,
+      });
+      expect(maxAge(gate.crons)).toBe(36 * 60 * 60 * 1000);
+    });
+
+    it('should report a red run of the last 24 h even when a newer run passed or is running', () => {
+      const red = judgeRuns(
+        gate,
+        [
+          run('2026-11-08T10:23:00Z', 'completed', 'success'),
+          run('2026-11-08T02:17:00Z', 'completed', 'failure'),
+          run('2026-11-07T21:47:00Z', 'completed', 'success'),
+        ],
+        now,
+      );
+      expect(red.state).toBe('failed');
+      expect(red.detail).toContain('failure');
+      expect(
+        judgeRuns(
+          gate,
+          [
+            run('2026-11-08T10:23:00Z', 'in_progress', undefined),
+            run('2026-11-08T02:17:00Z', 'completed', 'cancelled'),
+          ],
+          now,
+        ).state,
+      ).toBe('failed');
+    });
+
+    it('should judge by the newest run when nothing in the last 24 h was red', () => {
+      const runs = [
+        run('2026-11-08T10:23:00Z', 'completed', 'success'),
+        run('2026-11-08T02:17:00Z', 'completed', 'skipped'),
+        run('2026-11-07T10:23:00Z', 'completed', 'failure'),
+      ];
+      expect(judgeRuns(gate, runs, now).state).toBe('ok');
+      expect(judgeRuns(gate, [run('2026-11-08T10:23:00Z', 'completed', 'failure')], now).state).toBe('failed');
+      expect(judgeRuns(gate, [], now).state).toBe('missing');
+      expect(judgeRuns(daily, [run('2026-11-08T13:23:00Z', 'in_progress', undefined)], now).state).toBe('pending');
+    });
   });
 
   describe('drift check (WD-1b)', () => {

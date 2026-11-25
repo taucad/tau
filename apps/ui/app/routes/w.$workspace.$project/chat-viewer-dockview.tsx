@@ -1,5 +1,4 @@
 import {
-  lazy,
   memo,
   Suspense,
   useCallback,
@@ -77,13 +76,14 @@ import type {
   ViewerPanelParameters,
   ViewSource,
 } from '#workbench-records/viewer-adapter.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /*
  * The viewer is deferred (progressive loading PL5, rule 10): three.js, the viewer package and the runtime client
  * load when a viewer pane first mounts, and the model appears in the pane's frame when it is ready. There is no
  * cached picture of the model (operator ruling).
  */
-const ChatViewer = lazy(async () => {
+const ChatViewer = lazyCode(async () => {
   // `tau.load.viewer.chunk`: how long the deferred viewer took to arrive, for the harness.
   const span = pageProjectOpenPerformance().begin('viewer.chunk');
   try {

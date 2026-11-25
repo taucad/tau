@@ -22,10 +22,13 @@ import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-them
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
+import { buildDeploymentSeedScript } from '#cloud/deployment-seed.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
 import { safeModeHref } from '#lib/boot-signals.js';
-import { SafeModeBar } from '#components/layout/safe-mode-bar.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { SafeModeNotice } from '#components/layout/safe-mode-bar.js';
 import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
@@ -49,7 +52,7 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { CloudPaymentReturn, CloudRootBoundary } from '#cloud/root-billing.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import {
   selectRuntimeIdleFileManagers,
@@ -67,6 +70,11 @@ export type RootLoaderData = {
   readonly env: ClientEnvironment;
   /** Queries the server already answered (the model catalog), hydrated into the root `QueryClient`. */
   readonly queries?: DehydratedState;
+  /**
+   * The display mode the server rendered the document with, from its own ask of the page's API origin (adaptive app
+   * deployment mode W11). The same for every visitor of a deployment; none on a prerendered or static shell.
+   */
+  readonly deployment?: DeploymentModeSnapshot;
 };
 
 export function RootLayout({
@@ -103,7 +111,7 @@ export function RootLayout({
             <ThemeProvider>
               <ColorProvider>
                 <AppViewerEnvironment>
-                  <LayoutDocument env={data?.env ?? {}} documentChrome={documentChrome}>
+                  <LayoutDocument env={data?.env ?? {}} deployment={data?.deployment} documentChrome={documentChrome}>
                     <HarnessDocumentLoad />
                     {/* The error document's code block copies through a tooltip, so the tooltip host stays here. */}
                     <TooltipProvider>{children}</TooltipProvider>
@@ -120,10 +128,12 @@ export function RootLayout({
 
 function LayoutDocument({
   children,
+  deployment,
   documentChrome,
   env,
 }: {
   readonly children: ReactNode;
+  readonly deployment: DeploymentModeSnapshot | undefined;
   readonly documentChrome: ReactNode | undefined;
   readonly env: Partial<ClientEnvironment>;
 }): React.JSX.Element {
@@ -134,7 +144,12 @@ function LayoutDocument({
   const color = useColor();
   const { setFaviconColor } = useFavicon();
   const usePointerCursors = useDocumentFact('pointerCursors') === true;
-  const bootWatchdogScript = buildBootWatchdogScript();
+  /* D0 (B28): the watchdog's script and strip only matter in the server's document, which runs them without the
+   * bundle. The client renders the same elements with empty inner HTML, which hydration keeps as the server wrote it
+   * (React neither compares nor rewrites a hydrated element's `dangerouslySetInnerHTML`), so their source strings stay
+   * out of the client bundle. `undefined`: the desktop build emits neither. */
+  const bootWatchdogScript = import.meta.env.SSR ? buildBootWatchdogScript() : isDesktopTarget() ? undefined : '';
+  const bootWatchdogStrip = import.meta.env.SSR ? bootWatchdogStripHtml : '';
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -189,12 +204,17 @@ function LayoutDocument({
             __html: buildClientEnvScript(env),
           }}
         />
+        {deployment === undefined ? undefined : (
+          /* W11: the server's deployment answer, read by the client entry before hydration (`#cloud/deployment-seed`). */
+          /* oxlint-disable-next-line react/no-danger -- the same `<`-escaped JSON injection as the environment's */
+          <script dangerouslySetInnerHTML={{ __html: buildDeploymentSeedScript(deployment) }} />
+        )}
         <ObservabilityHarnessHydrationProbe pathname={location.pathname} search={location.search} />
         <SvgSpriteMount />
         {bootWatchdogScript === undefined ? undefined : (
           /* The watchdog's strip, hidden until its script shows it; React never changes it after the server render. */
           /* oxlint-disable-next-line react/no-danger -- static markup the inline watchdog reveals */
-          <div dangerouslySetInnerHTML={{ __html: bootWatchdogStripHtml }} suppressHydrationWarning />
+          <div dangerouslySetInnerHTML={{ __html: bootWatchdogStrip }} suppressHydrationWarning />
         )}
         {documentChrome}
         {children}
@@ -239,10 +259,12 @@ export function ProductApp(): React.JSX.Element {
   const { pathname } = useLocation();
   const runtime = useOptionalAppRuntime();
   const isSafeMode = runtime !== undefined && selectRuntimeSafeMode(runtime);
+  /* Desktop safe mode is main's, with its reason and the recovery window behind the bar (D0). Both are read in the
+   * browser only, so the bar mounts after hydration. */
   const shell = (
     <>
       <ProductShell />
-      {isSafeMode ? <SafeModeBar reason='requested' /> : undefined}
+      <SafeModeNotice isRequested={isSafeMode} />
     </>
   );
   if (isRemoteHostHarness(data?.env.TAU_DEBUG, pathname)) {
@@ -277,12 +299,17 @@ function ProductShell(): React.JSX.Element {
       }),
     [],
   );
-  useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const { pathname } = useLocation();
   /* D24, I19 (A11): the app shell, at one tree position on every route. The host renders it beside the live
    * projects, never inside one, so a project open, a move between projects or a Home visit never remounts it. */
-  const page = <Page />;
+  /* The payment and portal return, where the shell called its hook (adaptive app deployment mode W5). */
+  const page = (
+    <>
+      <CloudPaymentReturn />
+      <Page />
+    </>
+  );
   return isRemoteHostHarness(data?.env.TAU_DEBUG, pathname) ? page : <ProjectSessionsHost>{page}</ProjectSessionsHost>;
 }
 

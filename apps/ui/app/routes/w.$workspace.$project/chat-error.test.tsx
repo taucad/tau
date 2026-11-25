@@ -15,9 +15,19 @@ import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machin
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
-import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
+
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
@@ -183,6 +193,41 @@ describe('ChatError', () => {
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
     projection.stop();
+  });
+
+  /* PL7 staging defects FP10: the agent host's own code failed to load in every worker the page would start; sending
+   * again meets the same failure, so the card offers Reload and never Try again. */
+  it.each([
+    ['its code', { code: 'WORKER_LOAD_FAILED', message: 'The agent-host worker failed to load: x' }],
+    [
+      "the browser's own wording",
+      {
+        message:
+          'Agent host worker failed to load: Failed to fetch dynamically imported module: https://tau.new/assets/agent-host.impl-BuKhIGu5.js',
+      },
+    ],
+  ])('offers Reload, never Try again, when the agent host could not load (%s)', async (_label, failure) => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, reload });
+    const projection = createActor(chatProjectionLogic).start();
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: { category: errorCategory.generic, title: 'Something went wrong', ...failure },
+        projection: projection.getSnapshot().context,
+        // Before the host log catches up, as when the host never opened.
+        attachmentStatus: 'lost',
+      } as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Part of Tau did not finish loading')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledOnce();
+    projection.stop();
+    vi.unstubAllGlobals();
   });
 
   it('retires an untyped legacy connection card only after the current host log catches up', () => {
@@ -483,6 +528,46 @@ describe('ChatError', () => {
     expect(screen.getByText('Finalizing earlier work')).toBeInTheDocument();
     expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* I1: a run whose server's billing mode is unknown made no model call; it resumes once the server answers. The host
+   * names its own remedy when it has one (an unreadable recorded mode, a host that cannot fund the run). */
+  it('should show the host instruction for a billing mode it could not confirm and offer Resume', () => {
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText('This run was started under a billing mode this build cannot read; update Tau, then resume.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Check your connection/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should fall back to the connection copy for a billing mode refusal without a host instruction', () => {
+    /* A projected failure always carries the host's sentence; a persisted card can arrive without one. */
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: '',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The app could not confirm how this Tau server bills model calls, so this attempt made none. Check your connection, then resume.',
+      ),
+    ).toBeInTheDocument();
   });
 
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads
@@ -791,8 +876,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
-    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.getByText('This chat is running on your other device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once it finishes.')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
@@ -805,9 +890,9 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     expect(
-      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+      screen.getByText('This chat continues when the changes from your other device arrive. Send again then.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
@@ -920,7 +1005,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
@@ -1002,9 +1087,11 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Update Tau on this host')).toBeInTheDocument();
+    expect(screen.getByText('Update Tau on that computer')).toBeInTheDocument();
     expect(
-      screen.getByText('This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'),
+      screen.getByText(
+        'That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.',
+      ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -1121,7 +1208,7 @@ describe('ChatError', () => {
     );
 
     render(<ChatErrorBanner />);
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
   });
 
   it('should replay the server-category fallback when Try again is clicked', async () => {

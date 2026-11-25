@@ -1,5 +1,5 @@
 import type { Breadcrumb, Event, SeverityLevel } from '@sentry/react';
-import { apiRequestIdTags } from '#lib/api-request-id.js';
+import { apiRequestIdTags } from '@taucad/ui-core/lib/api-request-id';
 import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /*

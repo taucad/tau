@@ -9,6 +9,13 @@ import type { MetricsService } from '@taucad/api-observability/metrics';
 /** One pass claims at most this many due operations per pool; the ledger caps a claim at 100. */
 export const recoveryPassLimit = 100;
 
+/**
+ * One pool's batch that has not settled after this long is reported as a failed batch, so a hung
+ * driver or database shows as `outcome: 'failed'` passes the caller backs off from, not as silence.
+ * It is under the ledger's one-minute claim lease, so the report lands before the claim can lapse.
+ */
+export const recoveryBatchDeadlineMilliseconds = 30_000;
+
 const capacityPools: readonly FundedLlmCapacityPool[] = ['primary', 'helper'];
 
 export type BillingRecoverySchedulerConfig = {
@@ -16,6 +23,45 @@ export type BillingRecoverySchedulerConfig = {
   /** `BILLING_RECOVERY_INTERVAL_MS`, validated and defaulted by the environment schema. */
   readonly intervalMilliseconds: number;
   readonly limit: number;
+  /** Defaults to {@link recoveryBatchDeadlineMilliseconds}. */
+  readonly batchDeadlineMilliseconds?: number;
+};
+
+/** A pool's batch outlived its deadline; `name` is the `failureKind` its failed batch record carries. */
+export class RecoveryBatchDeadlineError extends Error {
+  public override readonly name = 'RecoveryBatchDeadlineError';
+
+  public constructor(milliseconds: number) {
+    super(`Recovery batch did not settle within ${milliseconds} ms`);
+  }
+}
+
+/**
+ * Settles with `work`, or rejects with {@link RecoveryBatchDeadlineError} once `milliseconds` pass.
+ *
+ * The ledger takes no cancellation signal, so an expired batch is abandoned rather than stopped: its
+ * claim lease keeps other passes off the operations it holds until the lease lapses, the ledger's
+ * terminal transitions stay exactly-once, and its late outcome is dropped here instead of becoming
+ * an unhandled rejection.
+ *
+ * @param work - The batch in flight.
+ * @param milliseconds - Its deadline.
+ * @returns The batch's result.
+ */
+const withinDeadline = async <T>(work: Promise<T>, milliseconds: number): Promise<T> => {
+  // oxlint-disable-next-line promise/prefer-await-to-then -- nothing awaits an abandoned batch, so its rejection is observed here
+  work.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new RecoveryBatchDeadlineError(milliseconds));
+    }, milliseconds);
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 export type BillingRecoveryMetrics = Pick<
@@ -83,7 +129,8 @@ export class BillingRecoveryScheduler implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Resolves one bounded batch of due operations per capacity pool and records the
-   * recovery metrics. The caller decides which batch records to log.
+   * recovery metrics. The caller decides which batch records to log. Each batch has a
+   * deadline, so a pass always settles: a batch that throws or outlives it is a failed batch.
    */
   public async runOnce(): Promise<BillingRecoveryPassResult> {
     let failed = 0;
@@ -102,11 +149,14 @@ export class BillingRecoveryScheduler implements OnModuleInit, OnModuleDestroy {
       });
       try {
         // oxlint-disable-next-line no-await-in-loop -- the two disjoint capacity pools are drained in turn
-        const result = await this.ledger.recoverDueLlmOperations({
-          environment: this.config.environment,
-          limit: this.config.limit,
-          pool,
-        });
+        const result = await withinDeadline(
+          this.ledger.recoverDueLlmOperations({
+            environment: this.config.environment,
+            limit: this.config.limit,
+            pool,
+          }),
+          this.config.batchDeadlineMilliseconds ?? recoveryBatchDeadlineMilliseconds,
+        );
         const failures = result.failedOperationIds.length;
         failed += failures;
         fullBatch ||= result.claimed === this.config.limit;

@@ -84,6 +84,16 @@ describe.runIf(process.platform === 'linux')('ShellCustody protocol projection',
       // oxlint-disable-next-line no-await-in-loop -- see above.
       await settle(20);
     }
+    throw new Error('Condition did not hold within 2 s.');
+  };
+  /*
+   * Crash(supervisor) is complete only when its exit is reaped. A killed multithreaded leader shows as a zombie while
+   * its other threads still share, and so still hold, the inherited lock descriptor; the process table cannot see that.
+   */
+  const crash = async (supervisor: ReturnType<typeof spawn>): Promise<void> => {
+    const exit = once(supervisor, 'exit', { signal: AbortSignal.timeout(5000) });
+    supervisor.kill('SIGKILL');
+    await exit;
   };
 
   const fixture = async () => {
@@ -158,8 +168,7 @@ describe.runIf(process.platform === 'linux')('ShellCustody protocol projection',
       await until(async () => !(await alive(staged.pid)));
       expect(existsSync(sentinel)).toBe(false);
       // Crash(supervisor): the OS releases the lock; one recovery confirms the stop.
-      supervisor.kill('SIGKILL');
-      await until(async () => !(await alive(supervisor.pid)));
+      await crash(supervisor);
       expect(await recovery.recover({ executionIds: [prepared.executionId] })).toEqual([
         expect.objectContaining({ ...prepared, status: 'stopped' }),
       ]);
@@ -180,8 +189,7 @@ describe.runIf(process.platform === 'linux')('ShellCustody protocol projection',
       await openStartBarrier(staged);
       await until(async () => existsSync(sentinel));
       expect(existsSync(sentinel)).toBe(true);
-      supervisor.kill('SIGKILL');
-      await until(async () => !(await alive(supervisor.pid)));
+      await crash(supervisor);
       expect(await alive(staged.pid)).toBe(true);
       expect(await recovery.recover({ executionIds: [prepared.executionId] })).toEqual([
         expect.objectContaining({ ...prepared, status: 'stopped' }),
@@ -205,8 +213,7 @@ describe.runIf(process.platform === 'linux')('ShellCustody protocol projection',
       await host.register({ executionId: prepared.executionId, supervisor: supervisor.pid!, root: staged.pid! });
       await host.handoff(prepared.executionId);
       await openStartBarrier(staged);
-      supervisor.kill('SIGKILL');
-      await until(async () => !(await alive(supervisor.pid)));
+      await crash(supervisor);
       const [answer] = await blind.recover({ executionIds: [prepared.executionId] });
       expect(answer).toEqual(expect.objectContaining({ ...prepared, status: 'blocked' }));
       expect(answer?.status === 'blocked' ? answer.message : '').toContain('table unavailable');

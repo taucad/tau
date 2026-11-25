@@ -27,6 +27,7 @@ const cappedModelIds = [
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
+  'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
   'google-gemini-4-hydrogen',
@@ -61,6 +62,7 @@ const pdfInputModelIds = [
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
+  'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
   'google-gemini-4-hydrogen',
@@ -198,6 +200,7 @@ describe('modelList', () => {
         'anthropic-claude-sonnet-5.5',
         'openai-gpt-6.1-terra',
         'openai-gpt-6-astra',
+        'google-gemini-4-neon',
         'google-gemini-4-hydrogen',
       ]);
       expect(
@@ -209,7 +212,12 @@ describe('modelList', () => {
   });
 
   it('should offer PDF input on every Gemini catalog model', () => {
-    const geminiModelIds = ['google-gemini-4-argon', 'google-gemini-4-carbon', 'google-gemini-4-hydrogen'];
+    const geminiModelIds = [
+      'google-gemini-4-neon',
+      'google-gemini-4-argon',
+      'google-gemini-4-carbon',
+      'google-gemini-4-hydrogen',
+    ];
 
     for (const id of geminiModelIds) {
       const model = getCloudCatalogEntries().find((entry) => entry.id === id);
@@ -409,6 +417,7 @@ describe('ModelService', () => {
   });
 
   it.each([
+    ['gemini-4-neon', ['low', 'medium', 'high', 'xhigh']],
     ['gemini-4-argon', ['low', 'medium', 'high']],
     ['gemini-4-carbon', ['low', 'medium', 'high']],
     ['gemini-4-hydrogen', ['low', 'medium', 'high', 'xhigh']],

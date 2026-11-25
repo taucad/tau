@@ -4,8 +4,12 @@ import { chatAttachmentsPath } from '@taucad/chat-ui/db/attachment-store';
 import { composerRecordPaths, recordAttachmentsPath } from '@taucad/chat-ui/db/composer-record-store';
 import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import {
+  attachmentAbsentLabel,
+  attachmentDownloadName,
+  useAttachmentSource,
+} from '@taucad/chat-ui/hooks/use-attachment-source';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 /** The directories one project chat's attachment references resolve against. */
@@ -79,7 +83,7 @@ export function AttachmentFileChip({
           <span className='truncate text-sm font-medium'>{name ?? 'File'}</span>
         )}
         {isError && source.status === 'ready' ? (
-          <span className='text-xs text-feature'>Failed to load image. Click to download.</span>
+          <span className='text-xs text-feature'>Couldn’t load this image. Click to download it.</span>
         ) : null}
         <span className='text-xs text-muted-foreground'>
           {source.status === 'absent' ? attachmentAbsentLabel : details.join(' · ')}

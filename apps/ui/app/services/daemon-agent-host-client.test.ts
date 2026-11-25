@@ -108,7 +108,13 @@ describe('createDaemonAgentHostTransport', () => {
     channel.read = async ({ chatId }) => ({ status: 'refused', chatId, reason: 'owner-fenced' });
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
     const ended = Promise.withResolvers<void>();
-    client.subscribe({ chatId: 'chat-owner-recovery', cursor: 0 }, () => undefined, ended.resolve);
+    client.subscribe(
+      { chatId: 'chat-owner-recovery', cursor: 0 },
+      () => undefined,
+      () => {
+        ended.resolve();
+      },
+    );
     try {
       await ended.promise;
       const frames: CatchUpFrame[] = [];

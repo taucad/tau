@@ -53,9 +53,9 @@ import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
-import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
+import { useDraftImageErrorToast } from '@taucad/chat-ui/hooks/use-draft-image-error-toast';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -63,7 +63,7 @@ import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
-import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import { useModels } from '#hooks/use-models.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -79,15 +79,15 @@ import {
   flushRecord,
   storeAttachmentActorFor,
   useComposerRecord,
-} from '#hooks/composer-record.js';
+} from '@taucad/chat-ui/hooks/composer-record';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
-import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import { useComposerRecordToasts } from '@taucad/chat-ui/hooks/use-composer-record-toasts';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 type ChatInstance = ChatView;
@@ -183,6 +183,8 @@ export type ActiveChatSessionContextValue = {
   chat: ChatView;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /** This chat's composer record on this device: whether it is read yet decides whether a painted draft hint is taken. */
+  composerRecordRef: ComposerRecordRef;
 };
 
 /**
@@ -243,6 +245,11 @@ export type ChatComposerContextValue = {
   attachmentSource: string | undefined;
   /** Consume the current draft at its persistence owner. */
   consumeDraft: () => Promise<void>;
+  /**
+   * Home's own composer record, which its draft persists to; a chat's is on `session`. Read for record-wins: an Enter
+   * on Home's painted draft waits for it and is sent only when it holds that text (ruling 2026-11-17T03:43Z).
+   */
+  homeRecordRef?: ComposerRecordRef;
 };
 
 const ChatComposerContext = createContext<ChatComposerContextValue | undefined>(undefined);
@@ -423,8 +430,9 @@ export function HomeNewProjectComposerProvider({
       canSelectExecution: true,
       attachmentSource: undefined,
       consumeDraft,
+      homeRecordRef: recordRef,
     }),
-    [consumeDraft, draftActorRef, execution, kernel, model],
+    [consumeDraft, draftActorRef, execution, kernel, model, recordRef],
   );
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
 }
@@ -492,8 +500,9 @@ function ActiveChatSessionProvider({
       chat: session.chat,
       persistenceActorRef: session.persistenceActorRef,
       draftActorRef: session.draftActorRef,
+      composerRecordRef: session.composerRecordRef,
     }),
-    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef],
+    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
   );
 
   const composerValue = useMemo<ChatComposerContextValue>(

@@ -10,9 +10,13 @@
  */
 
 import { Topic } from '@taucad/events';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 const importTranscodeSources = async (): Promise<readonly string[]> => {
-  const { attachmentTranscodeSources } = await import('#runtime/attachment-transcode-sources.js');
+  const { attachmentTranscodeSources } = await loadCode(async () => {
+    const { attachmentTranscodeSources } = await import('#runtime/attachment-transcode-sources.js');
+    return { attachmentTranscodeSources };
+  });
   return attachmentTranscodeSources;
 };
 

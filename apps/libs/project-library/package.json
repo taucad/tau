@@ -1,0 +1,85 @@
+{
+  "name": "@taucad/project-library",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app project library: the library machines, service and commands, its storage calls and observations, and the project manager provider and listing hooks, composed from the files and chat features",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/project-library"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/project-library#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "projects",
+    "library"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./hooks/project-manager-provider": "./src/hooks/project-manager-provider.tsx",
+    "./hooks/use-project-manager": "./src/hooks/use-project-manager.ts",
+    "./hooks/use-projects": "./src/hooks/use-projects.ts",
+    "./machines/library-access.machine": "./src/machines/library-access.machine.ts",
+    "./machines/library-discovery.machine": "./src/machines/library-discovery.machine.ts",
+    "./machines/library-recovery.machine": "./src/machines/library-recovery.machine.ts",
+    "./machines/project-manager.machine": "./src/machines/project-manager.machine.ts",
+    "./runtime/project-library-chat-logs": "./src/runtime/project-library-chat-logs.ts",
+    "./runtime/project-library-commands": "./src/runtime/project-library-commands.ts",
+    "./runtime/project-library-observations": "./src/runtime/project-library-observations.ts",
+    "./runtime/project-library-storage": "./src/runtime/project-library-storage.ts",
+    "./runtime/project-library-workspace": "./src/runtime/project-library-workspace.ts",
+    "./runtime/project-library.fixture": "./src/runtime/project-library.fixture.ts",
+    "./runtime/project-library": "./src/runtime/project-library.ts",
+    "./types/chat-storage.types": "./src/types/chat-storage.types.ts",
+    "./types/pending-project-operation.types": "./src/types/pending-project-operation.types.ts",
+    "./types/project-library-io.types": "./src/types/project-library-io.types.ts",
+    "./types/project-library.types": "./src/types/project-library.types.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/chat-ui": "workspace:*",
+    "@taucad/events": "workspace:*",
+    "@taucad/files-ui": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/fs-bridge": "workspace:*",
+    "@taucad/fs-client": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "deepmerge": "catalog:",
+    "type-fest": "catalog:",
+    "uint8array-extras": "catalog:",
+    "xstate": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}

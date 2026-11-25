@@ -1,6 +1,7 @@
 /* oxlint-disable import/extensions -- The composed source fixture is replaced by the package export when FIX-PROJ adds the UI dependency. */
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
@@ -8,7 +9,7 @@ import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-hos
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [
     {
       name: 'agent-host-gateway-fixture',
@@ -76,6 +77,7 @@ export default defineConfig({
     ],
   },
   test: {
+    reporters: testReporters('default'),
     include: [
       'app/workers/agent-host.browser.test.ts',
       'app/workers/agent-host-resident.browser.test.ts',

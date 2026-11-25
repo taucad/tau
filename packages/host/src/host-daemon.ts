@@ -7,7 +7,7 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { WebSocket } from 'ws';
 
-import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createGatewayModelTransport } from '@taucad/agent-host';
 import type { AgentSessionModel } from '@taucad/agent-host';
 import { credentialPrincipal } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, CredentialState } from '@taucad/agent-host/launcher';
@@ -28,11 +28,13 @@ import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtim
 import { nodeGrepMatcherWorker } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { RevisionUserActor } from '@taucad/revisions';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
+import type { StaticUiWasmMount } from '#static-ui.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { runtimeTranscodePort } from '#acp/media.js';
 import type { AcpAdapterRefusal } from '#acp/index.js';
@@ -57,7 +59,7 @@ import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
 import type { KeepAwakeBlocker } from '#keep-awake.js';
 import { agentMachineFacet, openSharedMachineHost } from '#local-machines.js';
-import type { SharedMachineHost } from '#local-machines.js';
+import type { OpenSharedMachineHostOptions, SharedMachineHost } from '#local-machines.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -70,6 +72,7 @@ import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
+import { createTauIdentityReader } from '#telemetry.js';
 import type { ReportingConsent } from '#telemetry.js';
 
 /** Milliseconds. */
@@ -185,7 +188,11 @@ export type HostDaemonEvent =
  * @public
  */
 export type HostDaemonAgentOptions = {
-  /** Enables Tau-funded operation binding for a managed Cloud host. */
+  /**
+   * A managed Cloud host: a local-only (`relay: false`) daemon then still authenticates model calls with its paired
+   * device credential rather than the CLI account session. It no longer selects the billing layer: the gateway API's
+   * deployment answer does, per run (D1).
+   */
   readonly tauCloudEnabled?: boolean | undefined;
   /** Absolute workspace root; `.tau/chats/<chatId>/events.jsonl` lives under it. */
   readonly workspaceRoot: string;
@@ -244,6 +251,8 @@ export type HostDaemonAgentOptions = {
   readonly port?: number | undefined;
   /** Absolute directory of a prebuilt Tau UI served at `/` (serve mode). */
   readonly uiRoot?: string | undefined;
+  /** WebAssembly directories served beside the UI, such as the installed `cadmpeg-ts` engines. */
+  readonly uiWasmMounts?: readonly StaticUiWasmMount[] | undefined;
   /** Extra browser origins admitted on the upgrade; own origins always are. */
   readonly allowedOrigins?: readonly string[] | undefined;
   /**
@@ -335,6 +344,12 @@ export type HostDaemonOptions = {
    * `tau serve` but the cloud host container) reports no sync attempts.
    */
   readonly syncTelemetryConsent?: () => ReportingConsent;
+  /**
+   * Runtime telemetry for `--machines` (T19): told each new machine operation and each request the shared store's
+   * admission refuses. The cloud host container composes it from the same reporter as `observeRuntimeClient`; every
+   * other `tau serve` leaves it out.
+   */
+  readonly machineTelemetry?: Pick<OpenSharedMachineHostOptions, 'onOperation' | 'onAdmissionRefusal'>;
   /**
    * Agent observability (T11): observe the chats the agent's project host leads, given that project's id and its
    * own-row read. It must not throw and never affects a run. The cloud host container composes it from a module its
@@ -576,6 +591,10 @@ const localRoute = (childUrl: URL, route: 'runtime' | 'fs' | 'agent', sessionId:
  */
 export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle => {
   const maxSessions = options.maxSessions ?? 1;
+  /* The API's deployment answer, asked at each run's admission (D1): it, not this process's environment, chooses
+   * whether a run carries the billing layer, so a Cloud host the provisioner started without `TAU_CLOUD_ENABLED` is
+   * funded too. One per daemon, in memory, keyed by the gateway's origin. */
+  const deployment = createDeploymentModeResolver();
   if (!Number.isInteger(maxSessions) || maxSessions < 1) {
     throw new TypeError('startHostDaemon: maxSessions must be a positive integer');
   }
@@ -893,6 +912,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       onWarning: ({ code, message }) => {
         emit({ type: 'warning', code, message });
       },
+      ...options.machineTelemetry,
     });
     if (shared === undefined) {
       emit({
@@ -913,6 +933,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
     const localAccountSession =
       options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
+    /* The CLI session's account (`session.user.id`, as the web and desktop hosts name theirs): a funded run stamps its
+     * attempts with it, so another account's resume is refused (GI-Q6). Never an anonymous pseudonym. */
+    let sessionPrincipal =
+      localAccountSession === undefined || agent.revisionActor?.anonymous === true
+        ? undefined
+        : agent.revisionActor?.id;
+    /* Without it (an anonymous actor, or the CLI's startup lookup failed), the token's account is looked up on demand
+     * through `get-session` and kept once known. */
+    const readSessionIdentity =
+      localAccountSession === undefined || sessionPrincipal !== undefined
+        ? undefined
+        : createTauIdentityReader({
+            apiOrigin: agent.gatewayBaseUrl,
+            readToken: async () => ({ kind: 'token', token: localAccountSession }),
+          });
+    const resolveSessionPrincipal = async (): Promise<string | undefined> => {
+      if (sessionPrincipal === undefined && readSessionIdentity !== undefined) {
+        const identity = await readSessionIdentity();
+        sessionPrincipal = identity.kind === 'signed-in' ? identity.principalId : undefined;
+      }
+      return sessionPrincipal;
+    };
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -1061,26 +1103,44 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       model: agent.model,
       systemPrompt: agent.systemPrompt,
       /* The bearer is read per request from the credential state, never captured: pairing replaces it. */
-      modelTransport:
-        agent.tauCloudEnabled === true
-          ? createTauCloudGatewayModelTransport({
-              baseUrl: agent.gatewayBaseUrl,
-              model: agent.model,
-              auth: bearer,
-              principal: () => credentialPrincipal(credentialState),
-              /* No `projectId`: a `tau serve` workspace is a directory, not a
-               * cloud project, so its receipts name no project by design. */
-              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
-            })
-          : createGatewayModelTransport({
-              baseUrl: agent.gatewayBaseUrl,
-              model: agent.model,
-              // Local-only serving does not pair a device. Use its CLI account session;
-              // relayed hosts retain their live device credential, including revocation.
-              auth: localAccountSession === undefined ? bearer : () => localAccountSession,
-              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
-            }),
-      credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
+      modelTransport: createGatewayModelTransport({
+        baseUrl: agent.gatewayBaseUrl,
+        model: agent.model,
+        // Local-only serving does not pair a device. Use its CLI account session;
+        // relayed hosts retain their live device credential, including revocation.
+        auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+        /* No `projectId`: a `tau serve` workspace is a directory, not a
+         * cloud project, so its receipts name no project by design. */
+        ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
+        billing: {
+          /* The gateway's API answers whether a run is funded; an unknown answer refuses the run (I1). A funded run on
+           * the CLI session whose account cannot be learned is refused the same way, never run unstamped (GI-Q6). */
+          deployment: async () => {
+            const mode = await deployment.mode(agent.gatewayBaseUrl);
+            return mode === 'funded' &&
+              localAccountSession !== undefined &&
+              (await resolveSessionPrincipal()) === undefined
+              ? 'unknown'
+              : mode;
+          },
+          /* The account the credential port names: the paired device's, or the CLI session's, which a resumed funded
+           * attempt needs as much as a new one; unknown, the prepare is refused rather than left unstamped. */
+          principal: async () => {
+            if (localAccountSession === undefined) {
+              return credentialPrincipal(credentialState);
+            }
+            const principal = await resolveSessionPrincipal();
+            if (principal === undefined) {
+              throw new Error('The account of this Tau session could not be looked up.');
+            }
+            return principal;
+          },
+        },
+      }),
+      credential: () =>
+        localAccountSession === undefined
+          ? credentialState
+          : { mode: 'session', ...(sessionPrincipal === undefined ? {} : { principal: sessionPrincipal }) },
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
@@ -1160,6 +1220,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ...(agent.label ? { label: agent.label } : {}),
       ...(agent.port === undefined ? {} : { port: agent.port }),
       ...(agent.uiRoot ? { uiRoot: agent.uiRoot } : {}),
+      ...(agent.uiWasmMounts ? { uiWasmMounts: agent.uiWasmMounts } : {}),
       ...(agent.allowedOrigins ? { allowedOrigins: agent.allowedOrigins } : {}),
       ...(project.mcp ? { mcp: project.mcp } : {}),
       ...(externalAgents.length > 0 ? { externalAgents } : {}),

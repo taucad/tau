@@ -5,7 +5,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Error thrown by the project-name / commit-name client when the
@@ -89,7 +90,7 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
   const generateFromParts = useCallback<GenerateNameFromParts>(
     async (parts, projectId) => {
       // Mounting the project manager does not need a naming transport.
-      const sdk = await import('ai');
+      const sdk = await loadCode(async () => import('ai'));
       const chatId = generatePrefixedId(idPrefix.chat);
       const messageId = generatePrefixedId(idPrefix.message);
       const userMessage: MyUIMessage = {

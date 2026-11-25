@@ -60,7 +60,8 @@
     "zod": "^4.1.0"<% } %>
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"<% if (usesZod) { %>,
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*"<% if (usesZod) { %>,
     "zod": "catalog:"<% } %>
   },
   "taucad": {

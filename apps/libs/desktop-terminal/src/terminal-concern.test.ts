@@ -512,6 +512,128 @@ describe('terminal concern', () => {
     ]);
   });
 
+  describe('one-time setup', () => {
+    const notSetUp: ShellProbe = {
+      status: 'unavailable',
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox is not set up on this device.',
+      recovery: 'Choose Set up in the Terminal.',
+    };
+
+    it('should refuse provisioning-required and run no setup for a plain open', async () => {
+      const provision = vi.fn(async (): Promise<ShellProbe> => notSetUp);
+      const { connect } = setup({ shell: async () => notSetUp, provision });
+      const port = connect();
+      port.send({ type: 'open', size });
+      await flush();
+      expect(provision).not.toHaveBeenCalled();
+      expect(port.of('refused')).toEqual([
+        {
+          type: 'refused',
+          code: 'provisioning-required',
+          message: 'The Windows shell sandbox is not set up on this device.',
+          recovery: 'Choose Set up in the Terminal.',
+        },
+      ]);
+    });
+
+    it('should run the setup for an open that asks for it, then open the shell it provisioned', async () => {
+      const { shell, sessions } = createShell();
+      const provision = vi.fn(async (): Promise<ShellProbe> => ({ status: 'available', shell }));
+      const { connect } = setup({ shell: async () => notSetUp, provision });
+      const port = connect();
+      port.send({ type: 'open', size, setUp: true });
+      await flush();
+      expect(provision).toHaveBeenCalledOnce();
+      expect(port.of('opened')).toHaveLength(1);
+      expect(sessions).toHaveLength(1);
+    });
+
+    it('should refuse with the setup outcome when the setup did not complete', async () => {
+      const declined: ShellProbe = {
+        ...notSetUp,
+        message: 'The Windows shell sandbox was not set up.',
+      };
+      const { connect } = setup({
+        shell: async () => notSetUp,
+        provision: async () => declined,
+      });
+      const port = connect();
+      port.send({ type: 'open', size, setUp: true });
+      await flush();
+      expect(port.of('refused')).toEqual([
+        {
+          type: 'refused',
+          code: 'provisioning-required',
+          message: 'The Windows shell sandbox was not set up.',
+          recovery: 'Choose Set up in the Terminal.',
+        },
+      ]);
+    });
+
+    it('should not run the setup when the shell does not ask for it', async () => {
+      const provision = vi.fn(async (): Promise<ShellProbe> => notSetUp);
+      const { connect } = setup({ provision });
+      const port = connect();
+      port.send({ type: 'open', size, setUp: true });
+      await flush();
+      expect(provision).not.toHaveBeenCalled();
+      expect(port.of('opened')).toHaveLength(1);
+    });
+
+    it('should start nothing when the pane leaves during the setup', async () => {
+      const { shell, sessions } = createShell();
+      const answer = Promise.withResolvers<ShellProbe>();
+      const { connect } = setup({
+        shell: async () => notSetUp,
+        provision: async () => answer.promise,
+      });
+      const port = connect();
+      port.send({ type: 'open', size, setUp: true });
+      await flush();
+      port.disconnect();
+      await flush();
+      answer.resolve({ status: 'available', shell });
+      await flush();
+      expect(sessions).toHaveLength(0);
+      expect(port.of('opened')).toHaveLength(0);
+    });
+
+    it('should give the shell service its full admission bound after a long setup', async () => {
+      const { shell } = createShell();
+      let attempts = 0;
+      const registering: HostShell = {
+        ...shell,
+        openTerminal: async (request) => {
+          attempts += 1;
+          return attempts === 1
+            ? {
+                status: 'refused',
+                code: 'project-not-admitted',
+                message: 'Not yet.',
+                recovery: 'Wait.',
+              }
+            : shell.openTerminal(request);
+        },
+      };
+      const harness = setup({
+        shell: async () => notSetUp,
+        provision: async () => {
+          /* The person took longer than the whole admission bound to approve the prompt. */
+          harness.advance(60_000);
+          return { status: 'available', shell: registering };
+        },
+      });
+      const port = harness.connect();
+      port.send({ type: 'open', size, setUp: true });
+      await vi.waitFor(() => {
+        expect(port.of('opened')).toHaveLength(1);
+      });
+      expect(attempts).toBe(2);
+      expect(port.of('refused')).toEqual([]);
+    });
+  });
+
   it('should refuse when the desktop has no shell composed', async () => {
     const { connect } = setup({ shell: undefined });
     const port = connect();

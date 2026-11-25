@@ -61,7 +61,7 @@ vi.mock('@taucad/ui-kit/components/input-tags', () => ({
   TagsTrigger: () => <button type='button'>Add tags</button>,
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({
     selectedFile,
     title,

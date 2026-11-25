@@ -1,11 +1,14 @@
 name: E2E nightly
 
 # The browser-backed suites, out of pull request and `main` CI: every `type:e2e`
-# project's Vitest Browser matrices and development-server qualifications, the
-# real-device WebGPU qualification, the funded desktop live turn and the live GitHub
-# account rows (C10, A4); each secret-gated lane skips until its secrets exist. Its
-# summary ends with the W22 consumer parity table. Each
-# night they run against the head of `main`, with the GeoSpec engine installed from
+# project's Vitest Browser matrices and development-server qualifications. Its
+# summary ends with the W22 consumer parity table. The rows that need outside state
+# (`test:e2e:webgpu` on real WebGPU hardware, the funded desktop live LLM turn
+# `test:e2e:desktop:live` and the live GitHub account rows `test:e2e:live:github`,
+# C10 and A4) do not run here: they skipped every night for want of a runner or
+# secrets, and their home is the release gate (CI decomposition global review
+# 2026-11-24, ruling 12), which does not run them yet. Each night the suites run
+# against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate. A suite that passes five consecutive nightlies moves to ci.yml's
 # merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix.
@@ -44,7 +47,7 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
   # End-to-end suites that open no chat, so capture no chat log for the empty-capture rule to find.
-  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:filesystem-scenarios"]'
+  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios", "test:e2e:adaptive"]'
 
 jobs:
   # Picks the commit and lists every suite. Selectors are target names, so a new e2e
@@ -59,7 +62,6 @@ jobs:
       sha: ${{ steps.commit.outputs.sha }}
       suites: ${{ steps.suites.outputs.suites }}
       sharded: ${{ steps.suites.outputs.sharded }}
-      webgpu: ${{ steps.suites.outputs.webgpu }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,6 +82,9 @@ jobs:
           # `tail -1` keeps the JSON array and drops Nx's log lines. A target splits into
           # `metadata.shards` jobs when it declares that count; each job passes
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
+          # An aggregate that declares `metadata.jobPerDependency` runs as one job per
+          # `dependsOn` target of its project (each with its own shards), so a suite that
+          # times out cannot use up the step budget of the suites after it (viewer, #2279).
           suites='[]'
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
           # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
@@ -98,16 +103,28 @@ jobs:
                   end
                 + {group: ("\($project)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
           }
-          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:filesystem-scenarios; do
+          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:service-worker test:e2e:filesystem-scenarios; do
             for project in $(pnpm nx show projects --with-target "$target" --json | tail -1 | jq -r '.[]'); do
               if jq -e --arg suite "$project:$target" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
                 continue
               fi
-              shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
-              add_suite "$project" "$target" "$shards"
+              jobs=$(pnpm nx show project "$project" --json | tail -1 | jq -c --arg project "$project" --arg target "$target" '
+                .targets as $targets
+                | if $targets[$target].metadata.jobPerDependency == true
+                  then $targets[$target].dependsOn // []
+                    | if length == 0 then error("\($project):\($target) runs a job per dependency but depends on nothing") else . end
+                  else [$target] end
+                | map(if type == "string" and $targets[.] != null
+                    then {target: ., shards: ($targets[.].metadata.shards // 1)}
+                    else error("\($project):\($target) runs a job per dependency, but \(tojson) is not a target of \($project)") end)')
+              for job in $(jq -r '.[] | "\(.target)=\(.shards)"' <<< "$jobs"); do
+                if jq -e --arg suite "$project:${job%=*}" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
+                  continue
+                fi
+                add_suite "$project" "${job%=*}" "${job##*=}"
+              done
             done
           done
-          webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
           echo "End-to-end suites: $suites"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
           # The sharded suites whose chat logs `e2e-chat-logs` validates once, across their shards.
@@ -115,7 +132,6 @@ jobs:
             '[.[] | select(.shard != "" and (.target | IN($without[]) | not)) | {project, target, group}] | unique' <<< "$suites")
           echo "Sharded suites with chat logs: $sharded"
           echo "sharded=$sharded" >> "$GITHUB_OUTPUT"
-          echo "webgpu=$([ "$webgpu" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
 
   # One job per project and suite target: in one job they ran one after another for
   # over 105 min (run 37221169741, 2026-10-04). A target too long for one job declares
@@ -140,6 +156,16 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - &setup-nx
         name: Setup Nx Environment
@@ -147,15 +173,20 @@ jobs:
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
 
       # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
       # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
       - name: Install Pandoc for reference conversion
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
-          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          ./.tau-ci/.github/actions/apt-install/download.sh pandoc-download \
+            https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb \
+            "$RUNNER_TEMP/pandoc.deb" sha256:91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
       # Sandboxed native kernel workers, and uv for desktop-e2e's build123d wheels.
@@ -168,9 +199,11 @@ jobs:
       # browsers' SwiftShader (`TAU_E2E_WEBGPU_PROFILE: software`); viewer-parity.yml
       # runs both side by side the same way.
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.
@@ -201,7 +234,8 @@ jobs:
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
       # `SUITES_WITHOUT_CHAT` names the suites that open no chat: `test:e2e:non-isolated` runs
-      # only PicoVoxel specs, `test:e2e:deploy-skew` only the TAU-UI-6 deploy check and
+      # only PicoVoxel specs, `test:e2e:deploy-skew` only the TAU-UI-6 deploy check, `test:e2e:service-worker`
+      # only the PL7 service worker checks and
       # `test:e2e:filesystem-scenarios` only the filesystem scenario harness (Chromium, small profile).
       # A shard holds only part of its suite's logs, so `e2e-chat-logs` validates those
       # once all its shards finish: alone, a shard that opens no chat would fail the
@@ -291,41 +325,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Real-device qualification. The runner label is an infrastructure contract: this
-  # lane must never silently fall back to SwiftShader. No `tau-webgpu` runner is
-  # registered yet, so the lane waits for `TAU_WEBGPU_RUNNER_ENABLED` rather than
-  # queueing until GitHub cancels it (the benchmark lane's pattern).
-  webgpu-hardware:
-    name: WebGPU hardware qualification
-    runs-on: [self-hosted, tau-webgpu]
-    needs: [plan]
-    if: needs.plan.outputs.webgpu == 'true' && vars.TAU_WEBGPU_RUNNER_ENABLED == 'true'
-    permissions:
-      contents: 'read'
-      actions: 'read'
-    steps:
-      - *checkout
-      - *setup-nx
-
-      - name: Install managed Chromium for Vitest Browser
-        run: pnpm exec playwright install chromium
-
-      - name: Run hardware WebGPU qualification
-        env:
-          TAU_E2E_WEBGPU_PROFILE: hardware
-        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:webgpu
-
-      - *root-hygiene
-
-      - name: Upload hardware WebGPU diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vitest-browser-webgpu-hardware-diagnostics
-          path: out/test-results/vitest-browser
-          if-no-files-found: error
-          retention-days: 14
-
   # The cloud-build load tier (app state orchestration A0.11): the loading rows a self-host
   # build cannot show, on the cloud UI variant with stand-ins answering the API by
   # interception, so it needs no API, database or secret. Each row pins a known defect: it
@@ -343,10 +342,24 @@ jobs:
       actions: 'read'
     steps:
       - *checkout
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - *setup-nx
 
+      - name: Install Chromium for Vitest Browser (system dependencies)
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       - name: Run the cloud-build load tier
         timeout-minutes: 45
@@ -409,8 +422,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
 
       - name: Prepare current installed GeoSpec consumer
         run: |
@@ -419,208 +430,3 @@ jobs:
 
       - name: Run the runtime end-to-end suite
         run: pnpm nx run-many -t test --projects tag:ci:quarantined --skip-nx-cache
-
-  # D19's funded cell: one real frontier turn placed on launcher 2, against a local
-  # API with real provider keys. Skipped without the key; the deterministic half of
-  # D19 runs in the `e2e` job, which stubs the provider upstream. Only the OpenAI key
-  # is needed: the seam stays armed for the Anthropic host in this tier, so the home
-  # composer's seeding turn lands on the suite's stub, and only the live turn spends
-  # on the frontier row the credit delta measures.
-  desktop-e2e-live:
-    name: Desktop live LLM (launcher 2)
-    runs-on: ubuntu-latest
-    needs: [plan]
-    permissions:
-      contents: 'read'
-      actions: 'read'
-    env:
-      OPENAI_API_KEY: ${{ secrets.TAU_E2E_OPENAI_API_KEY }}
-      TAU_E2E_WEBGPU_PROFILE: software
-    steps:
-      - name: Skip without live provider keys
-        id: gate
-        run: |
-          if [ -z "$OPENAI_API_KEY" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "TAU_E2E_OPENAI_API_KEY not configured — skipping the live desktop lane."
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout
-        if: steps.gate.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/setup-nx
-
-      - name: Prepare API env file
-        if: steps.gate.outputs.enabled == 'true'
-        run: cp apps/api/.env.example apps/api/.env
-
-      - name: Run the live launcher-2 turn
-        if: steps.gate.outputs.enabled == 'true'
-        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:desktop:live
-
-      - name: Upload desktop diagnostics
-        if: always() && steps.gate.outputs.enabled == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: desktop-e2e-live-diagnostics
-          path: out/test-results/desktop-e2e
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # GitHub capability audit C10 and A4 (R17): *Add account* with one GitHub account
-  # connected, and GitHub sign-in refused in words for an account whose email is not
-  # the Tau account's. Both rows sign in to github.com as two test identities, against
-  # a cloud API started here with the development GitHub App and the development
-  # sign-in OAuth App. That API listens on localhost:4000 because both apps' registered
-  # callbacks are there, and the Chromium on this runner follows GitHub's redirect back
-  # to it. Skipped, with a notice naming each missing secret, until all eleven are set.
-  # Each secret reaches only the step that needs it: the identities the rows, the
-  # app credentials the API. The API's AUTH_SECRET and connection key are made per run.
-  live-github:
-    name: Live GitHub accounts (C10, A4)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [plan]
-    permissions:
-      contents: 'read'
-      actions: 'read'
-    steps:
-      - name: Skip without the live GitHub secrets
-        id: gate
-        env:
-          TAU_E2E_GITHUB_USERNAME: ${{ secrets.TAU_E2E_GITHUB_USERNAME }}
-          TAU_E2E_GITHUB_PASSWORD: ${{ secrets.TAU_E2E_GITHUB_PASSWORD }}
-          TAU_E2E_GITHUB_TOTP_SECRET: ${{ secrets.TAU_E2E_GITHUB_TOTP_SECRET }}
-          TAU_E2E_GITHUB_SECOND_USERNAME: ${{ secrets.TAU_E2E_GITHUB_SECOND_USERNAME }}
-          TAU_E2E_GITHUB_SECOND_PASSWORD: ${{ secrets.TAU_E2E_GITHUB_SECOND_PASSWORD }}
-          TAU_E2E_GITHUB_SECOND_TOTP_SECRET: ${{ secrets.TAU_E2E_GITHUB_SECOND_TOTP_SECRET }}
-          TAU_E2E_GITHUB_APP_CLIENT_ID: ${{ secrets.TAU_E2E_GITHUB_APP_CLIENT_ID }}
-          TAU_E2E_GITHUB_APP_CLIENT_SECRET: ${{ secrets.TAU_E2E_GITHUB_APP_CLIENT_SECRET }}
-          TAU_E2E_GITHUB_APP_SLUG: ${{ secrets.TAU_E2E_GITHUB_APP_SLUG }}
-          TAU_E2E_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.TAU_E2E_GITHUB_OAUTH_CLIENT_ID }}
-          TAU_E2E_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.TAU_E2E_GITHUB_OAUTH_CLIENT_SECRET }}
-        run: |
-          missing=()
-          for name in TAU_E2E_GITHUB_USERNAME TAU_E2E_GITHUB_PASSWORD TAU_E2E_GITHUB_TOTP_SECRET \
-            TAU_E2E_GITHUB_SECOND_USERNAME TAU_E2E_GITHUB_SECOND_PASSWORD TAU_E2E_GITHUB_SECOND_TOTP_SECRET \
-            TAU_E2E_GITHUB_APP_CLIENT_ID TAU_E2E_GITHUB_APP_CLIENT_SECRET TAU_E2E_GITHUB_APP_SLUG \
-            TAU_E2E_GITHUB_OAUTH_CLIENT_ID TAU_E2E_GITHUB_OAUTH_CLIENT_SECRET; do
-            if [ -z "${!name}" ]; then missing+=("$name"); fi
-          done
-          if [ "${#missing[@]}" -eq 0 ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            list=$(printf '%s, ' "${missing[@]}")
-            echo "::notice title=Live GitHub rows skipped::Add these repository secrets to run C10 and A4: ${list%, }."
-          fi
-
-      - name: Checkout
-        if: steps.gate.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/setup-nx
-
-      - name: Install Chromium for Vitest Browser
-        if: steps.gate.outputs.enabled == 'true'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Prepare API env file
-        if: steps.gate.outputs.enabled == 'true'
-        run: cp apps/api/.env.example apps/api/.env
-
-      # Named containers, not job services: the rows verify each Tau test account with
-      # `docker exec tau-postgres psql`, as every ui-e2e tier against an API does.
-      - name: Start Postgres + Redis + MinIO
-        if: steps.gate.outputs.enabled == 'true'
-        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
-
-      # With TAU_CLOUD_ENABLED=true the migration job also publishes the development
-      # tariff, which funding each row's Tau test account needs.
-      - name: Apply the protected migration job
-        if: steps.gate.outputs.enabled == 'true'
-        env:
-          TAU_CLOUD_ENABLED: 'true'
-        run: pnpm nx run-many -t db-migrate --projects tag:scope:api
-
-      # `vite build` alone, as desktop-e2e's global setup does: the API bundle needs
-      # none of `build`'s dependency chain.
-      - name: Build the API
-        if: steps.gate.outputs.enabled == 'true'
-        working-directory: apps/api
-        run: pnpm exec vite build
-
-      # A cloud API whose only trusted origin is the rows' UI (test:e2e:live:github's
-      # PORT). `.env` supplies the development billing values and Stripe placeholders;
-      # the process environment wins over it. The log stays on the runner: it is
-      # printed only when the API never answers, before any GitHub round trip.
-      - name: Start the API
-        if: steps.gate.outputs.enabled == 'true'
-        working-directory: apps/api
-        env:
-          PORT: '4000'
-          AUTH_URL: http://localhost:4000
-          TAU_API_URL: http://localhost:4000
-          TAU_FRONTEND_URL: http://localhost:3018
-          TAU_CLOUD_ENABLED: 'true'
-          GITHUB_CLIENT_ID: ${{ secrets.TAU_E2E_GITHUB_OAUTH_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.TAU_E2E_GITHUB_OAUTH_CLIENT_SECRET }}
-          GITHUB_REPOSITORY_APP_CLIENT_ID: ${{ secrets.TAU_E2E_GITHUB_APP_CLIENT_ID }}
-          GITHUB_REPOSITORY_APP_CLIENT_SECRET: ${{ secrets.TAU_E2E_GITHUB_APP_CLIENT_SECRET }}
-          GITHUB_REPOSITORY_APP_SLUG: ${{ secrets.TAU_E2E_GITHUB_APP_SLUG }}
-          GITHUB_REPOSITORY_APP_CALLBACK_URL: http://localhost:4000/v1/github/callback
-        run: |
-          AUTH_SECRET=$(openssl rand -base64 32)
-          GITHUB_REPOSITORY_CONNECTION_KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')
-          echo "::add-mask::$AUTH_SECRET"
-          echo "::add-mask::$GITHUB_REPOSITORY_CONNECTION_KEY"
-          export AUTH_SECRET GITHUB_REPOSITORY_CONNECTION_KEY
-          nohup node --env-file-if-exists=.env --import @oxc-node/core/register dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
-          for _ in $(seq 1 60); do
-            if curl -fs -o /dev/null http://localhost:4000/health/live; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::The API did not answer /health/live within 120 s."
-          tail -n 40 "$RUNNER_TEMP/api.log"
-          exit 1
-
-      # TAU_E2E_LIVE_GITHUB=true is this job's statement that the API above carries
-      # the GitHub App and GitHub sign-in for the rows' origin.
-      - name: Run the live GitHub rows
-        if: steps.gate.outputs.enabled == 'true'
-        timeout-minutes: 45
-        env:
-          TAU_E2E_LIVE_GITHUB: 'true'
-          TAU_E2E_WEBGPU_PROFILE: software
-          TAU_E2E_GITHUB_USERNAME: ${{ secrets.TAU_E2E_GITHUB_USERNAME }}
-          TAU_E2E_GITHUB_PASSWORD: ${{ secrets.TAU_E2E_GITHUB_PASSWORD }}
-          TAU_E2E_GITHUB_TOTP_SECRET: ${{ secrets.TAU_E2E_GITHUB_TOTP_SECRET }}
-          TAU_E2E_GITHUB_SECOND_USERNAME: ${{ secrets.TAU_E2E_GITHUB_SECOND_USERNAME }}
-          TAU_E2E_GITHUB_SECOND_PASSWORD: ${{ secrets.TAU_E2E_GITHUB_SECOND_PASSWORD }}
-          TAU_E2E_GITHUB_SECOND_TOTP_SECRET: ${{ secrets.TAU_E2E_GITHUB_SECOND_TOTP_SECRET }}
-        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:live:github --parallel=1 --outputStyle=stream
-
-      # The rows stop the context's trace before they type a credential (`uiAuthorizeGithub`).
-      - name: Upload Vitest Browser diagnostics
-        if: always() && steps.gate.outputs.enabled == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vitest-browser-diagnostics-live-github
-          path: out/test-results/vitest-browser
-          if-no-files-found: ignore
-          retention-days: 7

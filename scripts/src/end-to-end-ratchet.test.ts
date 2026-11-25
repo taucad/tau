@@ -52,6 +52,9 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
   const steps = lane?.steps ?? [];
   const nightlySteps = nightly.jobs['e2e']?.steps ?? [];
   const step = (list: readonly Step[], name: string): Step | undefined => list.find((entry) => entry.name === name);
+  // The nightly runs the retry wrapper from its trusted `.tau-ci` checkout; the merge queue from its own.
+  const queueRun = (name: string): string | undefined =>
+    step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/');
   /** The first batch, green on nightlies 43698158501 and 43752242587. A suite never moves back to the nightly. */
   const firstBatch = [
     'agent-host:test:e2e',
@@ -67,19 +70,47 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     'ui-e2e:test:e2e:filesystem-scenarios',
     'ui-e2e:test:e2e:non-isolated',
   ];
+  /**
+   * Suites admitted after the first batch, each on five consecutive green nightlies. The adaptive web tier ran as its
+   * own nightly job, not a matrix row, so its admission deleted that job (global review 2026-11-24, ruling 11).
+   */
+  const laterAdmissions = ['ui:test:e2e:attachment-image-engines', 'ui-e2e:test:e2e:adaptive'];
 
-  it('should plan the lane from test:e2e:queue, in the merge queue only', () => {
-    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'queue' });
+  it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
+    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
     expect(planScript).toContain('e2e_queue=$(flag e2e-queue)');
     expect(planScript).toContain('echo "e2e-queue-suites=$e2e_queue_suites"');
     expect(ci.jobs['plan']?.outputs?.['e2e-queue-suites']).toBe(expression('steps.plan.outputs.e2e-queue-suites'));
-    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.needs).toEqual(['plan', 'queue-builds']);
     expect(lane?.if).toBe(
       expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true'"),
     );
     expect(lane?.strategy?.matrix?.['suite']).toBe(expression('fromJSON(needs.plan.outputs.e2e-queue-suites)'));
     // The rows carry the nightly's job names, so a suite keeps its name when it moves.
     expect(lane?.name).toBe(nightly.jobs['e2e']?.name);
+  });
+
+  it('should build each UI bundle the rows restore once per merge-queue run (global review 2026-11-24, ruling 6)', () => {
+    const builds = ci.jobs['queue-builds'];
+    // No `needs`: it starts with the run, and only the queue writes what it builds.
+    expect(builds?.needs).toBeUndefined();
+    expect(builds?.if).toBe(expression("github.event_name == 'merge_group'"));
+    expect(builds?.strategy?.matrix?.['target']).toEqual(['queue-build', 'queue-build:serve']);
+    expect(builds?.steps?.at(-1)?.run).toBe('pnpm nx run-many -t "$TARGET" --parallel=1');
+    // The rows wait for it but never for its result: a row whose bundle it did not write builds it, as before.
+    expect(lane?.if).not.toContain('queue-builds');
+    // Each target names the one bundle the ui-e2e queue suites build, and nothing else.
+    const uiEndToEndProject = JSON.parse(read('apps/ui-e2e/project.json')) as {
+      readonly targets: Record<string, { readonly executor?: string; readonly dependsOn?: readonly unknown[] }>;
+    };
+    expect(uiEndToEndProject.targets['queue-build']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build' }],
+    });
+    expect(uiEndToEndProject.targets['queue-build:serve']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build:serve' }],
+    });
   });
 
   it('should require every row in the required check when the plan selected the lane', () => {
@@ -100,7 +131,7 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
       'Prepare API env file',
       'Validate captured chat logs',
     ]) {
-      expect(step(steps, name)?.run, name).toBe(step(nightlySteps, name)?.run);
+      expect(step(steps, name)?.run, name).toBe(queueRun(name));
     }
     expect(step(steps, 'Setup Linux sandbox prerequisites')?.uses).toBe('./.github/actions/setup-linux-sandbox');
     expect(step(steps, 'Setup formal toolchains')?.with).toEqual({ tools: 'tlc' });
@@ -144,7 +175,15 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
         ratcheted.push(`${project.name}:${String(dependency)}`);
       }
     }
-    expect(ratcheted).toEqual(expect.arrayContaining(firstBatch));
+    expect(ratcheted).toEqual(expect.arrayContaining([...firstBatch, ...laterAdmissions]));
+  });
+
+  it('should run the adaptive web tier only in the merge queue, as a suite that opens no chat (ruling 11)', () => {
+    expect(Object.keys(nightly.jobs)).not.toContain('adaptive-web');
+    const runs = Object.values(nightly.jobs).flatMap((job) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    expect(runs.filter((run) => run.includes('test:e2e:adaptive'))).toEqual([]);
+    // It captures no chat log, so the row skips the chat log validation the empty-capture rule would fail.
+    expect(JSON.parse(lane?.env?.['SUITES_WITHOUT_CHAT'] ?? '[]')).toContain('test:e2e:adaptive');
   });
 
   it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {
@@ -160,35 +199,20 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(oracles.map(({ job }) => job)).toContain('Browser end-to-end (agent-plugin test:e2e)');
   });
 
-  it('should leave every ratcheted suite out of the nightly matrix', () => {
+  const target = (config: Record<string, unknown> = {}): Record<string, unknown> => config;
+
+  /** Runs the nightly plan's suite listing against a stub Nx whose graph holds `nodes`. */
+  const planNightly = (
+    nodes: Record<string, unknown>,
+  ): {
+    readonly status: ReturnType<typeof spawnSync>['status'];
+    readonly stderr: string;
+    readonly labels: readonly string[];
+  } => {
     const script = nightly.jobs['plan']?.steps?.find((candidate) => candidate.id === 'suites')?.run ?? '';
     const directory = mkdtempSync(join(tmpdir(), 'tau-e2e-nightly-plan-'));
     try {
-      const target = (config: Record<string, unknown> = {}): Record<string, unknown> => config;
-      const graph = {
-        graph: {
-          nodes: {
-            'ui-e2e': {
-              name: 'ui-e2e',
-              data: {
-                targets: {
-                  'test:e2e': target({ metadata: { shards: 2 } }),
-                  'test:e2e:development': target(),
-                  'test:e2e:daemon-host': target(),
-                  'test:e2e:browser-host': target(),
-                  'test:e2e:queue': target({ dependsOn: ['test:e2e:development', 'test:e2e:daemon-host'] }),
-                },
-              },
-            },
-            'agent-host': {
-              name: 'agent-host',
-              data: { targets: { 'test:e2e': target(), 'test:e2e:queue': target({ dependsOn: ['test:e2e'] }) } },
-            },
-            viewer: { name: 'viewer', data: { targets: { 'test:e2e': target() } } },
-          },
-        },
-      };
-      writeFileSync(join(directory, 'graph-fixture.json'), JSON.stringify(graph));
+      writeFileSync(join(directory, 'graph-fixture.json'), JSON.stringify({ graph: { nodes } }));
       writeFileSync(
         join(directory, 'pnpm'),
         [
@@ -217,16 +241,107 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
           ['SUITES_WITHOUT_CHAT', nightly.env?.['SUITES_WITHOUT_CHAT'] ?? '[]'],
         ]),
       });
-      expect(result.status, result.stderr).toBe(0);
       const suites = /^suites=(.*)$/mu.exec(readFileSync(output, 'utf8'))?.[1] ?? '[]';
-      expect((JSON.parse(suites) as ReadonlyArray<{ readonly label: string }>).map(({ label }) => label)).toEqual([
-        'ui-e2e test:e2e 1/2',
-        'ui-e2e test:e2e 2/2',
-        'viewer test:e2e',
-        'ui-e2e test:e2e:browser-host',
-      ]);
+      return {
+        status: result.status,
+        stderr: result.stderr,
+        labels: (JSON.parse(suites) as ReadonlyArray<{ readonly label: string }>).map(({ label }) => label),
+      };
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('should leave every ratcheted suite out of the nightly matrix', () => {
+    const { status, stderr, labels } = planNightly({
+      'ui-e2e': {
+        name: 'ui-e2e',
+        data: {
+          targets: {
+            'test:e2e': target({ metadata: { shards: 2 } }),
+            'test:e2e:development': target(),
+            'test:e2e:daemon-host': target(),
+            'test:e2e:browser-host': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:development', 'test:e2e:daemon-host'] }),
+          },
+        },
+      },
+      'agent-host': {
+        name: 'agent-host',
+        data: { targets: { 'test:e2e': target(), 'test:e2e:queue': target({ dependsOn: ['test:e2e'] }) } },
+      },
+      viewer: {
+        name: 'viewer',
+        data: {
+          targets: {
+            'test:e2e': target({
+              dependsOn: ['test:e2e:resize', 'test:e2e:antialias', 'test:e2e:batches'],
+              metadata: { jobPerDependency: true },
+            }),
+            'test:e2e:resize': target(),
+            'test:e2e:antialias': target({ metadata: { shards: 2 } }),
+            'test:e2e:batches': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:batches'] }),
+          },
+        },
+      },
+      ui: { name: 'ui', data: { targets: { 'test:e2e': target({ dependsOn: ['test:e2e:chat-viewer'] }) } } },
+    });
+    expect(status, stderr).toBe(0);
+    expect(labels).toEqual([
+      'ui-e2e test:e2e 1/2',
+      'ui-e2e test:e2e 2/2',
+      // A jobPerDependency aggregate: one job per dependsOn target with its own shards, less the ratcheted ones (#2279).
+      'viewer test:e2e:resize',
+      'viewer test:e2e:antialias 1/2',
+      'viewer test:e2e:antialias 2/2',
+      // Without it, an aggregate stays one job.
+      'ui test:e2e',
+      'ui-e2e test:e2e:browser-host',
+    ]);
+  });
+
+  it('should fail the plan when a job-per-dependency aggregate names no target of its project', () => {
+    for (const dependsOn of [[], ['test:e2e:missing'], [{ projects: ['ui'], target: 'build' }]]) {
+      const { status, stderr } = planNightly({
+        viewer: {
+          name: 'viewer',
+          data: { targets: { 'test:e2e': target({ dependsOn, metadata: { jobPerDependency: true } }) } },
+        },
+      });
+      expect(status, JSON.stringify(dependsOn)).not.toBe(0);
+      expect(stderr).toContain('viewer:test:e2e runs a job per dependency');
+    }
+  });
+
+  it('should leave the timing-budget specs to their own lane (D-DC17), never the nightly matrix', () => {
+    const script = nightly.jobs['plan']?.steps?.find((candidate) => candidate.id === 'suites')?.run ?? '';
+    const listed = /for target in ([^;]+); do/u.exec(script)?.[1]?.split(/\s+/u) ?? [];
+    expect(listed).toContain('test:e2e');
+    expect(listed).not.toContain('test:e2e:timing-budgets');
+    const runs = Object.values(nightly.jobs).flatMap((job) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    expect(runs.filter((run) => run.includes('timing-budgets'))).toEqual([]);
+    // `test:e2e` (the nightly's sharded suite) admits none of them: only TAU_E2E_TIMING_BUDGET_SPECS=true does.
+    const config = read('apps/ui-e2e/vitest.config.ts');
+    expect(config).toMatch(/TAU_E2E_TIMING_BUDGET_SPECS'\] === 'true' \? \[\] : timingBudgetSpecs/u);
+    const suite = (
+      JSON.parse(read('apps/ui-e2e/project.json')) as {
+        readonly targets: Record<string, { readonly options?: { readonly env?: Record<string, string> } }>;
+      }
+    ).targets['test:e2e'];
+    expect(suite?.options?.env?.['TAU_E2E_TIMING_BUDGET_SPECS']).toBeUndefined();
+  });
+
+  it('should run no outside-state row nightly, whose home is the release gate (global review 2026-11-24, ruling 12)', () => {
+    const jobs = Object.entries(nightly.jobs);
+    const removed = new Set(['webgpu-hardware', 'desktop-e2e-live', 'live-github']);
+    expect(jobs.map(([id]) => id).filter((id) => removed.has(id))).toEqual([]);
+    const runs = jobs.flatMap(([, job]) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    for (const target of ['test:e2e:webgpu', 'test:e2e:desktop:live', 'test:e2e:live:github']) {
+      expect(
+        runs.filter((run) => run.includes(target)),
+        target,
+      ).toEqual([]);
     }
   });
 });

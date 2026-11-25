@@ -140,7 +140,8 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
           rig,
           connectorRef,
           consumersRef: { current: consumers },
-          getUpAxis: () => 'z',
+          // As the canvas reads it: graphics' up direction setting.
+          getUpAxis: () => graphics.getSnapshot().context.upDirection,
           // As the canvas reads it: the view cube's gesture holds the lock as a state tag.
           isInteractionLocked: () => selectGraphicsViewportGizmoLocked(graphics.getSnapshot()),
         }),
@@ -456,6 +457,83 @@ describe('controls adapter', () => {
     expect(controls.camera.up.toArray()).toEqual([0, 1, 0]);
     expect(after.y).toBeCloseTo(before.y, 9);
     expect(after.z).not.toBeCloseTo(before.z, 3);
+  });
+
+  /*
+   * Roll ruling E: Turntable (the orbit style with no camera input routing) has no roll. A rolled pose that arrives from
+   * anything but this canvas's own controls or the view cube is straightened as switching to Turntable does: the view
+   * direction stays and the up is the scene up again.
+   */
+  describe('in Turntable, a rolled pose', () => {
+    const rolled = { ...cameraView, up: [1, 0, 0] } as const;
+
+    it('another sender reports as input is straightened as a person change, and the controls orbit the scene up', () => {
+      const harness = createHarness();
+      harness.attach();
+
+      harness.camera.send({ type: 'poseObserved', source: 'input', ...rolled });
+
+      const { view, lastChange } = harness.camera.getSnapshot().context;
+      expect(view.up).toEqual([0, 0, 1]);
+      expect(new Vector3(...view.direction).angleTo(new Vector3(...cameraView.direction))).toBeLessThan(1e-12);
+      expect(lastChange.source).toBe('up');
+      expect(harness.controls().camera.up.toArray()).toEqual([0, 0, 1]);
+    });
+
+    it('the camera adopts from a record is straightened as an automatic change, which the record never saves (I7)', () => {
+      const harness = createHarness();
+      harness.attach();
+
+      harness.camera.send({
+        type: 'adoptPersistedPose',
+        requestId: 'record',
+        pose: { target: rolled.target, direction: rolled.direction, up: rolled.up, verticalSpan: rolled.verticalSpan },
+      });
+
+      const { view, lastChange } = harness.camera.getSnapshot().context;
+      expect(view.up).toEqual([0, 0, 1]);
+      expect(new Vector3(...view.direction).angleTo(new Vector3(...cameraView.direction))).toBeLessThan(1e-12);
+      expect(lastChange.source).toBe('persisted');
+      expect(harness.controls().camera.up.toArray()).toEqual([0, 0, 1]);
+    });
+
+    it('the camera held before its canvas attached is straightened when the canvas presents it', () => {
+      const harness = createHarness({ cameraView: rolled });
+      harness.attach();
+
+      const { view, lastChange } = harness.camera.getSnapshot().context;
+      expect(view.up).toEqual([0, 0, 1]);
+      expect(lastChange.source).toBe('persisted');
+    });
+
+    it('straight down the scene up keeps its roll, with one change and no loop', () => {
+      const harness = createHarness();
+      harness.attach();
+      const { revision } = harness.camera.getSnapshot().context;
+
+      harness.camera.send({
+        type: 'poseObserved',
+        source: 'input',
+        ...cameraView,
+        direction: [0, 0, 1],
+        up: [1, 0, 0],
+      });
+
+      const { view } = harness.camera.getSnapshot().context;
+      expect(view.up).toEqual([1, 0, 0]);
+      expect(view.direction).toEqual([0, 0, 1]);
+      expect(harness.camera.getSnapshot().context.revision).toBe(revision + 1);
+    });
+
+    it('the view cube reports is left to the cube, which keeps a Turntable view upright itself', () => {
+      const harness = createHarness();
+      harness.attach();
+
+      harness.camera.send({ type: 'poseObserved', source: 'gizmo', ...rolled });
+
+      expect(harness.camera.getSnapshot().context.view.up).toEqual([1, 0, 0]);
+      expect(harness.camera.getSnapshot().context.lastChange.source).toBe('gizmo');
+    });
   });
 
   it('ends a held gesture when its canvas leaves mid-drag, so the camera is not stuck dragging', () => {

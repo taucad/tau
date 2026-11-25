@@ -1,8 +1,9 @@
-import { lazy, Suspense, useSyncExternalStore } from 'react';
+import { Suspense, useSyncExternalStore } from 'react';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 // Every route mounts the palette items, so the example catalog loads on its own chunk instead of joining each route's
 // entry.
-const ExampleCommandPaletteItems = lazy(async () => {
+const ExampleCommandPaletteItems = lazyCode(async () => {
   const m = await import('#components/nav/example-command-items.js');
   return { default: m.ExampleCommandPaletteItems };
 });

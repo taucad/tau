@@ -12,6 +12,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 /* oxlint-disable no-restricted-imports -- Exercise the installed runner's own scenario module. */
+import { buildIdentity } from '../src/main/boot-health.js';
+import { desktopHostBuildOf } from '../src/shared/desktop-host-build.js';
 import {
   assertBaselineShipsAutoInstall,
   assertRecoveryReceipts,
@@ -20,7 +22,10 @@ import {
   brokenRendererDocument,
   qualificationScenario,
   rebuildAppImageWithEntry,
+  recoveryFailure,
+  recoveryLedgerSummary,
   recoveryRows,
+  recoveryTrail,
   rendererEntryPath,
   squashfsCompressor,
 } from './qualification-recovery.mjs';
@@ -41,9 +46,12 @@ const at = (seconds: number, text: string): string =>
 const startedAfter = (seconds: number): string =>
   at(seconds, line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'));
 const launchOf = (version: string, pid: number): string => line('main.ready', { packaged: true, version, pid });
+/** The build the app records in its ledger: packaging's 12-hex short commit (`host-build.json`), never the full one. */
+const buildOf = (version: string, sourceCommit: string): string =>
+  buildIdentity({ version, sourceCommit: desktopHostBuildOf(() => sourceCommit), packaged: true });
 const ledgerOf = (version: string, sourceCommit: string, stage: string) => ({
   schemaVersion: 1,
-  build: `${version}+${sourceCommit}+packaged`,
+  build: buildOf(version, sourceCommit),
   unhealthyCount: 0,
   last: { launchId: 'launch', mode: 'normal', stage, deadlinePassed: false },
 });
@@ -246,7 +254,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
           started: true,
           furthestStage: 'window-loaded',
         },
-        b: { pid: 5200, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
+        b: { pid: 5200, build: `${b.version}+${'b'.repeat(12)}+packaged`, stage: 'home-ready' },
       });
     },
   ],
@@ -333,6 +341,79 @@ const tests: Array<[string, () => Promise<void> | void]> = [
     },
   ],
   [
+    "a failed row keeps A's launch, recovery and updater events and the ledger's stage, with no path or other event",
+    () => {
+      const log = [
+        launchOf(a.version, 4100),
+        line('main.app-protocol-registered', {
+          clientRoot: String.raw`C:\Users\runner\AppData\Local\Programs\t\resources\ui\client`,
+        }),
+        line('renderer.console', { message: 'secret-free but noisy' }, 'DEBUG'),
+        line('kernel.broker', { message: 'pooled spare exited' }, 'ERROR'),
+        line('main.recovery-offered', { trigger: 'shell-timeout' }, 'WARN'),
+        line(
+          'updater.error',
+          {
+            message: String.raw`Update failed: ENOENT \\?\C:\Users\runner\AppData\Local\tau-staging-updater\pending\x.exe and /home/runner/x`,
+            stack: 'at C:\\x',
+          },
+          'WARN',
+        ),
+        line('updater.blocked', { reason: 'clock', nested: { phase: 'error' } }, 'WARN'),
+        'a stack line without a record',
+      ].join('\n');
+      const trail = recoveryTrail(log);
+      assert.deepEqual(
+        trail.map(({ event }) => event),
+        ['main.ready', 'main.app-protocol-registered', 'main.recovery-offered', 'updater.error', 'updater.blocked'],
+      );
+      assert.deepEqual(trail[0]!.detail, { version: a.version, pid: 4100 });
+      assert.deepEqual(trail[1]!.detail, {});
+      assert.deepEqual(trail[2]!.detail, { trigger: 'shell-timeout' });
+      assert.deepEqual(trail[3]!.detail, { message: 'Update failed: ENOENT <path> and <path>' });
+      assert.deepEqual(trail[4]!.detail, { reason: 'clock' });
+      assert.equal(trail[0]!.at, '2026-11-17T10:00:00.000Z');
+      assert.doesNotMatch(JSON.stringify(trail), /Users|runner|home/u);
+      const many = Array.from({ length: 250 }, (_, index) => line('main.boot-stage', { stage: String(index) })).join(
+        '\n',
+      );
+      assert.equal(recoveryTrail(many).length, 200);
+      assert.equal(recoveryTrail(many).at(-1)!.detail['stage'], '249');
+
+      assert.deepEqual(
+        recoveryLedgerSummary({
+          ...ledgerOf(a.version, a.sourceCommit, 'updater-started'),
+          autoInstall: { fromBuild: 'x', targetVersion: b.version },
+        }),
+        {
+          build: buildOf(a.version, a.sourceCommit),
+          unhealthyCount: 0,
+          last: { mode: 'normal', stage: 'updater-started', deadlinePassed: false },
+          autoInstall: { targetVersion: b.version },
+        },
+      );
+      assert.equal(recoveryLedgerSummary(undefined), undefined);
+      assert.equal(recoveryLedgerSummary('not a ledger'), undefined);
+
+      const failure = recoveryFailure({
+        reason: `Version ${a.version} logged no automatic-install countdown for ${b.version}`,
+        log,
+        ledgerText: JSON.stringify(ledgerOf(a.version, a.sourceCommit, 'updater-started')),
+        aAlive: true,
+        mirrorRequests: [],
+      });
+      assert.equal(
+        failure.error.message,
+        `T-B22.4 recovery did not complete: Version ${a.version} logged no automatic-install countdown for ${b.version} (A alive: true; ledger stage: updater-started; mirror requests: 0; last updater events: updater.error {"message":"Update failed: ENOENT <path> and <path>"}; updater.blocked {"reason":"clock"})`,
+      );
+      assert.deepEqual(failure.record['trail'], trail);
+      assert.match(
+        recoveryFailure({ reason: 'r', log: '', ledgerText: '{', aAlive: false, mirrorRequests: [] }).error.message,
+        /A alive: false; ledger stage: none; mirror requests: 0; last updater events: none/u,
+      );
+    },
+  ],
+  [
     'the receipts job admits exactly the scope rows, each passed, all on one A and B',
     () => {
       const receipt = (
@@ -357,7 +438,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
             started: true,
             furthestStage: 'window-loaded',
           },
-          b: { pid: 2, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
+          b: { pid: 2, build: buildOf(b.version, b.sourceCommit), stage: 'home-ready' },
           installed: { executableSha256: 'c'.repeat(64), asarSha256: 'd'.repeat(64) },
         },
         logs: 'https://github.com/taucad/tau/actions/runs/1',

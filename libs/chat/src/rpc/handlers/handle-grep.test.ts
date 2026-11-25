@@ -406,7 +406,7 @@ describe('handleGrep', () => {
         return 'const marker = 1;';
       }
       if (path === 'part.step') {
-        throw Object.assign(new Error('The large object of part.step is not on this device yet.'), {
+        throw Object.assign(new Error('part.step is still downloading.'), {
           code: 'PENDING',
         });
       }
@@ -460,7 +460,7 @@ describe('handleGrep', () => {
     };
     fileSystem.readFile.mockImplementation(async (path) => {
       if (path === 'part.step') {
-        throw Object.assign(new Error('The large object of part.step is not on this device yet.'), { code: 'PENDING' });
+        throw Object.assign(new Error('part.step is still downloading.'), { code: 'PENDING' });
       }
       return 'const marker = 1;';
     });

@@ -225,7 +225,6 @@ export function ChatMessageToolTestModel({
           key='output'
           variant='minimal'
           status={isLoading ? 'loading' : 'ready'}
-          isDefaultOpen={!allPassed}
           isCollapsible={totalRequirements > 0 || fullResult !== undefined}
         >
           <ChatToolCardHeader>

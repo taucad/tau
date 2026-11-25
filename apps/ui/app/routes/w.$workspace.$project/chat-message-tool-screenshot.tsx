@@ -12,7 +12,8 @@ import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ViewerLink } from '@taucad/files-ui/components/files/viewer-link';
-import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
+import { ChatMessageMedia, ChatMessageMediaThumbnails } from '#routes/w.$workspace.$project/chat-message-media.js';
+import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {
   return <ViewerLink path={targetFile}>{targetFile}</ViewerLink>;
@@ -60,6 +61,12 @@ export function ChatMessageToolScreenshot({
       const renderableImages = allImages.filter((image) =>
         'dataUrl' in image ? image.dataUrl.startsWith('data:') : image.path.startsWith('attachments/'),
       );
+      const media = renderableImages.map(
+        (image): ChatMedia =>
+          'dataUrl' in image
+            ? { url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }
+            : { url: image.path, mediaType: image.mimeType },
+      );
       const count = allImages.length;
       const noun = count === 1 ? 'screenshot' : 'screenshots';
 
@@ -71,7 +78,7 @@ export function ChatMessageToolScreenshot({
           isDefaultOpen={false}
           isCollapsible={renderableImages.length > 0}
         >
-          <ChatToolCardHeader>
+          <ChatToolCardHeader trailing={<ChatMessageMediaThumbnails media={media} />}>
             <ChatToolCardIcon icon={Camera} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Captured'>
@@ -92,19 +99,12 @@ export function ChatMessageToolScreenshot({
               <div
                 className={`grid gap-2 ${renderableImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 @md:grid-cols-3'}`}
               >
-                {renderableImages.map((image) => (
+                {renderableImages.map((image, index) => (
                   <div
                     key={JSON.stringify([image.view, image.instance, image.angle])}
                     className='flex flex-col items-center gap-1'
                   >
-                    <ChatMessageMedia
-                      media={
-                        'dataUrl' in image
-                          ? { url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }
-                          : { url: image.path, mediaType: image.mimeType }
-                      }
-                      alt={`${image.angle ?? image.view} view`}
-                    />
+                    <ChatMessageMedia media={media[index]!} alt={`${image.angle ?? image.view} view`} />
                     <span className='text-xs text-muted-foreground'>{image.angle ?? image.view}</span>
                   </div>
                 ))}

@@ -39,8 +39,29 @@ export type DeploymentModeResolver = Readonly<{
    * @param url - The API origin, or any URL on it (the gateway base URL); only its origin is used.
    */
   mode(url: string): Promise<DeploymentMode>;
-  /** The full resolution for the origin of `url`, for a caller that wants the answer itself or the failure reason. */
+  /**
+   * The full resolution for the origin of `url`, for a caller that wants the answer itself or the failure reason. Its
+   * `source` is `cache` when no request was awaited.
+   */
   resolve(url: string): Promise<OriginAnswer<DeploymentAnswer>>;
+  /**
+   * Start the request for the origin of `url` when its answer is missing, expired or expires within
+   * {@link deploymentModeDefaults.refreshLead}, or join the one in flight; otherwise do nothing. Never rejects. Called
+   * on the facts that precede a send (the composer taking focus, the page shown again), because a timer does not fire
+   * across sleep or in a throttled tab (C7).
+   *
+   * @param url - The API origin, or any URL on it.
+   */
+  refresh(url: string): void;
+  /**
+   * Refresh the answer for the origin of `url` now and then {@link deploymentModeDefaults.refreshLead} before each
+   * expiry, so an admission reads it fresh instead of awaiting the request (C7). A failed request is retried after the
+   * lead. The freshness bound is unchanged: a stale answer still stands in only when a request fails.
+   *
+   * @param url - The API origin, or any URL on it.
+   * @returns Stops the refreshing.
+   */
+  keepFresh(url: string): () => void;
 }>;
 
 /**
@@ -53,6 +74,8 @@ export type DeploymentModeResolver = Readonly<{
  *   API that was never answered into `unfunded`.
  * - `requestTimeout`: 5 s, well inside the agent host's 10 s bound on the deployment ask, so a hanging route gives up
  *   while a stale answer can still stand in; at 10 s the agent host would refuse the run `unknown` first.
+ * - `refreshLead`: 30 s, how early {@link DeploymentModeResolver.keepFresh} and {@link DeploymentModeResolver.refresh}
+ *   ask again, so the request has settled before the answer expires.
  *
  * @public
  */
@@ -60,6 +83,8 @@ export const deploymentModeDefaults = {
   maxAgeBounds: { minimum: 60, maximum: 3600 } satisfies MaxAgeBounds,
   staleGraceSeconds: 86_400,
   requestTimeout: 5000,
+  /** Milliseconds before expiry that a kept-fresh answer is asked again; half the 60 s minimum `maxAge`. */
+  refreshLead: 30_000,
 } as const;
 
 /** The storage key prefix; the origin follows it. @public */
@@ -182,15 +207,49 @@ export const createDeploymentModeResolver = (input: DeploymentModeResolverInput 
     now,
     requestTimeout: input.requestTimeout ?? deploymentModeDefaults.requestTimeout,
   });
-  const resolve = async (url: string): Promise<OriginAnswer<DeploymentAnswer>> => {
+  const resolve = async (url: string, ahead = 0): Promise<OriginAnswer<DeploymentAnswer>> => {
     try {
-      return await resolver.resolve(url);
+      return await resolver.resolve(url, { ahead });
     } catch {
       return { state: 'unknown', reason: 'network' };
     }
   };
+  const { refreshLead } = deploymentModeDefaults;
   return {
-    resolve,
+    resolve: async (url) => resolve(url),
     mode: async (url) => deploymentModeOf(await resolve(url)),
+    refresh: (url) => {
+      void resolve(url, refreshLead);
+    },
+    keepFresh: (url) => {
+      let origin: string;
+      try {
+        ({ origin } = new URL(url));
+      } catch {
+        return () => undefined;
+      }
+      let stopped = false;
+      let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+      const refreshThenSchedule = async (): Promise<void> => {
+        await resolve(url, refreshLead);
+        if (stopped) {
+          return;
+        }
+        const expiresAt = stores.get(origin)?.read()?.expiresAt;
+        const untilDue = expiresAt === undefined ? 0 : expiresAt - refreshLead - now();
+        refreshTimer = setTimeout(
+          () => {
+            void refreshThenSchedule();
+          },
+          untilDue > 0 ? untilDue : refreshLead,
+        );
+        (refreshTimer as { unref?: () => void }).unref?.();
+      };
+      void refreshThenSchedule();
+      return () => {
+        stopped = true;
+        clearTimeout(refreshTimer);
+      };
+    },
   };
 };

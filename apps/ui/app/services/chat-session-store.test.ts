@@ -213,7 +213,7 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore } = await import('#services/chat-session-store.js');
+const { ChatSessionStore, presentMessages } = await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
@@ -240,6 +240,10 @@ type StubDeps = {
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
 /** The facts each `queue held` line logged, parsed from the JSON text the store writes. */
+/** The ids of a transcript's user messages, in order. */
+const userMessageIds = (messages: readonly MyUIMessage[]): string[] =>
+  messages.filter((message) => message.role === 'user').map((message) => message.id);
+
 const loggedHolds = (calls: ReadonlyArray<readonly unknown[]>): unknown[] =>
   calls
     .filter(([label]) => label === '[ChatSessionStore] queue held')
@@ -3001,7 +3005,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
         });
         const { messages } = session.chat;
-        const first = messages[0];
+        // T2: the displayed transcript is the fold, so the retained message is the displayed one.
+        const first = session.messages[0];
         reset.resolve();
         await vi.waitFor(() => {
           expect(store.getProjection(chatId)?.ledger.position.cursor).toBe(0);
@@ -3921,46 +3926,32 @@ describe('ChatSessionStore', () => {
     }
   });
 
+  /* T2: the displayed transcript is the fold, which never mutates a message and shares each unchanged one, so these
+   * rows moved from the SDK array to the store's pure index. The SDK array's per-token read bound is replaced by the
+   * fold's counted cost acceptance; the part-identity rows moved to `chat-projection.transcript.test.ts`. */
   it('keeps structural and command selections stable across a long text-only stream', () => {
-    const store = createStore();
-    const session = store.acquire('chat_presented', 'project_1');
-    let indexedReads = 0;
-    const messages = new Proxy(
-      Array.from(
-        { length: 1000 },
-        (_, index): MyUIMessage => ({
-          id: `message-${String(index)}`,
-          role: index % 2 === 0 ? 'user' : 'assistant',
-          parts: [{ type: 'text', text: 'first' }],
-        }),
-      ),
-      {
-        get(target, key, receiver) {
-          if (typeof key === 'string' && /^\d+$/.test(key)) {
-            indexedReads++;
-          }
-          // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- Proxy's Reflect.get is dynamically typed.
-          return Reflect.get(target, key, receiver) as unknown;
-        },
-      },
+    let messages: MyUIMessage[] = Array.from(
+      { length: 1000 },
+      (_, index): MyUIMessage => ({
+        id: `message-${String(index)}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        parts: [{ type: 'text', text: 'first' }],
+      }),
     );
-    session.chat.messages = messages;
-    const before = store.getMessagePresentation('chat_presented');
+    const before = presentMessages(messages);
+    let presented = before;
     const replaceTail = (parts: MyUIMessage['parts']): void => {
       const tail = messages.at(-1);
       if (tail === undefined) {
         throw new Error('Missing transcript tail');
       }
-      messages[messages.length - 1] = { ...tail, parts };
+      messages = [...messages.slice(0, -1), { ...tail, parts }];
+      presented = presentMessages(messages, presented);
     };
-    indexedReads = 0;
     replaceTail([{ type: 'text', text: 'next token' }]);
-    indexedReads = 0;
-    const after = store.getMessagePresentation('chat_presented');
-    expect(after.order).toBe(before.order);
-    expect(after.groups).toBe(before.groups);
-    expect(after.agentInvocations).toBe(before.agentInvocations);
-    expect(indexedReads).toBeLessThan(10);
+    expect(presented.order).toBe(before.order);
+    expect(presented.groups).toBe(before.groups);
+    expect(presented.agentInvocations).toBe(before.agentInvocations);
 
     const acp = (name: string): MyUIMessage['parts'][number] => ({
       type: 'data-acp-session',
@@ -3973,86 +3964,14 @@ describe('ChatSessionStore', () => {
       },
     });
     replaceTail([acp('help')]);
-    expect(store.getMessagePresentation('chat_presented').agentInvocations).toBe('/help');
+    expect(presented.agentInvocations).toBe('/help');
     replaceTail([acp('next')]);
-    expect(store.getMessagePresentation('chat_presented').agentInvocations).toBe('/next');
+    expect(presented.agentInvocations).toBe('/next');
 
-    messages.push({ id: 'new-user', role: 'user', parts: [{ type: 'text', text: 'next turn' }] });
-    const appended = store.getMessagePresentation('chat_presented');
+    messages = [...messages, { id: 'new-user', role: 'user', parts: [{ type: 'text', text: 'next turn' }] }];
+    const appended = presentMessages(messages, presented);
     expect(appended.order.at(-1)).toBe('new-user');
     expect(appended.groups.at(-1)?.messageIds).toEqual(['new-user']);
-    store.release('chat_presented');
-  });
-
-  it('retains completed active-message parts while accepting a changed earlier part', () => {
-    const store = createStore();
-    const session = store.acquire('chat_parts', 'project_1');
-    const first: MyUIMessage = {
-      id: 'assistant',
-      role: 'assistant',
-      parts: [
-        { type: 'text', text: 'Completed paragraph', state: 'done' },
-        { type: 'text', text: 'Live', state: 'streaming' },
-      ],
-    };
-    session.chat.messages = [first];
-    const before = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
-    session.chat.messages = [
-      {
-        ...first,
-        parts: [{ ...first.parts[0]! }, { type: 'text', text: 'Live grows', state: 'streaming' }],
-      },
-    ];
-    const next = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
-    expect(next.parts[0]).toBe(before.parts[0]);
-    expect(next.parts[1]).not.toBe(before.parts[1]);
-    session.chat.messages = [
-      {
-        ...first,
-        parts: [{ type: 'text', text: 'Corrected earlier paragraph', state: 'done' }, next.parts[1]!],
-      },
-    ];
-    const corrected = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
-    expect(corrected.parts[0]).not.toBe(before.parts[0]);
-    expect(corrected.parts[1]).toBe(next.parts[1]);
-    store.release('chat_parts');
-  });
-
-  it('snapshots mutable SDK tail parts while retaining unchanged renderer identities', () => {
-    const store = createStore();
-    const session = store.acquire('chat_mutable_tail', 'project_1');
-    const raw: MyUIMessage = {
-      id: 'assistant',
-      role: 'assistant',
-      parts: [
-        { type: 'text', text: 'Completed paragraph', state: 'done' },
-        { type: 'reasoning', text: 'alpha', state: 'streaming' },
-      ],
-    };
-    session.chat.messages = [raw];
-    const before = store.getMessagePresentation('chat_mutable_tail');
-    const prior = before.messagesById.get('assistant')!;
-    const part = raw.parts[1];
-    if (part?.type !== 'reasoning') {
-      throw new Error('Missing live reasoning');
-    }
-    part.text = 'alpha beta';
-    const after = store.getMessagePresentation('chat_mutable_tail');
-    const next = after.messagesById.get('assistant')!;
-    expect(prior.parts[1]).toMatchObject({ text: 'alpha' });
-    expect(next.parts[1]).toMatchObject({ text: 'alpha beta' });
-    expect(next).not.toBe(prior);
-    expect(next.parts[0]).toBe(prior.parts[0]);
-    expect(after.order).toBe(before.order);
-    expect(after.groups).toBe(before.groups);
-    expect(store.getMessagePresentation('chat_mutable_tail').messagesById.get('assistant')).toBe(next);
-    part.text = 'alpha beta final';
-    session.chat.messages = [raw, { id: 'next-user', role: 'user', parts: [{ type: 'text', text: 'Next turn' }] }];
-    const promoted = store.getMessagePresentation('chat_mutable_tail').messagesById.get('assistant')!;
-    expect(promoted.parts[1]).toMatchObject({ text: 'alpha beta final' });
-    expect(promoted.parts[0]).toBe(next.parts[0]);
-    expect(next.parts[1]).toMatchObject({ text: 'alpha beta' });
-    store.release('chat_mutable_tail');
   });
 
   it('derives funded operation IDs and tokens from a foreign accepted host log', async () => {
@@ -5690,10 +5609,30 @@ describe('ChatSessionStore', () => {
             expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
           });
           expect(store.departingSendOf(chatId)).toBe('first');
-          /* The transcript took the request, and a later one (a steer) arrived behind it before the run ended. */
-          const request = (id: string): MyUIMessage => ({ id, role: 'user', parts: [{ type: 'text', text: id }] });
-          session.chat.messages = [request('first'), request('nudge')];
-          expect(session.messages.map((message) => message.id)).toEqual(['first', 'nudge']);
+          /* The log took the request, and a later one (a steer) arrived behind it before the run ended. */
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              logRow(4, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+              lifecycleRow(5, 'running', 'req_first'),
+              lifecycleRow(6, 'admitted', 'req_nudge'),
+              logRow(7, {
+                runId: 'req_nudge',
+                type: 'message.appended',
+                message: { id: 'nudge', role: 'user', content: [{ type: 'text', text: 'nudge' }] },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(userMessageIds(session.messages)).toEqual(['first', 'nudge']);
+          });
         } finally {
           unadmit();
           unpublish();

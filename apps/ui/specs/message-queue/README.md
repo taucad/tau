@@ -122,3 +122,7 @@ The chat UX review re-pinned the drift after the gate moved into `outbox-gate.ts
 Review round 2 re-pinned the drift after held sends became parked (`NextUp`), a steered send became withdrawable, `TakeBack` modelled the host's take-back of an accepted turn, and `ComposerExclusive` was stated over deliverable and kept requests. The target passes (1,397,239 distinct states), and every witness still fails on its own invariant.
 
 Review round 3 re-pinned the drift after a withdrawn or refused send became parked first and removed only once the composer took it (`Withdraw` may now leave it queued and parked), parking began dropping a spent steer, a take-back began to be restored from the log independently of the Stop, and a handed-over send stopped being departing once the log had its request. The target passes (1,733,879 distinct states), and every witness still fails on its own invariant. `TakeBack` then also held the sends queued behind a taken-back turn; the target passes (1,724,375 distinct states) and every witness still fails on its own invariant.
+
+use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.
+
+Chat UX F1/F2 merged with T2 re-pinned the drift: the departing send is shown on the fold until the host accepts it, and the accepted gesture shows it from then until its run folds, so a handed-over send no longer keeps its own copy. No action changed.

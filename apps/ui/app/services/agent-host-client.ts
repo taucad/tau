@@ -569,6 +569,8 @@ export type ResidentAgentWorker = Readonly<{
   presented: (presentation: BrowserRunPresentation) => Promise<void>;
   /** Tell an already-open project's host that the account rated a run; never boots a worker. */
   rated: (rating: BrowserRunRating) => Promise<void>;
+  /** Tell a running worker that a composer took focus, so its hosts refresh the deployment answer (C7); never boots one. */
+  composerFocused: () => Promise<void>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1216,6 +1218,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       await live.ready;
       await live.channel.call('runRated', rating);
     },
+    composerFocused: async () => {
+      const live = current;
+      if (live === undefined || live.dead) {
+        return;
+      }
+      await live.ready;
+      await live.channel.call('composerFocus', {});
+    },
     recover: async (projectId) => {
       const live = current;
       const opening = live?.provided.get(projectId);
@@ -1291,6 +1301,21 @@ export const noteBrowserRunPresented = async (presentation: BrowserRunPresentati
  */
 export const noteBrowserRunRated = async (rating: BrowserRunRating): Promise<void> =>
   residentAgentWorker().rated(rating);
+
+/**
+ * Tell the document's agent-host worker, when one is running, that a composer took focus: a send may follow, so each
+ * open project host refreshes its deployment answer now rather than at admission (C7). Best effort; never boots a
+ * worker and never rejects.
+ *
+ * @public
+ */
+export const noteBrowserComposerFocused = async (): Promise<void> => {
+  try {
+    await residentAgentWorker().composerFocused();
+  } catch {
+    /* A closing worker loses only this hint; admission still refreshes an expired answer. */
+  }
+};
 
 /**
  * Keep a browser project's existing host provided while its route is live. Short-lived command and observer clients

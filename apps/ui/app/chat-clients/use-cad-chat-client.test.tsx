@@ -319,10 +319,17 @@ const installActions = (actions: ActionsMock): void => {
   useChatActionsMock.mockReturnValue(actions as unknown as ChatActions);
 };
 
+/** The store's displayed transcript and visible status, which `useChatSelector` reads (T2). */
+let shownMessages: readonly MyUIMessage[] = [];
+let chatStatus = 'ready';
+
 /** Records every `setPersistedError` the client raises on the chat banner. */
 const persistedErrors: unknown[] = [];
 const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
   ((_chatId: string) => ({
+    get messages() {
+      return shownMessages;
+    },
     persistenceActorRef: {
       send: (event: { readonly type: string; readonly error?: unknown }) => {
         if (event.type === 'setPersistedError') {
@@ -411,7 +418,11 @@ beforeEach(() => {
   availabilityHarness.gate = undefined;
   revisionRoot.connected = true;
   mountAgentMock(buildAgent());
-  useChatSelectorMock.mockReturnValue('ready');
+  shownMessages = [];
+  chatStatus = 'ready';
+  useChatSelectorMock.mockImplementation((selector) =>
+    selector({ status: chatStatus, messages: shownMessages } as unknown as Parameters<typeof selector>[0]),
+  );
   installActiveSession('chat_test');
   persistedErrors.length = 0;
   promoteDraftAttachments = vi.fn(async () => undefined);
@@ -430,7 +441,7 @@ describe('useCadChatClient', () => {
      * those newest instances. The binding belongs to the chat's session actor;
      * these views only read. */
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -494,7 +505,7 @@ describe('useCadChatClient', () => {
   it('does not poll the catalog before answering a send with an unresolved model', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-offline' } }));
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -514,9 +525,7 @@ describe('useCadChatClient', () => {
 
   it('uses the startup request id as the seeded first turn’s host command id', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', {
-      get: () => [{ id: 'seed-user', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
-    });
+    shownMessages = [{ id: 'seed-user', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -549,7 +558,7 @@ describe('useCadChatClient', () => {
       );
     };
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -580,7 +589,7 @@ describe('useCadChatClient', () => {
 
   it('pre-flights the route the turn will run and dispatches when nothing refuses it', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -604,7 +613,7 @@ describe('useCadChatClient', () => {
        body is composed. */
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -637,9 +646,9 @@ describe('useCadChatClient', () => {
       },
     ] as MyUIMessage[];
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
+    shownMessages = messages;
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('streaming');
+    chatStatus = 'streaming';
     const actions = buildActions();
     installActions(actions);
 
@@ -673,9 +682,9 @@ describe('useCadChatClient', () => {
       },
     ] as MyUIMessage[];
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
+    shownMessages = messages;
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('streaming');
+    chatStatus = 'streaming';
     const actions = buildActions();
     actions.setMessages.mockImplementation((next: MyUIMessage[]) => {
       messages = next;
@@ -698,9 +707,9 @@ describe('useCadChatClient', () => {
     browserHostHarness.resumable = true;
     browserHostHarness.hostRunId = 'run-stale';
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('ready');
+    chatStatus = 'ready';
     installActions(buildActions());
 
     const { result } = renderClient();
@@ -717,7 +726,7 @@ describe('useCadChatClient', () => {
   it('delegates a denied approval to the projection-backed command path', async () => {
     browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -735,7 +744,7 @@ describe('useCadChatClient', () => {
     browserHostHarness.run = { runId: 'run-external-paused', state: 'paused', eventCount: 4 };
     browserHostHarness.runKind = 'external';
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -755,9 +764,9 @@ describe('useCadChatClient', () => {
     browserHostHarness.hostRunId = 'run-daemon-paused';
     browserHostHarness.resumable = true;
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('ready');
+    chatStatus = 'ready';
     const actions = buildActions();
     installActions(actions);
 
@@ -780,9 +789,9 @@ describe('useCadChatClient', () => {
   it('carries the exact option a human chose to the projected approval command', async () => {
     browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    shownMessages = [];
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('streaming');
+    chatStatus = 'streaming';
     installActions(buildActions());
 
     const { result } = renderClient();
@@ -799,7 +808,7 @@ describe('useCadChatClient', () => {
     'should retain pre-%s queue intent while attachment promotion is pending',
     async (terminal) => {
       useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
-      useChatSelectorMock.mockReturnValue('streaming');
+      chatStatus = 'streaming';
       const actions = buildActions();
       installActions(actions);
       let intent: ChatMessageQueueIntent = {};
@@ -814,7 +823,7 @@ describe('useCadChatClient', () => {
       });
       expect(actions.sendMessage).not.toHaveBeenCalled();
       intent = { afterTerminalRunId: `run-${terminal}` };
-      useChatSelectorMock.mockReturnValue('ready');
+      chatStatus = 'ready';
       view.rerender();
       await act(async () => {
         saved.resolve();
@@ -992,7 +1001,7 @@ describe('useCadChatClient', () => {
      * one whose message is absent, because there is no rewind point to lease
      * against (T3-D5). A fixture with no transcript was asserting an admission
      * the product no longer makes. */
-    chat.messages = [{ id: 'msg_99', role: 'user', parts: [{ type: 'text', text: 'original' }] }];
+    shownMessages = [{ id: 'msg_99', role: 'user', parts: [{ type: 'text', text: 'original' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -1020,14 +1029,14 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('should expose messages and error from the bound chat instance, and status from useChatSelector', () => {
+  it('should expose messages and status from the displayed transcript, and error from the bound chat instance', () => {
     const chat = mock<Chat<MyUIMessage>>();
     const messages: readonly MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }];
-    Object.defineProperty(chat, 'messages', { get: () => messages });
+    shownMessages = messages;
     const error = new Error('network');
     Object.defineProperty(chat, 'error', { get: () => error });
     useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('streaming');
+    chatStatus = 'streaming';
     const actions = buildActions();
     installActions(actions);
 
@@ -1056,7 +1065,7 @@ describe('useCadChatClient', () => {
 
   it('should unpublish the focused admission on view unmount without interrupting its composed command', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    chat.messages = [{ id: 'user-owned', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }];
+    shownMessages = [{ id: 'user-owned', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
@@ -1076,7 +1085,7 @@ describe('useCadChatClient', () => {
   const composeSeededCommand = async (messages: MyUIMessage[]): Promise<HostCommand> => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
+    shownMessages = messages;
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     installSessionStore({
@@ -1144,7 +1153,7 @@ describe('useCadChatClient', () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
-    Object.defineProperty(chat, 'messages', { get: () => [{ id: 'user_1', role: 'user', parts: [] }] });
+    shownMessages = [{ id: 'user_1', role: 'user', parts: [] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     renderClient();
@@ -1172,12 +1181,10 @@ describe('useCadChatClient', () => {
    */
   it('continues the turn a resume names, under the run the host already holds', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', {
-      get: () => [
-        { id: 'user_1', role: 'user', parts: [] },
-        { id: 'run_live', role: 'assistant', parts: [] },
-      ],
-    });
+    shownMessages = [
+      { id: 'user_1', role: 'user', parts: [] },
+      { id: 'run_live', role: 'assistant', parts: [] },
+    ];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     renderClient();

@@ -1,6 +1,7 @@
 import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, it, expect } from 'vitest';
 import {
+  admissionPhases,
   agentToolKinds,
   clientMetricEntrySchema,
   ingestPayloadSchema,
@@ -268,6 +269,54 @@ describe('agent usage entries', () => {
         detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...extra },
       }),
     ).toThrow();
+  });
+
+  /* B4, C3: tool-result delivery and admission phases, content-free and allowlisted field by field (rule 5). */
+  const delivered = {
+    agentId: 'tau',
+    placement: 'browser',
+    outcome: 'completed',
+    toolResults: 4,
+    toolResultsExcluded: 1,
+    toolResultsUnsettled: 1,
+    toolResultDelayMax: 0.42,
+    admissionDelay: { create: 1.2, page: 0.05, dispatch: 0.03, host: 0.08, delivery: 0.02 },
+    hostStart: 'cold',
+    chatState: 'reopened',
+    deploymentRefetched: true,
+  };
+
+  it('should accept a turn carrying every delivery and admission field', () => {
+    const entry = { name: IngestEntryName.AGENT_TURN, duration: 4000, detail: delivered };
+
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+    expect(Object.keys(delivered.admissionDelay)).toEqual([...admissionPhases]);
+  });
+
+  it('should drop a detail field outside the allowlist, so it is never recorded', () => {
+    const parsed = clientMetricEntrySchema.parse({
+      name: IngestEntryName.AGENT_TURN,
+      duration: 4000,
+      detail: { ...delivered, chatId: 'chat_123', toolResultPaths: ['main.ts'] },
+    });
+
+    expect(parsed.detail).toEqual(delivered);
+  });
+
+  it.each([
+    ['an unknown admission phase', { admissionDelay: { model: 1 } }],
+    ['a negative admission delay', { admissionDelay: { host: -1 } }],
+    ['an unknown host start', { hostStart: 'lukewarm' }],
+    ['an unknown chat state', { chatState: 'evicted' }],
+    ['a fractional tool-result count', { toolResults: 1.5 }],
+  ])('should reject a turn with %s', (_label, extra) => {
+    expect(
+      clientMetricEntrySchema.safeParse({
+        name: IngestEntryName.AGENT_TURN,
+        duration: 1,
+        detail: { ...delivered, ...extra },
+      }).success,
+    ).toBe(false);
   });
 
   it('should clamp a turn longer than a day instead of dropping it', () => {

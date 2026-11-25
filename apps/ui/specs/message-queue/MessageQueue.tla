@@ -217,6 +217,11 @@
 \* judged; that changes no action or verdict.
 \* TakeBack now holds the sends queued behind a taken-back turn, as Withdraw does. A Stop aimed at a run settles
 \* from that run's end, and each cancel's answer settles only the Stop that sent it.
+\* use_skill startup latency T2 (2026-11-26): the transcript `chat-session-store.ts`, `chat-turn-host.tsx`,
+\* `use-cad-chat-client.ts` and `use-chat.tsx` read is the fold of the projection, with a durably accepted gesture shown
+\* until its run folds; delivery, persistence, acknowledgement and the queue are untouched. No action or verdict changes.
+\* Chat UX F1/F2 with T2: the departing send is shown on the fold until the host accepts it, and the accepted
+\* gesture shows it after; a handed-over send no longer needs its own copy. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

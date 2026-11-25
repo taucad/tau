@@ -106,6 +106,7 @@ import {
   selectRunFailure,
   selectRunElsewhereAwaitsPull,
   selectRunPhase,
+  selectTranscript,
   selectTranscriptSource,
   selectToolsInFlight,
   materializeTranscript,
@@ -115,10 +116,11 @@ import {
 import type {
   ChatProjection,
   ChatProjectionReadAnswer,
+  TranscriptProjection,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
 import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
-import type { RowKey } from '@taucad/agent-host';
+import type { AgentLiveEvent, RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
@@ -330,16 +332,86 @@ type MessagePresentation = {
   readonly agentInvocations: string;
 };
 
-type CachedMessagePresentation = MessagePresentation & {
-  readonly messagesById: Map<string, MyUIMessage>;
-  readonly length: number;
-  readonly lastId: string | undefined;
-  readonly lastRole: MyUIMessage['role'] | undefined;
-  readonly prefixInvocations: ReadonlySet<string>;
-  readonly lastParts: MyUIMessage['parts'] | undefined;
-  readonly lastMessage: MyUIMessage | undefined;
-  readonly lastRawMessage: MyUIMessage | undefined;
-  readonly firstMessage: MyUIMessage | undefined;
+export type CachedMessagePresentation = MessagePresentation & {
+  /** The transcript this index was built from; the fold keeps a message's identity while it is unchanged. */
+  readonly messages: readonly MyUIMessage[];
+};
+
+/** A gesture the host accepted (`durable`) before the page folded its run's first row (T2, accepted gesture). */
+type AcceptedGesture = Readonly<{
+  runId: string;
+  request: Extract<ChatRequest, { kind: 'send' | 'edit' | 'regenerate' }>;
+}>;
+
+/**
+ * Show an accepted gesture the log does not hold yet, as a pure step over the folded transcript: a send appends its
+ * message, an edit truncates at its message and replaces it, a regenerate truncates after the last user message.
+ *
+ * @param messages - The folded transcript.
+ * @param request - The accepted gesture.
+ * @returns The transcript with the gesture applied.
+ */
+const applyAcceptedGesture = (
+  messages: readonly MyUIMessage[],
+  request: AcceptedGesture['request'],
+): readonly MyUIMessage[] => {
+  switch (request.kind) {
+    case 'send': {
+      return messages.some((message) => message.id === request.message.id) ? messages : [...messages, request.message];
+    }
+    case 'edit': {
+      const index = messages.findIndex((message) => message.id === request.messageId);
+      return index === -1 ? messages : [...messages.slice(0, index), editedMessage(messages[index]!, request)];
+    }
+    case 'regenerate': {
+      return messages.slice(0, messages.findLastIndex((message) => message.role === 'user') + 1);
+    }
+  }
+};
+
+const noViews: ChatProjection['views'] = Object.freeze({});
+const noMessages: readonly MyUIMessage[] = Object.freeze([]);
+const invocationsByMessage = new WeakMap<MyUIMessage, ReadonlySet<string>>();
+
+/**
+ * Index a displayed transcript for its renderers, keeping the previous index's order and invocations while they are
+ * equal. Keyed on the transcript's identity: the fold returns a new transcript whenever a message changes.
+ *
+ * @param messages - The displayed transcript.
+ * @param cached - The index of the previous transcript.
+ * @returns The index of this one.
+ * @internal
+ */
+export const presentMessages = (
+  messages: readonly MyUIMessage[],
+  cached?: CachedMessagePresentation,
+): CachedMessagePresentation => {
+  if (cached?.messages === messages) {
+    return cached;
+  }
+  const order = messages.map((message) => message.id);
+  const invocations = new Set<string>();
+  for (const message of messages) {
+    let own = invocationsByMessage.get(message);
+    if (own === undefined) {
+      own = invocationsOf([message]);
+      invocationsByMessage.set(message, own);
+    }
+    for (const invocation of own) {
+      invocations.add(invocation);
+    }
+  }
+  const agentInvocations = [...invocations].join('\n');
+  return {
+    messages,
+    messagesById: new Map(messages.map((message) => [message.id, message])),
+    order:
+      cached !== undefined && cached.order.length === order.length && cached.order.every((id, at) => id === order[at])
+        ? cached.order
+        : order,
+    groups: buildTurnGroups(messages),
+    agentInvocations: cached?.agentInvocations === agentInvocations ? cached.agentInvocations : agentInvocations,
+  };
 };
 
 /** Compare mutable SDK values against retained snapshots without changing equal renderer parts. */
@@ -365,21 +437,6 @@ const equalPartValue = (left: unknown, right: unknown): boolean => {
     keys.length === Object.keys(second).length &&
     keys.every((key) => Object.hasOwn(second, key) && equalPartValue(first[key], second[key]))
   );
-};
-
-const shareMessageParts = (previous: MyUIMessage | undefined, current: MyUIMessage): MyUIMessage => {
-  if (previous?.id !== current.id || previous.role !== current.role) {
-    return structuredClone(current);
-  }
-  const parts = current.parts.map((part, index) =>
-    equalPartValue(previous.parts[index], part) ? previous.parts[index]! : structuredClone(part),
-  );
-  const unchanged =
-    parts.length === previous.parts.length && parts.every((part, index) => part === previous.parts[index]);
-  if (unchanged && equalPartValue(previous.metadata, current.metadata)) {
-    return previous;
-  }
-  return { ...current, metadata: structuredClone(current.metadata), parts: unchanged ? previous.parts : parts };
 };
 
 export type ChatHistoricalUsage = Readonly<{
@@ -580,10 +637,9 @@ type InternalSession = ChatSession & {
   /** The outbox's record as this page last read it: the gate reads its handover receipt. */
   outboxRecord: ChatMessageQueueRecord | undefined;
   /**
-   * A departing send the host accepted. The thread shows it until the SDK transcript holds it or its run ends: the
-   * outbox lets go of the entry on acceptance, and the thread must not drop the request for the frames in between. It
-   * is still *departing* (the cue reads it as starting, and it cannot be edited) only until the log has its request
-   * (`logged`).
+   * A departing send the host accepted. The accepted gesture shows it until the log has its run; it is still
+   * *departing* (the cue reads it as starting, and it cannot be edited) only until the log has its request (`logged`),
+   * and a Stop aims at its run until that run ends.
    */
   handedOff: Readonly<{ message: MyUIMessage; runId: string; logged?: true }> | undefined;
   dispatchTask: Promise<void> | undefined;
@@ -628,6 +684,25 @@ type InternalSession = ChatSession & {
       }>
     | undefined;
   materializeVersion: number;
+  /**
+   * The displayed source (T2): this device's views and overlay as of the last projection caught up with its read
+   * answered, and other devices' views as of their last completed scan. Each advances on its own authority.
+   */
+  displayedOwn: ChatProjection | undefined;
+  displayedRemote: ChatProjection['remote'];
+  /** The fold of the displayed source, and the transcript shown from it with the gesture and seed. */
+  displayedFold: readonly MyUIMessage[];
+  displayedMessages: Readonly<{
+    fold: readonly MyUIMessage[];
+    gesture: AcceptedGesture | undefined;
+    seed: MyUIMessage | undefined;
+    messages: readonly MyUIMessage[];
+  }>;
+  acceptedGesture: AcceptedGesture | undefined;
+  /** The transcript last announced, and the D-UI-10 throttle that announces the next. */
+  announcedMessages: readonly MyUIMessage[];
+  announceTimer: ReturnType<typeof setTimeout> | undefined;
+  announcePending: boolean;
   transcriptMaterialization: Promise<void> | undefined;
   /** A materialization of the log applied (or failed) for this session: an empty transcript is now settled (I21). */
   transcriptSettled: boolean;
@@ -1768,69 +1843,14 @@ export class ChatSessionStore {
     session.chat.messages = messages;
   }
 
-  /** Stable structural and command selections; streaming text only inspects the current tail. */
+  /** Stable structural and command selections, rebuilt from message identity: any message the fold changed is new. */
   public getMessagePresentation(chatId: string): MessagePresentation {
     const messages = this.#sessions.get(chatId)?.messages;
     if (messages === undefined) {
       return emptyMessagePresentation;
     }
-    const last = messages.at(-1);
     const cached = this.#messagePresentations.get(chatId);
-    if (
-      cached?.length === messages.length &&
-      cached.lastId === last?.id &&
-      cached.lastRole === last?.role &&
-      (messages.length === 1 || cached.firstMessage === messages[0])
-    ) {
-      const selected = last === undefined ? undefined : shareMessageParts(cached.lastMessage, last);
-      if (last !== undefined) {
-        // The map is an index over the authoritative SDK array, not another transcript.
-        cached.messagesById.set(last.id, selected!);
-      }
-      const agentInvocations =
-        cached.lastParts === selected?.parts
-          ? cached.agentInvocations
-          : [
-              ...new Set([...cached.prefixInvocations, ...invocationsOf(selected === undefined ? [] : [selected])]),
-            ].join('\n');
-      const next = {
-        ...cached,
-        agentInvocations,
-        lastParts: selected?.parts,
-        lastMessage: selected,
-        lastRawMessage: last,
-      };
-      this.#messagePresentations.set(chatId, next);
-      return next;
-    }
-    const prefixInvocations = invocationsOf(messages.slice(0, -1));
-    const agentInvocations = [
-      ...new Set([...prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])]),
-    ].join('\n');
-    const selected = last === undefined ? undefined : shareMessageParts(undefined, last);
-    const next: CachedMessagePresentation = {
-      messagesById: new Map(
-        messages.map((message) => [
-          message.id,
-          message === last
-            ? selected!
-            : message === cached?.lastRawMessage
-              ? shareMessageParts(cached.lastMessage, message)
-              : message,
-        ]),
-      ),
-      order: messages.map((message) => message.id),
-      groups: buildTurnGroups(messages),
-      agentInvocations,
-      length: messages.length,
-      lastId: last?.id,
-      lastRole: last?.role,
-      prefixInvocations,
-      lastParts: selected?.parts,
-      lastMessage: selected,
-      lastRawMessage: last,
-      firstMessage: messages[0],
-    };
+    const next = presentMessages(messages, cached);
     this.#messagePresentations.set(chatId, next);
     return next;
   }
@@ -1866,7 +1886,7 @@ export class ChatSessionStore {
     }
     const projection = this.#projectionContext(chatId);
     if (projection === undefined || !selectCaughtUp(projection)) {
-      return usageOf(this.#sessions.get(chatId)?.chat.messages ?? []);
+      return usageOf(this.#sessions.get(chatId)?.messages ?? []);
     }
     const cached = this.#historicalUsage.get(chatId);
     const sameSource = (left: ChatProjection, right: ChatProjection): boolean =>
@@ -1961,6 +1981,11 @@ export class ChatSessionStore {
       this.#unreadTopic.emit();
     }
     this.startPendingSeed(chatId);
+  }
+
+  /** Fold one live model event as the host attachment does; the ingress for deterministic readers. @internal */
+  public receiveHostLiveEvent(chatId: string, event: AgentLiveEvent): void {
+    this.#projectionOf(chatId).send({ type: 'live', event });
   }
 
   /** The current read-only host attachment's verified state, never a run lifecycle. @public */
@@ -3315,7 +3340,7 @@ export class ChatSessionStore {
 
   /**
    * The request the thread showed as departing has a turn of its own from here: once the log has it, its run's rows
-   * describe it; once the run has ended, it stays until the transcript shows it, unless the host took it back.
+   * describe it, and once that run has ended, a Stop no longer aims at it.
    */
   #settleHandedOff(session: InternalSession, projection: ChatProjection): void {
     const { handedOff } = session;
@@ -3323,17 +3348,10 @@ export class ChatSessionStore {
       return;
     }
     const lifecycle = projection.ledger.runs[handedOff.runId]?.lifecycle;
-    const view = projection.views[handedOff.runId];
-    if (
-      (lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') &&
-      (view?.user === undefined ||
-        isRetractedRun(view) ||
-        session.chat.messages.some((message) => message.id === handedOff.message.id))
-    ) {
+    if (lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
       session.handedOff = undefined;
-      this.#messagePresentations.delete(session.chatId);
       this.#chatTopics.get(session.chatId)?.emit();
-    } else if (handedOff.logged !== true && view?.user !== undefined) {
+    } else if (handedOff.logged !== true && projection.views[handedOff.runId]?.user !== undefined) {
       /* The log has the request: the run's own rows describe it from here, and it can be edited like any other. */
       session.handedOff = { ...handedOff, logged: true };
       this.#chatTopics.get(session.chatId)?.emit();
@@ -4083,6 +4101,10 @@ export class ChatSessionStore {
         return;
       }
       accepted = true;
+      if (command.type === 'start' && request.kind !== 'continue') {
+        session.acceptedGesture = { runId: command.payload.runId, request };
+        this.#presentTranscript(session, this.#projectionContext(session.chatId));
+      }
       if (request.queueId !== undefined) {
         await session.messageQueueStore.acknowledge(request.queueId, command.commandId, acceptingPlacement);
         if (session.commandAbort !== abort) {
@@ -4127,15 +4149,17 @@ export class ChatSessionStore {
             ? 'resume'
             : 'regenerate';
       if (request.kind === 'edit') {
-        const index = session.chat.messages.findIndex((message) => message.id === request.messageId);
-        if (index === -1) {
+        if (!session.messages.some((message) => message.id === request.messageId)) {
           throw new Error('That message is no longer in this chat, so it cannot be edited.');
         }
-        this.#messagePresentations.delete(session.chatId);
-        session.chat.messages = [
-          ...session.chat.messages.slice(0, index),
-          editedMessage(session.chat.messages[index]!, request),
-        ];
+        /* The SDK chat still streams the run for its status (T2); its copy truncates as the transcript does. */
+        const index = session.chat.messages.findIndex((message) => message.id === request.messageId);
+        if (index !== -1) {
+          session.chat.messages = [
+            ...session.chat.messages.slice(0, index),
+            editedMessage(session.chat.messages[index]!, request),
+          ];
+        }
       }
       const watchInput: SdkWatchInput = {
         runId: command.payload.runId,
@@ -4161,6 +4185,10 @@ export class ChatSessionStore {
       session.watch = undefined;
       session.watchedRunId = undefined;
       session.activeCommand = undefined;
+      if (session.acceptedGesture?.runId === command.payload.runId) {
+        session.acceptedGesture = undefined;
+        this.#presentTranscript(session, this.#projectionContext(session.chatId));
+      }
       const parsed = parseErrorForPersistence(error instanceof Error ? error : new Error(String(error)));
       session.persistenceActorRef.send({
         type: 'setPersistedError',
@@ -4328,6 +4356,7 @@ export class ChatSessionStore {
       this.refreshMessageQueue(chatId);
     }
     this.#refreshDeparting(session);
+    this.#presentTranscript(session, projection);
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
@@ -4640,7 +4669,6 @@ export class ChatSessionStore {
       watch?.stop();
       session.watch = undefined;
       session.watchedRunId = undefined;
-      this.#projections.get(session.chatId)?.send({ type: 'clear-live', runId });
       const projection = this.#projectionContext(session.chatId);
       warnPresentation('[ChatSessionStore] presentation recovery', {
         chatId: session.chatId,
@@ -4658,6 +4686,91 @@ export class ChatSessionStore {
       session.recoveringPresentation = false;
       this.#syncProjection(session.chatId, 'none');
     });
+  }
+
+  /**
+   * The displayed transcript (T2, I-1): the fold of the displayed source, plus the accepted gesture the log does not
+   * hold yet, plus the unsent seed. Each source advances only on its own authority, so a reset, a reread or a cold
+   * read in pages shows the last displayed source until its successor has authority, and no content is compared.
+   */
+  #displayedTranscript(session: InternalSession): readonly MyUIMessage[] {
+    const projection = this.#projectionContext(session.chatId);
+    if (projection !== undefined && this.#sessions.get(session.chatId) === session) {
+      /* A display validated before a release stays displayable while a fresh capture is held. */
+      const validated = this.#hasDisplayAuthority(session.chatId, projection);
+      if (selectCaughtUp(projection) && (validated || this.#hasTranscriptAuthority(session.chatId, projection))) {
+        session.displayedOwn = projection;
+      }
+      if (validated || this.#foreignDisplayReady(session.chatId, projection)) {
+        session.displayedRemote = projection.remote;
+      }
+    }
+    const own = session.displayedOwn;
+    const source: TranscriptProjection = {
+      views: own?.views ?? noViews,
+      ...(own?.live === undefined ? {} : { live: own.live }),
+      ...(session.displayedRemote === undefined ? {} : { remote: session.displayedRemote }),
+    };
+    const fold = selectTranscript(source, session.displayedFold);
+    session.displayedFold = fold;
+    const gesture =
+      session.acceptedGesture !== undefined && own?.views[session.acceptedGesture.runId] === undefined
+        ? session.acceptedGesture
+        : undefined;
+    const seed = session.seedMessage;
+    const shown = session.displayedMessages;
+    if (shown.fold === fold && shown.gesture === gesture && shown.seed === seed) {
+      return shown.messages;
+    }
+    let messages = gesture === undefined ? fold : applyAcceptedGesture(fold, gesture.request);
+    if (seed !== undefined && !messages.some((message) => message.role === 'user')) {
+      messages = [...messages, seed];
+    }
+    session.displayedMessages = { fold, gesture, seed, messages };
+    return messages;
+  }
+
+  /**
+   * Announce the displayed transcript when it changed, leading and trailing at most every 50 ms (D-UI-10), and settle
+   * its load state from authority (I21): once this device's log is caught up with its read answered, or other
+   * devices' history is all the chat has.
+   */
+  #presentTranscript(session: InternalSession, projection: ChatProjection | undefined): void {
+    const { messages } = session;
+    if (
+      session.acceptedGesture !== undefined &&
+      session.displayedOwn?.views[session.acceptedGesture.runId] !== undefined
+    ) {
+      session.acceptedGesture = undefined;
+    }
+    if (
+      projection !== undefined &&
+      session.displayedOwn === projection &&
+      this.#hasDisplayAuthority(session.chatId, projection)
+    ) {
+      this.#settleTranscript(session, messages);
+    }
+    if (messages === session.announcedMessages) {
+      return;
+    }
+    session.announcedMessages = messages;
+    this.#announce(session);
+  }
+
+  /** Wake the chat's subscribers, leading and trailing at most every 50 ms (D-UI-10). */
+  #announce(session: InternalSession): void {
+    if (session.announceTimer !== undefined) {
+      session.announcePending = true;
+      return;
+    }
+    this.#chatTopics.get(session.chatId)?.emit();
+    session.announceTimer = setTimeout(() => {
+      session.announceTimer = undefined;
+      if (session.announcePending) {
+        session.announcePending = false;
+        this.#announce(session);
+      }
+    }, chatMessagesThrottle);
   }
 
   /** A startup request is chat-record-owned only while the host log has no user turn. */
@@ -5116,6 +5229,7 @@ export class ChatSessionStore {
 
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
+    const displayed = (): readonly MyUIMessage[] => this.#displayedTranscript(session);
 
     /* The project is the caller's (PV-S4), so the composer binds now; only a released predecessor's drain is awaited. */
     const { client } = depsRef();
@@ -5474,9 +5588,8 @@ export class ChatSessionStore {
     // sets. `~registerMessagesCallback` etc. are public (the `~` prefix is
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
-    // Message changes are throttled (leading and trailing, D-UI-10): a stream
-    // writes one snapshot per chunk, and every subscriber re-rendered on each.
-    // Status and error callbacks stay immediate.
+    // Message changes share the transcript's throttle (leading and trailing, D-UI-10): a stream writes one
+    // snapshot per chunk, and every subscriber re-rendered on each. Status and error callbacks stay immediate.
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
       if (
         session.presentationHold !== undefined &&
@@ -5484,8 +5597,8 @@ export class ChatSessionStore {
       ) {
         session.presentationHold = undefined;
       }
-      this.#chatTopics.get(chatId)?.emit();
-    }, chatMessagesThrottle);
+      this.#announce(session);
+    });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
       const next = chat.status;
       if (session.status !== next) {
@@ -5573,8 +5686,9 @@ export class ChatSessionStore {
       chatId,
       chat,
       get messages() {
-        const base = session.presentationHold?.messages ?? chat.messages;
-        const message = session.departing?.message ?? session.handedOff?.message;
+        const base = displayed();
+        /* A send leaving for its own turn is shown until the host accepts it; the accepted gesture shows it after. */
+        const message = session.departing?.message;
         if (message === undefined) {
           return base;
         }
@@ -5627,6 +5741,14 @@ export class ChatSessionStore {
       watchedStreamVersion: undefined,
       presentationHold: undefined,
       materializeVersion: 0,
+      displayedOwn: undefined,
+      displayedRemote: undefined,
+      displayedFold: noMessages,
+      displayedMessages: { fold: noMessages, gesture: undefined, seed: undefined, messages: noMessages },
+      acceptedGesture: undefined,
+      announcedMessages: noMessages,
+      announceTimer: undefined,
+      announcePending: false,
       transcriptMaterialization: undefined,
       transcriptSettled: this.#createdEmpty.delete(chatId),
       transcriptAwaitsForeignScan: false,
@@ -5670,6 +5792,8 @@ export class ChatSessionStore {
         session.watch?.stop();
         clearTimeout(session.presentationRetry);
         session.presentationRetry = undefined;
+        clearTimeout(session.announceTimer);
+        session.announceTimer = undefined;
         lifecycleSubscription?.unsubscribe();
         unregisterMessages();
         unregisterStatus();

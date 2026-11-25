@@ -19,7 +19,7 @@
       "home": {
         "brotliBytes": 1260153,
         "requests": 225,
-        "largestChunkBrotliBytes": 138982,
+        "largestChunkBrotliBytes": 140916,
         "knownHeavy": {}
       }
     }

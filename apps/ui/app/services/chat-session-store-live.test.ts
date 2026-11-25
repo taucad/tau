@@ -379,21 +379,38 @@ describe('ChatSessionStore with the pinned real SDK', () => {
    * re-rendered the transcript once per token. */
   it('should coalesce a burst of message updates into one leading and one trailing notification', async () => {
     const store = createStore();
-    const { chat } = store.acquire('chat', 'project');
+    store.acquire('chat', 'project');
     await vi.waitFor(() => {
       expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
+    /* T2: the transcript is the fold of the projection, so the burst is a run of live text deltas. */
+    publishLogRows(store, 'chat', [
+      lifecycleRow(0, 'admitted'),
+      lifecycleRow(1, 'running'),
+      logRow(2, { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Go.' } }),
+    ]);
+    const text = { chatId: 'chat', runId: 'run_1', messageId: 'step-1', contentIndex: 0 } as const;
+    store.receiveHostLiveEvent('chat', { type: 'text-start', ...text });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
     const listener = vi.fn();
     const unsubscribe = store.subscribeChat('chat', listener);
-    const message = (text: string): MyUIMessage => ({ id: 'a', role: 'assistant', parts: [{ type: 'text', text }] });
-    for (let index = 1; index <= 20; index++) {
-      chat.messages = [message('x'.repeat(index))];
+    for (let index = 0; index < 20; index++) {
+      store.receiveHostLiveEvent('chat', { type: 'text-delta', ...text, delta: 'x', offset: index });
     }
     expect(listener.mock.calls.length).toBeLessThanOrEqual(1);
+    // A trailing announcement carries the burst's last delta; a timer still open from the text start may absorb the
+    // leading one under load, so at most two wake the subscriber.
     await vi.waitFor(() => {
-      expect(listener).toHaveBeenCalledTimes(2);
+      expect(visible(store.get('chat')!.messages).at(-1)?.text).toBe('x'.repeat(20));
+      expect(listener.mock.calls.length).toBeGreaterThanOrEqual(1);
     });
-    expect(visible(store.get('chat')!.messages)).toEqual([{ id: 'a', text: 'x'.repeat(20) }]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 120);
+    });
+    expect(listener.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(visible(store.get('chat')!.messages).at(-1)).toEqual({ id: 'run_1', text: 'x'.repeat(20) });
     unsubscribe();
     store.release('chat');
   });

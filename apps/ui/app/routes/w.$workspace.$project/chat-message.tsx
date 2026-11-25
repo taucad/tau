@@ -6,6 +6,7 @@ import {
   Camera,
   Globe,
   ListChecks,
+  ListTodo,
   MessageCircle,
   Pencil,
   Search,
@@ -34,7 +35,7 @@ import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { ChatActivityGroup } from '@taucad/chat-ui/components/chat-activity-group';
+import { ChatActivityGroup, ChatActivityRow } from '@taucad/chat-ui/components/chat-activity-group';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
 import { reportTourAction } from '#components/tour/tour-actions.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -203,7 +204,6 @@ function ChatMessageAcpPlan({
 
 type PartRenderContext = {
   readonly messageId: string;
-  readonly lastMeaningfulIndex: number;
   readonly isActiveGroup: boolean;
   readonly isMessageActive: boolean;
 };
@@ -284,7 +284,7 @@ function renderAssistantPart(
   index: number,
   context: PartRenderContext,
 ): React.JSX.Element | undefined {
-  const { messageId, lastMeaningfulIndex, isMessageActive } = context;
+  const { messageId, isMessageActive } = context;
   const part = settledToolPart(receivedPart);
 
   switch (part.type) {
@@ -299,7 +299,6 @@ function renderAssistantPart(
         <ChatMessageReasoning
           key={`${messageId}-message-part-${index}`}
           parts={[part]}
-          hasContent={index < lastMeaningfulIndex}
           isMessageActive={context.isActiveGroup}
         />
       );
@@ -631,25 +630,27 @@ function renderActivityGroup(
       <ChatMessageReasoning
         key={`${context.messageId}-reasoning-${group.partIndices[0] ?? groupIndex}`}
         parts={reasoningParts}
-        hasContent={(group.partIndices.at(-1) ?? 0) < context.lastMeaningfulIndex}
         isMessageActive={context.isActiveGroup}
       />
     );
   }
 
   const ActivityGroup = group.families.includes('test') ? TestActivityGroup : ChatActivityGroup;
+  const rows = renderActivityRows(group, context);
   return (
     <ActivityGroup
       key={`${context.messageId}-group-${groupIndex}`}
       summary={group.summary}
       icon={activityIcons[group.families[0] ?? 'other']}
-      isActive={context.isActiveGroup}
+      // One row names itself better than a summary of one, and opens straight to its detail.
+      isSole={rows.length === 1}
+      isSettled={!context.isMessageActive}
       hasActiveRows={
         (context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))) ||
         (context.isActiveGroup && isStreamingThought(group.parts.at(-1)))
       }
     >
-      {renderActivityRows(group, context)}
+      {rows}
     </ActivityGroup>
   );
 }
@@ -667,28 +668,24 @@ const reportTestRowOpened = (): void => {
  */
 function TestActivityGroup(properties: React.ComponentProps<typeof ChatActivityGroup>): React.JSX.Element {
   const testRowAnchor = useTourAnchor('activity-test');
-  return <ChatActivityGroup {...properties} triggerRef={testRowAnchor} onOpen={reportTestRowOpened} />;
+  return <ChatActivityGroup {...properties} anchorRef={testRowAnchor} onOpen={reportTestRowOpened} />;
 }
 
 type ReasoningPart = Extract<MyMessagePart, { type: 'reasoning' }>;
 
-/** Tool rows in order, with each consecutive reasoning run as one nested thought. */
+/** Tool rows in order, with each consecutive reasoning run as one thought row. */
 function renderActivityRows(group: AggregatedGroup, context: PartRenderContext): React.JSX.Element[] {
   const rows: React.JSX.Element[] = [];
   let run: ReasoningPart[] = [];
   let runStart = 0;
-  let runEnd = 0;
   const flushRun = (isTrailing: boolean): void => {
     if (run.length === 0) {
       return;
     }
     rows.push(
-      <ChatMessageReasoning
-        key={`${context.messageId}-reasoning-${runStart}`}
-        parts={run}
-        hasContent={runEnd < context.lastMeaningfulIndex}
-        isMessageActive={context.isActiveGroup && isTrailing}
-      />,
+      <ChatActivityRow key={`${context.messageId}-reasoning-${runStart}`}>
+        <ChatMessageReasoning parts={run} isMessageActive={context.isActiveGroup && isTrailing} />
+      </ChatActivityRow>,
     );
     run = [];
   };
@@ -699,13 +696,12 @@ function renderActivityRows(group: AggregatedGroup, context: PartRenderContext):
         runStart = partIndex;
       }
       run.push(part);
-      runEnd = partIndex;
       continue;
     }
     flushRun(false);
     const row = renderAssistantPart(part, partIndex, context);
     if (row) {
-      rows.push(row);
+      rows.push(<ChatActivityRow key={row.key}>{row}</ChatActivityRow>);
     }
   }
   flushRun(true);
@@ -724,6 +720,7 @@ const activityIcons: Record<ActivityFamily, LucideIcon> = {
   screenshot: Camera,
   test: ListChecks,
   chat: MessageCircle,
+  plan: ListTodo,
   other: Wrench,
 };
 
@@ -731,20 +728,17 @@ const AssistantActivityGroup = memo(function AssistantActivityGroup({
   group,
   groupIndex,
   messageId,
-  lastMeaningfulIndex,
   isActiveGroup,
   isMessageActive,
 }: {
   readonly group: ActivityGroup;
   readonly groupIndex: number;
   readonly messageId: string;
-  readonly lastMeaningfulIndex: number;
   readonly isActiveGroup: boolean;
   readonly isMessageActive: boolean;
 }): React.JSX.Element | undefined {
   return renderActivityGroup(group, groupIndex, {
     messageId,
-    lastMeaningfulIndex,
     isActiveGroup,
     isMessageActive,
   });
@@ -758,7 +752,6 @@ function AssistantParts({
   readonly messageId: string;
 }): React.JSX.Element {
   const groups = useMemo(() => groupAssistantParts(parts), [parts]);
-  const lastMeaningfulIndex = useMemo(() => findLastMeaningfulPartIndex(parts), [parts]);
   const lastGroupIndex = groups.length - 1;
   const isMessageActive = useChatSelector(
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
@@ -772,7 +765,6 @@ function AssistantParts({
           group={group}
           groupIndex={groupIndex}
           messageId={messageId}
-          lastMeaningfulIndex={lastMeaningfulIndex}
           isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
           isMessageActive={isMessageActive}
         />

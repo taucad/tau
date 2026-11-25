@@ -2317,11 +2317,16 @@ it.each(['approve-then-reuse', 'reuse-then-approve', 'reuse-during-approval'])(
     const answered = new Promise<void>((resolve) => {
       answer = resolve;
     });
+    let asked: () => void = () => undefined;
+    const askedPerson = new Promise<void>((resolve) => {
+      asked = resolve;
+    });
     const projection = createTurnProjection({
       turn: {
         ...stubTurn(rows),
         approve: async () => {
           if (order === 'reuse-during-approval') {
+            asked();
             await answered;
           }
           return { interruptId: 'permission-interrupt', outcome: 'approved', optionId: 'allow_always' };
@@ -2356,6 +2361,8 @@ it.each(['approve-then-reuse', 'reuse-then-approve', 'reuse-during-approval'])(
       await approve();
     } else {
       const approval = approve();
+      /* The person is being asked before the id is reused, and answers only once the reuse is projected. */
+      await askedPerson;
       open('second');
       await vi.waitFor(() => {
         expect(rows.filter((row) => row.type === 'message.appended' && row.message.role === 'tool-input')).toHaveLength(

@@ -111,3 +111,5 @@ use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, 
 use_skill startup latency T3 re-pins the drift after `chat-session-store.ts`, `use-chat.tsx` and `use-cad-chat-client.ts` began reading the chat's status from the run phase and the command in flight, with no SDK stream armed; no action changed.
 
 use_skill startup latency T4 re-pins the drift after `chat-session-store.ts` and `use-chat.tsx` dropped the AI SDK `Chat`, its watch, presentation hold, retries and materialization, leaving the fold as the transcript's one owner; no action changed.
+
+The T4 review re-pins the drift after `chat-session-store.ts` held its throttled transcript for every reader, released a run whose log read is refused for good and held a Resume submitted until its run reopens; no action changed.

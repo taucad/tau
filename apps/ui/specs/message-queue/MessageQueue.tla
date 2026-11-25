@@ -199,6 +199,8 @@
 \* presentation hold, retry or materialization; the fold is the transcript's one owner and settles its load. A Start
 \* whose log read is refused for good no longer shows as submitted. Dispatch, acknowledgement and the queue are
 \* untouched. No action or verdict changes.
+\* T4 review (2026-11-26): the store's transcript holds its D-UI-10 announcement, a refused read releases its held run
+\* and a Resume stays submitted until its run reopens. Dispatch, acknowledgement and the queue are untouched.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -303,9 +303,12 @@ export const replayGatewayTraceStep = (state: GatewayTraceState, action: string)
       ];
     }
     case 'ApiFinish': {
-      return row.cust === 'pending' && row.gen === 1 && row.ev.includes('final')
-        ? [terminal('settled', 'final', false)]
-        : unchanged;
+      if (row.cust !== 'pending' || row.gen !== 1) {
+        return unchanged;
+      }
+      /* The live finish settles final usage and absorbs every other end the stream reached: nothing can price it
+       * later, so it does not wait for the sweep (SupplierCutSettles). */
+      return [row.ev.includes('final') ? terminal('settled', 'final', false) : terminal('absorbed', 'unknown', false)];
     }
     case 'SweepClaim': {
       return [state.now - 1, state.now]

@@ -1325,12 +1325,15 @@ it.each([
           supplierCostUnpricedReason: null,
         });
       } else {
+        /* The supplier stream is over and reported no usage this route can price, so nothing can price it
+         * later: the live finish absorbs it at once instead of leaving the hold to recovery (launch audit D-2). */
         expect(operation).toMatchObject({
-          chargedAtoms: null,
-          customerState: 'pending',
+          chargedAtoms: 0n,
+          customerState: 'absorbed',
           supplierCostPicoUsd: null,
-          supplierCostUnpricedReason: null,
+          supplierCostUnpricedReason: 'absorbed',
         });
+        /* Recovery finds nothing of this step left to resolve. */
         await database
           .update(creditOperation)
           .set({ dueAt: sql`clock_timestamp() - interval '1 second'` })

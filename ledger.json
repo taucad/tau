@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T19:08:43.380Z",
+  "updatedAt": "2026-11-25T19:24:12.951Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1756,6 +1756,19 @@
       "counted": 843,
       "replayed": 23299,
       "rejected": 0
+    },
+    {
+      "run": 45682283431,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "abe90d9c89a36195731f59e5ed5eeed8d75defeb",
+      "at": "2026-11-25T19:23:52Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -2008,12 +2021,12 @@
       "lastSeen": "2026-11-25T19:08:30Z"
     },
     "apps-runtime-e2e:vitest": {
-      "executions": 12,
-      "tests": 12,
+      "executions": 13,
+      "tests": 13,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:40:19Z",
-      "lastSeen": "2026-11-25T15:28:47Z"
+      "lastSeen": "2026-11-25T19:23:52Z"
     },
     "archive-core:test": {
       "executions": 1,

@@ -196,8 +196,9 @@
 \* trays and first-text timing read the fold. Dispatch, acknowledgement and the queue are untouched. No action or
 \* verdict changes.
 \* use_skill startup latency T4 (2026-11-26): `chat-session-store.ts` and `use-chat.tsx` hold no AI SDK `Chat`, watch,
-\* presentation hold, retry or materialization; the fold is the transcript's one owner and settles its load. Dispatch,
-\* acknowledgement and the queue are untouched. No action or verdict changes.
+\* presentation hold, retry or materialization; the fold is the transcript's one owner and settles its load. A Start
+\* whose log read is refused for good no longer shows as submitted. Dispatch, acknowledgement and the queue are
+\* untouched. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

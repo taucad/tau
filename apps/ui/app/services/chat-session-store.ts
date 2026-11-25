@@ -1716,6 +1716,7 @@ export class ChatSessionStore {
       if (answer.reason === 'unreadable' && session !== undefined) {
         // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
         this.#latchUnreadTranscript(session);
+        this.#refreshStatus(session);
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -2886,6 +2887,7 @@ export class ChatSessionStore {
           if (event.type === 'attachment.refused') {
             if (session !== undefined) {
               this.#latchUnreadTranscript(session);
+              this.#refreshStatus(session);
             }
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
@@ -4591,6 +4593,8 @@ export class ChatSessionStore {
     return (
       session.commandInFlight ||
       (command?.type === 'start' &&
+        /* A refused read folds nothing more, so the run it waits for would never arrive. */
+        this.#observed.get(session.chatId)?.status !== 'refused' &&
         this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId] === undefined)
     );
   }

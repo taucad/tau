@@ -14,9 +14,8 @@ type CreateChatInstanceOptions = {
 /**
  * Factory for a per-session AI SDK `Chat<MyUIMessage>` instance.
  *
- * The chat-session store calls this once per chat acquisition; clients then
- * read the instance via `useActiveChatInstance` and never construct one
- * directly. Centralising `id` / `transport` / `generateId` here means a
+ * The CAD transcript no longer uses one (T4: it is the store's fold); this
+ * serves the remaining SDK clients. Centralising `id` / `transport` / `generateId` here means a
  * change to the API surface (e.g. a new transport, a different id format)
  * is one edit.
  *

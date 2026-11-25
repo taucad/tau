@@ -1535,6 +1535,9 @@ const reductionOf = (chunks: ProjectedChunks): ChunkReduction => {
   }
   const reduction = reduceChunks(chunksSince(chunks, base?.length ?? 0), base);
   reductions.set(chunks, reduction);
+  /* A reduced value is where a later walk stops, so its own ancestors (and their reductions) can be collected: a long
+   * live run otherwise held every displayed snapshot of its answer until the overlay cleared. */
+  extensions.delete(chunks);
   return reduction;
 };
 

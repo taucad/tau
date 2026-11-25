@@ -1779,6 +1779,59 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
+  it('should stop showing an accepted Start as submitted once its log read is refused for good (T3 review)', async () => {
+    const store = createStore();
+    const chatId = 'chat_refused_command';
+    const projectId = 'project_refused_command';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: 'req_live_command',
+      payload: {
+        chatId,
+        runId: 'req_live_command',
+        message: { id: 'msg_live_command', role: 'user', content: 'Make a cube' },
+        trigger: 'submit',
+      },
+    };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn(async () => reply.promise);
+    const close = vi.fn(async () => undefined);
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({
+        catchUp: writerOwnedCatchUp,
+        hostCommand,
+        close,
+        subscribe: () => () => undefined,
+        subscribeLive: () => () => undefined,
+      }),
+    );
+    startTurnOwner(store, projectId);
+    store.acquire(chatId, projectId);
+    publishAdmission(chatId, () => ({
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+      command,
+    }));
+    const requested = store.requestTurn(chatId, {
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+    });
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+    });
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
+    await requested;
+    await settle();
+    /* Accepted, and its run not folded yet: still submitted, and the accepted message is shown. */
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    expect(store.get(chatId)?.messages.map((message) => message.id)).toEqual(['msg_live_command']);
+    /* Nothing will fold the run from an unreadable log: the composer is not left busy until a reload. */
+    store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    unpublish();
+  });
+
   it.each([
     { outcome: 'acknowledgement', successor: 'pending' },
     { outcome: 'failure', successor: 'pending' },

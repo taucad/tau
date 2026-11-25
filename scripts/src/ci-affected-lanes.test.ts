@@ -124,6 +124,10 @@ const affectedPlanOutputs = (): ReadonlySet<string> => {
       outputs.add(key);
     }
   }
+  // The burn-in (FQ-10): computed from the pull request's own changed test files and the same graph, in its own step.
+  if (ci.jobs['plan']?.outputs?.['burn-in'] === expression('steps.burn-in.outputs.burn-in')) {
+    outputs.add('burn-in');
+  }
   return outputs;
 };
 
@@ -243,6 +247,7 @@ describe('ci.yml affected-only lanes', () => {
       'e2e-queue',
       'compute-qualify',
       'node-floor',
+      'burn-in',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');

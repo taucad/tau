@@ -97,6 +97,8 @@ jobs:
       node-floor: ${{ steps.plan.outputs.node-floor }}
       node-floor-shards: ${{ steps.plan.outputs.node-floor-shards }}
       compute-qualify: ${{ steps.plan.outputs.compute-qualify }}
+      burn-in: ${{ steps.burn-in.outputs.burn-in }}
+      burn-in-units: ${{ steps.burn-in.outputs.burn-in-units }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -515,6 +517,19 @@ jobs:
             '{api: ($selected.api != [] | tostring), "billing-e2e": ($selected.billing != [] | tostring), "reused-run": $reused, desktop: $desktop, "desktop-projects": $desktop_projects}' \
             > out/ci-plan/lanes.json
           cat out/ci-plan/lanes.json
+
+      # Burn-in of changed tests (Brain research/ci-flake-quarantine-blueprint.md, FQ-10, operator decision O6 B): the
+      # test files this pull request adds or modifies, mapped to their project's `test` target, the target the test
+      # lanes run (`scripts/src/burn-in.ts`). None selects no `burn-in` job. Pull requests only: the merge queue and
+      # pushes never burn in. The files are the pull request's own, as the "touched" rule above reads them.
+      - name: Plan the burn-in of changed tests
+        id: burn-in
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          head=${NX_HEAD:-HEAD}
+          git diff --name-only --no-renames --diff-filter=AM --relative "$(git merge-base "$NX_BASE" "$head")" "$head" \
+            | node scripts/src/burn-in-cli.ts plan --graph "$RUNNER_TEMP/graph.json" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the lane plan
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1153,6 +1168,74 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Burn-in of changed tests on pull requests (Brain research/ci-flake-quarantine-blueprint.md, FQ-10, operator decision
+  # O6 B). The test files the pull request adds or modifies (the plan's `burn-in-units`, each its project's `test`
+  # target) run ten times in fresh Vitest processes with `--sequence.shuffle`, a recorded seed per run (the run id plus
+  # the run's index) and no retry (RT-3: a changed test gets no credit for a retry), capped at 5 minutes of runs; the
+  # cap kills the run in progress, and the summary names the files it cut short. Ten runs catch a 20 % flake 89 % of
+  # the time and a 5 % one 40 %. A failing run fails this job, and the required gate `Run affected tasks` fails with
+  # it, so a pull request cannot enter the queue with a flake its own diff brings. A pull request that changes no test
+  # file the test lanes run gets no job; the merge queue never runs it (`scripts/src/burn-in-cli.ts`).
+  burn-in:
+    name: Burn-in (changed tests)
+    needs: plan
+    # The plan sets `burn-in` on pull requests only.
+    if: needs.plan.outputs.burn-in == 'true'
+    runs-on: ubuntu-latest
+    # Setup, the targets' dependencies and the 5-minute cap on the runs.
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      # As the test lanes: some suites run the native sandbox.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      # As the test lanes: the pinned downloads the burned-in targets' task graph reaches come from the Actions cache.
+      - name: Find the burn-in's pinned downloads
+        id: pins
+        env:
+          UNITS: ${{ needs.plan.outputs.burn-in-units }}
+        run: |
+          graph="$RUNNER_TEMP/burn-in-graph.json"
+          projects=$(jq -r 'map(.project) | join(",")' <<< "$UNITS")
+          pnpm nx run-many -t test --projects "$projects" --graph="$graph" > /dev/null
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+      - name: Restore the Python kernel seeds
+        if: steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+      - name: Restore the wasi-sdk archive
+        if: steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
+      - name: Burn in the changed tests
+        env:
+          UNITS: ${{ needs.plan.outputs.burn-in-units }}
+        run: |
+          node scripts/src/burn-in-cli.ts run --units "$UNITS" --runs 10 --minutes 5 \
+            --seed "$(( GITHUB_RUN_ID % 1000000000 ))" --out out/burn-in --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the burn-in report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: burn-in
+          path: out/burn-in/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Standalone-project oracles, in `standalone-projects.yml` (also nightly): on every push to
   # `main` only. Not required checks, so they wait for the required gate rather than take three
   # runners while the required lanes still queue for one (X3); `!cancelled()` keeps them running
@@ -1508,6 +1591,7 @@ jobs:
         e2e-queue,
         compute-qualify,
         node-floor,
+        burn-in,
       ]
     if: ${{ github.event_name == 'merge_group' && always() || !cancelled() }}
     runs-on: ubuntu-latest
@@ -1546,6 +1630,8 @@ jobs:
           COMPUTE_QUALIFY_RESULT: ${{ needs.compute-qualify.result }}
           NODE_FLOOR_REQUIRED: ${{ needs.plan.outputs.node-floor }}
           NODE_FLOOR_RESULT: ${{ needs.node-floor.result }}
+          BURN_IN_REQUIRED: ${{ needs.plan.outputs.burn-in }}
+          BURN_IN_RESULT: ${{ needs.burn-in.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -1575,6 +1661,7 @@ jobs:
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
           if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
+          if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed
@@ -1758,6 +1845,16 @@ jobs:
     name: Fail fast (node-floor)
     needs: [node-floor]
     if: ${{ failure() && github.event_name == 'merge_group' && needs.node-floor.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  # The burn-in never runs in the merge queue, so this one never fires; it keeps one fail-fast job per gated lane.
+  fail-fast-burn-in:
+    name: Fail fast (burn-in)
+    needs: [burn-in]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.burn-in.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: *fail-fast-permissions

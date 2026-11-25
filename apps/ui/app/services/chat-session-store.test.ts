@@ -1849,6 +1849,56 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
+  it('should neither send nor hold a Start requested after its log read was refused for good (T4 review)', async () => {
+    const store = createStore();
+    const chatId = 'chat_refused_before_command';
+    const projectId = 'project_refused_before_command';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: 'req_live_command',
+      payload: {
+        chatId,
+        runId: 'req_live_command',
+        message: { id: 'msg_live_command', role: 'user', content: 'Make a cube' },
+        trigger: 'submit',
+      },
+    };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn(async () => reply.promise);
+    const close = vi.fn(async () => undefined);
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({
+        catchUp: writerOwnedCatchUp,
+        hostCommand,
+        close,
+        subscribe: () => () => undefined,
+        subscribeLive: () => () => undefined,
+      }),
+    );
+    startTurnOwner(store, projectId);
+    store.acquire(chatId, projectId);
+    store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
+    publishAdmission(chatId, () => ({
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+      command,
+    }));
+    const requested = store.requestTurn(chatId, {
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+    });
+    await settle();
+    /* No run will fold from a log this page cannot read: nothing is sent, busy or held. */
+    expect(hostCommand).not.toHaveBeenCalled();
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
+    store.release(chatId);
+    await requested;
+    await settle();
+    expect(store.get(chatId)).toBeUndefined();
+    unpublish();
+  });
+
   it.each([
     { outcome: 'acknowledgement', successor: 'pending' },
     { outcome: 'failure', successor: 'pending' },

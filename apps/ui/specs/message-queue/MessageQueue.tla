@@ -201,6 +201,8 @@
 \* untouched. No action or verdict changes.
 \* T4 review (2026-11-26): the store's transcript holds its D-UI-10 announcement, a refused read releases its held run
 \* and a Resume stays submitted until its run reopens. Dispatch, acknowledgement and the queue are untouched.
+\* T4 review round 3 (2026-11-26): a command answered on a refused read releases its run, and a gesture's admission
+\* in `use-chat.tsx` reads the current fold rather than the throttled transcript. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

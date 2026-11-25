@@ -101,7 +101,7 @@ export function ChatTurnHost(): ReactNode {
       const projection = store.getProjection(activeChatId);
       const projectedRun =
         projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
-      const messages = store.get(activeChatId)?.messages ?? [];
+      const messages = store.getCurrentTranscript(activeChatId);
       const turnTelemetry = telemetry.begin(execution, {
         kernelId: turnAgent.kernel,
         consent: consentRef.current,

@@ -59,6 +59,7 @@ const displayed = vi.hoisted(() => ({ messages: [] as readonly MyUIMessage[] }))
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
     get: () => ({ messages: displayed.messages }),
+    getCurrentTranscript: () => displayed.messages,
     getProjection: () => undefined,
     requestTurn: vi.fn(),
     startPendingSeed: vi.fn(),

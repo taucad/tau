@@ -1627,6 +1627,19 @@ export class ChatSessionStore {
     return this.#sessions.get(chatId);
   }
 
+  /**
+   * The chat's transcript as the fold has it now, ahead of the throttled `messages` subscribers see (D-UI-10). For a
+   * gesture's admission and checks, which must not act on a transcript up to one throttle window old.
+   *
+   * @param chatId - A chat with a live session.
+   * @returns Its folded transcript, or none without a session.
+   * @public
+   */
+  public getCurrentTranscript(chatId: string): readonly MyUIMessage[] {
+    const session = this.#sessions.get(chatId);
+    return session === undefined ? [] : this.#displayedTranscript(session);
+  }
+
   /** Stable structural and command selections, rebuilt from message identity: any message the fold changed is new. */
   public getMessagePresentation(chatId: string): MessagePresentation {
     const messages = this.#sessions.get(chatId)?.messages;
@@ -3435,8 +3448,13 @@ export class ChatSessionStore {
       if (session.commandAbort === abort) {
         session.commandInFlight = false;
         session.commandAbort = undefined;
-        this.#refreshStatus(session);
-        this.#scheduleRunReleaseIfTerminal(session);
+        if (this.#observed.get(session.chatId)?.status === 'refused') {
+          /* A command answered after its chat's log read was refused: nothing will fold its run here. */
+          this.#releaseRefusedRun(session);
+        } else {
+          this.#refreshStatus(session);
+          this.#scheduleRunReleaseIfTerminal(session);
+        }
       }
     }
   }
@@ -4610,7 +4628,11 @@ export class ChatSessionStore {
     if (session.commandInFlight) {
       return true;
     }
-    if (command?.type !== 'start' && command?.type !== 'resume') {
+    /* A refused read folds nothing more, so the run a command waits for would never arrive. */
+    if (
+      (command?.type !== 'start' && command?.type !== 'resume') ||
+      this.#observed.get(session.chatId)?.status === 'refused'
+    ) {
       return false;
     }
     const run = this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId];

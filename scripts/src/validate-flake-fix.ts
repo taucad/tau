@@ -12,8 +12,11 @@
  * - config: a Vitest, Vite or Playwright config. Product-grade change; the retry and timeout rule runs on it.
  * - product: everything else.
  *
- * The rules compare each test file's code before and after, lexically (comments and string contents never match),
- * so moving code within a file is neutral and only a net change counts:
+ * The rules compare each test file's code before and after, lexically (comments and string contents never match).
+ * Counts compare per declaration path (`suite:A > test:works`) as well as in total, so a loss in one test is not
+ * hidden by a gain in another. Values (timeouts, wait bounds, retries, `toBeCloseTo` digits) pair by structural
+ * identity (the declaration path plus the callee, receiver or key and its first argument) before they compare; an
+ * identity whose count differs between the sides fails closed (see `raised`):
  * - forbidden: an added skip, `only`, `todo`, `fails`, `skipIf` or `runIf` (and `xit`/`fit`, `{ skip: true }`,
  *   `ctx.skip()`, a `skip`/`only`/`todo`/`fails` key in a declaration's options); fewer test declarations, a deleted
  *   test file or one renamed to a path the runner does not collect; fewer assertions; an added assertion on a
@@ -323,6 +326,19 @@ export type Call = {
   readonly args: ReadonlyArray<readonly Token[]>;
   /** For a call on a call's result (`it.each(table)(…)`), the inner call's callee. */
   readonly curriedFrom?: string;
+  /** For a member chain on a call's result (`expect(volume).toBeCloseTo`), that call's text (`expect(volume)`). */
+  readonly receiver?: string;
+  /** The test, suite and hook declarations the call stands in, outermost first. */
+  readonly blocks: readonly Block[];
+};
+
+/** A test, suite or hook declaration that encloses code: where it opens, and its string name if it has one. */
+export type Block = {
+  readonly start: number;
+  readonly kind: 'suite' | 'test' | 'hook';
+  readonly name: string | undefined;
+  /** `suite:<name>`, `test:<name>` (`?` for a name that is not a string) or the hook's name. */
+  readonly label: string;
 };
 
 /**
@@ -338,8 +354,10 @@ export type Binding = {
    * `<key>` (`projects: [{ … }]`), `''` for any other object, `'='` for an assignment.
    */
   readonly context: string;
-  /** For an object argument, the call's first argument when it is a string (a test's name). */
-  readonly subject?: string;
+  /** For an object argument that is not the first, the call's first argument's text (a wait's condition). */
+  readonly firstArgument?: string;
+  /** The declarations the binding stands in, as for a call. */
+  readonly blocks?: readonly Block[];
   /** The identity the before and after values are paired by, when there is one (a test's name). */
   readonly id?: string;
 };
@@ -422,6 +440,8 @@ type Frame =
       readonly kind: 'call';
       readonly callee: string;
       readonly curriedFrom: string | undefined;
+      readonly receiver: string | undefined;
+      readonly blocks: readonly Block[];
       readonly start: number;
       readonly commas: number[];
     }
@@ -429,7 +449,7 @@ type Frame =
       readonly kind: 'object';
       readonly argumentOf: string | undefined;
       readonly elementOf: string | undefined;
-      readonly subject: string | undefined;
+      readonly firstArgument: string | undefined;
     }
   | { readonly kind: 'group'; readonly key?: string };
 
@@ -450,6 +470,46 @@ export const facts = (tokens: readonly Token[]): Facts => {
   const bindings: Binding[] = [];
   const stack: Array<Frame & { readonly open: string }> = [];
   let lastCall: { readonly end: number; readonly callee: string } | undefined;
+  /** Each closed call's text, by the index of its closing parenthesis. */
+  const callTexts = new Map<number, string>();
+  const text = (from: number, to: number): string =>
+    tokens
+      .slice(from, to)
+      .map((token) => (token.type === 'string' ? JSON.stringify(token.value) : token.value))
+      .join(' ');
+
+  /** The test, suite and hook declarations open on the stack, outermost first. */
+  const blocksOf = (): Block[] =>
+    stack.flatMap((frame): Block[] => {
+      if (frame.kind !== 'call') {
+        return [];
+      }
+      const base = (frame.curriedFrom ?? frame.callee).split('.')[0]!;
+      const declared = focusedOrSkipped.has(base) ? (base.endsWith('describe') ? 'describe' : 'it') : base;
+      const kind = suites.has(declared)
+        ? 'suite'
+        : testFamily.has(declared)
+          ? 'test'
+          : hooks.has(declared)
+            ? 'hook'
+            : undefined;
+      if (kind === undefined) {
+        return [];
+      }
+      const first = frame.commas.length === 0 ? [] : tokens.slice(frame.start + 1, frame.commas[0]);
+      const name = first.length === 1 && first[0]!.type === 'string' ? first[0]!.value : undefined;
+      const label = kind === 'hook' ? base : `${kind}:${name ?? '?'}`;
+      return [{ start: frame.start, kind, name, label }];
+    });
+
+  /** The call whose result a member chain ending before `index` starts from (`expect(volume)` in `expect(volume).toBe(`). */
+  const receiverAt = (index: number): string | undefined => {
+    let cursor = index - 1;
+    while (tokens[cursor]?.type === 'ident' && ['.', '?.'].includes(tokens[cursor - 1]?.value ?? '')) {
+      cursor -= 2;
+    }
+    return cursor < index - 1 ? callTexts.get(cursor) : undefined;
+  };
 
   const calleeAt = (index: number): string | undefined => {
     // `index` is the `(`; read the member chain that ends just before it.
@@ -502,18 +562,18 @@ export const facts = (tokens: readonly Token[]): Facts => {
 
   type Open = Frame & { readonly open: string };
 
-  /** An object literal: which call it is an argument of (and that call's string name), or which keyed array holds it. */
+  /** An object literal: which call it is an argument of (and that call's first argument), or which keyed array holds it. */
   const objectFrame = (index: number, top: Open | undefined): Open => {
     const previous = tokens[index - 1]?.value;
     const isArgument = top?.kind === 'call' && (previous === '(' || previous === ',');
     const argumentOf = isArgument ? top.callee : undefined;
     const first = isArgument && top.commas.length > 0 ? tokens.slice(top.start + 1, top.commas[0]) : [];
-    const subject = first.length === 1 && first[0]!.type === 'string' ? first[0]!.value : undefined;
+    const firstArgument = first.length > 0 ? first.map((token) => token.value).join(' ') : undefined;
     const elementOf =
       top?.kind === 'group' && top.open === '[' && top.key !== undefined && (previous === '[' || previous === ',')
         ? `${top.key}[]`
         : undefined;
-    return { kind: 'object', argumentOf, elementOf, subject, open: '{' };
+    return { kind: 'object', argumentOf, elementOf, firstArgument, open: '{' };
   };
 
   /** An array literal, with the key it is bound to (`projects: [`). */
@@ -532,10 +592,20 @@ export const facts = (tokens: readonly Token[]): Facts => {
     if (value === '(') {
       const callee = calleeAt(index);
       const curriedFrom = callee === '<call>' && lastCall?.end === index - 1 ? lastCall.callee : undefined;
+      const receiver = callee?.startsWith('<call>') ? receiverAt(index) : undefined;
       stack.push(
         callee === undefined
           ? { kind: 'group', open: '(' }
-          : { kind: 'call', callee, curriedFrom, start: index, commas: [], open: '(' },
+          : {
+              kind: 'call',
+              callee,
+              curriedFrom,
+              receiver,
+              blocks: blocksOf(),
+              start: index,
+              commas: [],
+              open: '(',
+            },
       );
     } else if (value === '{' || value === '[') {
       stack.push(value === '{' ? objectFrame(index, top) : arrayFrame(index));
@@ -552,8 +622,11 @@ export const facts = (tokens: readonly Token[]): Facts => {
           callee: frame.callee,
           args: args.length === 1 && args[0]!.length === 0 ? [] : args,
           ...(frame.curriedFrom === undefined ? {} : { curriedFrom: frame.curriedFrom }),
+          ...(frame.receiver === undefined ? {} : { receiver: frame.receiver }),
+          blocks: frame.blocks,
         });
         lastCall = { end: index, callee: frame.callee };
+        callTexts.set(index, `${frame.callee}(${text(frame.start + 1, index)})`);
       }
     } else if (value === ',' && top?.kind === 'call') {
       top.commas.push(index);
@@ -572,13 +645,14 @@ export const facts = (tokens: readonly Token[]): Facts => {
         continue;
       }
       const context = value === '=' ? '=' : top?.kind === 'object' ? (top.argumentOf ?? top.elementOf ?? '') : '';
-      const subject = value === ':' && top?.kind === 'object' ? top.subject : undefined;
+      const firstArgument = value === ':' && top?.kind === 'object' ? top.firstArgument : undefined;
       bindings.push({
         key: key.value,
         text: valueTokens.map((entry) => entry.value).join(' '),
         value: evaluate(valueTokens),
         context,
-        ...(subject === undefined ? {} : { subject }),
+        ...(firstArgument === undefined ? {} : { firstArgument }),
+        blocks: blocksOf(),
       });
     }
   }
@@ -589,6 +663,7 @@ export const facts = (tokens: readonly Token[]): Facts => {
 // --- Rules -----------------------------------------------------------------------------------------------------
 
 const testFamily = new Set(['it', 'test', 'describe', 'suite', 'bench']);
+const suites = new Set(['describe', 'suite']);
 const hooks = new Set(['beforeEach', 'afterEach', 'beforeAll', 'afterAll']);
 const disablers = ['skip', 'only', 'todo', 'fails', 'skipIf', 'runIf'] as const;
 const focusedOrSkipped = new Set(['xit', 'xtest', 'xdescribe', 'fit', 'fdescribe', 'ftest']);
@@ -675,9 +750,14 @@ const isLiteral = (tokens: readonly Token[]): boolean =>
     tokens[0]!.type === 'string' ||
     ['true', 'false', 'null', 'undefined'].includes(tokens[0]!.value));
 
+/** Counts keyed by where they stand: the path of the declarations around them (`suite:A > test:works`). */
+export type Tally = Readonly<Record<string, number>>;
+
 /** Counts and value lists the rules compare between before and after. */
 export type Measures = {
   readonly disabled: Readonly<Record<string, number>>;
+  /** Each disabled or focused declaration, by its identity, so moving a skip to another test still reads as one. */
+  readonly disabledIds: Tally;
   readonly tests: number;
   readonly assertions: number;
   readonly literalAssertions: number;
@@ -685,6 +765,15 @@ export type Measures = {
   readonly waits: number;
   readonly strict: number;
   readonly loose: number;
+  /** The same counts per declaration path, so a loss in one test is not hidden by a gain in another. */
+  readonly byPath: {
+    readonly tests: Tally;
+    readonly assertions: Tally;
+    readonly literalAssertions: Tally;
+    readonly sleeps: Tally;
+    readonly strict: Tally;
+    readonly loose: Tally;
+  };
   readonly retries: readonly Binding[];
   readonly testTimeouts: readonly Binding[];
   readonly waitTimeouts: readonly Binding[];
@@ -696,7 +785,7 @@ export type Measures = {
   readonly optionDisablers: number;
 };
 
-/** Whether a test or suite declaration's argument is an options object with a disabling key not set to `false`. */
+/** The disabling keys (`skip`, `only`, `todo`, `fails`, set to anything but `false`) of an options-object argument. */
 const disablingOptions = (tokens: readonly Token[]): number => {
   if (tokens[0]?.value !== '{') {
     return 0;
@@ -722,114 +811,134 @@ const disablingOptions = (tokens: readonly Token[]): number => {
   return found;
 };
 
-const positional = (tokens: readonly Token[], id?: string): Binding | undefined => {
+const tokenText = (tokens: readonly Token[]): string => tokens.map((token) => token.value).join(' ');
+
+const positional = (tokens: readonly Token[], id: string): Binding | undefined => {
   const value = evaluate(tokens);
-  return value === undefined
-    ? undefined
-    : {
-        key: '',
-        text: tokens.map((token) => token.value).join(' '),
-        value,
-        context: '',
-        ...(id === undefined ? {} : { id }),
-      };
+  return value === undefined ? undefined : { key: '', text: tokenText(tokens), value, context: '', id };
 };
 
-/** A declaration's identity: `test:<name>` for a test or suite named by a string, `<hook>` for a hook. */
-const declarationId = (base: string, name: string | undefined): string | undefined =>
-  hooks.has(base) ? base : name === undefined ? undefined : `${base === 'it' ? 'test' : base}:${name}`;
+/** The path of declarations around a call or binding: `suite:A > test:works > beforeEach`. */
+const pathOf = (blocks: readonly Block[] | undefined): string => (blocks ?? []).map((block) => block.label).join(' > ');
 
-/** Numbers repeated ids in order of appearance (`test:a#0`, `test:a#1`), so each pairs with its counterpart. */
-const numberIds = (bindings: readonly Binding[]): Binding[] => {
-  const seen = new Map<string, number>();
-  return bindings.map((binding) => {
-    if (binding.id === undefined) {
-      return binding;
-    }
-    const occurrence = seen.get(binding.id) ?? 0;
-    seen.set(binding.id, occurrence + 1);
-    return { ...binding, id: `${binding.id}#${occurrence}` };
-  });
+/** A path extended by one more label. */
+const within = (path: string, label: string): string => (path === '' ? label : `${path} > ${label}`);
+
+/** A declaration's own label, as `pathOf` writes it for the code inside it. */
+const declarationLabel = (base: string, name: string | undefined): string =>
+  hooks.has(base) ? base : `${suites.has(base) ? 'suite' : 'test'}:${name ?? '?'}`;
+
+/** The innermost declaration a fake-clock call governs: a hook's suite or test, else its own, else the file (-1). */
+const clockScope = (blocks: readonly Block[]): number => {
+  const governed = blocks.at(-1)?.kind === 'hook' ? blocks.slice(0, -1) : blocks;
+  return governed.at(-1)?.start ?? -1;
+};
+
+const bump = (tally: Record<string, number>, key: string): void => {
+  tally[key] = (tally[key] ?? 0) + 1;
 };
 
 export const measure = (source: string): Measures => {
   const { calls, bindings } = facts(tokenize(source));
   const disabled: Record<string, number> = {};
-  const count = (key: string): void => {
-    disabled[key] = (disabled[key] ?? 0) + 1;
+  const disabledIds: Record<string, number> = {};
+  const byPath: Record<keyof Measures['byPath'], Record<string, number>> = {
+    tests: {},
+    assertions: {},
+    literalAssertions: {},
+    sleeps: {},
+    strict: {},
+    loose: {},
   };
-  let tests = 0;
-  let assertions = 0;
-  let literalAssertions = 0;
-  let sleeps = 0;
   let waits = 0;
-  let strict = 0;
-  let loose = 0;
   const testTimeouts: Binding[] = [];
   const waitTimeouts: Binding[] = [];
   const closeTo: Binding[] = [];
   let optionDisablers = 0;
-  const callees = calls.map((call) => members(call.callee).at(-1)!);
-  // A fake clock that the file installs and advances runs `setTimeout` callbacks without waiting.
-  const fakeClock =
-    callees.some((name) => name === 'useFakeTimers') ||
-    calls.some(({ callee }) => members(callee).at(-2) === 'clock' && fakeClockInstall.has(members(callee).at(-1)!));
-  const controlledTimers = fakeClock && callees.some((name) => fakeClockAdvance.has(name));
 
-  for (const { callee, args, curriedFrom } of calls) {
+  // A fake clock runs `setTimeout` callbacks without waiting only where it is both installed and advanced: in the
+  // declaration that does so (a hook's suite or test), and in the code nested inside it.
+  const installed = new Set<number>();
+  const advanced = new Set<number>();
+  for (const { callee, blocks } of calls) {
+    const chain = members(callee);
+    const last = chain.at(-1)!;
+    if (last === 'useFakeTimers' || (chain.at(-2) === 'clock' && fakeClockInstall.has(last))) {
+      installed.add(clockScope(blocks));
+    } else if (fakeClockAdvance.has(last)) {
+      advanced.add(clockScope(blocks));
+    }
+  }
+  const controlled = (blocks: readonly Block[]): boolean => {
+    const scopes = [-1, ...blocks.map((block) => block.start)];
+    return scopes.some((scope) => installed.has(scope)) && scopes.some((scope) => advanced.has(scope));
+  };
+
+  for (const { callee, args, curriedFrom, receiver, blocks } of calls) {
     const chain = members(callee);
     const base = chain[0]!;
     const last = chain.at(-1)!;
     const modifiers = new Set(chain.slice(1));
+    const path = pathOf(blocks);
+    const name = args[0]?.length === 1 && args[0][0]!.type === 'string' ? args[0][0]!.value : undefined;
+    const own = within(path, declarationLabel(base, name));
+    const disable = (key: string, id: string): void => {
+      bump(disabled, key);
+      bump(disabledIds, id);
+    };
 
     if (testFamily.has(base)) {
-      const disabler = disablers.find((name) => modifiers.has(name));
+      const disabler = disablers.find((entry) => modifiers.has(entry));
       if (disabler !== undefined) {
-        count(disabler);
+        disable(disabler, own);
       }
       // A disabled test is still declared, so switching one off reads as `disabled-test`, not as a deletion.
-      if (base !== 'describe' && base !== 'suite' && !modifiers.has('extend') && !modifiers.has('scoped')) {
-        tests += 1;
+      if (!suites.has(base) && !modifiers.has('extend') && !modifiers.has('scoped')) {
+        bump(byPath.tests, path);
       }
     } else if (focusedOrSkipped.has(callee)) {
-      count(callee);
-      tests += callee.endsWith('describe') ? 0 : 1;
+      disable(callee, within(path, `${callee.endsWith('describe') ? 'suite' : 'test'}:${name ?? '?'}`));
+      if (!callee.endsWith('describe')) {
+        bump(byPath.tests, path);
+      }
     } else if (chain.length > 1 && last === 'skip') {
-      count('skip');
+      disable('skip', path);
     }
 
     const declaration = testFamily.has(base) || (curriedFrom !== undefined && testFamily.has(members(curriedFrom)[0]!));
     if (declaration) {
-      optionDisablers += args.slice(1).reduce((total, argument) => total + disablingOptions(argument), 0);
+      const options = args.slice(1).reduce((total, argument) => total + disablingOptions(argument), 0);
+      optionDisablers += options;
+      for (let index = 0; index < options; index += 1) {
+        bump(disabledIds, within(own, 'options'));
+      }
     }
 
     const timeoutArgument = testFamily.has(base) ? 2 : hooks.has(base) ? 1 : -1;
-    const name = args[0]?.length === 1 && args[0][0]!.type === 'string' ? args[0][0]!.value : undefined;
     const budget =
-      timeoutArgument >= 0 && args.length > timeoutArgument
-        ? positional(args[timeoutArgument]!, declarationId(base, name))
-        : undefined;
+      timeoutArgument >= 0 && args.length > timeoutArgument ? positional(args[timeoutArgument]!, own) : undefined;
     if (budget !== undefined) {
       testTimeouts.push(budget);
     }
 
     if (assertionBases.has(base) && !(chain.length > 1 && asymmetric.has(chain[1]!))) {
-      assertions += 1;
+      bump(byPath.assertions, path);
       if (base === 'expect' && chain.length === 1 && args.length === 1 && isLiteral(args[0]!)) {
-        literalAssertions += 1;
+        bump(byPath.literalAssertions, path);
       }
     }
 
     if (
-      (sleepNames.has(last) && !(last === 'setTimeout' && controlledTimers)) ||
+      (sleepNames.has(last) && !(last === 'setTimeout' && controlled(blocks))) ||
       ((last === 'wait' || callee === 'scheduler.wait') && args[0] !== undefined && evaluate(args[0]) !== undefined)
     ) {
-      sleeps += 1;
+      bump(byPath.sleeps, path);
     }
 
     if (waitName.test(last)) {
       waits += 1;
-      const bound = args[1] === undefined ? undefined : positional(args[1]);
+      const bound =
+        args[1] === undefined ? undefined : positional(args[1], within(path, `${callee}(${tokenText(args[0] ?? [])})`));
       if (bound !== undefined) {
         waitTimeouts.push(bound);
       }
@@ -837,9 +946,9 @@ export const measure = (source: string): Measures => {
 
     if (base === '<call>' || chain.length > 1) {
       if (strictMatchers.has(last)) {
-        strict += 1;
+        bump(byPath.strict, path);
       } else if (looseMatchers.has(last)) {
-        loose += 1;
+        bump(byPath.loose, path);
       }
     }
     if (
@@ -848,7 +957,7 @@ export const measure = (source: string): Measures => {
       asymmetric.has(chain[1]!) &&
       !['not', 'extend'].includes(chain[1]!)
     ) {
-      loose += 1;
+      bump(byPath.loose, path);
     }
 
     if (last === 'toBeCloseTo') {
@@ -858,8 +967,8 @@ export const measure = (source: string): Measures => {
         text: String(digits),
         value: digits === undefined ? undefined : -digits,
         context: '',
-        // Paired by the expected value, which a digits change leaves alone.
-        id: `toBeCloseTo:${(args[0] ?? []).map((token) => token.value).join(' ')}`,
+        // Paired by where it stands, what it asserts on and the expected value, which a digits change leaves alone.
+        id: within(path, `${receiver ?? callee}.toBeCloseTo(${tokenText(args[0] ?? [])})`),
       });
     }
   }
@@ -870,90 +979,110 @@ export const measure = (source: string): Measures => {
   for (const binding of bindings) {
     const { key, context } = binding;
     const contextBase = members(context)[0]!;
+    const path = pathOf(binding.blocks);
+    const keyed = { ...binding, id: within(path, `${context}.${key}`) };
     if (/^(?:retry|retries)$/iu.test(key) || (context === '=' && /retr(?:y|ies)/iu.test(key))) {
-      retries.push(binding);
+      retries.push(keyed);
     } else if (/^(?:testTimeout|hookTimeout|teardownTimeout)$/u.test(key)) {
-      testTimeouts.push(binding);
+      testTimeouts.push(keyed);
+    } else if (key === 'timeout' && (testFamily.has(contextBase) || hooks.has(contextBase))) {
+      // The options object stands inside its declaration, so its path ends with the declaration's own label, the
+      // identity a positional timeout on the same declaration has.
+      testTimeouts.push({ ...binding, id: path });
     } else if (
       key === 'timeout' &&
-      (testFamily.has(contextBase) ||
-        hooks.has(contextBase) ||
-        context === 'projects[]' ||
-        /(?:setConfig|defineConfig|defineProject)$/u.test(context))
+      (context === 'projects[]' || /(?:setConfig|defineConfig|defineProject)$/u.test(context))
     ) {
-      const id = declarationId(contextBase, binding.subject);
-      testTimeouts.push(id === undefined ? binding : { ...binding, id });
+      testTimeouts.push(keyed);
     } else if (key === 'timeout' && context !== '' && context !== '=') {
-      waitTimeouts.push(binding);
+      waitTimeouts.push({ ...binding, id: within(path, `${context}(${binding.firstArgument ?? ''})`) });
     } else if (/timeout/iu.test(key)) {
-      timeoutConstants.push(binding);
+      timeoutConstants.push(keyed);
     } else if (toleranceKey.test(key) || (context === '=' && toleranceConstant.test(key))) {
-      tolerances.push(binding);
+      tolerances.push(keyed);
     }
   }
 
+  const total = (tally: Tally): number => Object.values(tally).reduce((sum, value) => sum + value, 0);
   return {
     disabled,
-    tests,
-    assertions,
-    literalAssertions,
-    sleeps,
+    disabledIds,
+    tests: total(byPath.tests),
+    assertions: total(byPath.assertions),
+    literalAssertions: total(byPath.literalAssertions),
+    sleeps: total(byPath.sleeps),
     waits,
-    strict,
-    loose,
+    strict: total(byPath.strict),
+    loose: total(byPath.loose),
+    byPath,
     retries,
-    testTimeouts: numberIds(testTimeouts),
+    testTimeouts,
     waitTimeouts,
     timeoutConstants,
     tolerances,
-    closeTo: numberIds(closeTo),
+    closeTo,
     optionDisablers,
   };
 };
 
+/** The keys whose count in `after` exceeds the count in `before`. */
+export const grew = (before: Tally, after: Tally): string[] =>
+  Object.keys(after).filter((key) => after[key]! > (before[key] ?? 0));
+
 const isRaise = (from: Binding, to: Binding): boolean =>
   to.text !== from.text && (to.value === undefined || from.value === undefined || to.value > from.value);
 
+const byValue = (a: Binding, b: Binding): number => b.value! - a.value!;
+
 /**
- * The values in `after` that exceed what `before` held. Values with the same `id` (one test's timeout) pair first and
- * compare directly. Of the rest, identical expressions cancel; what is left is compared largest to largest, so a
- * value that went up is a raise. An expression with no constant value that did not stand before is a raise too (fail
- * closed). A value with no counterpart left (a new one) is a raise unless `fresh` is `'ignore'`, for a new wait or a
- * new matcher, which loosens nothing that stood before.
+ * The values in `after` that exceed what `before` held, paired by structural identity (`id`: the declaration path,
+ * and the callee, receiver or key with its first argument) before any value is compared:
+ * - an identity with as many values on both sides pairs them in order and compares each pair;
+ * - an identity with a different count on each side is ambiguous: every value after that matches no value before
+ *   is a raise (fail closed);
+ * - identities on one side only are removals and additions. They are compared largest to largest, so a value that
+ *   moved to a new identity (a renamed test, a reworded condition) and went up is still a raise. An addition beyond
+ *   the removals is a raise unless `fresh` is `'ignore'` (a new wait or matcher loosens nothing that stood before).
+ *   A new value with no constant value is a raise against a removal, or when `fresh` is `'raise'`.
  */
 export const raised = (
   before: readonly Binding[],
   after: readonly Binding[],
   fresh: 'raise' | 'ignore' = 'raise',
 ): Binding[] => {
+  const group = (bindings: readonly Binding[]): Map<string, Binding[]> => {
+    const groups = new Map<string, Binding[]>();
+    for (const binding of bindings) {
+      const id = binding.id ?? `${binding.context}.${binding.key}`;
+      groups.set(id, [...(groups.get(id) ?? []), binding]);
+    }
+    return groups;
+  };
+  const was = group(before);
+  const is = group(after);
   const result: Binding[] = [];
-  const unpaired = [...before];
-  const rest: Binding[] = [];
-  for (const binding of after) {
-    const match = binding.id === undefined ? -1 : unpaired.findIndex((candidate) => candidate.id === binding.id);
-    if (match === -1) {
-      rest.push(binding);
-    } else {
-      if (isRaise(unpaired[match]!, binding)) {
-        result.push(binding);
-      }
-      unpaired.splice(match, 1);
-    }
-  }
-  const remaining = unpaired;
+  const removed: Binding[] = [];
   const added: Binding[] = [];
-  for (const binding of rest) {
-    const match = remaining.findIndex((candidate) => candidate.text === binding.text);
-    if (match === -1) {
-      added.push(binding);
+  for (const [id, values] of is) {
+    const previous = was.get(id);
+    if (previous === undefined) {
+      added.push(...values);
+    } else if (previous.length === values.length) {
+      result.push(...values.filter((value, index) => isRaise(previous[index]!, value)));
     } else {
-      remaining.splice(match, 1);
+      const texts = new Set(previous.map((value) => value.text));
+      result.push(...values.filter((value) => !texts.has(value.text)));
     }
   }
+  for (const [id, values] of was) {
+    if (!is.has(id)) {
+      removed.push(...values);
+    }
+  }
+  const counterparts = fresh === 'raise' ? Number.POSITIVE_INFINITY : removed.length;
   const unknown = added.filter((binding) => binding.value === undefined);
-  const known = added.filter((binding) => binding.value !== undefined).sort((a, b) => b.value! - a.value!);
-  const previous = remaining.filter((binding) => binding.value !== undefined).sort((a, b) => b.value! - a.value!);
-  const counterparts = fresh === 'raise' ? Number.POSITIVE_INFINITY : remaining.length;
+  const known = added.filter((binding) => binding.value !== undefined).sort(byValue);
+  const previous = removed.filter((binding) => binding.value !== undefined).sort(byValue);
   return [
     ...result,
     ...unknown.slice(0, counterparts),
@@ -964,13 +1093,13 @@ export const raised = (
 };
 
 /** A measured duration: a number and a time unit. */
-const duration = String.raw`\d+(?:[.,]\d+)?\s*(?:ms|milliseconds?|s|sec|seconds?|m|min|minutes?)\b`;
+const duration = String.raw`\d+(?:[.,]\d+)?[ \t]*(?:ms|milliseconds?|s|sec|seconds?|m|min|minutes?)\b`;
 /**
  * A `Timeout-budget:` line whose p99 is a measured duration: `p99 21.4 s`, `p99: 1200 ms`, `measured p99 = 12 s`, or
  * `21.4 s (p99)`, `21.4 s p99`.
  */
 const timeoutBudgetLine = new RegExp(
-  String.raw`^[ \t>*-]*Timeout-budget:[^\n]*?(?:\bp99\s*(?:[:=]|is|of|was)?\s*~?${duration}|${duration}\s*\(?\s*p99\b)`,
+  String.raw`^[ \t>*-]*Timeout-budget:[^\n]*?(?:\bp99[ \t]*(?:[:=]|is|of|was)?[ \t]*~?${duration}|${duration}[ \t]*\(?[ \t]*p99\b)`,
   'imu',
 );
 
@@ -1012,24 +1141,36 @@ export const codeFindings = ({
   if (is.optionDisablers > was.optionDisablers) {
     add('disabled-test', 'forbidden', 'adds a `skip`, `only`, `todo` or `fails` test option');
   }
-  if (is.tests < was.tests) {
-    add('deleted-test', 'forbidden', `declares ${was.tests - is.tests} fewer test(s) (${was.tests} → ${is.tests})`);
+  // Counts compare per declaration too, so a loss in one test or suite is not hidden by a gain in another.
+  const switchedOff = grew(was.disabledIds, is.disabledIds);
+  if (switchedOff.length > 0 && !findings.some((finding) => finding.rule === 'disabled-test')) {
+    add('disabled-test', 'forbidden', `switches off or focuses another declaration (${switchedOff.join('; ')})`);
   }
-  if (is.assertions < was.assertions) {
+  const fewerTests = grew(is.byPath.tests, was.byPath.tests);
+  if (is.tests < was.tests || fewerTests.length > 0) {
+    add(
+      'deleted-test',
+      'forbidden',
+      `declares fewer tests (${was.tests} → ${is.tests}${fewerTests.length > 0 ? `; fewer in ${fewerTests.map((key) => key || 'the file').join('; ')}` : ''})`,
+    );
+  }
+  const fewerAssertions = grew(is.byPath.assertions, was.byPath.assertions);
+  if (is.assertions < was.assertions || fewerAssertions.length > 0) {
     add(
       'deleted-assertion',
       'forbidden',
-      `makes ${was.assertions - is.assertions} fewer assertion(s) (${was.assertions} → ${is.assertions})`,
+      `makes fewer assertions (${was.assertions} → ${is.assertions}${fewerAssertions.length > 0 ? `; fewer in ${fewerAssertions.map((key) => key || 'the file').join('; ')}` : ''})`,
     );
   }
-  if (is.literalAssertions > was.literalAssertions) {
+  if (grew(was.byPath.literalAssertions, is.byPath.literalAssertions).length > 0) {
     add('literal-assertion', 'forbidden', 'adds an assertion on a literal, which cannot fail');
   }
-  if (is.sleeps > was.sleeps) {
+  const sleptIn = grew(was.byPath.sleeps, is.byPath.sleeps);
+  if (sleptIn.length > 0) {
     add(
       'fixed-sleep',
       'forbidden',
-      `adds ${is.sleeps - was.sleeps} fixed sleep(s) (sleep, delay, setTimeout, waitForTimeout): await the condition, not the clock`,
+      `adds a fixed sleep (sleep, delay, setTimeout, waitForTimeout) in ${sleptIn.map((key) => key || 'the file').join('; ')}: await the condition, not the clock`,
     );
   }
   const retries = raised(was.retries, is.retries);
@@ -1046,7 +1187,7 @@ export const codeFindings = ({
         : `raises a test or hook timeout (${describeValues(testTimeouts)}) without a \`Timeout-budget:\` line giving the measured p99`,
     );
   }
-  // A new bounded wait has no counterpart and is no widening; a retained bound that went up is, whatever was added.
+  // A new bounded wait pairs with nothing and is no widening; a retained bound that went up is, whatever was added.
   const waitTimeouts = raised(was.waitTimeouts, is.waitTimeouts, 'ignore');
   if (waitTimeouts.length > 0) {
     add(
@@ -1066,7 +1207,10 @@ export const codeFindings = ({
   if (raised(was.closeTo, is.closeTo, 'ignore').length > 0) {
     add('widened-tolerance', 'tolerance', 'lowers the digits of a `toBeCloseTo`');
   }
-  if (is.strict < was.strict && is.loose > was.loose) {
+  const loosened = grew(is.byPath.strict, was.byPath.strict).filter(
+    (key) => (is.byPath.loose[key] ?? 0) > (was.byPath.loose[key] ?? 0),
+  );
+  if (loosened.length > 0) {
     add('loosened-matcher', 'tolerance', `trades strict matchers for loose ones (${was.strict} → ${is.strict} strict)`);
   }
 

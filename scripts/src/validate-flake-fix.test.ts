@@ -246,6 +246,15 @@ const cases: ReadonlyArray<{
   { name: 'added-close-to', classification: 'test-only', rules: [] },
   { name: 'close-to-digits-moved', classification: 'tolerance', rules: ['widened-tolerance'] },
   { name: 'of-division', classification: 'forbidden', rules: ['deleted-assertion'] },
+  { name: 'close-to-receiver', classification: 'tolerance', rules: ['widened-tolerance'] },
+  { name: 'reordered-suite-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
+  { name: 'mixed-timers', classification: 'forbidden', rules: ['fixed-sleep'] },
+  { name: 'widened-wait-same-condition', classification: 'tolerance', rules: ['widened-wait'] },
+  { name: 'widened-wait-new-bounded', classification: 'tolerance', rules: ['widened-wait'] },
+  { name: 'moved-assertion', classification: 'forbidden', rules: ['deleted-assertion'] },
+  { name: 'moved-skip', classification: 'forbidden', rules: ['disabled-test'] },
+  { name: 'moved-sleep', classification: 'forbidden', rules: ['fixed-sleep'] },
+  { name: 'moved-test', classification: 'forbidden', rules: ['deleted-test', 'deleted-assertion'] },
 ];
 
 describe('validateFlakeFix', () => {
@@ -490,6 +499,10 @@ describe('hasTimeoutBudget', () => {
     ['Timeout-budget: p99: 1,5 s', true],
     ['Timeout-budget: p99 not measured; see issue 42', false],
     ['Timeout-budget: p99 over 300 runs', false],
+    ['Timeout-budget: p99\n125 ms is the default timeout', false],
+    ['Timeout-budget: 125\nms (p99)', false],
+    ['Timeout-budget: see below\np99 21.4 s', false],
+    ['Notes\nTimeout-budget: p99 21.4 s\nmore', true],
     ['', false],
   ])('should read %j as %s', (message, expected) => {
     expect(hasTimeoutBudget(message)).toBe(expected);

@@ -21,6 +21,26 @@ import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-bl
 /** Verb used when {@link parseToolErrorText} cannot parse the error payload. */
 const unparseableErrorVerb = 'Attempted';
 
+/** Longest reason the closed line carries; the opened card holds the whole message. */
+const reasonLimit = 120;
+
+/**
+ * One bounded line of a failure's own words for the closed line.
+ *
+ * A row never opens itself, so "Attempted file read" alone would leave the
+ * reader a click away from why. Structured text is left to the opened card.
+ */
+const reasonOf = (message: unknown): string | undefined => {
+  if (typeof message !== 'string') {
+    return undefined;
+  }
+  const line = message.replaceAll(/\s+/gu, ' ').trim();
+  if (line === '' || line.startsWith('{') || line.startsWith('[')) {
+    return undefined;
+  }
+  return line.length > reasonLimit ? `${line.slice(0, reasonLimit)}…` : line;
+};
+
 type ChatToolErrorProps = {
   /** Raw error text from the tool invocation's output-error state */
   readonly errorText: string;
@@ -63,15 +83,22 @@ type ToolErrorHeaderProps = {
   readonly icon: LucideIcon;
   readonly verb: string;
   readonly noun: string;
+  /** Why it failed, when the verb does not already say. Shown while closed; the opened card holds it in full. */
+  readonly reason?: string;
 };
 
-function ToolErrorHeader({ icon, verb, noun }: ToolErrorHeaderProps): React.JSX.Element {
+function ToolErrorHeader({ icon, verb, noun, reason }: ToolErrorHeaderProps): React.JSX.Element {
   return (
     <ChatToolCardHeader>
       <ChatToolCardIcon icon={icon} />
       <ChatToolCardTitle>
         <ChatToolLabel verb={verb}>
-          <ChatToolDescription>{noun}</ChatToolDescription>
+          <ChatToolDescription>
+            {noun}
+            {reason === undefined ? undefined : (
+              <span className='group-data-[state=open]/chat-tool-trigger:hidden'> · {reason}</span>
+            )}
+          </ChatToolDescription>
         </ChatToolLabel>
       </ChatToolCardTitle>
     </ChatToolCardHeader>
@@ -86,7 +113,9 @@ function ToolErrorHeader({ icon, verb, noun }: ToolErrorHeaderProps): React.JSX.
  * {@link ChatToolLabel}/{@link ChatToolDescription}, and the body holds the
  * actual error message (plus validation details and raw output, when
  * present). The same header shape is used for parsed and unparseable
- * `errorText`.
+ * `errorText`. Where the verb names no cause (a generic execution error, an
+ * unrecognised code, plain text) the closed line also carries one bounded line
+ * of the failure's own message.
  */
 export function ChatToolError({
   errorText,
@@ -99,7 +128,8 @@ export function ChatToolError({
   const error = parseToolErrorText(errorText);
 
   if (!error) {
-    const code = parseToolErrorEnvelope(errorText)?.errorCode;
+    const envelope = parseToolErrorEnvelope(errorText);
+    const code = envelope?.errorCode;
     return (
       <ChatToolCard
         variant='minimal'
@@ -113,6 +143,7 @@ export function ChatToolError({
           icon={icon}
           verb={code?.replaceAll('_', ' ').toLowerCase() ?? unparseableErrorVerb}
           noun={noun}
+          reason={reasonOf(envelope === undefined ? errorText : envelope.message)}
         />
         <ChatToolCardContent>
           <div className='space-y-2 px-2 py-2 text-xs'>
@@ -171,7 +202,12 @@ function StructuredToolErrorBody({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
     >
-      <ToolErrorHeader icon={headerIcon} verb={verb} noun={noun} />
+      <ToolErrorHeader
+        icon={headerIcon}
+        verb={verb}
+        noun={noun}
+        reason={error.errorCode === 'TOOL_EXECUTION_ERROR' ? reasonOf(error.message) : undefined}
+      />
       <ChatToolCardContent>
         <div className='space-y-2 px-2 py-2 text-xs'>
           {description ? <p className='text-muted-foreground'>{description}</p> : undefined}

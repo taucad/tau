@@ -599,9 +599,11 @@ describe('the external tool-call renderer', () => {
 
     renderExternal(part);
     const header = screen.getByRole('button', { name: /Attempted/u });
-    expect(header).toHaveTextContent(/^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet$/u);
+    expect(header).toHaveTextContent(
+      /^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet · GeoSpecMeshIntegrityExpectation: \{ Exit code 1$/u,
+    );
     await user.click(header);
-    expect(screen.getByText(/GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1/u)).toBeVisible();
+    expect(screen.getByText(/^GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1$/u).tagName).toBe('PRE');
     expect(document.body.textContent).not.toContain('formatted_output');
   });
 

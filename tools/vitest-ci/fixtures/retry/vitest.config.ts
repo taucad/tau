@@ -1,7 +1,7 @@
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import { defineConfig } from 'vitest/config';
 
-// The spike's cases, run by `src/index.test.ts` in a child Vitest: a pass, a retried pass, a failure, a skip and a
+// The spike's cases, run by `src/outcome-reporter.test.ts` in a child Vitest: a pass, a retried pass, a failure, a skip and a
 // module that throws on import.
 export default defineConfig({
   test: {

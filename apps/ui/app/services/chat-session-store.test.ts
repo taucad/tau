@@ -5603,6 +5603,61 @@ describe('ChatSessionStore', () => {
           store.release(chatId);
         }
       });
+
+      it.each(['refused', 'thrown'] as const)(
+        'should offer Stop again when the cancel is %s (audit A-5)',
+        async (outcome) => {
+          const chatId = `stop_${outcome}`;
+          const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+          hostCommand.mockImplementation(async (command) => {
+            if (outcome === 'thrown') {
+              throw new Error('host closed');
+            }
+            return {
+              commandId: command.commandId,
+              generation: 1,
+              status: 'refused',
+              effect: 'not-applied',
+              code: 'HOST_CLOSED',
+              message: 'The host closed',
+            };
+          });
+          try {
+            publishLogRows(store, chatId, runningRows('live'));
+            store.stopRun(chatId, 'stop-button');
+            await vi.waitFor(() => {
+              expect(hostCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'cancel' }));
+              expect(store.isStopping(chatId)).toBe(false);
+            });
+          } finally {
+            unpublish();
+            store.release(chatId);
+          }
+        },
+      );
+
+      it('should send a Stop pressed before the host attached once it attaches (audit A-5)', async () => {
+        const chatId = 'stop_owed';
+        const projectId = 'departing_project';
+        const { store, hostCommand, unpublish } = await open(chatId, projectId);
+        unpublish();
+        publishLogRows(store, chatId, runningRows('live'));
+        store.stopRun(chatId, 'stop-button');
+        expect(store.isStopping(chatId)).toBe(true);
+        expect(hostCommand).not.toHaveBeenCalled();
+        const client = { hostCommand, close: vi.fn(async () => undefined) } as unknown as AgentHostClient;
+        const reattach = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledWith(
+              expect.objectContaining({ type: 'cancel', payload: { chatId, runId: 'live' } }),
+            );
+          });
+        } finally {
+          reattach();
+          store.release(chatId);
+        }
+      });
     });
 
     it('should retain a streaming follow-up without cancelling the active run', async () => {

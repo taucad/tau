@@ -1319,6 +1319,10 @@ export class ChatSessionStore {
     for (const session of this.#sessions.values()) {
       if (session.projectId === projectId) {
         this.startPendingSeed(session.chatId);
+        /* A Stop pressed while no host was attached owes its cancel. */
+        if (session.stopRequested && !session.commandInFlight) {
+          void this.#cancelSessionRun(session);
+        }
       }
     }
     return () => {
@@ -3120,14 +3124,12 @@ export class ChatSessionStore {
     if (runId === undefined || lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
       /* Nothing live to cancel: a Stop over a run that already ended must not wait for an end that came before it,
        * nor send a cancel the host can only refuse. */
-      if (session.stopRequested) {
-        session.stopRequested = false;
-        this.#chatTopics.get(session.chatId)?.emit();
-      }
+      this.#releaseStop(session);
       return;
     }
     if (connector === undefined) {
-      /* A live run whose host is not attached yet: the Stop waits for the run's terminal row, as before. */
+      /* A live run whose host is not attached yet: the cancel is owed, and is sent once the host attaches
+       * (`publishProjectHostConnector`). The Stop stays pressed until then. */
       return;
     }
     const command: HostCommand = {
@@ -3136,12 +3138,33 @@ export class ChatSessionStore {
       payload: { chatId: session.chatId, runId },
     };
     logStop(command, session.stopOrigin);
-    const answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
-    if (answer.status === 'refused') {
-      session.persistenceActorRef.send({
-        type: 'setPersistedError',
-        error: parseErrorForPersistence(new Error(`Host cancel refused ${answer.code}: ${answer.message}`)),
+    let failure: Error | undefined;
+    try {
+      const answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
+      if (answer.status === 'refused') {
+        failure = new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+    }
+    if (failure !== undefined) {
+      /* The cancel did not land: let go of the Stop so the composer offers it again, rather than waiting for an end
+       * nothing asked for. */
+      logFacts('warn', '[ChatSessionStore] stop did not reach the host', {
+        chatId: session.chatId,
+        runId,
+        reason: failure.message,
       });
+      session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+      this.#releaseStop(session);
+    }
+  }
+
+  /** A Stop that has nothing left to wait for: the composer leaves `stopping`. */
+  #releaseStop(session: InternalSession): void {
+    if (session.stopRequested) {
+      session.stopRequested = false;
+      this.#chatTopics.get(session.chatId)?.emit();
     }
   }
 
@@ -3733,6 +3756,8 @@ export class ChatSessionStore {
         throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
       }
       if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {
+        /* No run started, so a Stop deferred to this command has nothing to wait for. */
+        this.#releaseStop(session);
         return;
       }
       if (request.queueId !== undefined) {
@@ -3828,6 +3853,8 @@ export class ChatSessionStore {
         runId: command.payload.runId,
         reason: error instanceof Error ? error.message : String(error),
       });
+      /* The command failed, so a Stop deferred to it has nothing to wait for. */
+      this.#releaseStop(session);
     } finally {
       if (session.commandAbort === abort) {
         session.commandInFlight = false;

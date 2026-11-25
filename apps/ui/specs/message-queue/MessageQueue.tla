@@ -190,6 +190,8 @@
 \* and the session machine's `withdrawTurn` abandons the admission. The person may submit it again.
 \* The store waits for a withdrawal's removal before it re-reads the outbox, so no delivery reads it half-written.
 \* A Stop with no run, or over a run that already ended, sends no cancel (Cancel needs a live observed run).
+\* Audit A-5: a cancel the host refuses or never answers lets go of the Stop; one owed while no host is attached is
+\* sent when it attaches; a Stop deferred to a command that started no run is let go. Cancel and delivery unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

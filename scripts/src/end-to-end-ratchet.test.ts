@@ -52,6 +52,9 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
   const steps = lane?.steps ?? [];
   const nightlySteps = nightly.jobs['e2e']?.steps ?? [];
   const step = (list: readonly Step[], name: string): Step | undefined => list.find((entry) => entry.name === name);
+  // The nightly runs the retry wrapper from its trusted `.tau-ci` checkout; the merge queue from its own.
+  const queueRun = (name: string): string | undefined =>
+    step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/');
   /** The first batch, green on nightlies 43698158501 and 43752242587. A suite never moves back to the nightly. */
   const firstBatch = [
     'agent-host:test:e2e',
@@ -100,10 +103,7 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
       'Prepare API env file',
       'Validate captured chat logs',
     ]) {
-      // The nightly runs the retry wrapper from its trusted `.tau-ci` checkout; the merge queue from its own.
-      expect(step(steps, name)?.run, name).toBe(
-        step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/'),
-      );
+      expect(step(steps, name)?.run, name).toBe(queueRun(name));
     }
     expect(step(steps, 'Setup Linux sandbox prerequisites')?.uses).toBe('./.github/actions/setup-linux-sandbox');
     expect(step(steps, 'Setup formal toolchains')?.with).toEqual({ tools: 'tlc' });

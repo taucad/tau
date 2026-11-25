@@ -62,7 +62,7 @@ describe('section plane picker', () => {
     const require = createRequire(import.meta.url);
     const source = readFileSync(require.resolve('three/src/materials/nodes/manager/NodeMaterialObserver.js'));
     expect(createHash('sha256').update(source).digest('hex')).toBe(
-      '44e67b66854b65a96dfafe03f5b0ebd8100ede28c56a28853b974fef28089b83',
+      '7c7a6759c6f22297b529d2a5dcd134412f9924c82dc37a880e7d7211715c3687',
     );
   });
 

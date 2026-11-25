@@ -82,6 +82,9 @@ jobs:
           # `tail -1` keeps the JSON array and drops Nx's log lines. A target splits into
           # `metadata.shards` jobs when it declares that count; each job passes
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
+          # An aggregate that declares `metadata.jobPerDependency` runs as one job per
+          # `dependsOn` target of its project (each with its own shards), so a suite that
+          # times out cannot use up the step budget of the suites after it (viewer, #2279).
           suites='[]'
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
           # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
@@ -105,8 +108,21 @@ jobs:
               if jq -e --arg suite "$project:$target" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
                 continue
               fi
-              shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
-              add_suite "$project" "$target" "$shards"
+              jobs=$(pnpm nx show project "$project" --json | tail -1 | jq -c --arg project "$project" --arg target "$target" '
+                .targets as $targets
+                | if $targets[$target].metadata.jobPerDependency == true
+                  then $targets[$target].dependsOn // []
+                    | if length == 0 then error("\($project):\($target) runs a job per dependency but depends on nothing") else . end
+                  else [$target] end
+                | map(if type == "string" and $targets[.] != null
+                    then {target: ., shards: ($targets[.].metadata.shards // 1)}
+                    else error("\($project):\($target) runs a job per dependency, but \(tojson) is not a target of \($project)") end)')
+              for job in $(jq -r '.[] | "\(.target)=\(.shards)"' <<< "$jobs"); do
+                if jq -e --arg suite "$project:${job%=*}" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
+                  continue
+                fi
+                add_suite "$project" "${job%=*}" "${job##*=}"
+              done
             done
           done
           echo "End-to-end suites: $suites"

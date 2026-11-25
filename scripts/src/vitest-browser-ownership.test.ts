@@ -242,6 +242,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // its real-GPU check installs the same Chromium on the operator's Mac.
     // The release gate's end-to-end rows install the three engines `ci.yml`'s e2e-queue rows do (C2b).
     // The timing-budget lane installs the one engine its specs run in (D-DC17).
+    // The flake reproduction workflow installs the engines the target under stress selects (FQ-7).
     // The apt-install action installs the browsers' system dependencies those workflows used to fetch with
     // `--with-deps`, and its pinning test drives it (APT-1).
     expect(installFiles.sort()).toEqual(
@@ -253,6 +254,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/ci.yml',
         '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',
+        '.github/workflows/flake-repro.yml',
         '.github/workflows/observability-staging.yml',
         '.github/workflows/picogk-browser-archive.yml',
         '.github/workflows/preview-packages.yml',

@@ -931,6 +931,11 @@ export type RevisionPortErrorCode =
   | 'LFS_REMOTE_UNSUPPORTED'
   /** A large object this revision references is not in this store, and cannot be fetched. */
   | 'MISSING_LARGE_OBJECT'
+  /**
+   * This page load started in safe mode, which makes no Tau Cloud read or write (W9 R5, operator ruling). Refused
+   * before any request; a normal restart ends it, so no retry can.
+   */
+  | 'REMOTE_SAFE_MODE'
   /*
    * The remote's own answers (N1).
    *

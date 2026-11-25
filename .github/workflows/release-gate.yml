@@ -361,7 +361,7 @@ jobs:
         suite: ${{ fromJSON(needs.e2e-plan.outputs.suites) }}
     env:
       # The suites that open no chat, so capture no chat log for the empty-capture rule to find: e2e-nightly.yml's list.
-      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
+      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios", "test:e2e:adaptive"]'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -389,12 +389,13 @@ jobs:
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install chromium firefox webkit
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
 
       - name: Install Pandoc for reference conversion
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
-          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          ./.tau-ci/.github/actions/apt-install/download.sh pandoc-download \
+            https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb \
+            "$RUNNER_TEMP/pandoc.deb" sha256:91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
       - name: Setup Linux sandbox prerequisites
@@ -446,6 +447,17 @@ jobs:
             out/reports/formal
           if-no-files-found: ignore
           retention-days: 7
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-e2e-${{ matrix.suite.slug }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Viewer parity (VP-1): the merge queue never runs it, and a pull request runs it only when its own diff touches a
   # parity input, so every candidate captures and gates every fixture here, from GLBs generated fresh from this commit

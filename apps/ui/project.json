@@ -109,7 +109,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         },
         {
           "env": "POSTHOG_CLIENT_KEY"
@@ -159,7 +159,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -374,7 +374,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -718,6 +718,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-1.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 1 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -738,6 +739,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-2.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 2 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -758,6 +760,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-3.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 3 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -778,6 +781,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-4.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 4 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -798,6 +802,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-5.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 5 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -818,6 +823,7 @@
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-6.outcomes.jsonl"],
       "metadata": {
         "description": "Shard 6 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },

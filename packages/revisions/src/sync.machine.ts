@@ -596,6 +596,8 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_DAMAGED',
   /* D49: refused before any network call; retrying cannot change the tree. */
   'LFS_REMOTE_UNSUPPORTED',
+  /* W9 R5: safe mode refuses Tau Cloud before any request; only a normal restart ends it. */
+  'REMOTE_SAFE_MODE',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -668,6 +670,9 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
     }
     case 'REMOTE_DAMAGED': {
       return 'damaged';
+    }
+    case 'REMOTE_SAFE_MODE': {
+      return 'safeMode';
     }
     /* The server refused the refs, not the device (contract §4): a fetch and a
      * replay clear it, so the action beside it is *Sync now*, not *Sign in*. */

@@ -585,11 +585,6 @@
     "reason": "test fixture read from another project"
   },
   {
-    "file": "apps/ui/csharp-language-assets-cache-key.ts",
-    "target": "out/**",
-    "reason": "reads build or test output under out/, not a source file"
-  },
-  {
     "file": "apps/ui/depth-ownership.vitest.browser.config.ts",
     "target": "packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.js",
     "reason": "imports another project's source by relative path instead of its package"
@@ -980,6 +975,16 @@
     "reason": "reads the composite action whose cache steps it checks; .github is not an Nx project"
   },
   {
+    "file": "scripts/src/pinned-download.test.ts",
+    "target": ".github/actions",
+    "reason": "lists the composite actions whose file downloads it checks; .github is not an Nx project"
+  },
+  {
+    "file": "scripts/src/pinned-download.test.ts",
+    "target": ".github/actions/apt-install/download.sh",
+    "reason": "reads the download helper's default retry schedule; .github is not an Nx project"
+  },
+  {
     "file": "scripts/src/prepare-geospec-test-consumer.ts",
     "target": ".",
     "reason": "reads workspace-root configuration or inventory"
@@ -1043,6 +1048,11 @@
     "file": "scripts/src/telemetry-release-partition.test.ts",
     "target": "packages/telemetry",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/test-outcome-outputs.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
   },
   {
     "file": "scripts/src/test-shard-dealer.test.ts",

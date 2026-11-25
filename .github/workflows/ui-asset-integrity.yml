@@ -61,7 +61,7 @@ jobs:
       - name: Install the three browsers
         env:
           ENGINES: ${{ matrix.engines }}
-        run: pnpm exec playwright install ${ENGINES//,/ }
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install ${ENGINES//,/ }
       # Placeholder origins: the server build checks they are set; nothing here contacts them.
       - name: Build the web client
         env:

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { resolve } from 'node:path';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config bootstraps this server-side command before test aliases exist.
@@ -126,6 +127,7 @@ export default defineConfig({
     ],
   },
   test: {
+    reporters: testReporters('default'),
     attachmentsDir: resolve(import.meta.dirname, '../../out/test-results/vitest-browser/apps/ui-e2e/attachments'),
     coverage: {
       reportsDirectory: '../../out/reports/coverage/apps/ui-e2e',

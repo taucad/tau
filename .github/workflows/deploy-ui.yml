@@ -216,6 +216,9 @@ jobs:
           # Emergency only: a live origin that cannot be read fails the deploy, so a fix
           # must say on purpose that it ships without retention (logged as a warning).
           TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
+          # Staging only: a live deploy that cannot be reached after the retries ships without retention,
+          # with a warning, instead of failing; open staging tabs reload into the new build. Production stays strict.
+          TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE: ${{ inputs.environment == 'staging' && '1' || '' }}
           # Runtime bundle files kept between deploys (the cache restored above).
           TAU_RETAIN_ASSETS_STORE: ${{ github.workspace }}/out/retained-runtime-store
           # This environment's digest mirror, which serves the pinned PicoGK browser host

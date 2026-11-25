@@ -93,8 +93,13 @@ const desktopTerminalForbiddenImports = [
 const desktopTerminalConformance = 'apps/libs/desktop-services-host/src/services-host.terminal.conformance.test.ts';
 
 /** The workspace projects one project depends on directly. */
+/** Every project's Vitest config imports its reporter list, so the test tool is a dependency of every project. */
+const testTooling: ReadonlySet<string> = new Set(['vitest-ci']);
+
 const directDependencies = (projectGraphValue: ProjectGraph, project: string): readonly string[] =>
-  (projectGraphValue.dependencies[project] ?? []).map(({ target }) => target);
+  (projectGraphValue.dependencies[project] ?? [])
+    .map(({ target }) => target)
+    .filter((target) => !testTooling.has(target));
 
 const projectGraph = async (): Promise<ProjectGraph> => {
   try {

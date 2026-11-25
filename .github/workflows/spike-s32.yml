@@ -34,7 +34,7 @@ jobs:
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install the three browsers
-        run: pnpm exec playwright install chromium firefox webkit
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
       - name: Run the cells
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"

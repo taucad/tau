@@ -967,7 +967,7 @@ export const measure = (source: string): Measures => {
       timers.push({ line, controlled: controlled(blocks) });
     }
     if (timer) {
-      sequence(path, `timer:${callee}(${args.map(tokenText).join(', ')})`);
+      sequence(path, `timer:${callee}(${args.map((argument) => tokenText(argument)).join(', ')})`);
     } else if (
       fakeClockInstall.has(last) ||
       fakeClockAdvance.has(last) ||

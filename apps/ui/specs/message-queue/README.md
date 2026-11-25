@@ -114,4 +114,4 @@ use_skill startup latency T4 re-pins the drift after `chat-session-store.ts` and
 
 The T4 review re-pins the drift after `chat-session-store.ts` held its throttled transcript for every reader, released a run whose log read is refused for good and held a Resume submitted until its run reopens; no action changed.
 
-The third T4 review round re-pins the drift after `chat-session-store.ts` released a command answered on a refused read and `use-chat.tsx` read the current fold for an edit; no action changed.
+The third T4 review round re-pins the drift after `chat-session-store.ts` released a command answered on a refused read and `use-chat.tsx` and `chat-turn-host.tsx` read the current fold for an edit and a command; no action changed.

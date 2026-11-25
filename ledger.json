@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:43:19.565Z",
+  "updatedAt": "2026-11-25T23:44:08.253Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2211,6 +2211,32 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45723269307,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2848",
+      "sha": "d0b8ea91c361b6514241baec737e0f2e452eec85",
+      "at": "2026-11-25T23:44:04Z",
+      "conclusion": "cancelled",
+      "artifacts": 4,
+      "counted": 2343,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45723453222,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2863",
+      "sha": "b9f609607ed06e90d7c1a36e7cba7ab830a1aaa8",
+      "at": "2026-11-25T23:43:56Z",
+      "conclusion": "cancelled",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -2471,12 +2497,12 @@
       "lastSeen": "2026-11-25T23:32:27Z"
     },
     "archive-core:test": {
-      "executions": 2,
-      "tests": 242,
+      "executions": 3,
+      "tests": 363,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "assimp:test": {
       "executions": 6,
@@ -2511,12 +2537,12 @@
       "lastSeen": "2026-11-25T23:43:08Z"
     },
     "billing:test": {
-      "executions": 2,
-      "tests": 303,
+      "executions": 3,
+      "tests": 456,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "brep:test": {
       "executions": 6,
@@ -2767,12 +2793,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "formal:test": {
-      "executions": 2,
-      "tests": 194,
+      "executions": 3,
+      "tests": 291,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "fs-bridge:test": {
       "executions": 5,
@@ -2791,12 +2817,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "geometry-core:test": {
-      "executions": 6,
-      "tests": 2633,
+      "executions": 7,
+      "tests": 3072,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:08:01Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "gltf:test": {
       "executions": 6,
@@ -2887,20 +2913,20 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "json-schema:test": {
-      "executions": 2,
-      "tests": 10,
+      "executions": 3,
+      "tests": 15,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "kinematics:test": {
-      "executions": 2,
-      "tests": 492,
+      "executions": 3,
+      "tests": 738,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "lsp-fs:test": {
       "executions": 5,
@@ -2943,12 +2969,12 @@
       "lastSeen": "2026-11-25T23:43:08Z"
     },
     "memory:test": {
-      "executions": 2,
-      "tests": 90,
+      "executions": 3,
+      "tests": 135,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "middleware:test": {
       "executions": 6,
@@ -2967,12 +2993,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "nx:test": {
-      "executions": 2,
-      "tests": 114,
+      "executions": 3,
+      "tests": 171,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "occt-core:test": {
       "executions": 6,
@@ -3015,12 +3041,12 @@
       "lastSeen": "2026-11-25T23:07:56Z"
     },
     "parameters:test": {
-      "executions": 3,
-      "tests": 747,
+      "executions": 4,
+      "tests": 996,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "picogk:test": {
       "executions": 6,
@@ -3071,12 +3097,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "project-core:test": {
-      "executions": 2,
-      "tests": 106,
+      "executions": 3,
+      "tests": 159,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "project-library:test": {
       "executions": 16,
@@ -3191,12 +3217,12 @@
       "lastSeen": "2026-11-25T23:20:14Z"
     },
     "runtime-testing:test": {
-      "executions": 6,
-      "tests": 366,
+      "executions": 7,
+      "tests": 427,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:08:01Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "runtime:test": {
       "executions": 6,
@@ -3303,12 +3329,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "spatial:test": {
-      "executions": 2,
-      "tests": 22,
+      "executions": 3,
+      "tests": 33,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "tau-examples:test": {
       "executions": 16,
@@ -3327,12 +3353,12 @@
       "lastSeen": "2026-11-25T23:07:56Z"
     },
     "telemetry:test": {
-      "executions": 4,
-      "tests": 1432,
+      "executions": 5,
+      "tests": 1794,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "three:test": {
       "executions": 6,
@@ -3351,12 +3377,12 @@
       "lastSeen": "2026-11-25T23:08:01Z"
     },
     "types:test": {
-      "executions": 2,
-      "tests": 410,
+      "executions": 3,
+      "tests": 615,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "ui-core:test": {
       "executions": 12,
@@ -3439,12 +3465,12 @@
       "lastSeen": "2026-11-25T23:43:08Z"
     },
     "units:test": {
-      "executions": 2,
-      "tests": 250,
+      "executions": 3,
+      "tests": 375,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "utils:test": {
       "executions": 3,
@@ -3471,12 +3497,12 @@
       "lastSeen": "2026-11-25T23:07:56Z"
     },
     "vitest-ci:test": {
-      "executions": 2,
-      "tests": 81,
+      "executions": 3,
+      "tests": 168,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "warehouse:test": {
       "executions": 10,
@@ -3527,12 +3553,12 @@
       "lastSeen": "2026-11-25T23:07:56Z"
     },
     "xstate-testing:test": {
-      "executions": 2,
-      "tests": 54,
+      "executions": 3,
+      "tests": 81,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:07:56Z"
+      "lastSeen": "2026-11-25T23:44:04Z"
     },
     "zoo:test": {
       "executions": 6,
@@ -3785,6 +3811,45 @@
         "linux-x64 browser=chromium 9746788617404235284",
         "linux-x64 browser=firefox 9746788617404235284",
         "linux-x64 browser=chromium 23372684411709253"
+      ],
+      "failureShas": [],
+      "aliases": []
+    },
+    "xstate-testing › src/inspect.test.ts > guardActors > should fail a test that leaves a dead letter untaken": {
+      "project": "xstate-testing",
+      "targetKey": "test",
+      "file": "src/inspect.test.ts",
+      "firstSeen": "2026-11-25T23:44:04Z",
+      "lastSeen": "2026-11-25T23:44:04Z",
+      "lastFailure": "2026-11-25T23:44:04Z",
+      "executions": 1,
+      "failures": 0,
+      "retriedPasses": 1,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64": {
+          "executions": 1,
+          "failures": 0,
+          "events": 1,
+          "lastSeen": "2026-11-25T23:44:04Z"
+        }
+      },
+      "events": [
+        {
+          "kind": "retry",
+          "at": "2026-11-25T23:44:04Z",
+          "run": 45723269307,
+          "attempt": 1,
+          "failedRun": 45723269307,
+          "failedAttempt": 1,
+          "variant": "linux-x64",
+          "hash": "6940518647557768267",
+          "execution": 1
+        }
+      ],
+      "openFailures": [],
+      "passHashes": [
+        "linux-x64 6940518647557768267"
       ],
       "failureShas": [],
       "aliases": []

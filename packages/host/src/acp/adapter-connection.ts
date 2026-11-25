@@ -51,6 +51,9 @@ const stderrWrittenBefore = async (): Promise<void> => {
   }
 };
 
+/** How long an exited adapter's stdio may take to close before its exit is reported without it. Milliseconds. */
+const stdioDrain = 1000;
+
 /* A failed call, as the machine reads it: its code, its message, and the stderr tail beside it. */
 const callError = (error: unknown, stderr: string): AcpCallError => {
   const code = isRecord(error) ? error['code'] : undefined;
@@ -189,7 +192,19 @@ export const createAdapterConnection = (
         send({ type: 'adapterExited', stderr: adapter.stderr() });
       }
     };
-    adapter.child.once('exit', onExit);
+    /*
+     * Node emits `exit` while stdio may still be draining and guarantees the adapter's last stderr only on `close`, so
+     * the report waits for `close`. A process the adapter started can hold the pipes open long after the adapter's exit,
+     * so `close` waits for it too: after `stdioDrain` the exit is reported with the stderr read so far.
+     */
+    let drain: NodeJS.Timeout | undefined;
+    adapter.child.once('close', () => {
+      clearTimeout(drain);
+      onExit();
+    });
+    adapter.child.once('exit', () => {
+      drain = setTimeout(onExit, stdioDrain);
+    });
     /* A spawn that never started (ENOENT) emits `error` and may never emit `exit`. */
     adapter.child.once('error', () => {
       if (adapter.child.pid === undefined) {
@@ -261,6 +276,7 @@ export const createAdapterConnection = (
     });
 
     return () => {
+      clearTimeout(drain);
       connection.close();
       /* Every exit of the child ends with SIGKILL to the group (EA-R7); a gone group is ESRCH. */
       adapter.signal('SIGKILL');

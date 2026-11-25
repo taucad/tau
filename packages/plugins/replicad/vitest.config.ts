@@ -13,6 +13,8 @@ export default defineConfig({
      * nodejs/node#66376) or CI leaves Node 24. */
     pool: 'forks',
     execArgv: ['--no-wasm-code-gc'],
+    /* The kernel's generated source map and font, so `vitest` started outside Nx's `test` target finds them too. */
+    globalSetup: ['./vitest.global-setup.ts'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

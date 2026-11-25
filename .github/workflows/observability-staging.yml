@@ -126,7 +126,7 @@ jobs:
         with:
           playwright-browsers: chromium webkit
       - name: Install Chromium and WebKit
-        run: pnpm exec playwright install chromium webkit
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium webkit
       - name: Validate polling helpers
         run: pnpm nx run ui-e2e:test:observability-helpers
       - name: Check deployed harness

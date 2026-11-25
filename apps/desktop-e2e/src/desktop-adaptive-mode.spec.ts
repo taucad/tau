@@ -26,6 +26,7 @@ import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } 
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { composerOf, expectSignedIn, expectVisible } from '#support/scenario.js';
+import { connectTauCloud, openBackupChooser } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauBillingAccountArgs, tauTestAccount } from '#support/tau-account.js';
 
 const execFileAsync = promisify(execFile);
@@ -62,8 +63,8 @@ type DeploymentProxy = {
 };
 
 const paymentActionPath = '/v1/billing/payment-actions';
-/** The API paths that read the account's Tau Cloud: its projects, its billing and its cloud agents (W9 R5). */
-const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud)(?:\/|$)/u;
+/** The API paths that read the account's Tau Cloud: its projects, its billing, its cloud agents and its Git (W9 R5). */
+const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud|git)(?:\/|$)/u;
 
 /** A manual top-up as the API reports it: opened in the browser, or fulfilled with its receipt. */
 const paymentAction = (stubs: PaymentStubs, state: 'redirect_required' | 'fulfilled'): string =>
@@ -570,6 +571,56 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     /* The failed load goes to the stale-build recovery; once it settles the shell still answers. */
     await expectVisible(composerOf(current.page), launchTimeout);
     expect(current.application.windows().some((page) => page.url().endsWith('/recovery/index.html'))).toBe(false);
+  });
+
+  /* W9 R5 (Principal ruling): revision sync is a Tau Cloud read too. A project backed up to Tau Cloud, opened in safe
+   * mode, makes no Tau Git request and says Tau Cloud is off. */
+  it('makes no Tau revision request for a Tau Cloud project opened in safe mode (W9 R5)', async () => {
+    const { session: first, token } = await launch({ preserveProfile: true });
+    await expectSignedIn(first.page);
+    await first.page.goto('app://tau/projects/new', { waitUntil: 'domcontentloaded' });
+    await first.page.getByLabel('Project Name *').fill(`Safe mode sync ${String(Date.now())}`);
+    await first.page
+      .getByRole('button', { name: /^Create Project/u })
+      .first()
+      .click();
+    await first.page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
+    const projectUrl = first.page.url();
+    const openHistory = async (page: DesktopSession['page']): Promise<void> => {
+      await page
+        .getByRole('button', { name: /^Open History\./u })
+        .first()
+        .click({ timeout: 120_000 });
+    };
+    await openHistory(first.page);
+    await openBackupChooser(first.page);
+    await connectTauCloud(first.page);
+    await expectVisible(
+      first.page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Cloud' }),
+      180_000,
+    );
+
+    const firstProcess = first.application.process();
+    await first.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => firstProcess.exitCode ?? firstProcess.signalCode, { timeout: 60_000 }).not.toBeNull();
+    const { profileRoot } = first;
+    await first.close();
+    session = undefined;
+    proxy.cloudReads.length = 0;
+
+    const { session: safe } = await launch({ relaunch: { profileRoot, token: token! }, args: ['--safe-mode'] });
+    await expectVisible(safe.page.locator('[data-slot="safe-mode-bar"]'), launchTimeout);
+    await safe.page.goto(projectUrl, { waitUntil: 'load' });
+    await openHistory(safe.page);
+    await expectVisible(safe.page.getByText('Tau Cloud is off in safe mode', { exact: false }).first(), launchTimeout);
+    /* Long enough for an open pull, a push of the queue and one backoff to have asked, had any been allowed. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10_000);
+    });
+    expect(proxy.cloudReads.filter((path) => path.startsWith('/v1/git/'))).toEqual([]);
+    expect(proxy.cloudReads).toEqual([]);
   });
 
   it('shows no Cloud surface in safe mode, and never asks the route or reads Tau Cloud (D10, W9 R5)', async () => {

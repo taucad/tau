@@ -49,7 +49,7 @@ import { populateBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-m
 import type { BundledTypesMountEntry, BundledTypesRoot } from '@taucad/editor-ui/lib/bundled-types-mount';
 import { ensureBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-sentinel';
 import { createLazyBundledTypesReads } from '@taucad/editor-ui/lib/bundled-types-lazy';
-import { homeBackendFromWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
+import { homeBackendFromWorkerName, isSafeModeWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
 import { listWorkspaceDirectories } from '@taucad/files-ui/machines/file-manager-sync-fs-adapter';
 import {
   createCheckoutRoutes,
@@ -476,6 +476,8 @@ const pushRecorders = new Map<string, PushRecorder>();
 /* STO-25: each open project's open, timed from its root opening to its first usable view. */
 const projectOpenTimers = new Map<string, ProjectOpenTimer>();
 const revisionRegistry = createWorkerRevisionRegistry({
+  /* W9 R5: safe mode, read once from the name the page created this worker with. */
+  safeMode: isSafeModeWorkerName(self.name),
   /*
    * P31: one project, one store.
    *

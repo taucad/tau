@@ -5,6 +5,7 @@ import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } f
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 import { XIcon } from 'lucide-react';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -316,11 +317,18 @@ const ExpandedChatHistory = memo(function ({
     chatTextareaRef.current?.focus();
   }, []);
   const location = useLocation();
+  /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
+   * when the navigation commits lands on an inert composer and is dropped. It is given once per navigation, once the
+   * requested chat is the one presented (a URL naming no chat presents whatever it opens). */
+  const requestedChatId = projectChatIdFromSearch(location.search);
+  const isRequestedChatPresented = requestedChatId === undefined || requestedChatId === activeChatId;
+  const composerFocusRequest =
+    location.state?.focusChatComposer === true && isRequestedChatPresented ? location.key : undefined;
   useEffect(() => {
-    if (location.state?.focusChatComposer === true) {
+    if (composerFocusRequest !== undefined) {
       chatTextareaRef.current?.focus();
     }
-  }, [location.state]);
+  }, [composerFocusRequest]);
 
   // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
   // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.

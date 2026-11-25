@@ -54,9 +54,11 @@ const publishChatState = (state: MockChatState): void => {
   }
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
+let locationSearch = '';
+let presentedChatId = 'chat_test';
 let archiveOpen = false;
 vi.mock('react-router', () => ({
-  useLocation: () => ({ state: locationState }),
+  useLocation: () => ({ state: locationState, search: locationSearch, key: 'default' }),
   useParams: () => ({ workspace: 'home', project: 'one' }),
 }));
 vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
@@ -97,7 +99,7 @@ vi.mock('#hooks/use-chat.js', () => ({
       rememberedComposerTrays: [],
     });
   },
-  useChatContext: () => ({ activeChatId: 'chat_test' }),
+  useChatContext: () => ({ activeChatId: presentedChatId }),
 }));
 
 // Capture the body the chat client receives on submit so the wire-format
@@ -651,12 +653,33 @@ describe('ChatHistory — composer refocus', () => {
     capturedTextarea.focus = vi.fn<() => void>();
     draftReturnedListeners.clear();
     locationState = undefined;
+    locationSearch = '';
+    presentedChatId = 'chat_test';
     setMockMessages([]);
   });
 
   it('focuses the composer when a new-chat surface requests it', () => {
     locationState = { focusChatComposer: true };
     render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses the created chat composer once it is presented, not the previous chat held inert during the switch', () => {
+    /* A same-project switch keeps the previous chat on screen, inert, until the created chat is prepared. A focus
+     * given then is dropped by the browser, so the composer waits for the created chat. */
+    locationState = { focusChatComposer: true };
+    locationSearch = '?chat=chat_created';
+    const { rerender } = render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).not.toHaveBeenCalled();
+
+    presentedChatId = 'chat_created';
+    rerender(<ChatHistory className='presented' />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+
+    rerender(<ChatHistory className='typing' />);
 
     expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
   });

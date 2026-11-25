@@ -120,7 +120,7 @@ jobs:
           playwright-browsers: chromium
       - name: Install Chromium for the pack-install check
         if: env.SPIKE_GATE == 'true'
-        run: pnpm exec playwright install chromium
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       # The gate's native kernel suites run workers under Bubblewrap, and
       # prepare-build123d-python resolves its wheels with uv; the action provides both, as in ci.yml.
@@ -214,7 +214,7 @@ jobs:
         with:
           playwright-browsers: chromium
       - name: Install Chromium for the pack-install check
-        run: pnpm exec playwright install chromium
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       - name: Pack, install and run the CLI closure
         run: |

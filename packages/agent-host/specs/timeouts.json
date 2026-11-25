@@ -662,6 +662,14 @@
       "owner": "W10"
     },
     {
+      "id": "ACP-EXIT-STDIO-DRAIN",
+      "bound": "ACP adapter exit report's wait for its stdio to close, 1 s after the child's exit; covers a process the adapter started holding the pipes open, and expiry reports the exit with the stderr read so far",
+      "site": "packages/host/src/acp/adapter-connection.ts",
+      "token": "stdioDrain",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
       "id": "E26",
       "bound": "Relay session lifetime",
       "site": "packages/host/src/host-daemon.ts",

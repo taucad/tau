@@ -144,7 +144,7 @@ jobs:
         with:
           playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install chromium
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       # The nightly's software WebGPU profile, so a budget reads the same here as it did there. A step-level
       # bound below the job's, so the diagnostics and the report upload still run; streamed, because Nx holds a

@@ -48,7 +48,7 @@ export default defineConfig({
       'src/graphics/three/node-frame-reference.browser.test.ts',
       'src/graphics/three/webgpu-depth-sampling.browser.test.ts',
       'src/graphics/three/transmission-retirement.browser.test.ts',
-      'src/graphics/three/post-processing-antialias.browser.test.tsx',
+      // Not post-processing-antialias.browser.test.tsx: it runs alone (post-processing-antialias.vitest.browser.config.ts).
       'src/graphics/three/ao-denoise.browser.test.ts',
       'src/graphics/three/gtao-falloff.browser.test.ts',
       'src/graphics/three/ao-normal.browser.test.ts',

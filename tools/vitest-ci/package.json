@@ -1,7 +1,7 @@
 {
   "name": "@taucad/vitest-ci",
   "version": "0.0.1",
-  "description": "Shared Vitest reporter list and the CI test outcome recorder for every Tau test target",
+  "description": "Shared Vitest reporter list, CI test outcome recorder and recorded retry for every Tau test target",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",

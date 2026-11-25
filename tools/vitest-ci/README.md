@@ -1,3 +1,3 @@
 # @taucad/vitest-ci
 
-Shared Vitest reporter list and the CI test outcome recorder for every Tau test target
+Shared Vitest reporter list, CI test outcome recorder and recorded retry for every Tau test target

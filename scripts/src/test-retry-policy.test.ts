@@ -6,6 +6,8 @@ import { retryBudget } from '@taucad/vitest-ci/retry-policy';
 import { load } from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+
 /*
  * Testing policy § 16.2 (CI flake quarantine blueprint FQ-4, RT-1 and RT-4). Every Vitest config that reports through
  * `testReporters` sets `retry: testRetry()`, one in-process retry in CI, and no config sets a higher count: `ui-e2e`
@@ -21,12 +23,12 @@ const noRetry = new Map([
   ['apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts', 'filesystem scenarios record one timed run per scenario'],
 ]);
 
-const reportingConfigs = execFileSync('git', ['grep', '-l', '-z', 'reporters: testReporters('], {
+const reportingConfigs = execFileSync('git', ['grep', '-l', '-z', 'reporters: testReporters(', '--', '*.config.*'], {
   cwd: root,
   encoding: 'utf8',
 })
   .split('\0')
-  .filter((file) => file !== '' && !file.startsWith('tools/vitest-ci/src/'));
+  .filter((file) => file !== '');
 
 describe('the recorded retry in every Vitest config (RT-1)', () => {
   it('sets retry: testRetry() beside testReporters, and no other retry', () => {
@@ -74,7 +76,7 @@ describe("ci.yml's run budget for retried passes (RT-4)", () => {
   });
 
   /** Runs the gate's check against artifacts laid out as `download-artifact` writes them, one directory each. */
-  const runCheck = (artifacts: Record<string, readonly object[]>) => {
+  const runCheck = (artifacts: Record<string, ReadonlyArray<Record<string, unknown>>>) => {
     for (const [name, rows] of Object.entries(artifacts)) {
       const file = join(directory, 'test-outcomes', name, 'project', 'test.outcomes.jsonl');
       mkdirSync(join(file, '..'), { recursive: true });
@@ -117,7 +119,7 @@ describe("ci.yml's run budget for retried passes (RT-4)", () => {
       pattern: 'test-outcomes-*',
       path: `${expression('runner.temp')}/test-outcomes`,
     });
-    expect(gate.indexOf(download as Step)).toBeGreaterThan(
+    expect(gate.findIndex((step) => step.name === 'Download test outcomes')).toBeGreaterThan(
       gate.findIndex((step) => step.name === 'Require every affected lane'),
     );
     expect(check?.env?.['RUN_BUDGET']).toBe(retryBudget.run);
@@ -158,3 +160,5 @@ describe("ci.yml's run budget for retried passes (RT-4)", () => {
     expect(result.summary).toContain('### Retried passes in this run: 0 (budget 5)');
   });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- End wire names. */

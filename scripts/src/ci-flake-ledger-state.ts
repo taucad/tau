@@ -1,7 +1,8 @@
 /**
  * Flake ledger v2: per-test history from the outcome rows of `@taucad/vitest-ci` (FQ-2 of the CI flake quarantine
  * blueprint, Brain `research/ci-flake-quarantine-blueprint.md`, D2 and D3). The pure half; the IO is
- * `ci-flake-ledger-ingest-cli.ts`, and the weekly report (`ci-queue-health-cli.ts`) reads the state it keeps.
+ * `ci-flake-ledger-ingest-cli.ts` and `ci-flake-ledger-store.ts`, and the weekly report (`ci-queue-health-cli.ts`)
+ * reads the state it keeps.
  *
  * **Where the state lives.** One JSON document ({@link LedgerState}, `ledger.json`) on the `flake-ledger` branch of
  * this repository, written only by `flake-ledger.yml` through the Git data API: every update is a commit whose
@@ -10,7 +11,7 @@
  * file on `main`. It is kept off `main` because it changes after every CI run, which as pull requests would load the
  * merge queue with its own bookkeeping.
  *
- * **What is counted.** An execution is one outcome row of a test whose `run` and `attempt` are the run being
+ * **What is counted.** An execution is one outcome row of a test whose `run` and `attempt` are the run attempt being
  * ingested: a row a cache replay restored carries the ids of the run that executed it, so it is counted once, when
  * that run is ingested, and never again (D2). Only merge-queue runs and pushes to `main` are ingested.
  *
@@ -32,6 +33,9 @@
  *
  * **Renames.** `flake-ledger.json` `aliases` maps an old identity to its new one; the renaming pull request adds the
  * alias, and the ledger folds the old history into the new identity on its next run (D2, Renames).
+ *
+ * The outcome rows write an absent value as JSON `null`; this reader turns it into a missing field, and the state
+ * leaves an absent field out.
  */
 import { lineageOf, touchesFailingTest } from '#ci-flake-ledger.js';
 import type { Alias, ComparedFile } from '#ci-flake-ledger.js';
@@ -63,36 +67,33 @@ const dayMilliseconds = 24 * 60 * 60 * 1000;
 const maximumIdLength = 2000;
 const maximumErrorLength = 300;
 
-/** Where a row ran, as the reporter writes it. */
+/** Where a row ran: the Vitest project, the browser, the OS and architecture, and the flag state. */
 export type OutcomeVariant = {
-  readonly vitestProject: string | null;
-  readonly browser: string | null;
+  readonly vitestProject?: string | undefined;
+  readonly browser?: string | undefined;
   readonly os: string;
   readonly arch: string;
-  readonly flagState: string | null;
+  readonly flagState?: string | undefined;
 };
 
-/** One line of an outcome file (`@taucad/vitest-ci` `OutcomeRow`, schema 1), as this reader validates it. */
+/** One line of an outcome file (`@taucad/vitest-ci` `OutcomeRow`, schema 1), validated, with `null` as missing. */
 export type OutcomeRow = {
-  readonly schema: 1;
   readonly kind: 'test' | 'module' | 'unhandled';
   readonly id: string;
   readonly project: string;
   readonly target: string;
   readonly targetKey: string;
-  readonly file: string | null;
-  readonly name: string;
+  readonly file?: string | undefined;
   readonly variant: OutcomeVariant;
   readonly state: 'passed' | 'failed';
   readonly retryCount: number;
   readonly flaky: boolean;
   readonly durationMs: number;
   readonly errors: readonly string[];
-  readonly hash: string | null;
-  readonly run: number | null;
-  readonly attempt: number | null;
-  readonly job: string | null;
-  readonly sha: string | null;
+  readonly hash?: string | undefined;
+  readonly run?: number | undefined;
+  readonly attempt?: number | undefined;
+  readonly job?: string | undefined;
 };
 
 export type ParsedOutcomes = {
@@ -103,20 +104,26 @@ export type ParsedOutcomes = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-const isText = (value: unknown, limit = maximumIdLength): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= limit;
-const isOptionalText = (value: unknown): value is string | null => value === null || isText(value);
+const isText = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= maximumIdLength;
+const isOptionalText = (value: unknown): boolean => value === null || isText(value);
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
-const isOptionalCount = (value: unknown): value is number | null => value === null || isCount(value);
+const isOptionalCount = (value: unknown): boolean => value === null || isCount(value);
+const text = (value: unknown): string | undefined => (isText(value) ? value : undefined);
+const count = (value: unknown): number | undefined => (isCount(value) ? value : undefined);
 
-const rowProblem = (value: unknown): string | undefined => {
-  if (!isRecord(value)) {
-    return 'not an object';
-  }
+const isVariant = (value: unknown): value is Record<string, unknown> =>
+  isRecord(value) &&
+  isText(value['os']) &&
+  isText(value['arch']) &&
+  isOptionalText(value['vitestProject']) &&
+  isOptionalText(value['browser']) &&
+  isOptionalText(value['flagState']);
+
+const rowProblem = (value: Record<string, unknown>): string | undefined => {
   if (value['schema'] !== outcomeRowSchema) {
     return `unknown schema ${JSON.stringify(value['schema'])}`;
   }
-  const variant = value['variant'];
   const checks: ReadonlyArray<readonly [boolean, string]> = [
     [value['kind'] === 'test' || value['kind'] === 'module' || value['kind'] === 'unhandled', 'kind'],
     [isText(value['id']), 'id'],
@@ -124,16 +131,7 @@ const rowProblem = (value: unknown): string | undefined => {
     [isText(value['target']), 'target'],
     [isText(value['targetKey']), 'targetKey'],
     [isOptionalText(value['file']), 'file'],
-    [typeof value['name'] === 'string', 'name'],
-    [
-      isRecord(variant) &&
-        isText(variant['os']) &&
-        isText(variant['arch']) &&
-        isOptionalText(variant['vitestProject']) &&
-        isOptionalText(variant['browser']) &&
-        isOptionalText(variant['flagState']),
-      'variant',
-    ],
+    [isVariant(value['variant']), 'variant'],
     [value['state'] === 'passed' || value['state'] === 'failed', 'state'],
     [isCount(value['retryCount']), 'retryCount'],
     [typeof value['flaky'] === 'boolean', 'flaky'],
@@ -143,10 +141,37 @@ const rowProblem = (value: unknown): string | undefined => {
     [isOptionalCount(value['run']), 'run'],
     [isOptionalCount(value['attempt']), 'attempt'],
     [isOptionalText(value['job']), 'job'],
-    [isOptionalText(value['sha']), 'sha'],
   ];
   const bad = checks.filter(([ok]) => !ok).map(([, field]) => field);
   return bad.length > 0 ? `invalid ${bad.join(', ')}` : undefined;
+};
+
+const toRow = (value: Record<string, unknown>): OutcomeRow => {
+  const variant = value['variant'] as Record<string, unknown>;
+  return {
+    kind: value['kind'] as OutcomeRow['kind'],
+    id: value['id'] as string,
+    project: value['project'] as string,
+    target: value['target'] as string,
+    targetKey: value['targetKey'] as string,
+    file: text(value['file']),
+    variant: {
+      vitestProject: text(variant['vitestProject']),
+      browser: text(variant['browser']),
+      os: variant['os'] as string,
+      arch: variant['arch'] as string,
+      flagState: text(variant['flagState']),
+    },
+    state: value['state'] as OutcomeRow['state'],
+    retryCount: value['retryCount'] as number,
+    flaky: value['flaky'] as boolean,
+    durationMs: value['durationMs'] as number,
+    errors: value['errors'] as string[],
+    hash: text(value['hash']),
+    run: count(value['run']),
+    attempt: count(value['attempt']),
+    job: text(value['job']),
+  };
 };
 
 /**
@@ -154,10 +179,10 @@ const rowProblem = (value: unknown): string | undefined => {
  * reported, not counted; outcome files are written by pull-request code in the merge queue, so they are data and
  * every field is checked.
  */
-export const parseOutcomes = (text: string, source = 'outcomes'): ParsedOutcomes => {
+export const parseOutcomes = (content: string, source = 'outcomes'): ParsedOutcomes => {
   const rows: OutcomeRow[] = [];
   const problems: string[] = [];
-  for (const [index, line] of text.split('\n').entries()) {
+  for (const [index, line] of content.split('\n').entries()) {
     if (line.trim() === '') {
       continue;
     }
@@ -168,11 +193,15 @@ export const parseOutcomes = (text: string, source = 'outcomes'): ParsedOutcomes
       problems.push(`${source}:${index + 1}: not JSON`);
       continue;
     }
+    if (!isRecord(value)) {
+      problems.push(`${source}:${index + 1}: not an object`);
+      continue;
+    }
     const problem = rowProblem(value);
-    if (problem) {
-      problems.push(`${source}:${index + 1}: ${problem}`);
+    if (problem === undefined) {
+      rows.push(toRow(value));
     } else {
-      rows.push(value as OutcomeRow);
+      problems.push(`${source}:${index + 1}: ${problem}`);
     }
   }
   return { rows, problems };
@@ -204,11 +233,11 @@ export type FlakeEvent = {
   readonly failedAttempt: number;
   readonly variant: string;
   /** The task hash of the failure. */
-  readonly hash: string | null;
+  readonly hash?: string | undefined;
   /** The identity's execution count at the failure: the entry rule's window is counted on it. */
   readonly execution: number;
   /** The first line of the first error. */
-  readonly error: string | null;
+  readonly error?: string | undefined;
 };
 
 /** A failed execution still waiting for a pass on its hash or in its lineage. */
@@ -216,16 +245,16 @@ export type OpenFailure = {
   readonly run: number;
   readonly attempt: number;
   readonly at: string;
-  readonly hash: string | null;
+  readonly hash?: string | undefined;
   readonly variant: string;
   /** The commit the failing run tested. */
-  readonly sha: string | null;
+  readonly sha?: string | undefined;
   /** `pr-<n>` or `push:<branch>` (`ci-flake-ledger.ts` `Lineage`). */
-  readonly lineage: string | null;
+  readonly lineage?: string | undefined;
   /** The merge group's base, for a queue lineage. */
-  readonly base: string | null;
+  readonly base?: string | undefined;
   readonly execution: number;
-  readonly error: string | null;
+  readonly error?: string | undefined;
 };
 
 export type VariantState = {
@@ -240,13 +269,13 @@ export type IdentityState = {
   readonly project: string;
   /** The target with `:shard-<n>` removed. */
   targetKey: string;
-  file: string | null;
+  file?: string | undefined;
   /** The first execution the ledger counted: the identity's first failed or retried execution. */
   firstSeen: string;
   lastSeen: string;
   /** The last failed or retried execution. */
   lastFailure: string;
-  /** First-attempt executions counted since {@link firstSeen}. */
+  /** First-attempt executions counted since {@link IdentityState.firstSeen}. */
   executions: number;
   /** Executions whose final state was failed. */
   failures: number;
@@ -257,7 +286,7 @@ export type IdentityState = {
   variants: Record<string, VariantState>;
   events: FlakeEvent[];
   openFailures: OpenFailure[];
-  /** Recent hashes it passed on, with the variant (`<variant>\u0000<hash>`). */
+  /** Recent hashes it passed on, with the variant (`<variant> <hash>`). */
   passHashes: string[];
   /** Commits of its recent failures, for the queue inheritance check. */
   failureShas: string[];
@@ -284,10 +313,10 @@ export type IngestedRun = {
   readonly run: number;
   readonly attempt: number;
   readonly event: string;
-  readonly lineage: string | null;
-  readonly sha: string | null;
+  readonly lineage?: string | undefined;
+  readonly sha?: string | undefined;
   readonly at: string;
-  readonly conclusion: string | null;
+  readonly conclusion?: string | undefined;
   /** Outcome artifacts read. */
   readonly artifacts: number;
   /** Test rows counted as executions of this attempt. */
@@ -315,8 +344,8 @@ export const emptyState = (now: Date): LedgerState => ({
 });
 
 /** Read a state document, refusing a version or a shape this code does not know. */
-export const parseState = (text: string): LedgerState => {
-  const value: unknown = JSON.parse(text);
+export const parseState = (content: string): LedgerState => {
+  const value: unknown = JSON.parse(content);
   if (!isRecord(value) || value['schema'] !== ledgerStateSchema) {
     throw new Error(`flake ledger state: unknown schema ${JSON.stringify(isRecord(value) ? value['schema'] : value)}`);
   }
@@ -331,22 +360,22 @@ export const parseState = (text: string): LedgerState => {
   return value as unknown as LedgerState;
 };
 
+const byKey = <T>(record: Record<string, T>): Record<string, T> =>
+  Object.fromEntries(Object.entries(record).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
 /** The state as stable, reviewable JSON: identities and tasks in key order, two-space indent, a final newline. */
-export const serializeState = (state: LedgerState): string => {
-  const sorted = <T>(record: Record<string, T>): Record<string, T> =>
-    Object.fromEntries(Object.entries(record).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  return `${JSON.stringify(
+export const serializeState = (state: LedgerState): string =>
+  `${JSON.stringify(
     {
       schema: state.schema,
       updatedAt: state.updatedAt,
       ingested: [...state.ingested].sort((a, b) => a.run - b.run || a.attempt - b.attempt),
-      tasks: sorted(state.tasks),
-      identities: sorted(state.identities),
+      tasks: byKey(state.tasks),
+      identities: byKey(state.identities),
     },
-    null,
+    undefined,
     2,
   )}\n`;
-};
 
 /** The current identity of an id: aliases followed to the end (a renamed test renamed again). */
 export const aliasResolver = (aliases: readonly Alias[]): ((id: string) => string) => {
@@ -367,11 +396,12 @@ export const aliasResolver = (aliases: readonly Alias[]): ((id: string) => strin
 const later = (a: string, b: string): string => (a > b ? a : b);
 const earlier = (a: string, b: string): string => (a < b ? a : b);
 
-/** Fold `older` into `newer`: one history, the older one's executions first. */
-const mergeIdentities = (older: IdentityState, newer: IdentityState, olderId: string): IdentityState => {
-  const offset = older.executions;
-  const variants: Record<string, VariantState> = { ...older.variants };
-  for (const [key, entry] of Object.entries(newer.variants)) {
+const mergeVariants = (
+  older: Record<string, VariantState>,
+  newer: Record<string, VariantState>,
+): Record<string, VariantState> => {
+  const variants: Record<string, VariantState> = structuredClone(older);
+  for (const [key, entry] of Object.entries(newer)) {
     const existing = variants[key];
     variants[key] = existing
       ? {
@@ -382,6 +412,12 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, olderId: st
         }
       : { ...entry };
   }
+  return variants;
+};
+
+/** Fold `older` into `newer`: one history, the older one's executions first and the newer one's re-numbered after. */
+const mergeIdentities = (older: IdentityState, newer: IdentityState, renamed: string): IdentityState => {
+  const offset = older.executions;
   return {
     project: newer.project,
     targetKey: newer.targetKey,
@@ -393,7 +429,7 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, olderId: st
     failures: older.failures + newer.failures,
     retriedPasses: older.retriedPasses + newer.retriedPasses,
     passStreak: newer.executions > 0 ? newer.passStreak : older.passStreak,
-    variants,
+    variants: mergeVariants(older.variants, newer.variants),
     events: [...older.events, ...newer.events.map((event) => ({ ...event, execution: event.execution + offset }))]
       .sort((a, b) => a.execution - b.execution || a.at.localeCompare(b.at))
       .slice(-maximumEvents),
@@ -403,7 +439,7 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, olderId: st
     ],
     passHashes: [...new Set([...older.passHashes, ...newer.passHashes])].slice(-maximumPassHashes),
     failureShas: [...new Set([...older.failureShas, ...newer.failureShas])].slice(-maximumFailureShas),
-    aliases: [...new Set([...older.aliases, olderId, ...newer.aliases])].sort(),
+    aliases: [...new Set([...older.aliases, ...newer.aliases, renamed])].sort(),
   };
 };
 
@@ -414,21 +450,27 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, olderId: st
 export const applyAliases = (state: LedgerState, aliases: readonly Alias[]): string[] => {
   const resolve = aliasResolver(aliases);
   const folded: string[] = [];
-  for (const id of Object.keys(state.identities).sort()) {
+  const identities = new Map(Object.entries(state.identities));
+  for (const id of [...identities.keys()].sort()) {
     const target = resolve(id);
-    const source = state.identities[id];
+    const source = identities.get(id);
     if (target === id || !source) {
       continue;
     }
-    const existing = state.identities[target];
-    state.identities[target] = existing
-      ? existing.firstSeen <= source.firstSeen
-        ? mergeIdentities(existing, source, id)
-        : mergeIdentities(source, existing, id)
-      : { ...source, aliases: [...new Set([...source.aliases, id])].sort() };
-    delete state.identities[id];
+    const existing = identities.get(target);
+    let merged: IdentityState;
+    if (!existing) {
+      merged = { ...source, aliases: [...new Set([...source.aliases, id])].sort() };
+    } else if (existing.firstSeen <= source.firstSeen) {
+      merged = mergeIdentities(existing, source, id);
+    } else {
+      merged = mergeIdentities(source, existing, id);
+    }
+    identities.set(target, merged);
+    identities.delete(id);
     folded.push(id);
   }
+  state.identities = Object.fromEntries(identities);
   return folded;
 };
 
@@ -438,30 +480,33 @@ export type IngestRun = WorkflowRun & { readonly run_attempt?: number };
 /** A pass that would close a failure in its lineage, if the diff checks out. The CLI confirms it. */
 export type LineageCandidate = {
   readonly id: string;
-  readonly file: string | null;
+  readonly file?: string | undefined;
   readonly failure: OpenFailure;
   readonly pass: {
     readonly run: number;
     readonly attempt: number;
     readonly at: string;
-    readonly sha: string | null;
-    readonly base: string | null;
+    readonly sha?: string | undefined;
+    readonly base?: string | undefined;
     readonly lineage: string;
     readonly kind: 'queue' | 'push';
   };
 };
 
+/** An event and the identity it belongs to. */
+export type RecordedEvent = { readonly id: string; readonly event: FlakeEvent };
+
 export type IngestResult = {
   readonly record: IngestedRun;
   /** Events recorded by this run. */
-  readonly events: ReadonlyArray<{ readonly id: string; readonly event: FlakeEvent }>;
+  readonly events: readonly RecordedEvent[];
   readonly candidates: readonly LineageCandidate[];
 };
 
-const firstError = (row: OutcomeRow): string | null => {
+const firstError = (row: OutcomeRow): string | undefined => {
   const error = row.errors[0];
   if (error === undefined) {
-    return null;
+    return undefined;
   }
   return error.length > maximumErrorLength ? `${error.slice(0, maximumErrorLength - 1)}…` : error;
 };
@@ -498,33 +543,223 @@ const rowKey = (row: OutcomeRow): string =>
     row.durationMs,
   ]);
 
-/** The attempts of a run already ingested. */
-const ingestedAttempts = (state: LedgerState, run: number): Set<number> =>
-  new Set(state.ingested.filter((entry) => entry.run === run).map((entry) => entry.attempt));
-
 /** Whether the state already holds this run at this attempt (or a later one). */
 export const isIngested = (state: LedgerState, run: number, attempt: number): boolean =>
   state.ingested.some((entry) => entry.run === run && entry.attempt >= attempt);
 
-const recordEvent = (
-  identity: IdentityState,
-  variant: string,
-  event: FlakeEvent,
-  events: Array<{ id: string; event: FlakeEvent }>,
-  id: string,
-): void => {
+/** One identity's execution being counted, and where its events go. */
+type Counting = {
+  readonly id: string;
+  readonly identity: IdentityState;
+  readonly row: OutcomeRow;
+  readonly variant: string;
+  readonly at: string;
+  readonly run: IngestRun;
+  readonly attempt: number;
+  readonly events: RecordedEvent[];
+};
+
+const recordEvent = (counting: Counting, event: FlakeEvent): void => {
+  const { identity, id, events } = counting;
   identity.events = [...identity.events, event].slice(-maximumEvents);
-  const entry = identity.variants[variant];
+  const entry = identity.variants[event.variant];
   if (entry) {
     entry.events += 1;
   }
   events.push({ id, event });
 };
 
+const passKey = (variant: string, hash: string): string => `${variant} ${hash}`;
+
+/** A failed execution: an event with an earlier pass on its hash, else an open failure. */
+const countFailure = (counting: Counting): void => {
+  const { identity, row, variant, at, run, attempt } = counting;
+  const variantState = identity.variants[variant];
+  identity.failures += 1;
+  if (variantState) {
+    variantState.failures += 1;
+  }
+  identity.passStreak = 0;
+  identity.lastFailure = later(identity.lastFailure, at);
+  if (run.head_sha) {
+    identity.failureShas = [...identity.failureShas.filter((sha) => sha !== run.head_sha), run.head_sha].slice(
+      -maximumFailureShas,
+    );
+  }
+  if (row.hash !== undefined && identity.passHashes.includes(passKey(variant, row.hash))) {
+    recordEvent(counting, {
+      kind: 'same-hash',
+      at,
+      run: run.id,
+      attempt,
+      failedRun: run.id,
+      failedAttempt: attempt,
+      variant,
+      hash: row.hash,
+      execution: identity.executions,
+      error: firstError(row),
+    });
+    return;
+  }
+  const lineage = lineageOf(run);
+  identity.openFailures.push({
+    run: run.id,
+    attempt,
+    at,
+    hash: row.hash,
+    variant,
+    sha: run.head_sha,
+    lineage: lineage?.key,
+    base: lineage?.kind === 'queue' ? lineage.base : undefined,
+    execution: identity.executions,
+    error: firstError(row),
+  });
+};
+
+/**
+ * A passing execution: a `retry` event when it took a retry, a `same-hash` event for each open failure on its hash,
+ * else a lineage candidate for the newest open failure of its lineage.
+ */
+const countPass = (counting: Counting): LineageCandidate | undefined => {
+  const { identity, row, variant, at, run, attempt, id } = counting;
+  if (row.flaky) {
+    identity.retriedPasses += 1;
+    identity.passStreak = 0;
+    identity.lastFailure = later(identity.lastFailure, at);
+    recordEvent(counting, {
+      kind: 'retry',
+      at,
+      run: run.id,
+      attempt,
+      failedRun: run.id,
+      failedAttempt: attempt,
+      variant,
+      hash: row.hash,
+      execution: identity.executions,
+      error: firstError(row),
+    });
+  } else {
+    identity.passStreak += 1;
+  }
+  if (row.hash === undefined) {
+    return undefined;
+  }
+  const key = passKey(variant, row.hash);
+  identity.passHashes = [...identity.passHashes.filter((entry) => entry !== key), key].slice(-maximumPassHashes);
+  const sameHash = identity.openFailures.filter((failure) => failure.hash === row.hash && failure.variant === variant);
+  for (const failure of sameHash) {
+    recordEvent(counting, {
+      kind: 'same-hash',
+      at,
+      run: run.id,
+      attempt,
+      failedRun: failure.run,
+      failedAttempt: failure.attempt,
+      variant,
+      hash: failure.hash,
+      execution: failure.execution,
+      error: failure.error,
+    });
+  }
+  identity.openFailures = identity.openFailures.filter((failure) => !sameHash.includes(failure));
+  const lineage = lineageOf(run);
+  if (!lineage || sameHash.length > 0) {
+    return undefined;
+  }
+  const inLineage = identity.openFailures.filter(
+    (failure) => failure.lineage === lineage.key && failure.variant === variant && failure.run !== run.id,
+  );
+  /* The lineage has moved on: its next run of this test passed, so its older failures pair with nothing. */
+  identity.openFailures = identity.openFailures.filter((failure) => !inLineage.includes(failure));
+  const newest = inLineage.at(-1);
+  return newest
+    ? {
+        id,
+        file: identity.file,
+        failure: newest,
+        pass: {
+          run: run.id,
+          attempt,
+          at,
+          sha: run.head_sha,
+          base: lineage.kind === 'queue' ? lineage.base : undefined,
+          lineage: lineage.key,
+          kind: lineage.kind,
+        },
+      }
+    : undefined;
+};
+
+/** The rows of this run attempt not counted yet, de-duplicated, and how many were replays or earlier attempts. */
+const ownRows = (
+  state: LedgerState,
+  run: IngestRun,
+  rows: readonly OutcomeRow[],
+): { readonly own: OutcomeRow[]; readonly replayed: number } => {
+  const attempt = run.run_attempt ?? 1;
+  const done = new Set(state.ingested.filter((entry) => entry.run === run.id).map((entry) => entry.attempt));
+  const seen = new Set<string>();
+  const own: OutcomeRow[] = [];
+  let replayed = 0;
+  for (const row of rows) {
+    const key = rowKey(row);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    if (row.run !== run.id || row.attempt === undefined || row.attempt > attempt || done.has(row.attempt)) {
+      replayed += 1;
+    } else {
+      own.push(row);
+    }
+  }
+  /* Earlier attempts first, and inside one attempt failures before passes, so a re-run's pass finds its failure. */
+  own.sort(
+    (a, b) =>
+      (a.attempt ?? 0) - (b.attempt ?? 0) ||
+      (a.state === b.state ? 0 : a.state === 'failed' ? -1 : 1) ||
+      a.id.localeCompare(b.id),
+  );
+  return { own, replayed };
+};
+
+/** Count a row into its task's totals; true when it is a test row. */
+const countTask = (
+  state: LedgerState,
+  row: OutcomeRow,
+  context: { readonly at: string; readonly executions: Set<string> },
+): boolean => {
+  const { at, executions } = context;
+  const taskKey = `${row.project}:${row.targetKey}`;
+  const task = state.tasks[taskKey] ?? {
+    executions: 0,
+    tests: 0,
+    failures: 0,
+    otherFailures: 0,
+    firstSeen: at,
+    lastSeen: at,
+  };
+  state.tasks[taskKey] = task;
+  task.lastSeen = later(task.lastSeen, at);
+  const execution = JSON.stringify([taskKey, row.target, row.hash, row.attempt, row.job, row.variant]);
+  if (!executions.has(execution)) {
+    executions.add(execution);
+    task.executions += 1;
+  }
+  const failed = row.state === 'failed' ? 1 : 0;
+  if (row.kind !== 'test') {
+    task.otherFailures += failed;
+    return false;
+  }
+  task.tests += 1;
+  task.failures += failed;
+  return true;
+};
+
 /**
  * Count one run attempt's outcome rows into the state (in place): executions, failures, retried passes, and the
  * `retry` and `same-hash` events. Passes that may close a failure in their lineage are returned as candidates for
- * the CLI to confirm with {@link confirmLineage}.
+ * the CLI to confirm with {@link lineageConfirmed} and record with {@link confirmLineage}.
  */
 export const ingestRun = (
   state: LedgerState,
@@ -536,73 +771,29 @@ export const ingestRun = (
     readonly aliases?: readonly Alias[];
   },
 ): IngestResult => {
-  const { run, rows } = input;
+  const { run } = input;
   const resolve = aliasResolver(input.aliases ?? []);
-  const attempt = run.run_attempt ?? 1;
   const at = run.updated_at;
-  const lineage = lineageOf(run);
-  const done = ingestedAttempts(state, run.id);
-  const seen = new Set<string>();
-  const own: OutcomeRow[] = [];
-  let replayed = 0;
-  for (const row of rows) {
-    const key = rowKey(row);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    if (row.run !== run.id || row.attempt === null || row.attempt > attempt || done.has(row.attempt)) {
-      replayed += 1;
-      continue;
-    }
-    own.push(row);
-  }
-  /* Earlier attempts first, and inside one attempt failures before passes, so a re-run's pass finds its failure. */
-  own.sort(
-    (a, b) =>
-      (a.attempt ?? 0) - (b.attempt ?? 0) ||
-      (a.state === b.state ? 0 : a.state === 'failed' ? -1 : 1) ||
-      a.id.localeCompare(b.id),
-  );
-  const events: Array<{ id: string; event: FlakeEvent }> = [];
+  const { own, replayed } = ownRows(state, run, input.rows);
+  const events: RecordedEvent[] = [];
   const candidates: LineageCandidate[] = [];
   const taskExecutions = new Set<string>();
   let counted = 0;
   for (const row of own) {
-    const taskKey = `${row.project}:${row.targetKey}`;
-    const task = state.tasks[taskKey] ?? {
-      executions: 0,
-      tests: 0,
-      failures: 0,
-      otherFailures: 0,
-      firstSeen: at,
-      lastSeen: at,
-    };
-    state.tasks[taskKey] = task;
-    task.lastSeen = later(task.lastSeen, at);
-    const execution = JSON.stringify([taskKey, row.target, row.hash, row.attempt, row.job, row.variant]);
-    if (!taskExecutions.has(execution)) {
-      taskExecutions.add(execution);
-      task.executions += 1;
-    }
-    if (row.kind !== 'test') {
-      task.otherFailures += row.state === 'failed' ? 1 : 0;
+    if (!countTask(state, row, { at, executions: taskExecutions })) {
       continue;
     }
     counted += 1;
-    task.tests += 1;
-    task.failures += row.state === 'failed' ? 1 : 0;
     const id = resolve(row.id);
-    const variant = variantKey(row.variant);
-    const failedNow = row.state === 'failed';
     let identity = state.identities[id];
     if (!identity) {
-      if (!failedNow && !row.flaky) {
+      if (row.state === 'passed' && !row.flaky) {
         continue;
       }
       identity = newIdentity(row, at);
       state.identities[id] = identity;
     }
+    const variant = variantKey(row.variant);
     identity.targetKey = row.targetKey;
     identity.file = row.file;
     identity.executions += 1;
@@ -611,142 +802,25 @@ export const ingestRun = (
     identity.variants[variant] = variantState;
     variantState.executions += 1;
     variantState.lastSeen = later(variantState.lastSeen, at);
-    const runAttempt = row.attempt ?? attempt;
-    const hashKey = `${variant}\u0000${row.hash ?? ''}`;
-    if (failedNow) {
-      identity.failures += 1;
-      variantState.failures += 1;
-      identity.passStreak = 0;
-      identity.lastFailure = later(identity.lastFailure, at);
-      if (run.head_sha) {
-        identity.failureShas = [...identity.failureShas.filter((sha) => sha !== run.head_sha), run.head_sha].slice(
-          -maximumFailureShas,
-        );
-      }
-      if (row.hash !== null && identity.passHashes.includes(hashKey)) {
-        /* It passed on this hash before: the earlier pass and this failure are one event. */
-        recordEvent(
-          identity,
-          variant,
-          {
-            kind: 'same-hash',
-            at,
-            run: run.id,
-            attempt: runAttempt,
-            failedRun: run.id,
-            failedAttempt: runAttempt,
-            variant,
-            hash: row.hash,
-            execution: identity.executions,
-            error: firstError(row),
-          },
-          events,
-          id,
-        );
-        continue;
-      }
-      identity.openFailures.push({
-        run: run.id,
-        attempt: runAttempt,
-        at,
-        hash: row.hash,
-        variant,
-        sha: run.head_sha ?? null,
-        lineage: lineage?.key ?? null,
-        base: lineage?.kind === 'queue' ? lineage.base : null,
-        execution: identity.executions,
-        error: firstError(row),
-      });
-      continue;
-    }
-    if (row.flaky) {
-      identity.retriedPasses += 1;
-      identity.passStreak = 0;
-      identity.lastFailure = later(identity.lastFailure, at);
-      recordEvent(
-        identity,
-        variant,
-        {
-          kind: 'retry',
-          at,
-          run: run.id,
-          attempt: runAttempt,
-          failedRun: run.id,
-          failedAttempt: runAttempt,
-          variant,
-          hash: row.hash,
-          execution: identity.executions,
-          error: firstError(row),
-        },
-        events,
-        id,
-      );
+    const counting: Counting = { id, identity, row, variant, at, run, attempt: row.attempt ?? 1, events };
+    if (row.state === 'failed') {
+      countFailure(counting);
     } else {
-      identity.passStreak += 1;
-    }
-    if (row.hash !== null) {
-      identity.passHashes = [...identity.passHashes.filter((entry) => entry !== hashKey), hashKey].slice(
-        -maximumPassHashes,
-      );
-    }
-    const sameHash = identity.openFailures.filter(
-      (failure) => row.hash !== null && failure.hash === row.hash && failure.variant === variant,
-    );
-    for (const failure of sameHash) {
-      recordEvent(
-        identity,
-        variant,
-        {
-          kind: 'same-hash',
-          at,
-          run: run.id,
-          attempt: runAttempt,
-          failedRun: failure.run,
-          failedAttempt: failure.attempt,
-          variant,
-          hash: failure.hash,
-          execution: failure.execution,
-          error: failure.error,
-        },
-        events,
-        id,
-      );
-    }
-    let open = identity.openFailures.filter((failure) => !sameHash.includes(failure));
-    if (lineage && sameHash.length === 0) {
-      const inLineage = open.filter(
-        (failure) => failure.lineage === lineage.key && failure.variant === variant && failure.run !== run.id,
-      );
-      const newest = inLineage.at(-1);
-      if (newest) {
-        candidates.push({
-          id,
-          file: identity.file,
-          failure: newest,
-          pass: {
-            run: run.id,
-            attempt: runAttempt,
-            at,
-            sha: run.head_sha ?? null,
-            base: lineage.kind === 'queue' ? lineage.base : null,
-            lineage: lineage.key,
-            kind: lineage.kind,
-          },
-        });
+      const candidate = countPass(counting);
+      if (candidate) {
+        candidates.push(candidate);
       }
-      /* The lineage has moved on: its next run of this test passed, so its older failures pair with nothing. */
-      open = open.filter((failure) => !inLineage.includes(failure));
     }
-    identity.openFailures = open;
   }
+  const lineage = lineageOf(run);
   const record: IngestedRun = {
     run: run.id,
-    attempt,
+    attempt: run.run_attempt ?? 1,
     event: run.event ?? '',
-    lineage: lineage?.key ?? null,
-    sha: run.head_sha ?? null,
+    lineage: lineage?.key,
+    sha: run.head_sha,
     at,
-    conclusion: run.conclusion ?? null,
+    conclusion: run.conclusion,
     artifacts: input.artifacts,
     counted,
     replayed,
@@ -759,16 +833,22 @@ export const ingestRun = (
 
 /**
  * Whether a merge-queue lineage candidate is inherited: the group its failing run was built on failed the same test
- * (that group carries the failure, `ci-flake-ledger.ts` `pairFailures`).
+ * (that group carries the failure, as in `ci-flake-ledger.ts` `pairFailures`).
  */
 export const isInherited = (state: LedgerState, candidate: LineageCandidate): boolean =>
-  candidate.failure.base !== null &&
+  candidate.failure.base !== undefined &&
   (state.identities[candidate.id]?.failureShas.includes(candidate.failure.base) ?? false);
+
+const diffKey = (files: readonly ComparedFile[]): string =>
+  files
+    .map((file) => `${file.filename}\u0000${file.sha ?? ''}`)
+    .sort()
+    .join('\n');
 
 /**
  * Whether the two runs of a candidate tested the same change, from the compares the CLI fetched: for a queue
  * lineage, the pull request's diff against each group's base must be identical; for a push lineage, the commits
- * between must not touch the test's file.
+ * between must not touch the test's file. Undefined when a compare is missing.
  */
 export const lineageConfirmed = (
   candidate: LineageCandidate,
@@ -779,20 +859,9 @@ export const lineageConfirmed = (
   },
 ): boolean | undefined => {
   if (candidate.pass.kind === 'queue') {
-    if (!compares.failed || !compares.passed) {
-      return undefined;
-    }
-    const key = (files: readonly ComparedFile[]): string =>
-      files
-        .map((file) => `${file.filename}\u0000${file.sha ?? ''}`)
-        .sort()
-        .join('\n');
-    return key(compares.failed) === key(compares.passed);
+    return compares.failed && compares.passed ? diffKey(compares.failed) === diffKey(compares.passed) : undefined;
   }
-  if (!compares.between || !candidate.file) {
-    return undefined;
-  }
-  return !touchesFailingTest(compares.between, [candidate.file]);
+  return compares.between && candidate.file ? !touchesFailingTest(compares.between, [candidate.file]) : undefined;
 };
 
 /** Record a confirmed lineage pair as an event of its identity. */
@@ -813,7 +882,11 @@ export const confirmLineage = (state: LedgerState, candidate: LineageCandidate):
     execution: candidate.failure.execution,
     error: candidate.failure.error,
   };
-  recordEvent(identity, candidate.failure.variant, event, [], candidate.id);
+  identity.events = [...identity.events, event].slice(-maximumEvents);
+  const entry = identity.variants[event.variant];
+  if (entry) {
+    entry.events += 1;
+  }
   return event;
 };
 
@@ -824,13 +897,15 @@ export const pruneState = (state: LedgerState, now: Date): void => {
   const openCutoff = cutoff(openFailureDays);
   const retentionCutoff = cutoff(retentionDays);
   state.ingested = state.ingested.filter((entry) => entry.at >= ingestedCutoff);
+  const kept: Array<[string, IdentityState]> = [];
   for (const [id, identity] of Object.entries(state.identities)) {
     identity.openFailures = identity.openFailures.filter((failure) => failure.at >= openCutoff);
     identity.events = identity.events.filter((event) => event.at >= retentionCutoff);
-    if (identity.lastFailure < retentionCutoff && identity.events.length === 0) {
-      delete state.identities[id];
+    if (identity.lastFailure >= retentionCutoff || identity.events.length > 0) {
+      kept.push([id, identity]);
     }
   }
+  state.identities = Object.fromEntries(kept);
 };
 
 /** Events inside the identity's last `executions` executions. */
@@ -864,6 +939,8 @@ export type LedgerSummary = {
   readonly rows: readonly LedgerRow[];
 };
 
+const total = (row: LedgerRow): number => row.inWindow.retry + row.inWindow['same-hash'] + row.inWindow.lineage;
+
 /** The identities with a flake event in the window, most events first. */
 export const summarizeLedger = (state: LedgerState, window: { from: string; to: string }): LedgerSummary => {
   const inWindow = (at: string): boolean => at >= window.from && at <= window.to;
@@ -886,7 +963,6 @@ export const summarizeLedger = (state: LedgerState, window: { from: string; to: 
       entryRule: meetsEntryRule(identity),
     });
   }
-  const total = (row: LedgerRow): number => row.inWindow.retry + row.inWindow['same-hash'] + row.inWindow.lineage;
   rows.sort((a, b) => total(b) - total(a) || a.id.localeCompare(b.id));
   return {
     window,
@@ -901,18 +977,18 @@ export const summarizeLedger = (state: LedgerState, window: { from: string; to: 
   };
 };
 
-const cell = (text: string): string => text.replaceAll('|', String.raw`\|`).replaceAll(/\s+/gu, ' ');
+const cell = (content: string): string => content.replaceAll('|', String.raw`\|`).replaceAll(/\s+/gu, ' ');
 
 /** The ledger section of the weekly report (and of each ingestion's job summary). */
-export const renderLedgerMarkdown = (summary: LedgerSummary, options: { readonly limit?: number } = {}): string => {
-  const limit = options.limit ?? 50;
+export const renderLedgerMarkdown = (summary: LedgerSummary, limit = 50): string => {
+  const rejected = summary.rejected > 0 ? `, ${summary.rejected} rejected lines` : '';
   const lines = [
     '## Test flake ledger (FQ-2)',
     '',
     `${summary.window.from.slice(0, 16)}Z to ${summary.window.to.slice(0, 16)}Z: ${summary.runs} run attempts ingested, ` +
-      `${summary.counted} test executions counted (${summary.replayed} replayed rows not counted again` +
-      `${summary.rejected > 0 ? `, ${summary.rejected} rejected lines` : ''}). ${summary.events} flake events on ${summary.rows.length} tests; ` +
-      `${summary.tracked} tests tracked. State updated ${summary.updatedAt.slice(0, 16)}Z.`,
+      `${summary.counted} test executions counted (${summary.replayed} replayed rows not counted again${rejected}). ` +
+      `${summary.events} flake events on ${summary.rows.length} tests; ${summary.tracked} tests tracked. ` +
+      `State updated ${summary.updatedAt.slice(0, 16)}Z.`,
     '',
   ];
   if (summary.rows.length === 0) {

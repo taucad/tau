@@ -29,7 +29,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { client, GitHubError, listRuns } from '#ci-github-client.js';
+import { client, listRuns } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import { ledgerProblems } from '#ci-flake-ledger.js';
 import type { ComparedFile, Ledger } from '#ci-flake-ledger.js';
@@ -42,112 +42,17 @@ import {
   isIngested,
   lineageConfirmed,
   parseOutcomes,
-  parseState,
   pruneState,
   renderLedgerMarkdown,
-  serializeState,
   summarizeLedger,
 } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate } from '#ci-flake-ledger-state.js';
+import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 
-/** The state document's path on the state branch. */
-export const statePath = 'ledger.json';
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
 export const artifactPrefix = 'test-outcomes-';
 /** The largest unzipped outcome text one artifact may hold. */
 const maximumArtifactBytes = 512 * 1024 * 1024;
-
-const readme = `# Flake ledger state
-
-Written only by \`.github/workflows/flake-ledger.yml\` on \`main\` (\`scripts/src/ci-flake-ledger-ingest-cli.ts\`).
-\`${statePath}\` is the per-test history of the flake ledger: executions, failures, flake events, variants, first and
-last seen, built from the \`test-outcomes-*\` artifacts of merge-queue and \`main\` runs of \`ci.yml\`. Each commit is
-one ingestion; its parent is the state it read. The schema is \`LedgerState\` in
-\`scripts/src/ci-flake-ledger-state.ts\`. Do not edit or push this branch by hand: change the code on \`main\`.
-`;
-
-type StateStore = {
-  readonly read: () => Promise<LedgerState | undefined>;
-  readonly write: (state: LedgerState, message: string) => Promise<string>;
-};
-
-/** The state on a branch, through the Git data API. */
-export const branchStore = (github: Client, branch: string): StateStore => {
-  let parent: string | undefined;
-  return {
-    async read() {
-      try {
-        const ref = await github.get<{ object: { sha: string } }>(
-          `/repos/${github.repository}/git/ref/heads/${encodeURIComponent(branch)}`,
-        );
-        parent = ref.object.sha;
-      } catch (error) {
-        if (error instanceof GitHubError && error.status === 404) {
-          return undefined;
-        }
-        throw error;
-      }
-      const text = await github.getText(
-        `/repos/${github.repository}/contents/${statePath}?ref=${parent}`,
-        'application/vnd.github.raw+json',
-      );
-      return parseState(text);
-    },
-    async write(state, message) {
-      const repo = `/repos/${github.repository}`;
-      const blob = await github.send<{ sha: string }>('POST', `${repo}/git/blobs`, {
-        content: serializeState(state),
-        encoding: 'utf-8',
-      });
-      const files = [{ path: statePath, mode: '100644', type: 'blob', sha: blob.sha }];
-      let baseTree: string | undefined;
-      if (parent) {
-        baseTree = (await github.get<{ tree: { sha: string } }>(`${repo}/git/commits/${parent}`)).tree.sha;
-      } else {
-        const readmeBlob = await github.send<{ sha: string }>('POST', `${repo}/git/blobs`, {
-          content: readme,
-          encoding: 'utf-8',
-        });
-        files.push({ path: 'README.md', mode: '100644', type: 'blob', sha: readmeBlob.sha });
-      }
-      const tree = await github.send<{ sha: string }>('POST', `${repo}/git/trees`, {
-        ...(baseTree ? { base_tree: baseTree } : {}),
-        tree: files,
-      });
-      const commit = await github.send<{ sha: string }>('POST', `${repo}/git/commits`, {
-        message,
-        tree: tree.sha,
-        parents: parent ? [parent] : [],
-      });
-      await (parent
-        ? github.send('PATCH', `${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
-            sha: commit.sha,
-            force: false,
-          })
-        : github.send('POST', `${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: commit.sha }));
-      parent = commit.sha;
-      return commit.sha;
-    },
-  };
-};
-
-/** The state in a local file, for a replay. */
-const fileStore = (path: string): StateStore => ({
-  async read() {
-    try {
-      return parseState(await readFile(path, 'utf8'));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return undefined;
-      }
-      throw error;
-    }
-  },
-  async write(state) {
-    await writeFile(path, serializeState(state));
-    return path;
-  },
-});
 
 type Artifact = { readonly id: number; readonly name: string; readonly expired: boolean };
 
@@ -187,11 +92,15 @@ const readArtifact = async (github: Client, artifact: Artifact, directory: strin
   }
 };
 
+type Compares = {
+  readonly github: Client;
+  readonly cache: Map<string, Promise<ComparedFile[] | undefined>>;
+};
+
 const compareFiles = async (
-  github: Client,
-  cache: Map<string, Promise<ComparedFile[] | undefined>>,
-  base: string | null,
-  head: string | null,
+  { github, cache }: Compares,
+  base: string | undefined,
+  head: string | undefined,
 ): Promise<ComparedFile[] | undefined> => {
   if (!base || !head) {
     return undefined;
@@ -201,18 +110,25 @@ const compareFiles = async (
   if (cached) {
     return cached;
   }
-  const pending = github
-    .get<{ files?: ComparedFile[] }>(`/repos/${github.repository}/compare/${key}?per_page=300`)
-    .then((body) => (body.files ?? []).map((file) => ({ filename: file.filename, sha: file.sha })))
-    .catch(() => undefined);
+  const fetchFiles = async (): Promise<ComparedFile[] | undefined> => {
+    try {
+      const body = await github.get<{ files?: ComparedFile[] }>(
+        `/repos/${github.repository}/compare/${key}?per_page=300`,
+      );
+      return (body.files ?? []).map((file) => ({ filename: file.filename, sha: file.sha }));
+    } catch {
+      // A commit GitHub no longer has leaves the pair unconfirmed.
+      return undefined;
+    }
+  };
+  const pending = fetchFiles();
   cache.set(key, pending);
   return pending;
 };
 
-/** Confirm one lineage candidate through compares; true when it became an event. */
+/** Confirm one lineage candidate through compares; the event when it became one. */
 const confirmCandidate = async (
-  github: Client,
-  cache: Map<string, Promise<ComparedFile[] | undefined>>,
+  compares: Compares,
   state: LedgerState,
   candidate: LineageCandidate,
 ): Promise<FlakeEvent | undefined> => {
@@ -221,12 +137,12 @@ const confirmCandidate = async (
       return undefined;
     }
     const [failed, passed] = await Promise.all([
-      compareFiles(github, cache, candidate.failure.base, candidate.failure.sha),
-      compareFiles(github, cache, candidate.pass.base, candidate.pass.sha),
+      compareFiles(compares, candidate.failure.base, candidate.failure.sha),
+      compareFiles(compares, candidate.pass.base, candidate.pass.sha),
     ]);
     return lineageConfirmed(candidate, { failed, passed }) ? confirmLineage(state, candidate) : undefined;
   }
-  const between = await compareFiles(github, cache, candidate.failure.sha, candidate.pass.sha);
+  const between = await compareFiles(compares, candidate.failure.sha, candidate.pass.sha);
   return lineageConfirmed(candidate, { between }) ? confirmLineage(state, candidate) : undefined;
 };
 
@@ -261,7 +177,7 @@ const main = async (args: readonly string[]): Promise<number> => {
         'max-runs': { type: 'string', default: '40' },
         workflow: { type: 'string', default: 'ci.yml' },
         branch: { type: 'string', default: 'main' },
-        'state-branch': { type: 'string', default: 'flake-ledger' },
+        'state-branch': { type: 'string', default: stateBranch },
         'state-file': { type: 'string', default: '' },
         ledger: { type: 'string', default: 'scripts/src/flake-ledger.json' },
         summary: { type: 'string', default: process.env['GITHUB_STEP_SUMMARY'] ?? '' },
@@ -304,7 +220,9 @@ const main = async (args: readonly string[]): Promise<number> => {
   const repository = process.env['GITHUB_REPOSITORY'] ?? 'taucad/tau';
   const api = process.env['GITHUB_API_URL'] ?? 'https://api.github.com';
   const github = client({ api, token, repository, maxRequests });
-  const store = values['state-file'] ? fileStore(resolve(values['state-file'])) : branchStore(github, values['state-branch']);
+  const store = values['state-file']
+    ? fileStore(resolve(values['state-file']))
+    : branchStore(github, values['state-branch']);
   const now = new Date();
 
   const existing = await store.read();
@@ -324,7 +242,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   console.error(`${pending.length} runs to ingest; this invocation takes ${batch.length}`);
 
   const directory = await mkdtemp(join(tmpdir(), 'flake-ledger-'));
-  const compares = new Map<string, Promise<ComparedFile[] | undefined>>();
+  const compares: Compares = { github, cache: new Map() };
   const events: Array<{ id: string; event: FlakeEvent }> = [];
   const rejectedLines: string[] = [];
   const ingested: number[] = [];
@@ -336,9 +254,8 @@ const main = async (args: readonly string[]): Promise<number> => {
         break;
       }
       // oxlint-disable-next-line no-await-in-loop -- runs are ingested in order
-      const artifacts = (await listArtifacts(github, run.id)).filter(
-        (artifact) => artifact.name.startsWith(artifactPrefix) && !artifact.expired,
-      );
+      const listed = await listArtifacts(github, run.id);
+      const artifacts = listed.filter((artifact) => artifact.name.startsWith(artifactPrefix) && !artifact.expired);
       const rows = [];
       let rejected = 0;
       for (const artifact of artifacts) {
@@ -352,7 +269,7 @@ const main = async (args: readonly string[]): Promise<number> => {
       events.push(...result.events);
       for (const candidate of result.candidates) {
         // oxlint-disable-next-line no-await-in-loop -- a confirmation belongs to the run just counted
-        const event = await confirmCandidate(github, compares, state, candidate);
+        const event = await confirmCandidate(compares, state, candidate);
         if (event) {
           events.push({ id: candidate.id, event });
         }
@@ -386,7 +303,9 @@ const main = async (args: readonly string[]): Promise<number> => {
     renderLedgerMarkdown(summarizeLedger(state, { from: batchFrom, to: now.toISOString() })),
     `This invocation: ${ingested.length} of ${pending.length} pending runs ingested, ${events.length} new events` +
       `${folded.length > 0 ? `, ${folded.length} renamed identities folded` : ''}.`,
-    ...events.slice(0, 50).map(({ id, event }) => `- \`${event.kind}\` ${id.replaceAll('`', "'")} (${event.variant}, run ${event.run})`),
+    ...events
+      .slice(0, 50)
+      .map(({ id, event }) => `- \`${event.kind}\` ${id.replaceAll('`', "'")} (${event.variant}, run ${event.run})`),
     ...(rejectedLines.length > 0
       ? ['', '### Rejected outcome lines', '', ...rejectedLines.slice(0, 20).map((line) => `- ${line}`)]
       : []),

@@ -21,8 +21,8 @@ const maximumRetryAfterSeconds = 120;
 export class GitHubError extends Error {
   public readonly status: number;
 
-  public constructor(method: string, path: string, status: number, detail = '') {
-    super(`${method} ${path}: GitHub API ${status}${detail ? ` ${detail}` : ''}`);
+  public constructor(request: string, status: number, detail = '') {
+    super(`${request}: GitHub API ${status}${detail ? ` ${detail}` : ''}`);
     this.name = 'GitHubError';
     this.status = status;
   }
@@ -38,7 +38,7 @@ export type Client = {
    */
   readonly getText: (path: string, accept?: string) => Promise<string>;
   /** A binary body: an artifact's zip, which the API redirects to a signed URL. */
-  readonly getBytes: (path: string) => Promise<Uint8Array>;
+  readonly getBytes: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
   /** A `POST`, `PATCH` or `PUT` with a JSON body; no retry, since a write may have landed before the error. */
   readonly send: <T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown) => Promise<T>;
   /** Requests this run may still make. */
@@ -85,7 +85,7 @@ export const client = (options: {
       const limited =
         response?.status === 429 || (response?.status === 403 && (Number.isFinite(retryAfter) || header === '0'));
       if (response && ((response.status < 500 && !limited) || attempt > retries)) {
-        throw new GitHubError('GET', path, response.status);
+        throw new GitHubError(`GET ${path}`, response.status);
       }
       const backoff = 2000 * 2 ** (attempt - 1);
       // oxlint-disable-next-line no-await-in-loop -- the backoff is sequential by design
@@ -105,7 +105,7 @@ export const client = (options: {
       const response = await request(path, accept);
       return response.text();
     },
-    async getBytes(path: string): Promise<Uint8Array> {
+    async getBytes(path: string): Promise<Uint8Array<ArrayBuffer>> {
       const response = await request(path);
       return new Uint8Array(await response.arrayBuffer());
     },
@@ -119,7 +119,7 @@ export const client = (options: {
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        throw new GitHubError(method, path, response.status, detail.slice(0, 200));
+        throw new GitHubError(`${method} ${path}`, response.status, detail.slice(0, 200));
       }
       return (await response.json()) as T;
     },

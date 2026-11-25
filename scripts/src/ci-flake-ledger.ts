@@ -319,7 +319,6 @@ export const aliasProblems = (aliases: readonly Alias[]): string[] => {
   return problems;
 };
 
-
 const isoDay = /^\d{4}-\d{2}-\d{2}$/u;
 const login = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
 

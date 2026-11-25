@@ -40,6 +40,7 @@ import {
   selectRunFailure,
   selectPosition,
   selectRunPhase,
+  selectTranscript,
   selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
@@ -2606,9 +2607,17 @@ describe('the time an answer worked', () => {
     messages
       .filter((message) => message.role === 'assistant')
       .map((message) => [message.id, message.metadata?.createdAt, message.metadata?.endedAt]);
+  /** The times the displayed transcript shows, after checking they match the SDK materialization's. */
+  const shownTimes = async (projection: ChatProjection) => {
+    const shown = assistantTimes(selectTranscript(projection));
+    expect(shown).toEqual(assistantTimes(await materializeTranscript(projection)));
+    return shown;
+  };
 
   it('should end each recorded answer at its run settling row, wall clock from its admission', async () => {
-    const hexnut = await materializeTranscript(project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7));
+    const hexnutProjection = project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7);
+    await shownTimes(hexnutProjection);
+    const hexnut = await materializeTranscript(hexnutProjection);
     expect(
       hexnut
         .filter((message) => message.role === 'assistant')
@@ -2616,7 +2625,9 @@ describe('the time an answer worked', () => {
     ).toEqual([38_768, 7532, 27_790, 4225]);
 
     // Stopped for an approval at 04:58:49, failed by a later host at 05:07:09: wall clock counts the wait.
-    const kinetic = await materializeTranscript(project(readLog('recorded/kinetic-regenerate-resume'), 7));
+    const kineticProjection = project(readLog('recorded/kinetic-regenerate-resume'), 7);
+    await shownTimes(kineticProjection);
+    const kinetic = await materializeTranscript(kineticProjection);
     const [, last] = kinetic.filter((message) => message.role === 'assistant');
     expect(last?.metadata?.endedAt).toBe(Date.parse('2026-10-04T05:07:09.700Z'));
     expect(last!.metadata!.endedAt! - last!.metadata!.createdAt!).toBe(832_628);
@@ -2636,11 +2647,9 @@ describe('the time an answer worked', () => {
     ];
     const start = Date.parse('2026-09-28T00:00:00.000Z');
 
-    expect(assistantTimes(await materializeTranscript(project(rows.slice(0, 4), 1)))).toEqual([
-      ['run_1', start, start + 39_000],
-    ]);
-    expect(assistantTimes(await materializeTranscript(project(rows.slice(0, 5), 1)))).toEqual([['run_1', start, null]]);
-    expect(assistantTimes(await materializeTranscript(project(rows, 1)))).toEqual([['run_1', start, start + 846_000]]);
+    expect(await shownTimes(project(rows.slice(0, 4), 1))).toEqual([['run_1', start, start + 39_000]]);
+    expect(await shownTimes(project(rows.slice(0, 5), 1))).toEqual([['run_1', start, null]]);
+    expect(await shownTimes(project(rows, 1))).toEqual([['run_1', start, start + 846_000]]);
   });
 
   it('should take the end back in the live watch too when a stopped run resumes', () => {
@@ -2709,7 +2718,7 @@ describe('the time an answer worked', () => {
     ];
     const start = Date.parse('2026-09-28T00:00:00.000Z');
 
-    expect(assistantTimes(await materializeTranscript(project(rows, 2)))).toEqual([
+    expect(await shownTimes(project(rows, 2))).toEqual([
       ['run_1', start, start + 20_000],
       ['run_1:steer:c-1', start + 20_000, start + 60_000],
     ]);

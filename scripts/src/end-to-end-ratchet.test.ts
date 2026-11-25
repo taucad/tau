@@ -55,6 +55,12 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
   // The nightly runs the retry wrapper from its trusted `.tau-ci` checkout; the merge queue from its own.
   const queueRun = (name: string): string | undefined =>
     step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/');
+  it('should run the nightly on dispatch only, with no schedule (operator ruling Q4)', () => {
+    const on = (nightly as Workflow & { readonly on: Record<string, unknown> }).on;
+    expect(Object.keys(on)).toEqual(['workflow_dispatch']);
+    expect(on).not.toHaveProperty('schedule');
+  });
+
   /** The first batch, green on nightlies 43698158501 and 43752242587. A suite never moves back to the nightly. */
   const firstBatch = [
     'agent-host:test:e2e',

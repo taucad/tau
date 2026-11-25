@@ -14,7 +14,7 @@ const usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-const repeatedCalls = (count: number, isError = false): AgentMessage[] =>
+const repeatedCalls = (count: number, isError = false, toolName = 'read_file'): AgentMessage[] =>
   Array.from({ length: count }, (_, index): AgentMessage[] => [
     {
       role: 'assistant',
@@ -22,7 +22,7 @@ const repeatedCalls = (count: number, isError = false): AgentMessage[] =>
         {
           type: 'toolCall',
           id: `call-${index}`,
-          name: 'read_file',
+          name: toolName,
           arguments: { targetFile: 'main.ts' },
         },
       ],
@@ -36,7 +36,7 @@ const repeatedCalls = (count: number, isError = false): AgentMessage[] =>
     {
       role: 'toolResult',
       toolCallId: `call-${index}`,
-      toolName: 'read_file',
+      toolName,
       content: [{ type: 'text', text: isError ? '{"errorCode":"E","message":"bad"}' : 'ok' }],
       isError,
       timestamp: index,
@@ -87,6 +87,60 @@ describe('AgentSafeguards', () => {
     const result = await stream.result();
     expect(result.content[0]).toMatchObject({ type: 'text' });
     expect(JSON.stringify(result.content)).toContain('Please review what was attempted');
+  });
+
+  describe('a call repeated unchanged (C-5)', () => {
+    const run = async (messages: AgentMessage[]) => {
+      const recorded: SafeguardRecord[] = [];
+      const safeguards = createAgentSafeguards({
+        record: async (entry) => {
+          recorded.push(entry);
+        },
+        hash: async (input) => `hash:${input}`,
+      });
+      /* The context as the loop grows: one more identical call each step. */
+      for (let count = 1; count <= messages.length / 2; count++) {
+        // oxlint-disable-next-line no-await-in-loop -- each step of the loop sees the context the one before left.
+        await safeguards.transformContext(messages.slice(0, count * 2));
+      }
+      const base = vi.fn() as unknown as StreamFn;
+      await safeguards.wrapStreamFn(base)(stubModel, normalizeContext({ messages: [] }));
+      return { recorded, asked: vi.mocked(base).mock.calls.length > 0 };
+    };
+
+    it('should remind at five and end the run at ten', async () => {
+      const { recorded, asked } = await run(repeatedCalls(10));
+
+      expect(recorded.map((entry) => [entry.kind, entry.pattern])).toEqual([
+        ['nudge', 'identical_call'],
+        ['terminate', 'identical_call'],
+      ]);
+      expect(recorded[1]?.kind === 'terminate' ? recorded[1].reason : '').toContain('10 times in a row');
+      expect(asked).toBe(false);
+    });
+
+    it('should not end a run at nine identical calls', async () => {
+      const { recorded, asked } = await run(repeatedCalls(9));
+
+      expect(recorded.map((entry) => entry.kind)).toEqual(['nudge']);
+      expect(asked).toBe(true);
+    });
+
+    it.each(['check_job', 'get_machine', 'list_machines', 'shell'])(
+      'should let the agent poll %s without a reminder or an end',
+      async (toolName) => {
+        const { recorded, asked } = await run(repeatedCalls(20, false, toolName));
+
+        expect(recorded).toEqual([]);
+        expect(asked).toBe(true);
+      },
+    );
+
+    it('should still end a polling tool that fails identically', async () => {
+      const { recorded } = await run(repeatedCalls(6, true, 'check_job'));
+
+      expect(recorded.at(-1)).toMatchObject({ kind: 'terminate', pattern: 'identical_error' });
+    });
   });
 
   describe('the window the detectors count over', () => {

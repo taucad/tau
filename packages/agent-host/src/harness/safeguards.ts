@@ -53,6 +53,8 @@ export type SafeguardThresholds = {
   readonly identicalErrorNudge: number;
   readonly identicalErrorTerminate: number;
   readonly identicalCall: number;
+  /** Identical calls in a row that end the run, at twice the reminder count by default (C-5). */
+  readonly identicalCallTerminate: number;
   readonly perTargetEdit: number;
   readonly pingPongCycles: number;
   readonly emptyResult: number;
@@ -66,6 +68,7 @@ export const defaultSafeguardThresholds: SafeguardThresholds = {
   identicalErrorNudge: 3,
   identicalErrorTerminate: 6,
   identicalCall: 5,
+  identicalCallTerminate: 10,
   perTargetEdit: 5,
   pingPongCycles: 2,
   emptyResult: 3,
@@ -258,6 +261,17 @@ export const summarizeToolEvents = async (
   );
 };
 
+/**
+ * Tools whose answer changes with time rather than with their arguments: a job's progress, a machine's state, a shell
+ * command that reads something outside the project. Calling one again unchanged is how the agent waits, so the
+ * identical-call detector neither reminds nor ends a run for it. Every other tool answers the same arguments the same
+ * way within a turn, so repeating one unchanged is a loop. A polling tool that fails identically is still ended by
+ * the identical-error detector.
+ *
+ * @public
+ */
+export const pollingToolNames: ReadonlySet<string> = new Set(['check_job', 'get_machine', 'list_machines', 'shell']);
+
 const callSignature = (event: ToolEventSummary): string | undefined =>
   event.argsHash ? `${event.toolName}:${event.argsHash}` : undefined;
 const errorSignature = (event: ToolEventSummary): string | undefined =>
@@ -308,13 +322,24 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
   },
   (events) => {
     const tail = events.at(-1);
-    const signature = tail ? callSignature(tail) : undefined;
+    const signature = tail && !pollingToolNames.has(tail.toolName) ? callSignature(tail) : undefined;
     if (!tail || !signature) {
       return { kind: 'clear' };
     }
     let count = 0;
     for (let index = events.length - 1; index >= 0 && callSignature(events[index]!) === signature; index--) {
       count++;
+    }
+    /* A proven loop: the same call answered the same way this many times since the person spoke, past the reminder
+     * the model was given at `identicalCall`. Nothing the next identical call returns can change what the agent does. */
+    if (count >= thresholds.identicalCallTerminate) {
+      return {
+        kind: 'terminate',
+        pattern: anomalyPattern.identicalCall,
+        reason: `\`${tail.toolName}\` was called with identical arguments ${count} times in a row, after a reminder that the result would not change.`,
+        signature: `${signature}:loop`,
+        eventIndexes: indexes(events.slice(-count)),
+      };
     }
     return count >= thresholds.identicalCall
       ? {

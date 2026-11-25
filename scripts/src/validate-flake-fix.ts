@@ -29,7 +29,8 @@
  *   condition wait (an added wait does not hide it); a raised timeout constant; a raised tolerance, epsilon or
  *   threshold; fewer digits on an existing `toBeCloseTo`; an added `setTimeout` inside a declaration that installs
  *   and advances a fake clock (whether the clock still governs it needs flow analysis, so it fails closed to
- *   review); strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
+ *   review); any change to a declaration's order of timer and clock calls that leaves a timer in it (a timer moved
+ *   across `useRealTimers()`, say); strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
  *
  * The classification is the most severe finding: forbidden, then tolerance, then product, else test-only. Only
  * test-only earns the `flake:test-only` label (the agent may auto-merge with its stress proof); every other class
@@ -805,6 +806,8 @@ export type Measures = {
   readonly optionDisablers: number;
   /** Each timer or sleep call: its line, and whether a fake clock installed and advanced around it may excuse it. */
   readonly timers: ReadonlyArray<{ readonly line: number; readonly controlled: boolean }>;
+  /** Per declaration path, the timer and clock calls in order (`timer:setTimeout(…)`, `clock:useRealTimers`). */
+  readonly timerSequences: Readonly<Record<string, readonly string[]>>;
 };
 
 /** The disabling keys (`skip`, `only`, `todo`, `fails`, set to anything but `false`) of an options-object argument. */
@@ -880,6 +883,10 @@ export const measure = (source: string): Measures => {
   const closeTo: Binding[] = [];
   let optionDisablers = 0;
   const timers: Array<{ line: number; controlled: boolean }> = [];
+  const timerSequences: Record<string, string[]> = {};
+  const sequence = (path: string, event: string): void => {
+    timerSequences[path] = [...(timerSequences[path] ?? []), event];
+  };
 
   // A fake clock runs `setTimeout` callbacks without waiting only where it is both installed and advanced: in the
   // declaration that does so (a hook's suite or test), and in the code nested inside it.
@@ -958,6 +965,15 @@ export const measure = (source: string): Measures => {
     const timer = timerNames.has(last) || numericWait;
     if (timer && line !== undefined) {
       timers.push({ line, controlled: controlled(blocks) });
+    }
+    if (timer) {
+      sequence(path, `timer:${callee}(${args.map(tokenText).join(', ')})`);
+    } else if (
+      fakeClockInstall.has(last) ||
+      fakeClockAdvance.has(last) ||
+      ['useFakeTimers', 'useRealTimers', 'uninstall', 'restore'].includes(last)
+    ) {
+      sequence(path, `clock:${last}`);
     }
     const excused = last === 'setTimeout' && controlled(blocks);
     if (excused) {
@@ -1055,6 +1071,7 @@ export const measure = (source: string): Measures => {
     closeTo,
     optionDisablers,
     timers,
+    timerSequences,
   };
 };
 
@@ -1292,6 +1309,22 @@ export const codeFindings = ({
       'fake-clock-timer',
       'tolerance',
       `adds a timer under a fake clock (${clockTimers.join('; ')}): confirm the clock, not the wall time, runs it`,
+    );
+  }
+  // A timer that moved relative to the clock calls around it (across a `useRealTimers()`, say) may now run on the
+  // wall clock; the lexer cannot tell, so any change to a declaration's timer and clock order goes to review.
+  const reordered = Object.keys(is.timerSequences).filter(
+    (key) =>
+      is.timerSequences[key]!.some((event) => event.startsWith('timer:')) &&
+      (was.timerSequences[key] ?? []).join('\n') !== is.timerSequences[key]!.join('\n'),
+  );
+  const timerFound = (): boolean =>
+    findings.some((finding) => finding.rule === 'fixed-sleep' || finding.rule === 'fake-clock-timer');
+  if (reordered.length > 0 && !timerFound()) {
+    add(
+      'timer-moved',
+      'tolerance',
+      `changes the timers or the clock calls around them in ${reordered.map((key) => key || 'the file').join('; ')}: confirm which clock runs each timer`,
     );
   }
   const loosened = grew(is.byPath.strict, was.byPath.strict).filter(

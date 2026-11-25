@@ -260,6 +260,7 @@ const cases: ReadonlyArray<{
   { name: 'fake-clock-replaced-timer', classification: 'tolerance', rules: ['fake-clock-timer'] },
   { name: 'replaced-sleep', classification: 'forbidden', rules: ['fixed-sleep'] },
   { name: 'added-condition-wait', classification: 'test-only', rules: [] },
+  { name: 'fake-clock-moved-timer', classification: 'tolerance', rules: ['timer-moved'] },
   { name: 'mixed-timers', classification: 'forbidden', rules: ['fixed-sleep'] },
   { name: 'widened-wait-same-condition', classification: 'tolerance', rules: ['widened-wait'] },
   { name: 'widened-wait-new-bounded', classification: 'tolerance', rules: ['widened-wait'] },

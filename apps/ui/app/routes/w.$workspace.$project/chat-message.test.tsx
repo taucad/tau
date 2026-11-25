@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata, ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -665,7 +665,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
-    const line = screen.getByRole('button', { name: /^Worked · read files, commands failed$/u });
+    const line = screen.getByRole('button', { name: /^Worked · commands failed, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -709,7 +709,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · read files, commands failed$/u });
+    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · commands failed, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -720,24 +720,72 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
-    expect(screen.getByRole('button', { name: /^Worked for 7s · read files, commands failed$/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Worked for 7s · commands failed, read files$/u })).toBeVisible();
   });
 
-  it('waits for the next request when the reader opened a line while the turn ran', () => {
-    setMessages([narrated]);
-    const { rerender } = render(<ChatMessage messageId={narrated.id} />);
+  it('waits for the next request when the reader opened a line while the turn ran, even if the list remounts it', () => {
+    const opened: MyUIMessage = { ...narrated, id: 'msg-opened-while-running' };
+    setMessages([opened]);
+    const { unmount } = render(<ChatMessage messageId={opened.id} />);
     const [firstLine] = screen.getAllByRole('button', { expanded: false });
     fireEvent.click(firstLine!);
+    // Scrolled out of a virtualized list and back.
+    unmount();
 
-    setMessages([finished(narrated, 7532)]);
-    rerender(<ChatMessage messageId={narrated.id} footer={null} />);
+    setMessages([finished(opened, 7532)]);
+    const { rerender } = render(<ChatMessage messageId={opened.id} />);
 
     expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
     expect(screen.getByText('Reading the model first.')).toBeVisible();
 
-    rerender(<ChatMessage isPastTurn messageId={narrated.id} footer={null} />);
+    rerender(<ChatMessage isPastTurn messageId={opened.id} />);
 
     expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toBeVisible();
+  });
+
+  it('moves keyboard focus to the fold line when the narrative it was in folds away', () => {
+    const focused: MyUIMessage = { ...narrated, id: 'msg-focused-while-running' };
+    setMessages([focused]);
+    const { rerender } = render(<ChatMessage messageId={focused.id} />);
+    const [firstLine] = screen.getAllByRole('button', { expanded: false });
+    act(() => {
+      firstLine!.focus();
+    });
+
+    setMessages([finished(focused, 7532)]);
+    rerender(<ChatMessage messageId={focused.id} footer={null} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toHaveFocus();
+  });
+
+  it('keeps the answer in view when the turn ends on ticking off its task list', () => {
+    const ticked: MyUIMessage = finished(
+      {
+        id: 'msg-ticked',
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: 'Reading the model first.' },
+          read('read-1'),
+          { type: 'text', text: 'Done. The bracket is now 4 mm thick.' },
+          {
+            type: 'tool-update_todos',
+            toolCallId: 'todos-1',
+            state: 'output-available',
+            input: { chatId: 'chat_01', items: [{ id: 'a', title: 'Thicken the bracket', status: 'done' }] },
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+            output: { path: '.tau/chats/chat_01/todo.yaml', counts: { pending: 0, in_progress: 0, done: 1 } },
+          },
+        ],
+      },
+      12_000,
+    );
+    setMessages([ticked]);
+
+    render(<ChatMessage messageId={ticked.id} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 12s · read files$/u })).toBeVisible();
+    expect(screen.getByText('Done. The bracket is now 4 mm thick.')).toBeVisible();
+    expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
   });
 
   it('folds a one-line narrative when the line adds the time worked', () => {
@@ -758,7 +806,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    expect(screen.getByRole('button', { name: /^Worked · read files, commands failed$/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Worked · commands failed, read files$/u })).toBeVisible();
   });
 
   it('leaves a turn whose narrative is one line alone', () => {

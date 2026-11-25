@@ -14,7 +14,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import { providerPermissionResolutionSchema } from '@taucad/agent-host/wire';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -753,6 +753,14 @@ const workedFor = (createdAt: number | undefined, endedAt: number | undefined): 
   return Number.isFinite(elapsed) && elapsed >= 1000 ? formatElapsed(elapsed) : undefined;
 };
 
+/*
+ * Turns the reader opened a line in while they ran. Kept outside the component so a turn the virtualized list unmounts
+ * and mounts again still waits for the next request to fold.
+ */
+const readerOpenedTurns = new Set<string>();
+/* A disclosure trigger, not a menu or popover trigger, which also carries `aria-expanded`. */
+const closedDisclosure = '[aria-expanded="false"]:not([aria-haspopup])';
+
 function AssistantParts({
   parts,
   messageId,
@@ -772,7 +780,7 @@ function AssistantParts({
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
   /* A line the reader opened before the turn folded stays theirs: the turn waits for the next request to fold. */
-  const [readerOpened, setReaderOpened] = useState(false);
+  const [readerOpened, setReaderOpened] = useState(() => readerOpenedTurns.has(messageId));
   const elapsed = workedFor(createdAt, endedAt);
   /* Folded once the turn has finished (its run recorded an end) or a later request follows it, never while it is read
    * live. A one-line narrative folds only when the line adds the time worked. */
@@ -786,11 +794,39 @@ function AssistantParts({
       fold === undefined &&
       !readerOpened &&
       event.target instanceof Element &&
-      event.target.closest('[aria-expanded="false"]') !== null
+      event.target.closest(closedDisclosure) !== null
     ) {
+      readerOpenedTurns.add(messageId);
       setReaderOpened(true);
     }
   };
+  /* Folding unmounts the narrative; if it held keyboard focus, focus lands on the fold's line instead of the page. */
+  const containerRef = useRef<HTMLDivElement>(null);
+  const focusedRef = useRef<Element | undefined>(undefined);
+  const noteFocus = (event: React.FocusEvent): void => {
+    focusedRef.current = event.target;
+  };
+  const noteBlur = (event: React.FocusEvent): void => {
+    if (event.relatedTarget !== null) {
+      focusedRef.current = undefined;
+    }
+  };
+  useLayoutEffect(() => {
+    const focused = focusedRef.current;
+    const active = document.activeElement;
+    if (
+      fold === undefined ||
+      focused === undefined ||
+      focused.isConnected ||
+      (active !== null && active !== document.body)
+    ) {
+      return;
+    }
+    focusedRef.current = undefined;
+    containerRef.current
+      ?.querySelector<HTMLElement>('[data-slot="worked-fold"] button')
+      ?.focus({ preventScroll: true });
+  }, [fold]);
   const renderGroup = (group: ActivityGroup): React.JSX.Element => {
     const groupIndex = groups.indexOf(group);
     return (
@@ -807,8 +843,14 @@ function AssistantParts({
 
   /* One parent in both shapes, so the answer's groups keep their keys, and stay mounted, as the narrative folds. */
   return (
-    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- observes the disclosures' own clicks (keyboard activation included); it handles nothing itself
-    <div className='contents' onClickCapture={noteOpening}>
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- observes the disclosures' own clicks (keyboard activation included) and focus; it handles nothing itself
+    <div
+      ref={containerRef}
+      className='contents'
+      onClickCapture={noteOpening}
+      onFocusCapture={noteFocus}
+      onBlurCapture={noteBlur}
+    >
       {fold === undefined
         ? groups.map((group) => renderGroup(group))
         : [

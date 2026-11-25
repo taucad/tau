@@ -2649,6 +2649,43 @@ describe('the time an answer worked', () => {
     expect(assistantTimes(await materializeTranscript(project(rows, 1)))).toEqual([['run_1', start, start + 846_000]]);
   });
 
+  it('should take the end out of the live watch too when a stopped run resumes', () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+    ];
+    const watched = reduceChatProjection(project(rows, 2), {
+      type: 'live',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'live-text',
+        contentIndex: 0,
+        delta: 'Working',
+        offset: 0,
+      },
+    }).state;
+    const ending = (state: ChatProjection) =>
+      chunksOf(state.live?.chunks).filter(
+        (chunk) =>
+          chunk.type === 'abort' ||
+          (chunk.type === 'message-metadata' && 'endedAt' in (chunk.messageMetadata as Record<string, unknown>)),
+      );
+    const stopped = reduceChatProjection(watched, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(2, 'cancelled'), '2026-09-28T00:00:39.000Z')], 2, 3),
+    }).state;
+    expect(ending(stopped).map((chunk) => chunk.type)).toEqual(['message-metadata', 'abort']);
+
+    const resumed = reduceChatProjection(stopped, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(3, 'running'), '2026-09-28T00:13:00.000Z')], 3, 4),
+    }).state;
+    expect(ending(resumed)).toEqual([]);
+    expect(chunksOf(resumed.live?.chunks).some((chunk) => chunk.type === 'text-delta')).toBe(true);
+  });
+
   it('should end a steered answer at the steering input and start the next one there', async () => {
     const user = { id: 'user-1', role: 'user', content: 'Build it' } as const;
     const rows = [

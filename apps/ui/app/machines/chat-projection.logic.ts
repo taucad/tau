@@ -955,9 +955,15 @@ const foldLiveRow = (
   }
   const blocks = copyBlocks(live.blocks);
   const chunks = projectAgentHostEvent(row, blocks);
+  // A reopened run has not ended: the watch replays these chunks, so its earlier ending goes, as in the run's view.
+  const isEnding = (chunk: UIMessageChunk): boolean => terminalChunks.has(chunk.type) || isEndedChunk(chunk);
+  const prior =
+    row.type === 'run.lifecycle' && row.state === 'running' && chunksOf(live.chunks).some((chunk) => isEnding(chunk))
+      ? chunksOf(live.chunks).filter((chunk) => !isEnding(chunk))
+      : live.chunks;
   return {
     runId: live.runId,
-    chunks: appendChunks(live.chunks, chunks),
+    chunks: appendChunks(prior, chunks),
     blocks: Object.fromEntries(blocks),
   };
 };

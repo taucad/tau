@@ -255,7 +255,7 @@ describe('assistant message activity', () => {
   });
 });
 
-describe('an older turn split at its last tool call', () => {
+describe('a finished turn split at its last tool call', () => {
   const partsOf = (groups: readonly ActivityGroup[]): Part[] =>
     groups.flatMap((group) => (group.kind === 'singleton' ? [group.part] : [...group.parts]));
 
@@ -270,7 +270,7 @@ describe('an older turn split at its last tool call', () => {
     ];
     const split = splitWorkingNarrative(groupAssistantParts(parts));
 
-    expect(split?.summary).toBe('Read files, commands failed');
+    expect(split?.summary).toBe('Commands failed, read files');
     expect(partsOf(split!.narrative)).toEqual(parts.slice(0, 4));
     expect(split?.kept).toEqual([]);
     expect(partsOf(split!.answer)).toEqual(parts.slice(4));
@@ -297,18 +297,52 @@ describe('an older turn split at its last tool call', () => {
 
   it.each([
     ['no tool call', [text('Just an answer.')]],
-    ['one activity line', [tool('tool-read_file'), text('Done.')]],
     ['one thought and nothing else before the answer', [reasoning('Plan'), text('Answer')]],
   ])('leaves a turn with %s alone', (_label, parts) => {
     expect(splitWorkingNarrative(groupAssistantParts(parts))).toBeUndefined();
   });
 
-  it('folds a stopped turn that never answered', () => {
-    const parts = [text('Trying.'), tool('tool-read_file'), tool('tool-shell', 'output-error')];
+  it('leads the summary with what did not go through, so a cut-off line still shows it', () => {
+    const parts = [tool('tool-read_file'), tool('tool-edit_file'), tool('tool-shell', 'output-error'), text('Done.')];
+
+    expect(splitWorkingNarrative(groupAssistantParts(parts))?.summary).toBe(
+      'Commands failed, read files, edited files',
+    );
+  });
+
+  it('splits a one-line narrative and leaves the caller to decide whether a time makes it worth folding', () => {
+    const parts = [tool('tool-read_file'), text('Done.')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual([parts[0]]);
+    expect(partsOf(split!.answer)).toEqual([parts[1]]);
+  });
+
+  it('folds a stopped turn that never wrote a word', () => {
+    const parts = [tool('tool-read_file'), tool('tool-shell', 'output-error')];
     const split = splitWorkingNarrative(groupAssistantParts(parts));
 
     expect(partsOf(split!.narrative)).toEqual(parts);
     expect(split?.answer).toEqual([]);
+  });
+
+  it('keeps the last text in view when the turn ends on a tool call', () => {
+    const parts = [
+      text('Reading first.'),
+      tool('tool-read_file'),
+      text('Done. The bracket is now 4 mm thick.'),
+      tool('tool-update_todos'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual(parts.slice(0, 2));
+    expect(partsOf(split!.answer)).toEqual(parts.slice(2));
+  });
+
+  it('leaves a turn alone when its only text comes before its tool calls', () => {
+    const parts = [text('Trying.'), tool('tool-read_file'), tool('tool-shell', 'output-error')];
+
+    expect(splitWorkingNarrative(groupAssistantParts(parts))).toBeUndefined();
   });
 });
 

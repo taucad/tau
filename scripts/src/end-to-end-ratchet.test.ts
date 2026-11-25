@@ -230,6 +230,24 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     }
   });
 
+  it('should leave the timing-budget specs to their own lane (D-DC17), never the nightly matrix', () => {
+    const script = nightly.jobs['plan']?.steps?.find((candidate) => candidate.id === 'suites')?.run ?? '';
+    const listed = /for target in ([^;]+); do/u.exec(script)?.[1]?.split(/\s+/u) ?? [];
+    expect(listed).toContain('test:e2e');
+    expect(listed).not.toContain('test:e2e:timing-budgets');
+    const runs = Object.values(nightly.jobs).flatMap((job) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    expect(runs.filter((run) => run.includes('timing-budgets'))).toEqual([]);
+    // `test:e2e` (the nightly's sharded suite) admits none of them: only TAU_E2E_TIMING_BUDGET_SPECS=true does.
+    const config = read('apps/ui-e2e/vitest.config.ts');
+    expect(config).toMatch(/TAU_E2E_TIMING_BUDGET_SPECS'\] === 'true' \? \[\] : timingBudgetSpecs/u);
+    const suite = (
+      JSON.parse(read('apps/ui-e2e/project.json')) as {
+        readonly targets: Record<string, { readonly options?: { readonly env?: Record<string, string> } }>;
+      }
+    ).targets['test:e2e'];
+    expect(suite?.options?.env?.['TAU_E2E_TIMING_BUDGET_SPECS']).toBeUndefined();
+  });
+
   it('should run no outside-state row nightly, whose home is the release gate (global review 2026-11-24, ruling 12)', () => {
     const jobs = Object.entries(nightly.jobs);
     const removed = new Set(['webgpu-hardware', 'desktop-e2e-live', 'live-github']);

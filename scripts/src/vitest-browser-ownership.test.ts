@@ -241,6 +241,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
     // its real-GPU check installs the same Chromium on the operator's Mac.
     // The release gate's end-to-end rows install the three engines `ci.yml`'s e2e-queue rows do (C2b).
+    // The timing-budget lane installs the one engine its specs run in (D-DC17).
     // The apt-install action installs the browsers' system dependencies those workflows used to fetch with
     // `--with-deps`, and its pinning test drives it (APT-1).
     expect(installFiles.sort()).toEqual(
@@ -260,6 +261,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/spike-publish-dry-run.yml',
         '.github/workflows/spike-s31.yml',
         '.github/workflows/spike-s32.yml',
+        '.github/workflows/timing-budgets.yml',
         '.github/workflows/ui-asset-integrity.yml',
         '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',

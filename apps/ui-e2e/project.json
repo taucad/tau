@@ -142,12 +142,47 @@
           "TAU_CLOUD_ENABLED": "false",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
-          "TAU_FRONTEND_URL": "http://localhost:3000"
+          "TAU_FRONTEND_URL": "http://localhost:3000",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true"
         },
         "commands": [
           "pnpm exec nx run ui:build",
           "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts src/glass-prism-loader.spec.ts"
         ]
+      }
+    },
+    "test:e2e:timing-budgets": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "CI decomposition ruling D-DC17 (operator Q3, option B): the nine timing-budget specs, which measure runner speed as much as the product, run only here and never in the test:e2e nightly shards (vitest.config.ts admits them only with TAU_E2E_TIMING_BUDGET_SPECS=true, which this target sets). timing-budgets.yml runs it, non-gating, on every main push that affects this project, one job per shard under one concurrency group that cancels a superseded run, and updates one comment on each owner issue (metadata.owners, spec to issue) with the run and every spec's result. shards equals the number of files, so Vitest's --shard=<index>/<count> gives each job exactly one spec. The JSON report at out/test-results/timing-budgets/report.json is what the workflow reads. TODO(D-DC17): once every spec is green, the release gate requires this lane; it does not yet. The first command builds ui under the same env fixture as test:e2e, for the reason given there.",
+        "shards": 9,
+        "owners": {
+          "src/glass-prism-loader.spec.ts": 2287,
+          "src/headless-chat-image-capture.performance.spec.ts": 2286,
+          "src/home-load-gate.spec.ts": 2288,
+          "src/metal-morph-loader.spec.ts": 2287,
+          "src/mobile-stability.spec.ts": 2288,
+          "src/parameters-pane.performance.spec.ts": 2288,
+          "src/project-load-frames.spec.ts": 2288,
+          "src/revision-latency.spec.ts": 2288,
+          "src/user-project-thumbnail-generation.spec.ts": 2286
+        }
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium --reporter=default --reporter=github-actions --reporter=json --outputFile.json=../../out/test-results/timing-budgets/report.json src/glass-prism-loader.spec.ts src/headless-chat-image-capture.performance.spec.ts src/home-load-gate.spec.ts src/metal-morph-loader.spec.ts src/mobile-stability.spec.ts src/parameters-pane.performance.spec.ts src/project-load-frames.spec.ts src/revision-latency.spec.ts src/user-project-thumbnail-generation.spec.ts"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true"
+        }
       }
     },
     "test:e2e:development": {
@@ -293,6 +328,7 @@
         "env": {
           "PORT": "3021",
           "TAU_E2E_CLOUD_LOAD": "true",
+          "TAU_E2E_TIMING_BUDGET_SPECS": "true",
           "TAU_API_URL": "http://localhost:4000",
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"

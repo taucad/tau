@@ -40,6 +40,26 @@ const hostExcluded = process.env['TAU_E2E_HOST_TIER'] === 'true' ? [] : hostSpec
  * tier marker, not the bundle variable, admits the spec, so that tier without a bundle still fails.
  */
 const picogkExcluded = process.env['TAU_E2E_PICOGK_TIER'] === 'true' ? [] : ['src/picogk-browser.spec.ts'];
+/**
+ * The timing-budget specs (CI decomposition ruling D-DC17, operator Q3 option B) measure runner speed as much as the
+ * product, so they run only in `test:e2e:timing-budgets` (`timing-budgets.yml`, non-gating on `main` pushes that
+ * affect `ui`), never in the `test:e2e` nightly shards. `TAU_E2E_TIMING_BUDGET_SPECS=true` admits them: that target
+ * sets it, and so do the two tiers that name one of them for a different purpose (`test:e2e:webgpu` on real WebGPU
+ * hardware, `test:e2e:cloud-load` for home-load-gate's cloud-only rows), each passing its own file list.
+ * `test:e2e:timing-budgets`' command lists the same files (scripts/src/timing-budgets-workflow.test.ts).
+ */
+const timingBudgetSpecs = [
+  'src/glass-prism-loader.spec.ts',
+  'src/headless-chat-image-capture.performance.spec.ts',
+  'src/home-load-gate.spec.ts',
+  'src/metal-morph-loader.spec.ts',
+  'src/mobile-stability.spec.ts',
+  'src/parameters-pane.performance.spec.ts',
+  'src/project-load-frames.spec.ts',
+  'src/revision-latency.spec.ts',
+  'src/user-project-thumbnail-generation.spec.ts',
+];
+const timingBudgetExcluded = process.env['TAU_E2E_TIMING_BUDGET_SPECS'] === 'true' ? [] : timingBudgetSpecs;
 /* Only the snapshot production server honours TAU_E2E_DISABLE_COI (`production-server.ts`): the
  * development server and `apps/ui/server.ts` stay isolated, so the specs would assert a
  * non-isolated page against an isolated one. Refuse the combination instead. */
@@ -153,6 +173,7 @@ export default defineConfig({
             ...(liveProvidersEnabled ? [] : liveProviderSpecs),
             ...hostExcluded,
             ...picogkExcluded,
+            ...timingBudgetExcluded,
           ],
           provider: playwright({
             actionTimeout: 10_000,

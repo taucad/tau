@@ -318,8 +318,9 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       />,
     );
     const header = screen.getByRole('button');
+    expect(header).toHaveTextContent(`workbench arrangement · ${code} exact refusal`);
     await userEvent.click(header);
-    expect(screen.getByText(new RegExp(`${code} exact refusal`, 'u'))).toBeVisible();
+    expect(screen.getByText(new RegExp(`"message":"${code} exact refusal"`, 'u'))).toBeVisible();
   });
 
   it.each(['false', 'reject'] as const)('reports a %s Restore outcome and enables retry', async (outcome) => {

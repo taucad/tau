@@ -9,7 +9,7 @@ import type { TestProject } from 'vitest/node';
 import { resolvedElectronExternalization } from './support/electron-vite-contract.ts';
 import type { ReactTargetInspection } from './support/external-target.js';
 import { packageVersion } from './support/package-version.ts';
-import { captureProcessOutput, stopProcess, waitForEndpoint } from './support/process-lifecycle.ts';
+import { assertEndpointFree, captureProcessOutput, stopProcess, waitForEndpoint } from './support/process-lifecycle.ts';
 import { buildArtifactNames, runtimeBuildArtifactReport } from './support/runtime-build-artifacts.ts';
 import { reactE2EEnvironment, selectedReactE2ETargets } from './support/targets.ts';
 import type { ReactE2ETarget } from './support/targets.ts';
@@ -69,6 +69,7 @@ const startWebTarget = async (target: ReactE2ETarget, cleanups: Array<() => Prom
     throw new TypeError(`Web target ${target.id} has no serve command.`);
   }
   await runBuild(target);
+  await assertEndpointFree(target.baseURL);
   const log = createWriteStream(reactE2ELogPath(target.id), { flags: 'a' });
   const child = spawn(target.serve.file, [...target.serve.args], {
     cwd: target.root,
@@ -88,6 +89,12 @@ const startWebTarget = async (target: ReactE2ETarget, cleanups: Array<() => Prom
 };
 
 export const setup = async (project: TestProject): Promise<() => Promise<void>> => {
+  /* Vitest runs a config's globalSetup once for every browser instance with specs in the run and
+   * once more for the root project, which it always initializes. The root project owns the servers;
+   * the instances inherit what it provides. */
+  if (!project.isRootProject()) {
+    return async () => undefined;
+  }
   const targets = selectedReactE2ETargets();
   const cleanups: Array<() => Promise<void>> = [];
   const inspections: Record<string, ReactTargetInspection> = {};

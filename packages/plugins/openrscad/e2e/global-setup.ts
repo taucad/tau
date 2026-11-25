@@ -4,8 +4,10 @@ import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+import type { TestProject } from 'vitest/node';
 import { openrscadBaseURL, openrscadServerLog } from '#e2e/browser-command.js';
 
 const execFileAsync = promisify(execFile);
@@ -30,7 +32,37 @@ const stop = async (child: ChildProcess): Promise<void> => {
   }
 };
 
-export const setup = async (): Promise<() => Promise<void>> => {
+/** A launch must own its port: polling cannot tell our preview from one already listening there. */
+const assertEndpointFree = async (url: string): Promise<void> => {
+  const { hostname, port } = new URL(url);
+  const listening = await new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host: hostname, port: Number(port) });
+    const settle = (value: boolean): void => {
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(1000, () => {
+      settle(false);
+    });
+    socket.once('connect', () => {
+      settle(true);
+    });
+    socket.once('error', () => {
+      settle(false);
+    });
+  });
+  if (listening) {
+    throw new Error(`${url} already accepts connections before launch; another process owns the port.`);
+  }
+};
+
+export const setup = async (project: TestProject): Promise<() => Promise<void>> => {
+  /* Vitest runs a config's globalSetup once for every browser instance with specs in the run and
+   * once more for the root project, which it always initializes. The root project owns the preview. */
+  if (!project.isRootProject()) {
+    return async () => undefined;
+  }
+  await assertEndpointFree(openrscadBaseURL);
   await mkdir(resolve(openrscadServerLog, '..'), { recursive: true });
   await writeFile(openrscadServerLog, '');
   const build = await execFileAsync(vite, ['build'], { cwd: browserFixtureRoot, maxBuffer: 20 * 1024 * 1024 });

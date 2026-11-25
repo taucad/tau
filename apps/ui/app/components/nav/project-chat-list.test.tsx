@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const cloudOpening = vi.hoisted(() => ({ pending: false, loadingChats: false }));

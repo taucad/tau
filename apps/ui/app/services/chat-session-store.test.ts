@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
@@ -26,7 +26,7 @@ import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -1374,6 +1374,110 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           expect(hostCommand).toHaveBeenCalledOnce();
         });
       }
+      store.release(chatId);
+      unpublishConnector();
+    },
+  );
+
+  /*
+   * PL7 staging defects FP10, merge-queue jobs 136629890632 and 138839875362: a seed starts only after a fresh host
+   * read, so when the chat's read meets an agent host this page can no longer load (past the worker bound) before the
+   * seed's own command could, nothing ever sent the command, and the chat showed nothing at all.
+   */
+  it.each(['once the chat loaded', 'while the chat loads'] as const)(
+    'should show the agent host load failure its host read met %s while a seed waits for that read',
+    async (when) => {
+      const chatId = 'chat_seed_host_load';
+      const projectId = 'project_seed_host_load';
+      const seed: MyUIMessage = {
+        id: 'msg_seed_host_load',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Make a cube' }],
+        metadata: { status: 'pending' },
+      };
+      const deps = createStubDeps();
+      const loaded = Promise.withResolvers<void>();
+      if (when === 'once the chat loaded') {
+        loaded.resolve();
+      }
+      const row = chatRow(chatId, projectId, {
+        messages: [seed],
+        startupRequest: {
+          id: 'req_seed_host_load',
+          kind: 'regenerate-tail',
+          messageId: seed.id,
+          message: seed,
+          source: 'homepage-initial-message',
+          createdAt: 1,
+        },
+      });
+      deps.getChat.mockImplementation(async () => {
+        await loaded.promise;
+        return row;
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      store.setDependencies(deps);
+      const loadFailure = Object.assign(
+        new Error('The agent-host worker failed to load: Failed to fetch dynamically imported module'),
+        { code: 'WORKER_LOAD_FAILED' },
+      );
+      const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async () => {
+        throw loadFailure;
+      });
+      const unpublishConnector = store.publishProjectHostConnector(projectId, async () =>
+        mock<AgentHostClient>({
+          // oxlint-disable-next-line require-yield -- the read fails before its first frame, as the worker never loads.
+          async *catchUp() {
+            throw loadFailure;
+          },
+          hostCommand,
+          subscribe: vi.fn(() => vi.fn()),
+          subscribeLive: vi.fn<AgentHostClient['subscribeLive']>((_chatId, _listener, onEnded) => {
+            queueMicrotask(() => {
+              onEnded?.(loadFailure);
+            });
+            return vi.fn();
+          }),
+          close: vi.fn(async () => undefined),
+        }),
+      );
+      publishAdmission(chatId, (gesture) => {
+        if (gesture.kind !== 'regenerate' || gesture.requestId === undefined) {
+          throw new Error('Expected the durable seeded regenerate gesture.');
+        }
+        return {
+          kind: 'regenerate',
+          command: {
+            type: 'start',
+            commandId: gesture.requestId,
+            payload: {
+              chatId,
+              runId: gesture.requestId,
+              message: { id: seed.id, role: 'user', content: 'Make a cube' },
+              trigger: 'submit',
+            },
+          },
+        };
+      });
+      const session = store.acquire(chatId, projectId);
+      if (when === 'while the chat loads') {
+        // The read meets the failure while the chat loads, when the chat cannot hold an error yet.
+        store.observe(chatId, projectId);
+        await vi.waitFor(() => {
+          expect(store.getAttachmentStatus(chatId)).toBe('lost');
+        });
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
+        loaded.resolve();
+      }
+
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({
+          code: 'WORKER_LOAD_FAILED',
+        });
+      });
+      // The seed still waits for an authoritative read: the card's Reload starts it in a new page.
+      expect(hostCommand).not.toHaveBeenCalled();
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
       store.release(chatId);
       unpublishConnector();
     },

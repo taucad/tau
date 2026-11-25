@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/desktop-services-host",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:feature", "ci:shell", "ci:desktop"],
+  "tags": ["scope:ui", "type:app-lib", "layer:feature", "ci:shell", "ci:desktop", "ui:unlayered"],
   "targets": {
     "test:authority-writer": {
       "executor": "nx:run-commands",

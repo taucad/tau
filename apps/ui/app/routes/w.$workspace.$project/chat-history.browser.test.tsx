@@ -61,13 +61,13 @@ vi.doMock('#hooks/use-theme.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useTheme: () => ({ theme: 'light' }),
 }));
-vi.doMock('#components/files/file-link.js', () => ({
+vi.doMock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 // The chat lane's own seams; the composer's tray stays real (`ChatTodoList` over the chat's task-list file).
 vi.doMock('react-router', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useLocation: () => ({ state: undefined }),
+  useLocation: () => ({ key: 'default', search: '', state: undefined }),
 }));
 vi.doMock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [false, vi.fn()] }));
 vi.doMock('#hooks/use-chat.js', () => ({

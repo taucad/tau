@@ -1,10 +1,13 @@
 # replicad — Interfaces
 
-21 top-level symbols. Signatures are verbatim typescript.
+27 top-level symbols. Signatures are verbatim typescript.
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
   optimisation?: "none" | "commonFace" | "sameFace"
+
+  // Merge same-domain faces and edges after the Boolean operation
+  simplify?: boolean
 
 BSplineApproximationConfig: export declare interface BSplineApproximationConfig
 
@@ -54,6 +57,9 @@ DrawingInterface: export declare interface DrawingInterface
   // DrawingInterface.clone (method)
   clone(): DrawingInterface;
 
+  // DrawingInterface.delete (method)
+  delete(): void;
+
   boundingBox: BoundingBox2d
 
   // DrawingInterface.stretch (method)
@@ -92,6 +98,11 @@ DrawingInterface: export declare interface DrawingInterface
   // Formats the drawing as a list of SVG paths
   // DrawingInterface.toSVGPaths (method)
   toSVGPaths(): string[] | string[][];
+
+ExtrudeUntilOptions: export declare interface ExtrudeUntilOptions
+
+  // Defaults to the sketch's direction
+  extrusionDirection?: Point
 
 ExtrusionProfile: export declare interface ExtrusionProfile
 
@@ -306,6 +317,93 @@ MeshShapeMesh: export declare interface MeshShapeMesh
 
   numProp: number
 
+// A deterministic ownership scope for OpenCascade values (and other objects with a `delete()` method)
+// Remarks: `scope(value)` registers a value the scope owns and returns it; `scope.keep(value)` takes it back out (the caller now owns it), and `scope.dispose()` deletes everything still owned, last registered first, skipping values that were already deleted. Dispose a scope in a `finally` block, or declare it with `using` where explicit resource management is available, so that a throw cannot leak what it owns: ```ts const r = ocScope(); try { const builder = r(new oc.BRepBuilderAPI_MakeFace(plane)); return builder.Face(); } finally { r.dispose(); } ``` Unlike {@link GCWithScope}, nothing waits for the garbage collector, which never runs during a synchronous model build.
+OcScope: export declare interface OcScope
+
+  // Releases a value from the scope
+  // OcScope.keep (method)
+  keep<T extends Deletable | null | undefined>(value: T): T;
+
+  // Deletes every value the scope still owns
+  // OcScope.dispose (method)
+  dispose(): void;
+
+// A host cache
+// Remarks: The library calls `operation` only for calls made by user code: calls made while an operation runs (internal composition) go straight to the implementation, except inside a user callback that the library invokes (a sweep factory), where user code is routed again. Calls the cache makes itself go through the routing too; wrap them in `bypassOperationCache`.
+OperationCache: export declare interface OperationCache
+
+  // OperationCache.operation (method)
+  operation<T>(request: OperationRequest<T>): T;
+
+  // OperationCache.step (method)
+  step<T>(request: OperationStep<T>): T;
+
+  // Topological elements that user code took from `owner` (the `edges`, `faces`, `wires` and `solids` getters, a finder's `find`)
+  // OperationCache.elements (method)
+  elements(owner: object, kind: string, elements: readonly object[], ordinals: () => readonly number[] | undefined): void;
+
+// One public operation, described lazily
+OperationRequest: export declare interface OperationRequest<T>
+
+  // `Class.method`, `set:Class.property` or the exported function name
+  readonly op: string
+
+  readonly effect: OperationEffect
+
+  // `this` of a method
+  readonly receiver: object | undefined
+
+  // The arguments as passed
+  // Remarks: Do not identify a finder instance (`EdgeFinder`, `FaceFinder`, `CornerFinder`) by its object identity: its clause methods mutate it without being routed, so the same object can select differently from one call to the next. Describe it by its clauses, or let the operation's step key the selection.
+  readonly args: readonly unknown[]
+
+  // Positions of finder arguments among `args`
+  readonly finderArgs?: readonly number[]
+
+  // The result is a mutable builder (a pen from `draw()`)
+  readonly returnsBuilder?: boolean
+
+  // The operation's errors are a deterministic function of its inputs (it calls no user code that the inputs do not describe), so a cache may reuse a failure
+  readonly deterministicErrors?: boolean
+
+  // For a builder (pen, sketcher) the cache has not seen
+  readonly freshState?: () => readonly unknown[] | undefined
+
+  // Runs the operation
+  // OperationRequest.compute (method)
+  compute(): T;
+
+  // Deletes what the operation would have deleted
+  // OperationRequest.consume (method)
+  consume?(): void;
+
+// The part of an operation that depends on a callback the cache could not describe up front (a sweep factory, a finder predicate)
+OperationStep: export declare interface OperationStep<T>
+
+  readonly op: string
+
+  readonly receiver: object | undefined
+
+  // See {@link OperationRequest.deterministicErrors}
+  readonly deterministicErrors?: boolean
+
+  // The inputs known after the callback ran (selected element ordinals and radii, the factory's sketch), or `undefined` if they cannot be described (a selected element is not part of the receiver)
+  // OperationStep.values (method)
+  values(): readonly unknown[] | undefined;
+
+  // OperationStep.compute (method)
+  compute(): T;
+
+  // OperationStep.consume (method)
+  consume?(): void;
+
+PlaneConfig: export declare interface PlaneConfig
+
+  plane?: PlaneName | Plane
+
+  origin?: Point | number
+
 PlaneFace: export declare interface PlaneFace
 
   // PlaneFace.pointOnSurface (method)
@@ -393,10 +491,14 @@ SketchInterface: export declare interface SketchInterface
 
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults to the sketch origin)
   // SketchInterface.revolve (method)
-  revolve(revolutionAxis?: Point, config?: {
+  revolve(revolutionAxis?: Point | AxisName, config?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
+
+  // Extrudes the sketch up to a limiting face, returning only the extrusion
+  // SketchInterface.extrudeUntil (method)
+  extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
   // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).

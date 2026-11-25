@@ -234,7 +234,7 @@ function parseError(error: Error): ChatError {
     return {
       category: errorCategory.network,
       title: errorCategoryTitles[errorCategory.network],
-      message: 'Unable to connect to the server. Please check your internet connection.',
+      message: 'Check your connection and try again.',
       raw: error.message,
     };
   }

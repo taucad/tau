@@ -196,15 +196,13 @@ async function evaluateDocumentRequest(
   worker: KernelRuntimeWorker,
   input: Parameters<KernelRuntimeWorker['handleOpenDocument']>[0],
 ): Promise<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> {
-  const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
-  worker.onEvaluated = (event) => {
-    evaluated.push(event);
-  };
-  worker.handleOpenDocument(input);
-  await vi.waitFor(() => {
-    expect(evaluated).toHaveLength(1);
+  // The first evaluation the worker reports, awaited as the event itself: a polled wait gave up after `vi.waitFor`'s
+  // 1 s of wall time, which a loaded runner can spend before the worker reports, and the test's own timeout bounds it.
+  const evaluated = new Promise<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]>((resolve) => {
+    worker.onEvaluated = resolve;
   });
-  return evaluated[0]!;
+  worker.handleOpenDocument(input);
+  return evaluated;
 }
 
 async function evaluateWorkerDocument(
@@ -256,19 +254,16 @@ async function requestWorkerView(
     content?: Record<string, boolean>;
   },
 ): Promise<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> {
-  const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
-  worker.onRendered = (event) => {
-    rendered.push(event);
-  };
+  // The first render the worker reports, awaited as the event (see `evaluateDocumentRequest`).
+  const rendered = new Promise<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]>((resolve) => {
+    worker.onRendered = resolve;
+  });
   worker.handleOpenView({
     ...args,
     requestId: `${args.subscriptionId}-render`,
     view: 'display',
   });
-  await vi.waitFor(() => {
-    expect(rendered).toHaveLength(1);
-  });
-  return rendered[0]!;
+  return rendered;
 }
 
 async function renderWorkerView(

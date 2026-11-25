@@ -260,9 +260,38 @@ const expectedOutputs = (manifest: Manifest): Readonly<Record<string, string>> =
   'FormatManifest.generated.swift': swiftManifest(manifest),
 });
 
+/**
+ * Converter imports that Quick Look deliberately does not claim yet. These are the
+ * native CAD formats of `@taucad/cadmpeg`: no fixture evidence or UTI declaration
+ * has been admitted for them, and claiming a third-party UTI without one would
+ * register Tau as a handler for files it cannot prove it previews. A new converter
+ * format still fails the check until it joins the manifest or this list.
+ */
+const unclaimedConverterFormats: ReadonlySet<string> = new Set([
+  '3dm',
+  'catpart',
+  'f3d',
+  'f3z',
+  'fcstd',
+  'iam',
+  'ipt',
+  'pvz',
+  'sab',
+  'sat',
+  'sldprt',
+  'smb',
+  'smt',
+]);
+
 const validateConverterGraph = async (manifest: Manifest): Promise<void> => {
   const declared = manifest.formats.flatMap((format) => format.extensions).sort();
-  const actual = [...converterImportFormats].sort();
+  const actual = converterImportFormats.filter((format) => !unclaimedConverterFormats.has(format)).sort();
+  const stale = [...unclaimedConverterFormats].filter(
+    (format) => !(converterImportFormats as readonly string[]).includes(format) || declared.includes(format),
+  );
+  if (stale.length > 0) {
+    throw new Error(`Unclaimed Quick Look formats are no longer converter-only imports: ${stale.join(',')}`);
+  }
   if (JSON.stringify(declared) !== JSON.stringify(actual)) {
     throw new Error(
       `Quick Look formats drifted from converter imports:\nmanifest=${declared.join(',')}\nconverter=${actual.join(',')}`,

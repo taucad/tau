@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -10,7 +11,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/apps/libs/lsp',

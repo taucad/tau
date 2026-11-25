@@ -12,6 +12,10 @@
  *    walked, each batch while the one before it is kept — and kept in local
  *    packs of at most the repack ceiling, indexed from what was written (no
  *    `indexPack`), each whole entry with the deflated bytes it was read as.
+ *    What is known before any of it is read — the tips, each listing's trees
+ *    (their ids hashed from its entries) and blobs, and their delta bases —
+ *    is read ahead under a byte budget, so those waves wait on no round trip
+ *    of their own.
  * 4. Older history stays on the server: the heads' commits are the store's
  *    shallow boundary, the store reads history through by Range while the
  *    catalogue's links last, and a later fetch brings what is new.
@@ -24,9 +28,11 @@
  */
 
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { frameObject } from '#git-objects.js';
+import { concatBytes, hexToBytes } from '#object-hash.js';
 import type { ObjectSource, ObjectStore } from '#object-store/object-store.js';
 import { openRemotePack } from '#object-store/remote-pack.js';
-import type { RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
+import type { ReadAhead, RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
 import { readTreeEntries } from '#object-store/tree-codec.js';
 import type { CopiedObject, StoredObject } from '#pack-reader/pack-reader.js';
 
@@ -117,6 +123,12 @@ export type ColdOpenReport = Readonly<{
   ranges: RemotePackCounters;
   /** The most trees, commits and tags held with their bytes while they waited to be kept: at most one batch. */
   staged: Readonly<{ objects: number; bytes: number }>;
+  /**
+   * Listings whose trees were hashed to the root tree they name (their trees
+   * read ahead), and those that hashed to another or did not hash (their trees
+   * read as the walk reaches them).
+   */
+  listingTrees: Readonly<{ matched: number; missed: number }>;
 }>;
 
 /** A cold open that took: the refs it brought, and what it cost. */
@@ -148,6 +160,12 @@ export type ColdOpenOptions = Readonly<{
   batchBytes?: number;
   /** Objects read per wave, whatever their size; 2048 by default. */
   batchObjects?: number;
+  /**
+   * Stored bytes read ahead of the walk: the tips, each listing's trees and
+   * blobs, and their delta bases, held until the open ends; 32 MiB by
+   * default, 0 for none.
+   */
+  readAheadBytes?: number;
   signal?: AbortSignal;
 }>;
 
@@ -188,6 +206,76 @@ const sourceOver = (
   });
 
 const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
+
+/* A directory of a listing: its files' entries and its subdirectories. */
+type ListedDirectory = {
+  files: Array<Readonly<{ name: string; mode: string; oid: string }>>;
+  dirs: Map<string, ListedDirectory>;
+};
+
+/* Git's entry order: byte-wise by name, a directory sorting as `name/`. */
+const byGitOrder = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): number => {
+  for (let at = 0; at < Math.min(left.length, right.length); at += 1) {
+    if (left[at] !== right[at]) {
+      return left[at]! - right[at]!;
+    }
+  }
+  return left.length - right.length;
+};
+
+/*
+ * The ids of a listing's trees, hashed from its entries as git writes them,
+ * shallowest first: what the walk will ask for, known before any tree is
+ * read. Best effort: `undefined` for a listing that does not hash to the root
+ * tree it names (a mode not spelled as stored, an id that is not hex), whose
+ * trees are then read as the walk reaches them. Every tree read is still
+ * checked against its id.
+ */
+const listedTrees = async (listing: HeadListing, compute: ComputeWorker): Promise<string[] | undefined> => {
+  try {
+    const root: ListedDirectory = { files: [], dirs: new Map() };
+    for (const entry of listing.entries) {
+      const segments = entry.path.split('/');
+      let directory = root;
+      for (const segment of segments.slice(0, -1)) {
+        let child = directory.dirs.get(segment);
+        if (child === undefined) {
+          child = { files: [], dirs: new Map() };
+          directory.dirs.set(segment, child);
+        }
+        directory = child;
+      }
+      directory.files.push({ name: segments.at(-1)!, mode: entry.mode, oid: entry.oid });
+    }
+    const levels: string[][] = [];
+    const hash = async (directory: ListedDirectory, depth: number): Promise<string> => {
+      const directories = await Promise.all(
+        [...directory.dirs].map(async ([name, child]) => ({
+          name,
+          mode: '40000',
+          oid: await hash(child, depth + 1),
+          key: textEncoder.encode(`${name}/`),
+        })),
+      );
+      const entries = [
+        ...directory.files.map((file) => ({ ...file, key: textEncoder.encode(file.name) })),
+        ...directories,
+      ].sort((left, right) => byGitOrder(left.key, right.key));
+      const body = concatBytes(
+        ...entries.map((entry) =>
+          concatBytes(textEncoder.encode(`${entry.mode} ${entry.name}\0`), hexToBytes(entry.oid)),
+        ),
+      );
+      const oid = await compute.sha1(frameObject('tree', body));
+      (levels[depth] ??= []).push(oid);
+      return oid;
+    };
+    return (await hash(root, 0)) === listing.tree ? levels.flat() : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /* The tree under a commit's body. */
 const treeOf = (commit: StoredObject): string | undefined =>
@@ -249,7 +337,7 @@ const batchesOf = (
  * set does, and never its bytes.
  */
 type Stage = Readonly<{
-  entries: Map<string, { object: StoredObject | undefined; names: readonly string[] }>;
+  entries: Map<string, { object: CopiedObject | undefined; names: readonly string[] }>;
   held: { objects: number; bytes: number };
   peak: { objects: number; bytes: number };
 }>;
@@ -257,11 +345,16 @@ type Stage = Readonly<{
 /* How an import reads, keeps and bounds what it reads. */
 type Importer = Readonly<{
   store: ObjectStore;
+  compute: ComputeWorker;
   /* Reads every one of `oids`, each checked against its id, or throws. */
   readAll: (oids: readonly string[]) => Promise<Map<string, CopiedObject>>;
   /* A whole entry's deflated body is kept as it is: it inflated to the checked object. */
   keep: (objects: ReadonlyMap<string, CopiedObject>) => Promise<void>;
   sizeOf: (oid: string) => number;
+  /* Fetch `oids` and their bases ahead of the reads that want them, in order while the budget lasts. */
+  readAhead: (oids: readonly string[]) => ReadAhead;
+  /* Listings whose trees hashed to their root, and those that did not. */
+  listingTrees: { matched: number; missed: number };
   limits: Readonly<{ batchBytes: number; batchObjects: number }>;
   stage: Stage;
   /* Set once either side of an import running side by side fails: the other reads and keeps nothing more. */
@@ -287,16 +380,20 @@ const checkGoing = (importer: Importer): void => {
 const stageObject = (
   importer: Importer,
   oid: string,
-  staged: Readonly<{ object: StoredObject; names: readonly string[] }>,
+  staged: Readonly<{ object: CopiedObject; names: readonly string[] }>,
 ): void => {
   const { stage, limits } = importer;
   const { names } = staged;
   if (stage.entries.has(oid)) {
     return;
   }
-  /* Held by its body alone: a deflated body is a view into the Range read it came from, which staging would pin. */
-  const object: StoredObject = { type: staged.object.type, data: staged.object.data };
-  const bytes = object.data.byteLength;
+  /*
+   * Held with the deflated body it was read as, so it is kept as those bytes and not deflated again: a read hands
+   * that body over as its own bytes, never a view that pins the Range read behind it. Both count against the bound.
+   */
+  const { type, data, compressed } = staged.object;
+  const object: CopiedObject = compressed === undefined ? { type, data } : { type, data, compressed };
+  const bytes = data.byteLength + (compressed?.byteLength ?? 0);
   const fits = stage.held.objects < limits.batchObjects && stage.held.bytes + bytes <= limits.batchBytes;
   stage.entries.set(oid, { object: fits ? object : undefined, names });
   if (fits) {
@@ -427,7 +524,7 @@ const keepStaged = async (importer: Importer): Promise<void> => {
   for (const batch of batchesOf(stagedOrder(entries), importer.sizeOf, importer.limits)) {
     const unread = batch.filter((oid) => entries.get(oid)?.object === undefined);
     // oxlint-disable-next-line no-await-in-loop -- one batch read again at a time.
-    const reread = unread.length === 0 ? new Map<string, StoredObject>() : await importer.readAll(unread);
+    const reread = unread.length === 0 ? new Map<string, CopiedObject>() : await importer.readAll(unread);
     const objects = new Map(batch.map((oid) => [oid, entries.get(oid)?.object ?? reread.get(oid)!]));
     // oxlint-disable-next-line no-await-in-loop -- a batch is kept only after the batches it names.
     await importer.keep(objects);
@@ -435,7 +532,7 @@ const keepStaged = async (importer: Importer): Promise<void> => {
       const entry = entries.get(oid)!;
       if (entry.object !== undefined) {
         held.objects -= 1;
-        held.bytes -= entry.object.data.byteLength;
+        held.bytes -= entry.object.data.byteLength + (entry.object.compressed?.byteLength ?? 0);
       }
       entries.delete(oid);
     }
@@ -445,8 +542,8 @@ const keepStaged = async (importer: Importer): Promise<void> => {
 /* The ids of `oids` the store does not hold yet. */
 const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<string[]> => {
   const unique = [...new Set(oids)];
-  const held = await Promise.all(unique.map(async (oid) => store.has(oid)));
-  return unique.filter((_oid, at) => !held[at]);
+  const held = await store.heldOf(unique);
+  return unique.filter((oid) => !held.has(oid));
 };
 
 /*
@@ -509,21 +606,14 @@ const importTrees = async (
   await bothSettled(importer, walkTrees, keepListed);
 };
 
-/*
- * The tips (each ref's object and the commit a tag peels to), read and
- * staged; then the trees of every tip commit — a branch's and the one a tag
- * peels to alike — and every tip tree; then the blobs: the listings' where
- * every walked commit has one, else the trees' as well. The tips are kept
- * last, after everything they name. Answers the commits brought without their
- * history.
- */
-const importHeads = async (
-  references: Catalogue['refs'],
+/* {@link importHeads} once its read-ahead is asked for. */
+const importHeadsAhead = async (
   listings: readonly HeadListing[],
   importer: Importer,
+  known: Readonly<{ tips: readonly string[]; listed: readonly string[] }>,
 ): Promise<string[]> => {
-  const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
-  const tipObjects = new Map<string, StoredObject>();
+  const { tips } = known;
+  const tipObjects = new Map<string, CopiedObject>();
   await readBatches([...new Set(tips)], importer, async (objects) => {
     for (const [oid, object] of objects) {
       tipObjects.set(oid, object);
@@ -543,16 +633,55 @@ const importHeads = async (
    */
   const walked = [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
   const tipTrees = [...tipObjects].filter(([, object]) => object.type === 'tree').map(([oid]) => oid);
-  const listed = new Set(listings.map((listing) => listing.commit));
+  const listedCommits = new Set(listings.map((listing) => listing.commit));
   const roots = [...walked.flatMap((commit) => treeOf(tipObjects.get(commit)!) ?? []), ...tipTrees];
   await importTrees(roots, importer, {
-    walked: tipTrees.length > 0 || walked.some((commit) => !listed.has(commit)),
-    listed: listings.flatMap((listing) =>
-      listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
-    ),
+    walked: tipTrees.length > 0 || walked.some((commit) => !listedCommits.has(commit)),
+    listed: known.listed,
   });
   await keepStaged(importer);
   return walked;
+};
+
+/*
+ * The tips (each ref's object and the commit a tag peels to), read and
+ * staged; then the trees of every tip commit — a branch's and the one a tag
+ * peels to alike — and every tip tree; then the blobs: the listings' where
+ * every walked commit has one, else the trees' as well. The tips are kept
+ * last, after everything they name. Answers the commits brought without their
+ * history.
+ */
+const importHeads = async (
+  references: Catalogue['refs'],
+  listings: readonly HeadListing[],
+  importer: Importer,
+): Promise<string[]> => {
+  const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
+  const listed = listings.flatMap((listing) =>
+    listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
+  );
+  /*
+   * Everything named before anything is read — the tips, each listing's trees and its blobs — is asked for in one
+   * wave, so the tips, the walk's levels and the blob batches find their bytes held or landing.
+   */
+  const trees = await Promise.all(
+    listings.map(async (listing) => {
+      const hashed = await listedTrees(listing, importer.compute);
+      if (hashed === undefined) {
+        importer.listingTrees.missed += 1;
+        return [listing.tree];
+      }
+      importer.listingTrees.matched += 1;
+      return hashed;
+    }),
+  );
+  const ahead = importer.readAhead(await unheld(importer.store, [...tips, ...trees.flat(), ...listed]));
+  try {
+    return await importHeadsAhead(listings, importer, { tips, listed });
+  } finally {
+    /* Nothing it started runs on after the import, and nothing it held is kept past it. */
+    await ahead.release();
+  }
 };
 
 /* A catalogue opened: its refs in the asked-for families, its packs by Range and its listings. */
@@ -585,7 +714,13 @@ const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue 
   }
   const prefixes = families.map((family) => familyPrefixes[family]);
   const references = catalogue.refs.filter((entry) => prefixes.some((prefix) => entry.ref.startsWith(prefix)));
-  const getBytes = async (href: string, range?: readonly [number, number]): Promise<Uint8Array<ArrayBuffer>> => {
+  const getBytes = async (
+    href: string,
+    range?: readonly [number, number],
+    ended?: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer>> => {
+    /* The caller's signal, and a read-ahead's own when it ends a read nothing waits for. */
+    const both = ended === undefined ? signal : signal === undefined ? ended : AbortSignal.any([signal, ended]);
     const response = await filesFetch(href, {
       credentials: 'omit',
       /*
@@ -596,7 +731,7 @@ const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue 
       ...(range === undefined
         ? {}
         : { cache: 'no-store', headers: { range: `bytes=${String(range[0])}-${String(range[1] - 1)}` } }),
-      ...(signal === undefined ? {} : { signal }),
+      ...(both === undefined ? {} : { signal: both }),
     });
     if (response.status !== (range === undefined ? 200 : 206)) {
       await response.body?.cancel();
@@ -615,7 +750,7 @@ const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue 
             name: pack.key.slice(pack.key.lastIndexOf('/') + 1, -'.pack'.length),
             size: pack.bytes,
             index: await getBytes(pack.index.href),
-            fetchRange: async (offset, length) => getBytes(pack.pack.href, [offset, offset + length]),
+            fetchRange: async (offset, length, ended) => getBytes(pack.pack.href, [offset, offset + length], ended),
             compute,
           });
         }),
@@ -639,6 +774,9 @@ const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue 
   });
 };
 
+/* The read-ahead budget asked for, or the default. */
+const readAheadBytesOf = (options: ColdOpenOptions): number => options.readAheadBytes ?? 32 * 1024 * 1024;
+
 /* What reads the opened catalogue's packs into the store, and what that cost. */
 const importerOver = (
   opened: OpenedCatalogue,
@@ -655,6 +793,8 @@ const importerOver = (
   let packsWritten = 0;
   const importer: Importer = {
     store: options.store,
+    compute: options.compute,
+    listingTrees: { matched: 0, missed: 0 },
     readAll: async (oids) => {
       const found = await source.readMany(oids);
       const missing = oids.filter((oid) => !found.has(oid));
@@ -670,20 +810,57 @@ const importerOver = (
     },
     /* The listing's size where it names one, else the stored entry's (a delta's own, not its target's). */
     sizeOf: (oid) => listedSizes.get(oid) ?? Math.max(0, ...packs.map((pack) => pack.entryBytes(oid) ?? 0)),
+    readAhead: (oids) => {
+      /*
+       * Each id from the first pack that holds it, as a read takes it. The budget is spent here, in the order asked
+       * across every pack (tips and trees before blobs), so no pack's blobs take what another's trees need; what is
+       * left goes to the bases, shared.
+       */
+      const budget = { bytes: readAheadBytesOf(options) };
+      const byPack = packs.map((): string[] => []);
+      let taken = 0;
+      for (const oid of new Set(oids)) {
+        const at = packs.findIndex((pack) => pack.entryBytes(oid) !== undefined);
+        const bytes = at === -1 ? 0 : packs[at]!.entryBytes(oid)!;
+        if (taken + bytes > budget.bytes) {
+          break;
+        }
+        taken += bytes;
+        byPack[at]?.push(oid);
+      }
+      const reads = packs.flatMap((pack, at) =>
+        byPack[at]!.length === 0 ? [] : [pack.readAhead(byPack[at]!, budget)],
+      );
+      return {
+        release: async () => {
+          await Promise.all(reads.map(async (read) => read.release()));
+        },
+      };
+    },
     limits: { batchBytes: options.batchBytes ?? 16 * 1024 * 1024, batchObjects: options.batchObjects ?? 2048 },
     stage: { entries: new Map(), held: { objects: 0, bytes: 0 }, peak: { objects: 0, bytes: 0 } },
     halt: { stopped: false },
   };
   const report = (): ColdOpenReport => {
-    const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
+    const ranges: RemotePackCounters = {
+      rangeRequests: 0,
+      bytesFetched: 0,
+      waves: 0,
+      aheadHeldBytes: 0,
+      aheadPeakBytes: 0,
+    };
     for (const pack of packs) {
       ranges.rangeRequests += pack.counters.rangeRequests;
       ranges.bytesFetched += pack.counters.bytesFetched;
       ranges.waves += pack.counters.waves;
+      ranges.aheadHeldBytes += pack.counters.aheadHeldBytes;
+      /* Summed over packs: at least the most held at once. */
+      ranges.aheadPeakBytes += pack.counters.aheadPeakBytes;
     }
     const { indexReads, listingReads } = opened;
     const staged = { ...importer.stage.peak };
-    return { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges, staged };
+    const listingTrees = { ...importer.listingTrees };
+    return { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges, staged, listingTrees };
   };
   return { importer, source, report };
 };
@@ -708,8 +885,13 @@ async function attempted<Result>(
  *
  * @param options - Where the catalogue is, the store to fill and its compute.
  * @returns The refs it brought, its shallow boundary and what it cost, or `undefined` to fetch over smart HTTP instead.
+ * @throws RangeError when `readAheadBytes` is not a finite count of bytes.
  */
 export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<ColdOpenResult | undefined> => {
+  const readAheadBytes = readAheadBytesOf(options);
+  if (!Number.isFinite(readAheadBytes) || readAheadBytes < 0) {
+    throw new RangeError(`readAheadBytes must be a finite count of bytes, not ${String(readAheadBytes)}.`);
+  }
   const opened = await openCatalogue(options);
   if (opened === undefined) {
     return undefined;

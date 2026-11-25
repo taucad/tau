@@ -46,7 +46,8 @@ export type ModuleVm = {
   /** Detect imports without requiring builtins to be registered. */
   detectImports(entryPath: string, signal?: AbortSignal): Promise<DetectImportsResult>;
   /** Bundle an ESM entry point and its transitive dependency graph. */
-  bundle(entryPath: string, signal?: AbortSignal): Promise<BundleResult>;
+  /** Bundle an entry; `globals` limits the script globals bound to those built-in module names. */
+  bundle(entryPath: string, signal?: AbortSignal, globals?: readonly string[]): Promise<BundleResult>;
   /** Execute bundled ESM code in the current JavaScript environment. */
   execute<T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>>;
   /** Register an in-memory builtin module. */
@@ -111,8 +112,8 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
       return bundler.detectImports(entryPath, signal);
     },
 
-    async bundle(entryPath, signal) {
-      return bundler.bundle(entryPath, signal);
+    async bundle(entryPath, signal, globals) {
+      return bundler.bundle(entryPath, signal, globals);
     },
 
     execute,

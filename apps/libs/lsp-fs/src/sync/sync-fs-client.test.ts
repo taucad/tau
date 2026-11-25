@@ -4,11 +4,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { slotIndex, syncState } from '#sync/sync-fs-protocol.js';
 import type { SyncFsProbe } from '#sync/sync-fs-client.js';
-import { createSyncFsClient } from '#sync/sync-fs-client.js';
+import { pendingStallMilliseconds } from '@taucad/filesystem';
+import { createSyncFsClient, syncFsRequestTimeout } from '#sync/sync-fs-client.js';
 import { attachSyncFsServer } from '#sync/sync-fs-server.js';
 import type { SyncFsIndexSource } from '#sync/sync-fs-server.js';
 
 describe('createSyncFsClient', () => {
+  /* A read held while a tree write lands its path (D10, STO-25) is the filesystem's to answer or refuse. */
+  it('should wait on a slot request past the filesystem’s stall bound', () => {
+    expect(syncFsRequestTimeout).toBeGreaterThan(pendingStallMilliseconds);
+  });
+
   it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
     const root = '/root';
     const { port1, port2 } = new MessageChannel();

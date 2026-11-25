@@ -12,7 +12,7 @@
  * and a pending startup request, and asserts on the one durable host command.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
@@ -112,6 +112,9 @@ const harness = vi.hoisted(() => {
 
 // The store's own `Chat` instance, minus the AI SDK and its transport: this
 // scope asserts on the host command, never on a stream.
+/* The routing plan the turn reads at admission (adaptive app deployment mode C6): every kernel allowed here. */
+vi.mock('#cloud/kernel-commerce.js', () => ({ useKernelRoutingPlan: () => () => true }));
+
 vi.mock('@taucad/chat-ui/chat-clients/_internal/shared-chat-transport', () => ({
   createChatInstance: ({ chatId }: { chatId: string }) => {
     const chat = {
@@ -159,7 +162,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
-vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
+vi.mock('@taucad/chat-ui/hooks/use-draft-image-error-toast', () => ({ useDraftImageErrorToast: () => undefined }));
 /* ChatTurnHost reads the telemetry consent through the session and react-query; this scope has neither. */
 vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({

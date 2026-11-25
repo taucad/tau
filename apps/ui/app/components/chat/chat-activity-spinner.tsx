@@ -1,13 +1,23 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
+import type { MetalMorphSpinnerProperties } from '#components/geometry/loader/metal-morph-spinner.js';
 
-const loadMetalMorphSpinner = async () => import('#components/geometry/loader/metal-morph-spinner.js');
+/** What the spinner degrades to when its chunk cannot be loaded in this page: the flat spinner it already falls back to. */
+function FlatSpinnerFallback({ fallback }: MetalMorphSpinnerProperties): React.ReactNode {
+  return fallback;
+}
 
-const MetalMorphSpinnerLazy = lazy(async () => {
-  const module = await loadMetalMorphSpinner();
-  return { default: module.MetalMorphSpinner };
-});
+/* Decorative, so optional code (PL7 staging defects blueprint D20): a failed load degrades to the flat spinner and
+ * never takes the chat panel down. */
+const MetalMorphSpinnerLazy = lazyCode(
+  async () => {
+    const module = await import('#components/geometry/loader/metal-morph-spinner.js');
+    return { default: module.MetalMorphSpinner };
+  },
+  { fallback: FlatSpinnerFallback },
+);
 
 export type ChatActivitySpinnerProperties = Readonly<{
   className?: string;

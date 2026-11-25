@@ -19,9 +19,9 @@ import {
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { useExportToDisk } from '#components/files/use-export-to-disk.js';
-import { ViewerLink } from '#components/files/viewer-link.js';
-import { ExportFormatComboboxLabel, getExportFormatValue } from '#components/files/export-selector.js';
+import { useExportToDisk } from '@taucad/files-ui/components/files/use-export-to-disk';
+import { ViewerLink } from '@taucad/files-ui/components/files/viewer-link';
+import { ExportFormatComboboxLabel, getExportFormatValue } from '@taucad/files-ui/components/files/export-selector';
 import { groupExportFormatsByFidelity } from '@taucad/workbench-panes/export/export-source';
 import { buttonVariants } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';

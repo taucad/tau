@@ -161,6 +161,33 @@
 \* the record holds that text and nothing more;
 \* otherwise it is cancelled and never sent. A send still enters the queue only through the composer's submit, so
 \* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
+\* External-agent sign-in: the store answers which host a chat is attached to (a read of the observation it already
+\* keeps), so a login card can offer the sign-in where that host refused the turn, and an exit-0 sign-in retries the
+\* refused turn through the existing regenerate gesture. No action or verdict changes.
+\* DC-10 revisions-ui slice 2 (2026-11-18): `use-turn-admission.ts` takes the revision client registry from
+\* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
+\* revisions-ui slice 6 (2026-11-19): `use-turn-admission.ts` takes `subscribeRevisionSessionUser` from
+\* `@taucad/revisions-ui/lib/revision-actor`; only the import moved. No action or verdict changes.
+\* Tau Cloud naming audit (2026-11-18): `chat-session-store.ts` rewords the queue-updates error sentence; copy only.
+\* No action or verdict changes.
+\* DC-10 files-ui slice 9 (2026-11-19): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type
+\* from `@taucad/files-ui`; only the import moved. No action or verdict changes.
+\* Adaptive app deployment mode C6 (2026-11-19): `chat-turn-host.tsx` rebuilds `snapshot.kernel` from the plan read at
+\* admission; delivery, persistence and the queue are untouched. No action or verdict changes.
+\* DC-10 chat-ui slice 1 (2026-11-19): `chat-message-queue.machine.ts` moves unchanged to `@taucad/chat-ui`, and
+\* `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` import it, the draft
+\* machine and the chat SDK loader from there; only paths moved. No action or verdict changes.
+\* PL7 staging defects FP9 (2026-11-20): `chat-textarea.tsx` loads the headless capture service through the
+\* code-loading owner (`loadCode`); delivery, persistence and the queue are untouched. No action or verdict changes.
+\* UI layering W2 (2026-11-21): `chat-session-store.ts` takes `run-auto-resume` from `@taucad/chat-ui`, where it moved
+\* unchanged from `@taucad/ui-core`; only the import moved. No action or verdict changes.
+\* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
+\* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
+\* moved. No action or verdict changes.
+\* FP10 held seed (2026-11-25): `chat-session-store.ts` shows the agent host's terminal code load failure, which the
+\* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
+\* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

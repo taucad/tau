@@ -211,5 +211,7 @@ describe('UI deploy PicoGK browser host', () => {
     );
     // The variable reaches the Netlify build, which runs `ui:build` with it.
     expect(build[0]!.run).toMatch(/\/netlify" deploy \\\n/u);
+    // The cadmpeg engines load by digest from the same host, through the same build (cadmpeg engine delivery D11).
+    expect(build[0]!.env!['CADMPEG_ENGINES_BASE']).toMatch(/^\$\{\{ steps\.site\.outputs\.dependencies_base \}\}$/u);
   });
 });

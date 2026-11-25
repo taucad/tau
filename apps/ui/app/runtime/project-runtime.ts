@@ -39,6 +39,7 @@ import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { Topic } from '@taucad/events';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fileContentBytes } from '@taucad/fs-client/file-content-service';
@@ -52,7 +53,8 @@ import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
+import { noteManifestReconciled } from '#lib/manifest-reconciliation.js';
 import {
   createProjectManifestChangeObserver,
   ensureFocusedChatForProject,
@@ -74,7 +76,7 @@ import type {
 import { editorMachine } from '#machines/editor.machine.js';
 import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import type { ChatStorage } from '#types/storage.types.js';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import { startViewRecordSession } from '#workbench-records/view-record-session.js';
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
@@ -677,18 +679,30 @@ export const createParameterObserversLogic = (
   });
 };
 
+/** The `tau.json` bytes the project's last load read, and the project it parsed from them, with no issue. @public */
+export type LoadedProjectManifest = Readonly<{ project: Project; bytes: Uint8Array<ArrayBuffer> }>;
+
 /**
  * The manifest observation (row S15): while the project is ready and its file manager has a content service,
  * `tau.json` is followed, a change reloads the project and an unreadable one is reported. Its health reaches the root
  * as `manifestObservationChanged`, and `refresh` retries it.
  *
- * @param options - The project id and its file manager.
+ * A project ready with the very project its last load parsed is equal to the bytes that load read, so those bytes are
+ * recorded as its reconciled manifest as the observation starts (STO-25): a Tau Cloud open's viewer opens on them
+ * without waiting for the observation's own first read, which the open's apply holds back. The observation's reads
+ * then record what they find, as before.
+ *
+ * @param options - The project id, its file manager, and what the project's last load read.
  * @returns The observation's callback logic.
  */
 export const createManifestObservationLogic = (
-  options: Readonly<{ projectId: string; fileManagerRef: ProjectRuntimeFileManager['fileManagerRef'] }>,
+  options: Readonly<{
+    projectId: string;
+    fileManagerRef: ProjectRuntimeFileManager['fileManagerRef'];
+    loadedManifest?: () => LoadedProjectManifest | undefined;
+  }>,
 ): ProjectChildLogic<ManifestObservationEvent> => {
-  const { projectId, fileManagerRef } = options;
+  const { projectId, fileManagerRef, loadedManifest } = options;
   return createCallbackLogic<ManifestObservationEvent, ProjectChildInput>(
     ({ input: { project }, sendBack, receive }) => {
       const observe = (
@@ -714,6 +728,10 @@ export const createManifestObservationLogic = (
           },
           report: (issue) => {
             project.send({ type: 'manifestIssueObserved', issue });
+          },
+          /* STO-25: a model surface renders from the first view once this is the manifest the tree write landed. */
+          onReconciled: (bytes) => {
+            noteManifestReconciled(projectId, bytes);
           },
         });
         const observation = new ObservationService({
@@ -744,6 +762,8 @@ export const createManifestObservationLogic = (
             unsubscribe();
             observer.dispose();
             lease.release();
+            /* Nothing follows the manifest now: what it was found to be no longer stands. */
+            noteManifestReconciled(projectId, undefined);
           },
         };
       };
@@ -759,6 +779,14 @@ export const createManifestObservationLogic = (
           return;
         }
         current?.release();
+        if (contentService !== undefined) {
+          /* Identity, not equality: only the project the load parsed from these bytes is known to be theirs (I7). */
+          const loaded = loadedManifest?.();
+          const { project: held, manifestIssue } = project.getSnapshot().context;
+          if (loaded !== undefined && held === loaded.project && manifestIssue === undefined) {
+            noteManifestReconciled(projectId, loaded.bytes);
+          }
+        }
         current = contentService === undefined ? undefined : { contentService, ...observe(contentService) };
       };
       // `refresh` is the one event this child takes.
@@ -964,14 +992,21 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
     previewParameterService ?? buildParameterService(parameterSource),
   );
 
+  /* What the project's last load read (STO-25): the manifest observation records it once the project is ready with it. */
+  let loadedManifest: LoadedProjectManifest | undefined;
   const projectActors = {
     loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
+      loadedManifest = undefined;
       const readySnapshot = await waitFor(fileManagerRef, (state) => state.matches('ready'));
       const { contentService } = readySnapshot.context;
       if (!contentService) {
         throw new Error(`Project content service is unavailable for ${input.projectId}`);
       }
-      const { project, issue } = await resolveScopedProjectManifest({ contentService, projectId: input.projectId });
+      const { project, issue, bytes } = await resolveScopedProjectManifest({
+        contentService,
+        projectId: input.projectId,
+      });
+      loadedManifest = issue === undefined ? { project, bytes } : undefined;
       return { type: 'projectRetrieved', project, ...(issue === undefined ? {} : { issue }) };
     }),
     writeProjectActor: fromSafeAsync(async ({ input }) => {
@@ -1071,7 +1106,11 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
         parameterService,
         publishesPreviewParameters: previewParameterService !== undefined,
       }),
-      manifestObservation: createManifestObservationLogic({ projectId, fileManagerRef }),
+      manifestObservation: createManifestObservationLogic({
+        projectId,
+        fileManagerRef,
+        loadedManifest: () => loadedManifest,
+      }),
       libraryEvents: createLibraryEventsLogic({ projectId, profile, library }),
       resources: createResourcesLogic({
         parameterService,

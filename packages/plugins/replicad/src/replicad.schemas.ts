@@ -39,11 +39,16 @@ export const replicadOptionsSchema = z.object({
   withSourceMapping: z.boolean().optional().default(false),
   tessellationInstancing: z.boolean().optional().default(true),
   /**
-   * Per-operation compute reuse switch, off unless `true`. The adapter's results
-   * depend on cache history, so it stays off until the live operation tier replaces
-   * it; off installs no proxy and constructs no recipe.
+   * Live operation tier switch. Omitted, the tier runs whenever the runtime's
+   * compute reuse is on; `false` is a real off arm that installs no operation
+   * cache and builds no key.
    */
   computeReuse: z.boolean().optional(),
+  /**
+   * Estimated resident bytes the live operation tier keeps across documents (default 256 MiB). Beyond it the least
+   * recently used entries without live dependents are evicted, and their native shapes deleted.
+   */
+  computeReuseBytes: z.number().int().positive().optional(),
 });
 
 /**

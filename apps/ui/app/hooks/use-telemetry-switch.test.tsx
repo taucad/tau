@@ -20,7 +20,7 @@ vi.mock('@better-auth-ui/react', () => ({
 }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [state.device, setDevice] }));
-vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => state.analytics }));
+vi.mock('#hooks/use-privacy-choices.js', () => ({ useCookieConsent: () => state.analytics }));
 vi.mock('#hooks/use-privacy-preferences.js', () => ({
   usePrivacyPreferences: (options: { enabled?: boolean }) => ({
     preferences:

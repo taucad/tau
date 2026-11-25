@@ -1,5 +1,4 @@
 import type { KernelId } from '@taucad/types/constants';
-import type { ModelFamily } from '@taucad/chat';
 import type { SvgIcons } from '#icons/generated/svg-icons.js';
 
 const iconAliases = {
@@ -21,16 +20,13 @@ export type UnknownIconId = typeof unknownIconId;
  */
 export type IconId = SvgIcons | IconAliasId | UnknownIconId;
 
-// Compile-time guarantee that every kernel id and every model family resolves
-// to a real renderable icon. If a future kernel/family lands without a matching
-// sprite or alias, the build fails here instead of silently rendering an empty
-// `<use href="...#newid">`.
+// Compile-time guarantee that every kernel id resolves to a real renderable
+// icon. If a future kernel lands without a matching sprite or alias, the build
+// fails here instead of silently rendering an empty `<use href="...#newid">`.
+// The model-family check lives with the chat vocabulary, in chat-ui.
 type AssertKernelIdsRenderable = KernelId extends IconId ? true : never;
-type AssertModelFamiliesRenderable = ModelFamily extends IconId ? true : never;
 const kernelIdsRenderableCheck: AssertKernelIdsRenderable = true;
-const modelFamiliesRenderableCheck: AssertModelFamiliesRenderable = true;
 void kernelIdsRenderableCheck;
-void modelFamiliesRenderableCheck;
 
 export function SvgIcon({
   id,

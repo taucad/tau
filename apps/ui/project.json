@@ -61,22 +61,16 @@
           "env": "PORTLESS_URL"
         },
         {
-          "env": "TAU_CLOUD_ENABLED"
-        },
-        {
-          "env": "COMMIT_REF"
-        },
-        {
-          "env": "GITHUB_SHA"
-        },
-        {
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
-          "env": "TAU_BILLING_ENVIRONMENT"
+          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
         },
         {
           "env": "NETLIFY"
+        },
+        {
+          "env": "NETLIFY_LOCAL"
         },
         {
           "env": "CONTEXT"
@@ -106,13 +100,16 @@
           "env": "PICOGK_BROWSER_MIRROR_BASE"
         },
         {
+          "env": "CADMPEG_ENGINES_BASE"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         },
         {
           "env": "POSTHOG_CLIENT_KEY"
@@ -130,7 +127,7 @@
           "env": "STATS"
         }
       ],
-      "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build --sourcemapClient hidden --sourcemapServer hidden && node scripts/compress-static-assets.mts && rm -rf build/server-sourcemaps && cp -R build/server build/server-sourcemaps && find build/server -name \\*.map -delete && find build/server-sourcemaps -type f ! -name \\*.map -delete'\"",
+      "command": "node ../../tools/build-lock.mjs build -- \"react-router build --sourcemapClient hidden --sourcemapServer hidden && node scripts/compress-static-assets.mts && node scripts/split-server-sourcemaps.mts\"",
       "options": {
         "cwd": "{projectRoot}",
         "env": {
@@ -147,9 +144,6 @@
         "^production",
         "{workspaceRoot}/apps/desktop/package.json",
         {
-          "env": "TAU_CLOUD_ENABLED"
-        },
-        {
           "env": "TAU_TELEMETRY_HOST"
         },
         {
@@ -165,7 +159,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -200,22 +194,27 @@
       "outputs": [],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts"
+        "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts --expect-deployment-owner"
       }
     },
     "check-critical-budget": {
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Reads the module-id manifest `ui:build` writes to build/client-module-ids.json. CI's build lane runs it whenever this app is affected."
+        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against the one `adaptive` entry of critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Every build is the adaptive app (adaptive app deployment mode W12). CI's build lane runs it whenever this app is affected."
       },
       "dependsOn": ["build"],
       "inputs": [
         "{projectRoot}/scripts/check-critical-budget.mts",
         "{projectRoot}/scripts/critical-path.mts",
         "{projectRoot}/critical-budget.json",
+        "{projectRoot}/scripts/precache-list.ts",
+        "{projectRoot}/build-environment.ts",
         {
-          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
+          "env": "TAU_SERVICE_WORKER_KILL_SWITCH"
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,service-worker-precache.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
         }
       ],
       "outputs": [],
@@ -280,7 +279,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets. Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false, so React Router 7 deletes build/server; one left behind is checked). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets, or names an asset URL that resolves in neither output; and when the web server build no longer imports @taucad/openrscad by name (the server environment's resolve.external, RR5). Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false: React Router 8 leaves build/server, their configs' buildEnd removes it, and one left behind fails). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
       },
       "dependsOn": ["build", "build:desktop", "build:serve"],
       "inputs": [
@@ -292,7 +291,67 @@
       "outputs": [],
       "options": {
         "cwd": ".",
-        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build"
+        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build --external @taucad/openrscad"
+      }
+    },
+    "check-cadmpeg-engine-absence": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "cadmpeg engine-absence gate (cadmpeg engine delivery charter D16, I1): fails when the web, desktop renderer or `tau serve` build holds a file whose SHA-256 is the raw or gzip digest of any engine in the installed `cadmpeg-ts/digests`, under any name, and names the file and the engine. The browser loads one engine per opened format by digest at run time, so no build carries one. A missing build directory fails. CI's build lane runs it whenever this app is affected; its builds are already in that lane."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-cadmpeg-engine-absence.mts",
+        {
+          "externalDependencies": ["cadmpeg-ts"]
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-cadmpeg-engine-absence.mts apps/ui/build apps/ui/desktop/build apps/ui/serve/build"
+      }
+    },
+    "check-serve-ui-layer": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Serve UI layer size gate (X2; cadmpeg engine delivery charter D16, I11): builds the `tau serve` UI layer from the `tau serve` build with packages/cli/scripts/serve-ui-layer.mts, the release's own deterministic tar and gzip, and fails when it is over 150,000,000 B gzipped. It prints the layer's size on a pass and on a refusal. The release build's serve-ui-layer job still applies the same line. CI's build lane runs it whenever this app is affected; build:serve is already in that lane."
+      },
+      "dependsOn": ["build:serve"],
+      "inputs": [
+        "{workspaceRoot}/packages/cli/scripts/serve-ui-layer.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/serve/build/client/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts build --client apps/ui/serve/build/client --out out/serve-ui-layer"
+      }
+    },
+    "check-route-module-patch": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Route-module patch gate (React Router 8 migration RR8, ruling RD4): fails when the web, desktop renderer or `tau serve` client build ships React Router's loadRouteModule without Tau's local patch (tools/pnpm/patches/react-router@<version>.patch, TAU-UI-S), which loads a push navigation's destination instead of reloading the page being left when its route module fails to import. Every React Router bump re-keys the patch; a patch pnpm stops applying would otherwise ship unnoticed. CI's build lane runs it whenever this app is affected; its builds are already in that lane."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-route-module-patch.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/client/assets/**/*.js"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-route-module-patch.mts apps/ui/build apps/ui/desktop/build apps/ui/serve/build"
       }
     },
     "build:serve": {
@@ -302,9 +361,6 @@
       "inputs": [
         "production",
         "^production",
-        {
-          "env": "TAU_CLOUD_ENABLED"
-        },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
@@ -318,7 +374,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -366,7 +422,7 @@
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build && node scripts/check-ssr-bundle-budget.mts --client && node scripts/compress-static-assets.mts'\"",
+        "command": "node ../../tools/build-lock.mjs build -- \"react-router build && node scripts/check-ssr-bundle-budget.mts --client && node scripts/compress-static-assets.mts\"",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192",
           "TAU_API_URL": "http://localhost:4000",
@@ -456,12 +512,12 @@
         "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
-        "cwd": "{projectRoot}",
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
         "parallel": false,
         "commands": [
-          "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project chromium"
+          "vitest run --config ../../components/code/code-editor.vitest.browser.config.ts",
+          "vitest run --config chat-history.vitest.browser.config.ts",
+          "vitest run --config ../../hooks/attachment-image.vitest.browser.config.ts --project chromium"
         ]
       }
     },
@@ -490,8 +546,8 @@
         "description": "The CAD viewer's real Dockview header and viewer bar suite (chat-viewer.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-viewer.vitest.browser.config.ts"
       }
     },
     "test:e2e:agent-host": {
@@ -503,7 +559,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+        "command": "vitest run --config app/workers/agent-host.vitest.browser.config.ts"
       }
     },
     "test:e2e:editor-layout": {
@@ -515,7 +571,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
       }
     },
     "test:e2e:chat-message-queue": {
@@ -527,7 +583,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
       }
     },
     "test:e2e:viewer-resize": {
@@ -539,7 +595,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
       }
     },
     "test:e2e:chat-print": {
@@ -550,8 +606,8 @@
         "description": "The chat print suite (chat-print.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-print.vitest.browser.config.ts"
       }
     },
     "test:e2e:follow-latest-output": {
@@ -562,8 +618,8 @@
         "description": "The follow-latest-output suite (use-follow-latest-output.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config use-follow-latest-output.vitest.browser.config.ts"
       }
     },
     "test:e2e:terminal-renderer": {
@@ -575,7 +631,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
       }
     },
     "test:e2e:history-lanes": {
@@ -586,8 +642,8 @@
         "description": "History's lanes suite (history-lanes.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config history-lanes.vitest.browser.config.ts"
       }
     },
     "test:e2e:queue": {
@@ -605,7 +661,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
+        "command": "vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
       }
     },
     "sourcemaps": {
@@ -636,12 +692,145 @@
       "executor": "nx:run-commands",
       "dependsOn": ["copy-assets", "^copy-assets"],
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-print.vitest.browser.config.ts"
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ]
+    },
+    "test:shard-1": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-1.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 1 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=1/6"
+      }
+    },
+    "test:shard-2": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-2.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 2 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=2/6"
+      }
+    },
+    "test:shard-3": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-3.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 3 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=3/6"
+      }
+    },
+    "test:shard-4": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-4.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 4 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=4/6"
+      }
+    },
+    "test:shard-5": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-5.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 5 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=5/6"
+      }
+    },
+    "test:shard-6": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-shard-6.outcomes.jsonl"],
+      "metadata": {
+        "description": "Shard 6 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config test-shards.test.config.ts --shard=6/6"
+      }
     },
     "formal:wide": {
       "executor": "nx:run-commands",

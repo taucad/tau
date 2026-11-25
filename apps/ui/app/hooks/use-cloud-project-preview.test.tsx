@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchCloudProjectPreview, useCloudProjectPreview } from '#hooks/use-cloud-project-preview.js';
 
 const session = vi.hoisted(() => ({ id: 'account-one' as string | undefined }));
-vi.mock('#lib/revision-actor.js', () => ({
+vi.mock('@taucad/revisions-ui/lib/revision-actor', () => ({
   useRevisionSessionUser: () => (session.id ? { id: session.id } : undefined),
 }));
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- Runtime environment names. */

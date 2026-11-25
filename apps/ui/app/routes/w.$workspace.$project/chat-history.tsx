@@ -5,6 +5,7 @@ import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } f
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 import { XIcon } from 'lucide-react';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -242,11 +243,20 @@ function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'>
 
 type ChatHistoryProps = {
   readonly className?: string;
+  /** Classes for the pane's header row, such as the inset a host's fixed titlebar controls need. */
+  readonly headerClassName?: string;
+  /** Classes for the archived-chats view, which has no header row to take that inset. */
+  readonly archiveClassName?: string;
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
-export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ...props }: ChatHistoryProps) {
+export const ChatHistory = memo(function ({
+  isExpanded = true,
+  setIsExpanded,
+  archiveClassName,
+  ...props
+}: ChatHistoryProps) {
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -256,7 +266,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
   return isExpanded && isArchiveOpen ? (
     <FloatingPanel isOpen side='right' className={props.className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent className='min-h-0 overflow-hidden'>
+      <FloatingPanelContent className={cn('min-h-0 overflow-hidden', archiveClassName)}>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
     </FloatingPanel>
@@ -272,6 +282,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
 const ExpandedChatHistory = memo(function ({
   className,
+  headerClassName,
   isExpanded,
   setIsExpanded,
   formattedKeyCombination,
@@ -305,11 +316,18 @@ const ExpandedChatHistory = memo(function ({
     chatTextareaRef.current?.focus();
   }, []);
   const location = useLocation();
+  /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
+   * when the navigation commits lands on an inert composer and is dropped. It is given once per navigation, once the
+   * requested chat is the one presented (a URL naming no chat presents whatever it opens). */
+  const requestedChatId = projectChatIdFromSearch(location.search);
+  const isRequestedChatPresented = requestedChatId === undefined || requestedChatId === activeChatId;
+  const composerFocusRequest =
+    location.state?.focusChatComposer === true && isRequestedChatPresented ? location.key : undefined;
   useEffect(() => {
-    if (location.state?.focusChatComposer === true) {
+    if (composerFocusRequest !== undefined) {
       chatTextareaRef.current?.focus();
     }
-  }, [location.state]);
+  }, [composerFocusRequest]);
 
   // Empty-cancel: the persistence machine has lifted the cancelled user
   // message back into the composer draft (via the store's
@@ -403,7 +421,7 @@ const ExpandedChatHistory = memo(function ({
             <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
               {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
               {/* The one header row: name, rename in place, chat menu, close. */}
-              <FloatingPanelContentHeader className='gap-1'>
+              <FloatingPanelContentHeader className={cn('gap-1', headerClassName)}>
                 <ChatTitleBar
                   closeButton={
                     <FloatingPanelClose

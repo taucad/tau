@@ -327,9 +327,70 @@ async function expectClosedSectionCapIntegrity(backend: 'webgl' | 'webgpu', star
     `${backend}: caps should outline their cut edges`,
   ).toBeGreaterThan(0);
   expect(
-    stats.edgeLineish,
+    await countCapOutlineInk(),
     `start=${start}°: generated cap outlines should remain visibly near-black in the composed frame`,
   ).toBeGreaterThan(20);
+}
+
+/** Show or hide the cap outlines and wait until the canvas has drawn the change. */
+async function setCapOutlinesVisible(visible: boolean): Promise<void> {
+  const before = await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame);
+  expect(
+    await target.evaluate((next) => globalThis.__TAU_SECTION_VIEW_TEST__!.setSectionCapOutlinesVisible(next), visible),
+    'the section view should be mounted',
+  ).toBe(true);
+  await expect
+    .poll(async () => target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame))
+    .toBeGreaterThan(before);
+}
+
+/**
+ * The pixels the cap outlines make near-black in the composed frame, at device resolution: dark with the outlines,
+ * not dark in the same frame drawn without them. The outline is one CSS pixel wide, so a whole-frame thumbnail
+ * averages it away and counts shading and overlay text instead; this compares the frame with itself.
+ */
+async function countCapOutlineInk(): Promise<number> {
+  const canvas = selectors.getByCss('canvas[data-engine]');
+  const withOutlines = await target.screenshot(canvas);
+  await setCapOutlinesVisible(false);
+  let withoutOutlines: string;
+  try {
+    withoutOutlines = await target.screenshot(canvas);
+  } finally {
+    await setCapOutlinesVisible(true);
+  }
+  return target.evaluate(
+    async ({ outlined, bare }) => {
+      const decode = async (pngBase64: string): Promise<Uint8ClampedArray> => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${pngBase64}`;
+        await image.decode();
+        const decoded = document.createElement('canvas');
+        decoded.width = image.width;
+        decoded.height = image.height;
+        const context = decoded.getContext('2d');
+        if (!context) {
+          throw new Error('2D sampling context unavailable.');
+        }
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, image.width, image.height).data;
+      };
+      const [a, b] = await Promise.all([decode(outlined), decode(bare)]);
+      if (a.length !== b.length) {
+        throw new Error('The outlined and bare frames differ in size.');
+      }
+      const darkest = (data: Uint8ClampedArray, index: number): number =>
+        Math.max(data[index]!, data[index + 1]!, data[index + 2]!);
+      let ink = 0;
+      for (let index = 0; index < a.length; index += 4) {
+        if (darkest(a, index) <= 150 && darkest(b, index) > 150) {
+          ink++;
+        }
+      }
+      return ink;
+    },
+    { outlined: withOutlines, bare: withoutOutlines },
+  );
 }
 
 async function driveNonManifoldSectionView(): Promise<void> {

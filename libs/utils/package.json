@@ -33,7 +33,8 @@
     "./keyed-mutex": "./src/keyed-mutex.utils.ts",
     "./image-probe": "./src/image-probe.ts",
     "./attachment-media": "./src/attachment-media.ts",
-    "./origin-answer": "./src/origin-answer.utils.ts"
+    "./origin-answer": "./src/origin-answer.utils.ts",
+    "./deployment-mode": "./src/deployment-mode.utils.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -107,6 +108,11 @@
         "types": "./dist/origin-answer.utils.d.mts",
         "import": "./dist/origin-answer.utils.mjs",
         "default": "./dist/origin-answer.utils.mjs"
+      },
+      "./deployment-mode": {
+        "types": "./dist/deployment-mode.utils.d.mts",
+        "import": "./dist/deployment-mode.utils.mjs",
+        "default": "./dist/deployment-mode.utils.mjs"
       }
     }
   },

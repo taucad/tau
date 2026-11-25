@@ -10,10 +10,10 @@
  * module-id manifest the build writes (`@taucad/vite/module-id-manifest`). So it sees what the source guards
  * cannot: a package reached through another package, and a module the bundler merged into a shared chunk.
  *
- * The budget is a ratchet, per build variant (`cloud` for deploys, `self-host` for the CI build):
+ * The budget is a ratchet, on the one `adaptive` entry:
  * - growth past the tolerance fails;
  * - landing under the budget by more than the ratchet margin fails too, until the budget is lowered, so a gain is
- *   kept (`--write` rewrites the variant's numbers from this build);
+ *   kept (`--write` rewrites the entry's numbers from this build);
  * - a heavy family found and not listed under the class's `knownHeavy` fails, and so does a listed one no longer
  *   found, so the list only shrinks.
  * Raising a budget is a one-line change to the budget file that names its reason in the commit.
@@ -27,18 +27,30 @@
  * the next step never fetches a viewer, three.js, kernel, wasm or worker asset. It also reports what each warm-up
  * prefetches once idle, after the warming page's own interactive tier.
  *
+ * The service worker's precache list (PL7, shell invariant 8, `scripts/build-service-worker.ts`): it equals the list
+ * generated from the registry (each answered class's document, its references and its interactive tier), so nothing
+ * was added by hand; it holds each guarded class's measured closure; no entry is a wasm file, a worker or runtime
+ * asset, or a chunk holding any heavy module family; hashed `/assets/*` entries carry no revision, every other entry
+ * carries one, and none carries an `integrity`. It also reports the precache's size. A build with the kill switch
+ * (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, read here as the build read it) must list nothing.
+ *
  * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
  * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
  *
+ * One build (adaptive app deployment mode charter W12, I11): every bundle is the adaptive app, measured against the
+ * one `adaptive` entry with the usual tolerance and ratchet. The entry was first written from `main` with `--write`
+ * (gate G1's record holds the proof that the adaptive increment stayed within its bounds).
+ *
  * Usage (after `nx build ui`):
- *   node apps/ui/scripts/check-critical-budget.mts           # check
- *   node apps/ui/scripts/check-critical-budget.mts --write   # rebaseline this build's variant
+ *   node apps/ui/scripts/check-critical-budget.mts             # check the entry
+ *   node apps/ui/scripts/check-critical-budget.mts --write     # rebaseline it
  *
  * Exit codes:
  *   0  Every class within budget, no early kernel and no split route module
- *   1  A budget, heavy-family, early-kernel, warm-manifest or split-route-module violation, or a missing build output
+ *   1  A budget, heavy-family, early-kernel, warm-manifest, precache or split-route-module violation, or a missing
+ *      build output
  */
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +60,10 @@ import { criticalRouteClasses, heavyFamilyOfModuleId } from '#scripts/critical-p
 import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
 import type { ViteManifest } from '#scripts/interactive-closure.ts';
 /* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
-import { routeClasses } from '../app/lib/route-classes.ts';
+import { routeClasses, workerRouteClasses } from '../app/lib/route-classes.ts';
+import { resolveServiceWorkerKillSwitch, serviceWorkerKillSwitchVariable } from '../build-environment.ts';
+import { collectPrecacheFiles, isHashedUrl, precacheListFile, readNamedFiles } from './precache-list.ts';
+import type { ClientBuildView, PrecacheDocument } from './precache-list.ts';
 import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
 import type { WarmManifest } from '../app/lib/warm-manifest.ts';
 /* oxlint-enable no-restricted-imports */
@@ -62,7 +77,8 @@ export type ClassBudget = {
   knownHeavy: Record<string, string>;
 };
 
-export type BuildVariant = 'cloud' | 'self-host';
+/** The one budget entry (adaptive app deployment mode W12): every build is adaptive. */
+export type BuildVariant = 'adaptive';
 
 export type BudgetFile = {
   $comment?: string;
@@ -88,9 +104,21 @@ export type ClassMeasure = {
 
 const scriptDirectory = fileURLToPath(new URL('.', import.meta.url));
 const appDirectory = join(scriptDirectory, '..');
-const clientDirectory = join(appDirectory, 'build', 'client');
-const moduleIdsPath = join(appDirectory, 'build', 'client-module-ids.json');
 const budgetPath = join(appDirectory, 'critical-budget.json');
+
+/** The paths of one web build under `apps/ui`. */
+type BuildPaths = Readonly<{ root: string; client: string; moduleIds: string }>;
+
+const buildPaths = (directory: string): BuildPaths => {
+  const root = resolve(appDirectory, directory);
+  return { root, client: join(root, 'client'), moduleIds: join(root, 'client-module-ids.json') };
+};
+
+/** The value of `--name <value>` in the arguments, if given. */
+const argumentValue = (name: string): string | undefined => {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+};
 
 /**
  * Measure one route class.
@@ -194,7 +222,7 @@ export const compareWithBudget = (input: {
   return problems;
 };
 
-/** The modules route module splitting (`future.v8_splitRouteModules`) can move out of a route's own chunk. */
+/** The modules route module splitting (`splitRouteModules`, on by default in React Router 8) can move out of a route's own chunk. */
 const splitModuleFields = [
   'clientLoaderModule',
   'clientActionModule',
@@ -335,21 +363,118 @@ export const findWarmManifestProblems = (input: {
   return problems;
 };
 
-/**
- * Which variant a build is: each `#cloud/…` boundary module resolves to its `.cloud` or its `.self-host` file.
- *
- * @param moduleIds - The module-id manifest.
- * @returns The variant.
- * @throws When the build holds neither, or both.
- */
-export const buildVariantOf = (moduleIds: ModuleIdManifest): BuildVariant => {
-  const ids = moduleIds.chunks.flatMap((chunk) => chunk.modules.map((module) => module.id));
-  const cloud = ids.some((id) => /^apps\/ui\/app\/cloud\/[^/]+\.cloud\.tsx?$/u.test(id));
-  const selfHost = ids.some((id) => /^apps\/ui\/app\/cloud\/[^/]+\.self-host\.tsx?$/u.test(id));
-  if (cloud === selfHost) {
-    throw new Error('check-critical-budget: cannot tell whether this is a cloud or a self-host build');
+/** One entry of the precache list as the build wrote it; anything beyond `url` and `revision` is a violation. */
+export type WrittenPrecacheEntry = Readonly<{
+  url: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Workbox's precache wire value for "no revision".
+  revision?: string | null;
+  integrity?: string;
+}>;
+
+/** The violations of one precache entry: a deferred-tier, wasm, worker or runtime file, or a wrong revision. */
+const precacheEntryProblems = (
+  entry: WrittenPrecacheEntry,
+  input: Readonly<{
+    manifest: ViteManifest;
+    chunks: ReadonlyMap<string, ModuleIdManifestChunk>;
+    assets: ReadonlySet<string>;
+  }>,
+): string[] => {
+  const problems: string[] = [];
+  const file = entry.url.replace(/^\//u, '');
+  const owners = file.endsWith('.css')
+    ? Object.values(input.manifest).flatMap((chunk) => (chunk.css?.includes(file) === true ? [chunk.file] : []))
+    : [file];
+  const heavy = owners
+    .flatMap((owner) => input.chunks.get(owner)?.modules ?? [])
+    .find((module) => heavyFamilyOfModuleId(module.id) !== undefined);
+  if (file.endsWith('.wasm') || (input.assets.has(file) && /\.[cm]?js$/u.test(file))) {
+    problems.push(`precache: ${entry.url} is a wasm, worker or runtime asset`);
+  } else if (heavy !== undefined) {
+    problems.push(
+      `precache: ${entry.url} belongs with the ${heavyFamilyOfModuleId(heavy.id)?.name ?? ''} module ${heavy.id}`,
+    );
   }
-  return cloud ? 'cloud' : 'self-host';
+  const hashed = isHashedUrl(entry.url);
+  if (hashed && entry.revision !== null) {
+    problems.push(`precache: ${entry.url} is hashed by name but carries a revision`);
+  } else if (!hashed && typeof entry.revision !== 'string') {
+    problems.push(`precache: ${entry.url} carries no content revision`);
+  }
+  if (Object.keys(entry).some((key) => key !== 'url' && key !== 'revision')) {
+    problems.push(`precache: ${entry.url} carries ${Object.keys(entry).join(', ')}; only url and revision are allowed`);
+  }
+  return problems;
+};
+
+/**
+ * Files a worker document names that the precache may leave out: the icon sprites, which the sprite loader fetches after
+ * first paint (`svg-sprite-loader.tsx`). A sprite that fails to load costs the icons, never the boot.
+ */
+export const isPrecacheExemptFile = (url: string): boolean => /^\/assets\/[\w-]*sprite[\w-]*\.svg$/u.test(url);
+
+/**
+ * The service worker precache list's violations (shell invariant 8).
+ *
+ * @param input - The written list (`undefined` when missing), the list the registry generates for this build, each
+ *   guarded class's measured closure, the classes the worker answers, and the build manifests.
+ * @returns One message per violation; empty when the list holds.
+ */
+export const findPrecacheProblems = (input: {
+  entries: readonly WrittenPrecacheEntry[] | undefined;
+  expected: readonly string[];
+  closures: ReadonlyMap<string, readonly string[]>;
+  workerClassIds: readonly string[];
+  manifest: ViteManifest;
+  moduleIds: ModuleIdManifest;
+  /** The kill switch build (`TAU_SERVICE_WORKER_KILL_SWITCH=true`): its retiring worker precaches nothing. */
+  killSwitch?: boolean;
+  /**
+   * Each worker document and every same-origin file it names, in markup or in script text (`readNamedFiles`): a
+   * precached shell boots offline, or past asset retention, only if all of them are precached (D4).
+   */
+  named?: ReadonlyMap<string, readonly string[]>;
+}): string[] => {
+  if (input.entries === undefined) {
+    return [`precache: build/${precacheListFile} is missing`];
+  }
+  if (input.killSwitch === true) {
+    return input.entries.map(
+      (entry) => `precache: ${entry.url} is listed, but the kill switch worker precaches nothing`,
+    );
+  }
+  const listed = new Set(input.entries.map((entry) => entry.url));
+  const expected = new Set(input.expected);
+  const problems = [
+    ...[...expected]
+      .filter((url) => !listed.has(url))
+      .map((url) => `precache: ${url} is generated from the registry but not in the worker's list`),
+    ...[...listed]
+      .filter((url) => !expected.has(url))
+      .map((url) => `precache: ${url} is in the worker's list but not generated from the registry`),
+  ];
+  for (const [document, named] of input.named ?? []) {
+    problems.push(
+      ...named
+        .filter((url) => !listed.has(url) && !isPrecacheExemptFile(url))
+        .map((url) => `precache: ${document} names ${url}, which the worker does not precache`),
+    );
+  }
+  for (const [id, closure] of input.closures) {
+    if (input.workerClassIds.includes(id)) {
+      problems.push(
+        ...closure
+          .filter((file) => !listed.has(`/${file}`))
+          .map((file) => `precache: ${id}'s interactive tier holds /${file}, which the worker does not precache`),
+      );
+    }
+  }
+  const context = {
+    manifest: input.manifest,
+    chunks: new Map(input.moduleIds.chunks.map((chunk) => [chunk.fileName, chunk])),
+    assets: new Set(input.moduleIds.assets.map((asset) => asset.fileName)),
+  };
+  return [...problems, ...input.entries.flatMap((entry) => precacheEntryProblems(entry, context))];
 };
 
 function readJson<T>(path: string): T {
@@ -360,7 +485,7 @@ function readJson<T>(path: string): T {
   }
 }
 
-const readRouterManifest = (): RouterManifest => {
+const readRouterManifest = (clientDirectory: string): RouterManifest => {
   const assets = join(clientDirectory, 'assets');
   const candidates = readdirSync(assets).filter((name) => /^manifest-[\w-]+\.js$/u.test(name));
   for (const name of candidates) {
@@ -379,8 +504,8 @@ const htmlFiles = (directory: string): string[] =>
     .map((entry) => join(entry.parentPath, entry.name));
 
 /** Every file a document may preload, by origin. */
-const documentPreloads = (): Map<string, string[]> => {
-  const router = readRouterManifest();
+const documentPreloads = (clientDirectory: string): Map<string, string[]> => {
+  const router = readRouterManifest(clientDirectory);
   const preloads = new Map<string, string[]>([['entry', [router.entry.module, ...router.entry.imports]]]);
   for (const [id, route] of Object.entries(router.routes)) {
     preloads.set(`route ${id}`, [route.module, ...(route.imports ?? []), ...(route.css ?? [])]);
@@ -423,34 +548,42 @@ const attribution = (measure: ClassMeasure): string[] => {
   ];
 };
 
-const main = (): void => {
-  const write = process.argv.includes('--write');
-  const manifest = readJson<ViteManifest>(join(clientDirectory, '.vite', 'manifest.json'));
-  const moduleIds = readJson<ModuleIdManifest>(moduleIdsPath);
-  const budgetFile = readJson<BudgetFile>(budgetPath);
-  const variant = buildVariantOf(moduleIds);
+/** One build read for measuring: its manifests and a brotli size reader. */
+const readBuild = (paths: BuildPaths) => {
+  const manifest = readJson<ViteManifest>(join(paths.client, '.vite', 'manifest.json'));
+  const moduleIds = readJson<ModuleIdManifest>(paths.moduleIds);
   const chunksByFile = new Map(moduleIds.chunks.map((chunk) => [chunk.fileName, chunk]));
   const sizes = new Map<string, number>();
   const brotliSize = (file: string): number => {
     let size = sizes.get(file);
     if (size === undefined) {
-      size = brotliCompressSync(readFileSync(join(clientDirectory, file)), {
+      size = brotliCompressSync(readFileSync(join(paths.client, file)), {
         params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
       }).length;
       sizes.set(file, size);
     }
     return size;
   };
+  return { manifest, moduleIds, chunksByFile, brotliSize };
+};
+
+const main = (): void => {
+  const write = process.argv.includes('--write');
+  const paths = buildPaths(argumentValue('--build') ?? 'build');
+  const clientDirectory = paths.client;
+  const { manifest, moduleIds, chunksByFile, brotliSize } = readBuild(paths);
+  const budgetFile = readJson<BudgetFile>(budgetPath);
+  const variant: BuildVariant = 'adaptive';
+  const problems: string[] = [];
 
   const budgets = budgetFile.variants[variant] ?? {};
-  const problems: string[] = [];
   const measured: Record<string, ClassBudget> = {};
   const closures = new Map<string, readonly string[]>();
   for (const routeClass of criticalRouteClasses) {
     const measure = measureClass({ manifest, chunksByFile, roots: routeClass.roots, brotliSize });
     closures.set(routeClass.id, measure.files);
     const budget = budgets[routeClass.id];
-    const label = `${routeClass.label} (${variant})`;
+    const { label } = routeClass;
     console.info(
       `${label}: ${formatBytes(measure.brotliBytes)} brotli in ${measure.requests} requests; largest chunk ${measure.largestChunk} ${formatBytes(measure.largestChunkBrotliBytes)}; heavy: ${[...measure.heavy.keys()].join(', ') || 'none'}`,
     );
@@ -470,8 +603,50 @@ const main = (): void => {
     }
   }
 
-  problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(), moduleIds }));
-  problems.push(...findSplitRouteModules(readRouterManifest()));
+  problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(clientDirectory), moduleIds }));
+  problems.push(...findSplitRouteModules(readRouterManifest(clientDirectory)));
+
+  const precacheListPath = join(paths.root, precacheListFile);
+  const killSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
+  const precache = existsSync(precacheListPath) ? readJson<WrittenPrecacheEntry[]>(precacheListPath) : undefined;
+  const workerClasses = workerRouteClasses();
+  const clientView: ClientBuildView = {
+    readText: (relativePath) =>
+      existsSync(join(clientDirectory, relativePath))
+        ? readFileSync(join(clientDirectory, relativePath), 'utf8')
+        : undefined,
+    exists: (relativePath) => existsSync(join(clientDirectory, relativePath)),
+    manifest,
+  };
+  const precacheDocuments: PrecacheDocument[] = workerClasses.map((workerClass) => ({
+    document: workerClass.document,
+    roots: workerClass.routeClass.interactive ?? [],
+  }));
+  problems.push(
+    ...findPrecacheProblems({
+      entries: precache,
+      expected: collectPrecacheFiles(precacheDocuments, clientView),
+      closures,
+      workerClassIds: workerClasses.map((workerClass) => workerClass.routeClass.id),
+      manifest,
+      moduleIds,
+      killSwitch,
+      named: new Map(
+        precacheDocuments.map(({ document }) => [
+          document,
+          readNamedFiles(clientView.readText(document.slice(1)) ?? ''),
+        ]),
+      ),
+    }),
+  );
+  if (killSwitch) {
+    console.info(`Service worker precache (${variant}): none, the build ships the kill switch`);
+  } else if (precache !== undefined) {
+    const bytes = precache.reduce((total, entry) => total + brotliSize(entry.url.slice(1)), 0);
+    console.info(
+      `Service worker precache (${variant}): ${formatBytes(bytes)} brotli in ${precache.length} entries, for ${workerClasses.map((workerClass) => workerClass.routeClass.id).join(', ')}`,
+    );
+  }
 
   const warm = parseWarmManifest(readJson<unknown>(join(clientDirectory, warmManifestFile)));
   problems.push(...findWarmManifestProblems({ warm, closures, manifest, moduleIds }));
@@ -494,7 +669,8 @@ const main = (): void => {
   }
 
   if (write) {
-    budgetFile.variants[variant] = measured;
+    /* The one build's entry replaces every pinned build's (W12). */
+    budgetFile.variants = { [variant]: measured };
     writeFileSync(budgetPath, `${JSON.stringify(budgetFile, undefined, 2)}\n`);
     console.info(`Wrote the ${variant} budgets to ${budgetPath}`);
   }
@@ -502,7 +678,9 @@ const main = (): void => {
     console.error(problems.join('\n'));
     process.exit(1);
   }
-  console.info('Critical budget OK; no document preloads a kernel, wasm or worker asset; no route module is split');
+  console.info(
+    'Critical budget OK; no document preloads a kernel, wasm or worker asset; the precache holds no deferred-tier asset; no route module is split',
+  );
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

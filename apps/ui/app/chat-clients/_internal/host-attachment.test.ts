@@ -1775,6 +1775,53 @@ describe('hostAttachment', () => {
     actor.stop();
     projection.stop();
   });
+  it('reports the error that ended its read and its live preview with the loss (FP10)', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const onStatus = vi.fn();
+    const loadFailure = Object.assign(new Error('The agent-host worker failed to load.'), {
+      code: 'WORKER_LOAD_FAILED',
+    });
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        connect: async () => ({
+          // oxlint-disable-next-line require-yield -- the read fails before its first frame.
+          async *catchUp() {
+            throw loadFailure;
+          },
+          read: vi.fn(),
+          subscribe: vi.fn(() => vi.fn()),
+          subscribeLive: (
+            _chatId: string,
+            _listener: Parameters<AgentHostClient['subscribeLive']>[1],
+            ended?: (error?: unknown) => void,
+          ) => {
+            ended?.(loadFailure);
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }),
+        projection,
+        onStatus,
+      },
+    }).start();
+
+    await vi.waitFor(() => {
+      expect(onStatus).toHaveBeenCalledTimes(2);
+    });
+    expect(onStatus).toHaveBeenNthCalledWith(1, {
+      type: 'attachment.lost',
+      reason: 'live subscriber ended',
+      error: loadFailure,
+    });
+    expect(onStatus).toHaveBeenNthCalledWith(2, {
+      type: 'attachment.lost',
+      reason: loadFailure.message,
+      error: loadFailure,
+    });
+    actor.stop();
+    projection.stop();
+  });
   it('attaches an idle chat without parking on an empty long-poll read', async () => {
     const projection = createActor(chatProjectionLogic).start();
     const read = vi.fn(

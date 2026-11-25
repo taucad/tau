@@ -1,5 +1,8 @@
 import { AgentHostPlacementError } from '#lib/agent-host-placement.js';
 
+/** The resident agent host worker's name, as the web build's module names it. */
+export const agentHostWorkerName = 'agent-host';
+
 /**
  * Desktop runs the agent in its services utility and must never construct the
  * browser worker. The refusal is typed rather than a bare string so a selection

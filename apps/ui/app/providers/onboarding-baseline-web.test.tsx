@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({
   consent: 'declined' as 'unknown' | 'accepted' | 'declined',
 }));
 
-vi.mock('#hooks/use-cookie-consent.js', () => ({
+vi.mock('#hooks/use-privacy-choices.js', () => ({
   useCookieConsent: () => state.consent,
 }));
 vi.mock('#environment.config.js', () => ({

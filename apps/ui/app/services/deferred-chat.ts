@@ -15,7 +15,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { createDeferredChild } from '#runtime/deferred-child.js';
 import type { DeferredChild, DeferredChildPhase } from '#runtime/deferred-child.js';
-import type { ChatSdk, ChatSdkSource } from '#services/chat-sdk-loader.js';
+import type { ChatSdk, ChatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 
 type SdkChat = Chat<MyUIMessage>;
 

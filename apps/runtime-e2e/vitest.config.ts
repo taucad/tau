@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 /*
@@ -22,7 +23,7 @@ export default defineConfig({
       reportsDirectory: '../../out/reports/coverage/apps/runtime-e2e',
     },
     maxWorkers: 4,
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     projects: [
       {
         extends: true,

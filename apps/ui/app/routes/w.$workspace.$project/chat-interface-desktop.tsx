@@ -193,6 +193,13 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   );
 
   const areLanesReady = isClient && isEditorReady && areLanesLaidOut;
+  /* The chat lane toggle leads the header on the pixel it holds at the head of the viewer's tab bar while the lane is
+   * closed: one step in from the lane's edge, or straight after the host's controls. Given to the header itself
+   * rather than through a DOM-shape selector, so a wrapper around the header cannot drop the inset. The archive has
+   * no header row, so it starts below the row the host's controls hold. */
+  const chatLaneInsets = sidebarOpen
+    ? { header: 'pl-1', archive: undefined }
+    : { header: 'pl-(--titlebar-controls-width) [app-region:no-drag]', archive: 'pt-9' };
 
   return (
     <ChatContextInsertionProvider>
@@ -249,14 +256,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                     >
                       <ChatHistoryGate>
                         <ChatHistory
-                          /* The chat lane toggle leads the header on the pixel it holds at the head of the
-                       viewer's tab bar while the lane is closed: one step in from the lane's edge, or
-                       straight after the host's controls. */
-                          className={cn(
-                            sidebarOpen
-                              ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
-                              : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
-                          )}
+                          headerClassName={chatLaneInsets.header}
+                          archiveClassName={chatLaneInsets.archive}
                           isExpanded={desktopLayout.chatOpen}
                           setIsExpanded={(value) => {
                             setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);

@@ -91,11 +91,17 @@ export type ApplyingTreePurpose = 'apply' | 'tree' | 'fill';
  * What a tree write tells its host as it begins. A write that holds the tree
  * names its entry closure (`tau.json` and the files it names), which it lands
  * first; once the checkout's index has every one of them landed, the host may
- * read the tree as `entryReady` (D10).
+ * read the tree as `entryReady` (D10). It also hands over the `tau.json` bytes
+ * that closure lands, when the tree has one, so the host can say which
+ * manifest the landed closure is (STO-25).
  *
  * @public
  */
-export type ApplyingTreeBracket = Readonly<{ purpose: ApplyingTreePurpose; closure?: readonly string[] }>;
+export type ApplyingTreeBracket = Readonly<{
+  purpose: ApplyingTreePurpose;
+  closure?: readonly string[];
+  manifest?: Uint8Array<ArrayBuffer>;
+}>;
 
 /**
  * How a tree write ended, told as its bracket is released: `failed` when it

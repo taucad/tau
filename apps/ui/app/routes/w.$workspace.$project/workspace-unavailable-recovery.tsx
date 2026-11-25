@@ -113,7 +113,7 @@ export function WorkspaceUnavailableRecovery({
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
       throw error;
     } finally {
       setIsBusy(false);
@@ -144,7 +144,9 @@ export function WorkspaceUnavailableRecovery({
       }
       telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
       toast.error(
-        isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect workspace.',
+        isWorkspaceIdentityConflictError(error)
+          ? workspaceIdentityConflictCopy
+          : 'Couldn’t reconnect the folder. Try again.',
       );
       console.error('Failed to reconnect workspace:', error);
     } finally {
@@ -185,7 +187,7 @@ export function WorkspaceUnavailableRecovery({
 
               <WorkspaceDirectoryPanel
                 variant='inline'
-                status={reason}
+                status={reason === 'missing' ? 'none' : reason}
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
                 isBusy={isBusy}

@@ -10,6 +10,9 @@ import { featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlags } from '#flags/flag.constants.js';
 import { forgetClientFacts, writeClientFacts } from '#lib/client-facts.js';
 
+/* The funded rendering, as the Cloud chunk carries it (adaptive app deployment mode W12). */
+vi.mock('#cloud/nav-billing.js', async () => import('#cloud/nav-billing.funded.js'));
+
 const mockState = vi.hoisted(() => ({
   flags: undefined as FeatureFlags | undefined,
 }));

@@ -1,0 +1,55 @@
+{
+  "name": "@taucad/agent-host-ui",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app agent-host adapters: the agent protocol over the UI app domains, for the agent-host and file-manager workers",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/agent-host-ui"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/agent-host-ui#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "agent",
+    "worker",
+    "adapter"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./lib/large-object-guard": "./src/lib/large-object-guard.ts",
+    "./workers/agent-host-evidence": "./src/workers/agent-host-evidence.ts",
+    "./workers/agent-host-placement": "./src/workers/agent-host-placement.ts",
+    "./workers/agent-host-revisions": "./src/workers/agent-host-revisions.ts",
+    "./workers/system-skills-overlay": "./src/workers/system-skills-overlay.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "vitest-mock-extended": "catalog:"
+  },
+  "dependencies": {
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/agent-observability": "workspace:*",
+    "@taucad/agent-tools": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/fs-client": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/revisions-ui": "workspace:*",
+    "@taucad/skills": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/utils": "workspace:*"
+  }
+}

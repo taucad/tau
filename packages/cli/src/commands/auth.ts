@@ -34,7 +34,7 @@ const requireSavedLoginMode = (): void => {
 
 /** Browser-approved account sessions for cloud operations; local CAD needs no login. */
 export const authCommand = defineCommand({
-  meta: { name: 'auth', description: 'Sign in to Tau Cloud and manage this CLI’s session' },
+  meta: { name: 'auth', description: 'Sign in to Tau and manage this CLI’s session' },
   subCommands: {
     login: defineCommand({
       meta: { name: 'login', description: 'Approve a separate CLI session in your browser' },

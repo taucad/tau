@@ -44,6 +44,7 @@ import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
+import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -55,16 +56,16 @@ import type {
   ChatTurnGesture,
 } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
-import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
+import { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
+import { buildDraftMessage, draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import {
   createComposerRecordActor,
   draftHydrationOf,
   draftPersistenceFor,
   flushRecord,
   stopWhenWritesSettle,
-} from '#hooks/composer-record.js';
-import type { ComposerRecordRef } from '#hooks/composer-record.js';
+} from '@taucad/chat-ui/hooks/composer-record';
+import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { readChatPlacementsShared, writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import type { ComposerRecord, ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
@@ -82,7 +83,7 @@ import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_int
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
-import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
@@ -95,7 +96,7 @@ import {
   recordModelPendingAutoResume,
   recordProviderUnavailableAutoResume,
   recordRateLimitAutoResume,
-} from '@taucad/ui-core/utils/run-auto-resume';
+} from '@taucad/chat-ui/utils/run-auto-resume';
 import {
   chatProjectionLogic,
   selectAttentionRow,
@@ -125,16 +126,16 @@ import {
   composerTraysOf,
   readRememberedComposerTrays,
   writeRememberedComposerTrays,
-} from '#services/chat-composer-trays.js';
-import type { ComposerTray } from '#services/chat-composer-trays.js';
+} from '@taucad/chat-ui/services/chat-composer-trays';
+import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type {
   ChatMessageQueueIntent,
   ChatMessageQueueStore,
   QueueLock,
 } from '@taucad/chat-ui/db/chat-message-queue-store';
-import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
-import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
+import { createChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
+import type { ChatMessageQueueActor, QueueAdvanceResult } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 import {
   isTransientPresentationFailure,
@@ -142,8 +143,8 @@ import {
   presentationErrorFacts,
   warnPresentation,
 } from '#services/chat-presentation-diagnostics.js';
-import { chatSdkSource } from '#services/chat-sdk-loader.js';
-import type { ChatSdkSource } from '#services/chat-sdk-loader.js';
+import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
+import type { ChatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { DeferredChat } from '#services/deferred-chat.js';
 import type { ChatView } from '#services/deferred-chat.js';
 
@@ -792,6 +793,11 @@ type ObservedChat = {
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
+  /**
+   * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
+   * stays failed for the page's life, so the chat shows it whenever its session can ({@link ChatSessionStore}).
+   */
+  hostLoadFailure?: unknown;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -1887,6 +1893,17 @@ export class ChatSessionStore {
     return this.#observed.get(chatId)?.status ?? 'unknown';
   }
 
+  /**
+   * The host whose log this chat is attached to now: where its runs ran and its refusals came from, whatever the
+   * composer is set to since. `undefined` while unattached or attached to this page's own host.
+   *
+   * @public
+   */
+  public getAttachedHostId(chatId: string): TauAgentHostId | undefined {
+    const observed = this.#observed.get(chatId);
+    return observed?.status === 'attached' ? observed.placement?.hostId : undefined;
+  }
+
   /** Exact usage can be read only after both the host log and foreign segments reached this projection. */
   public historicalUsageReady(chatId: string, projectId: string): boolean {
     const projection = this.#projectionContext(chatId);
@@ -2067,6 +2084,12 @@ export class ChatSessionStore {
   public startPendingSeed(chatId: string): void {
     const session = this.#sessions.get(chatId);
     if (session?.pendingSeedGesture === undefined) {
+      return;
+    }
+    const observed = this.#observed.get(chatId);
+    if (observed?.status === 'lost' && observed.hostLoadFailure !== undefined) {
+      /* The read this seed waits for met an agent host this page can never load, before this session could say so. */
+      void this.#showHostLoadFailure(session, observed.hostLoadFailure);
       return;
     }
     const projection = this.#projectionContext(chatId);
@@ -2638,7 +2661,7 @@ export class ChatSessionStore {
         ? {
             items: after.items,
             status: 'blocked',
-            error: 'Message saved. Delivery could not be confirmed. Retry to continue.',
+            error: 'Message saved, but Tau couldn’t confirm it was delivered. Try again.',
           }
         : { items: after.items, status: 'changed' };
     });
@@ -2932,6 +2955,32 @@ export class ChatSessionStore {
     observed.status = 'unknown';
   }
 
+  /**
+   * FP10: the host this chat reads from cannot load its code in this page, and the page has stopped replacing its
+   * worker (the resident worker reports `WORKER_LOAD_FAILED` only past its bound). A held turn waits for that very read
+   * (a seed starts only after one, {@link ChatSessionStore.startPendingSeed}), so it would wait unseen whenever the read
+   * met the failure before the turn's own command did, or before the chat had loaded and could hold an error. The chat
+   * shows the failure as a command's would be shown, once its load is done: its card offers Reload, never Try again.
+   *
+   * @param session - The chat whose host attachment met the failure.
+   * @param error - The failure, with its code.
+   */
+  async #showHostLoadFailure(session: InternalSession, error: unknown): Promise<void> {
+    /* A chat still loading takes no error, and its load sets the chat's own: the failure goes once the load is done. */
+    await waitUnlessGone(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat);
+    if (
+      this.#sessions.get(session.chatId) !== session ||
+      session.persistenceActorRef.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED'
+    ) {
+      return;
+    }
+    const failure =
+      error instanceof Error
+        ? error
+        : Object.assign(new Error('The agent host worker did not load.'), { code: 'WORKER_LOAD_FAILED' });
+    session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+  }
+
   #startObservedAttachment(chatId: string, observed: ObservedChat): void {
     const connector = this.#projectHostConnectors.get(observed.projectId);
     if (connector === undefined) {
@@ -2977,10 +3026,17 @@ export class ChatSessionStore {
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
+            observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
           }
           const session = this.#sessions.get(chatId);
+          if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
+            observed.hostLoadFailure = event.error;
+            if (session !== undefined) {
+              void this.#showHostLoadFailure(session, event.error);
+            }
+          }
           if (session?.watchedRunId !== undefined) {
             session.watch?.stop();
             session.watch = undefined;
@@ -4513,7 +4569,7 @@ export class ChatSessionStore {
             if (observed.status === 'error' || observed.status === 'closed') {
               messageQueueRef.send({
                 type: 'watchFailed',
-                error: observed.error ?? 'Queue updates disconnected. Retry to reconnect.',
+                error: observed.error ?? 'Lost the connection to your queued messages. Try again.',
               });
             }
           });

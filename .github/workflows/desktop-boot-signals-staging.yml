@@ -1,0 +1,133 @@
+# T-R9.3 (desktop resilient startup blueprint, R9 and D5; Brain research/desktop-resilient-startup-and-scroll-blueprint.md):
+# prove the desktop boot signals reach Sentry from a real staging release, before the issue alerts of tau-cloud I1 are
+# applied on top of them.
+#
+# `force` downloads the published staging release under test (Tau-macos-arm64.zip, checked against its SHA256SUMS.txt;
+# staging candidates package macOS only) and runs `apps/desktop/scripts/force-boot-signals.sh` against it on a clean
+# macos-26 runner: one launch killed before `home-ready`, one healthy launch that reports `desktop-boot-unhealthy`, and
+# one launch whose Home is linked into Tau's own authority directory and so cannot be admitted, which reports
+# `file_service.start_failed`. The release's own build sends them, with the DSN, environment (`staging`) and release
+# (`tau-desktop@<version>`) it was built with, so the job needs no secret and builds nothing. `probe` then runs the T-R9.3 rows of `ui-e2e` with that release named in
+# `TAU_DESKTOP_SENTRY_RELEASE`, the time the forcing began in `TAU_DESKTOP_SIGNALS_SINCE`, and the staging read token,
+# which the `staging` environment gives only to `main`.
+#
+# The rows are `it.fails` until a forced release passes them, so a green run means they still fail and a red one that a
+# row now passes and its mark should go (`scripts/src/validate-expected-failures.ts`). Each row asserts exactly one event
+# for the release since this run's forcing began, so forcing the same release again is a valid run: the concurrency
+# group keeps two runs for one release from overlapping, and a re-run of the probe alone keeps its force job's time.
+name: Desktop boot signals on staging
+run-name: Desktop boot signals for ${{ inputs.release-tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Published staging desktop release to force and probe (for example desktop-staging@0.4.0-staging.1300)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-boot-signals-staging-${{ inputs.release-tag }}
+  cancel-in-progress: false
+
+jobs:
+  force:
+    name: Force the boot signals in ${{ inputs.release-tag }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      since: ${{ steps.force.outputs.since }}
+    steps:
+      - name: Name the Sentry release
+        id: release
+        env:
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^desktop-staging@[0-9]+\.[0-9]+\.[0-9]+-staging\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a desktop-staging@<version>-staging.<build> tag."
+            exit 1
+          fi
+          # release-build.yml bakes `tau-desktop@<tag suffix>` into every desktop build of the tag.
+          echo "release=tau-desktop@${TAG#*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the forcing script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: apps/desktop/scripts/force-boot-signals.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Download the published archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Tau-macos-arm64.zip --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          grep -E '[[:space:]]\*?Tau-macos-arm64\.zip$' SHA256SUMS.txt | shasum -a 256 -c -
+
+      # ditto keeps the signature and extended attributes. A writable folder outside Applications that is not
+      # translocated, so the release does not offer to move itself.
+      - name: Unpack the app
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/app"
+          ditto -x -k "$RUNNER_TEMP/release/Tau-macos-arm64.zip" "$RUNNER_TEMP/app"
+          test -x "$RUNNER_TEMP/app/Tau.app/Contents/MacOS/Tau"
+
+      # The staging feed could hand the app a newer build between launches, whose events would carry another release.
+      - name: Block the staging update feed
+        run: |
+          echo '0.0.0.0 downloads.taucad.dev' | sudo tee -a /etc/hosts > /dev/null
+          sudo dscacheutil -flushcache
+          sudo killall -HUP mDNSResponder || true
+
+      # A release build is locked: it ignores `--user-data-dir` and keeps its profile in `Tau Staging`.
+      # The probe counts only events from this time on, so an earlier forcing of the same release is not counted.
+      - name: Force one unhealthy boot and one file-service start failure
+        id: force
+        run: |
+          set -euo pipefail
+          since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "since=$since" >> "$GITHUB_OUTPUT"
+          echo "Forcing from $since"
+          apps/desktop/scripts/force-boot-signals.sh "$RUNNER_TEMP/app/Tau.app/Contents/MacOS/Tau" \
+            "$HOME/Library/Application Support/Tau Staging" "$RUNNER_TEMP/boot-signals"
+
+  probe:
+    name: Probe tau-desktop for ${{ needs.force.outputs.release }} (T-R9.3)
+    needs: force
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Probe the forced release
+        env:
+          # Read-only event token belongs only to this staging environment step.
+          SENTRY_E2E_READ_TOKEN: ${{ secrets.SENTRY_E2E_READ_TOKEN }}
+          TAU_DESKTOP_SENTRY_RELEASE: ${{ needs.force.outputs.release }}
+          TAU_DESKTOP_SIGNALS_SINCE: ${{ needs.force.outputs.since }}
+        run: |
+          if [ -z "$SENTRY_E2E_READ_TOKEN" ]; then
+            echo '::error::Configure SENTRY_E2E_READ_TOKEN in the staging environment.'
+            exit 1
+          fi
+          pnpm nx run ui-e2e:test:e2e:desktop-boot-signals-staging

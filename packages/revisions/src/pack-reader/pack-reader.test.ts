@@ -6,7 +6,7 @@
 /* oxlint-disable no-bitwise -- pack entry headers are bit fields. */
 import { describe, expect, it } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
-import { bytesToHex, digest } from '#object-hash.js';
+import { bytesToHex, digest, digestHex } from '#object-hash.js';
 import { encodePackIndex, readPackIndex } from '#pack-reader/pack-index.js';
 import type { PackIndexEntry } from '#pack-reader/pack-index.js';
 import { applyDelta } from '#pack-reader/delta.js';
@@ -187,6 +187,19 @@ describe('the pack reader on corrupt packs', () => {
     const other = new Uint8Array(pack);
     other[other.byteLength - 1]! ^= 0xff;
     await expect(readerOver(other, stored).reader.read(oidA)).rejects.toThrow(/checksum/u);
+  });
+
+  it('names the id a whole entry read for a copy hashes to apart from the id it was asked for', async () => {
+    // An `oid` beside the object would be spread over the id an import claims for it (SP6-import review).
+    const hello = encoder.encode('hello');
+    const helloOid = digestHex('sha1', Uint8Array.from([...encoder.encode('blob 5\0'), ...hello]));
+    const { pack, stored } = await packOf([
+      [helloOid, Uint8Array.from([...header(3, 5), ...(await compute.deflate(hello))])],
+    ]);
+    const copied = await readerOver(pack, stored).reader.readForCopy(helloOid);
+    expect(copied).not.toHaveProperty('oid');
+    expect(copied?.hashedOid).toBe(helloOid);
+    expect(copied?.data).toStrictEqual(hello);
   });
 
   it('refuses an entry that inflates to a size other than the one it declares', async () => {

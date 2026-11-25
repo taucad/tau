@@ -68,8 +68,10 @@ export type OriginAnswerResolver<A> = Readonly<{
    * Resolve the answer for the origin of `url`. Rejects with a `TypeError` only when `url` has no origin.
    *
    * @param url - An origin or any URL on it; only its origin is used.
+   * @param options - `ahead`: milliseconds; a cached answer that expires within them is not reused, so a caller
+   *   refreshing early starts the request before the answer expires. The stale fallback keeps its own bound.
    */
-  resolve(url: string): Promise<OriginAnswer<A>>;
+  resolve(url: string, options?: Readonly<{ ahead?: number }>): Promise<OriginAnswer<A>>;
 }>;
 
 /** Resolver defaults. @public */
@@ -150,9 +152,11 @@ const timedOut = Symbol('timed-out');
 
 /**
  * `GET` an answer without credentials and classify it: `404` is `absent`; another non-2xx status, a body that is not
- * JSON or that `parse` refuses, a thrown fetch and a timeout are `failed`. Never throws.
+ * JSON or that `parse` refuses, a thrown fetch, an abort and a timeout are `failed`. Never throws.
  *
- * @param input - The fetch, the URL, the body parser and an optional timeout in milliseconds.
+ * @param input - The fetch, the URL, the body parser, an optional timeout in milliseconds, an optional HTTP cache mode
+ *   (the fetch default when omitted; a page reader passes `no-store` so it never reads an old answer) and an optional
+ *   signal the caller aborts the request with.
  * @returns The classified response.
  * @public
  */
@@ -162,15 +166,19 @@ export const requestAnswer = async <B>(
     url: string;
     parse: (body: unknown) => B | undefined;
     requestTimeout?: number;
+    cache?: RequestCache;
+    signal?: AbortSignal;
   }>,
 ): Promise<AnswerResponse<B>> => {
   const exchange = async (signal: AbortSignal | undefined): Promise<AnswerResponse<B>> => {
     let response: Response;
     try {
-      response = await input.fetch(
-        input.url,
-        signal === undefined ? { method: 'GET', credentials: 'omit' } : { method: 'GET', credentials: 'omit', signal },
-      );
+      response = await input.fetch(input.url, {
+        method: 'GET',
+        credentials: 'omit',
+        ...(input.cache === undefined ? {} : { cache: input.cache }),
+        ...(signal === undefined ? {} : { signal }),
+      });
     } catch {
       return { kind: 'failed', reason: 'network' };
     }
@@ -188,9 +196,17 @@ export const requestAnswer = async <B>(
     }
   };
   if (input.requestTimeout === undefined) {
-    return exchange(undefined);
+    return exchange(input.signal);
   }
   const controller = new AbortController();
+  const forward = (): void => {
+    controller.abort();
+  };
+  if (input.signal?.aborted === true) {
+    controller.abort();
+  } else {
+    input.signal?.addEventListener('abort', forward, { once: true });
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<typeof timedOut>((resolve) => {
     timer = setTimeout(() => {
@@ -207,6 +223,7 @@ export const requestAnswer = async <B>(
     return outcome;
   } finally {
     clearTimeout(timer);
+    input.signal?.removeEventListener('abort', forward);
   }
 };
 
@@ -258,13 +275,13 @@ export const createOriginAnswerResolver = <A>(input: OriginAnswerResolverInput<A
   };
 
   return {
-    resolve: async (url) => {
+    resolve: async (url, options) => {
       const { origin } = new URL(url);
       if (origin === 'null') {
         throw new TypeError(`No origin in ${url}`);
       }
       const cached = storeOf(origin).read();
-      if (isAnswerFresh(cached, now())) {
+      if (isAnswerFresh(cached, now() + (options?.ahead ?? 0))) {
         return { state: 'known', answer: cached.answer, source: 'cache' };
       }
       const pending = inFlight.get(origin);

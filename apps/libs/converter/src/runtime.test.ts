@@ -1,9 +1,10 @@
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
 import { kernelConfigurations } from '@taucad/types/constants';
-import { describe, it } from 'vitest';
+import { cadmpegKernel } from '@taucad/cadmpeg';
+import { describe, expect, it } from 'vitest';
 
-import { converterRuntime } from '#runtime.js';
+import { converterImportFormats, converterRuntime } from '#runtime.js';
 
 // The converter imports and exports files; it runs no project, so every catalog kernel is deliberately absent.
 const importOnly = 'import-only runtime: the converter transcodes files and runs no CAD project';
@@ -28,5 +29,9 @@ describe('converterRuntime', () => {
         tscircuit: importOnly,
       },
     });
+  });
+
+  it('should open every native CAD format the cadmpeg kernel reads', () => {
+    expect(converterImportFormats).toEqual(expect.arrayContaining([...cadmpegKernel().extensions]));
   });
 });

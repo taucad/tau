@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/agent-observability",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"],
+  "tags": ["scope:shared", "type:lib", "protocol:agent"],
   "targets": {
     "test:e2e:queue": {
       "executor": "nx:noop",

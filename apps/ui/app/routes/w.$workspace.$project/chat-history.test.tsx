@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render as renderBare, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type {
@@ -50,9 +54,11 @@ const publishChatState = (state: MockChatState): void => {
   }
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
+let locationSearch = '';
+let presentedChatId = 'chat_test';
 let archiveOpen = false;
 vi.mock('react-router', () => ({
-  useLocation: () => ({ state: locationState }),
+  useLocation: () => ({ state: locationState, search: locationSearch, key: 'default' }),
   useParams: () => ({ workspace: 'home', project: 'one' }),
 }));
 vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
@@ -107,7 +113,7 @@ vi.mock('#hooks/use-chat.js', () => ({
       rememberedComposerTrays: [],
     });
   },
-  useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
+  useChatContext: () => ({ activeChatId: presentedChatId, persistenceActorRef: fakePersistenceActorRef }),
 }));
 
 // Capture the body the chat client receives on submit so the wire-format
@@ -219,7 +225,17 @@ vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
-  FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  FloatingPanelContent: ({
+    children,
+    className,
+  }: {
+    readonly children: React.ReactNode;
+    readonly className?: string;
+  }) => (
+    <div data-slot='floating-panel-content' className={className}>
+      {children}
+    </div>
+  ),
   FloatingPanelContentHeader: ({
     children,
     className,
@@ -254,6 +270,15 @@ vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
   const { useFileManager } = await import('#hooks/use-file-manager.js');
   return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
 });
+
+/* The chat's questions read the shared file-manager context. */
+const fileManager = mock<FileManagerContextValue>();
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
@@ -359,6 +384,14 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
+  /* The archive has no header row, so the host's titlebar clearance reaches its content instead. */
+  it('gives the archive the classes the host passes for it', () => {
+    archiveOpen = true;
+    render(<ChatHistory archiveClassName='pt-9' headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(screen.getByRole('region', { name: 'Archived chats' }).parentElement).toHaveClass('pt-9');
+  });
+
   it('skips hidden transcript and skill projections, then reveals current messages', () => {
     setMockMessages([message('u1', 'user')]);
     const view = render(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
@@ -391,6 +424,16 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(headers[0]).toHaveClass('gap-1');
     expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
     expect(container.querySelector('.sticky')).toBeNull();
+  });
+
+  /* The host's fixed titlebar controls sit over the header's leading edge; the inset must reach the header itself. */
+  it('gives its header row the classes the host passes for it', () => {
+    const { container } = render(<ChatHistory headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(container.querySelector('[data-slot=floating-panel-content-header]')).toHaveClass(
+      'gap-1',
+      'pl-(--titlebar-controls-width)',
+    );
   });
 
   /* PL6: the composer adopts only the native input its own project's placeholder served. */
@@ -624,12 +667,33 @@ describe('ChatHistory — composer refocus', () => {
     capturedTextarea.focus = vi.fn<() => void>();
     persistenceListeners.clear();
     locationState = undefined;
+    locationSearch = '';
+    presentedChatId = 'chat_test';
     setMockMessages([]);
   });
 
   it('focuses the composer when a new-chat surface requests it', () => {
     locationState = { focusChatComposer: true };
     render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses the created chat composer once it is presented, not the previous chat held inert during the switch', () => {
+    /* A same-project switch keeps the previous chat on screen, inert, until the created chat is prepared. A focus
+     * given then is dropped by the browser, so the composer waits for the created chat. */
+    locationState = { focusChatComposer: true };
+    locationSearch = '?chat=chat_created';
+    const { rerender } = render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).not.toHaveBeenCalled();
+
+    presentedChatId = 'chat_created';
+    rerender(<ChatHistory className='presented' />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+
+    rerender(<ChatHistory className='typing' />);
 
     expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
   });

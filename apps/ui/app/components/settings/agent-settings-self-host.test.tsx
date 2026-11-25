@@ -6,7 +6,9 @@ import { AgentSettings } from '#components/settings/agent-settings.js';
 
 // Unit tests build with Tau Cloud enabled, so a self-hosted panel is only
 // reachable by replacing the compile-time seam the settings registry reads.
-vi.mock('#cloud/cloud-enabled.js', () => ({ tauCloudEnabled: false }));
+vi.mock('#cloud/use-deployment-mode.js', () => ({
+  useDeploymentMode: () => ({ state: 'unfunded', basis: 'pinned' }),
+}));
 
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: boolean) => [defaultValue, vi.fn()],

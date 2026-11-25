@@ -2127,7 +2127,7 @@ const isolateTwoNodeViews = async (execution: 'webgpu' | 'node-webgl2', full: nu
   };
   const fixture = (index: number, width: number, generation: number): ReactNode => (
     <div key={generation} style={{ width, height: (width * 9) / 16 }}>
-      <GraphicsProvider graphicsRef={actors[index]!}>
+      <GraphicsProvider graphicsRef={actors[index]}>
         <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
           <ambientLight intensity={2} />
           <mesh position={[0, 0, -0.7]}>

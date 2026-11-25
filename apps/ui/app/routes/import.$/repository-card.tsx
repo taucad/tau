@@ -1,6 +1,6 @@
 import { Star, GitFork } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
-import { ExternalLink } from '#components/external-link.js';
+import { ExternalLink } from '@taucad/editor-ui/components/external-link';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 

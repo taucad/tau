@@ -59,7 +59,8 @@ const personHarness = vi.hoisted((): { onboarding: boolean; profile: HarnessProf
   profile: { version: 1, goals: [], languages: [] },
 }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'onboarding' ? personHarness.onboarding : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'onboarding' && personHarness.onboarding ? 'on' : 'off'),
 }));
 vi.mock('#preferences/use-person-record.js', () => ({
   usePersonRecord: () => ({ profile: personHarness.profile }),
@@ -298,7 +299,8 @@ describe('useCadAgentConfig', () => {
     await waitFor(() => {
       expect(result.current).toEqual({
         status: 'unavailable',
-        reason: 'This project’s storage cannot hold a durable agent log.',
+        reason:
+          'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
       });
     });
   });
@@ -350,7 +352,8 @@ describe('useCadAgentConfig', () => {
 
     await expect(settled).resolves.toEqual({
       status: 'unavailable',
-      reason: 'This project’s storage cannot hold a durable agent log.',
+      reason:
+        'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
     });
   });
 

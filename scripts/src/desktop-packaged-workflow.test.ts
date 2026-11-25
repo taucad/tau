@@ -178,9 +178,9 @@ describe('release-desktop-staging.yml candidate gates', () => {
 
   it('should tag a candidate only when every gate is green', () => {
     const { tag } = staging.jobs;
-    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks', 'rehearsal']);
+    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks', 'intel-native', 'rehearsal']);
     expect(tag?.if).toBe(
-      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.rehearsal.result == 'success'",
+      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.intel-native.result == 'success' && needs.rehearsal.result == 'success'",
     );
     expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
       /^\s*Packaged desktop gate: run \$\{RUN_ID\}$/mu,
@@ -390,7 +390,8 @@ describe('desktop-rehearsal-gate.yml (T-REH.2)', () => {
     const gate = named("Run the rehearsal over the base release's profile");
     expect(index(build)).toBeLessThan(index(gate));
     expect(gate?.run).toContain('xvfb-run --auto-servernum pnpm nx run desktop-e2e:test:e2e:rehearsal-gate');
-    // `ui:build` is the cloud variant only when this is set at build time, in both worktrees.
-    expect((rehearsal as Workflow & { env?: Record<string, string> }).env?.['TAU_CLOUD_ENABLED']).toBe('true');
+    // Both desktop builds carry the shipped renderer (adaptive app deployment mode W6): the workflow sets no ceiling, and
+    // the target sets `TAU_CLOUD_ENABLED=true` for its own cloud web build only.
+    expect((rehearsal as Workflow & { env?: Record<string, string> }).env?.['TAU_CLOUD_ENABLED']).toBeUndefined();
   });
 });

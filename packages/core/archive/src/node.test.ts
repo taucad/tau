@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readdir, readFile, readlink, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tar } from '#archive-builders.fixture.js';
 import type { ArchiveEntry } from '#archive-entry.js';
-import { writeArchiveEntries } from '#node.js';
+import { fetchVerifiedFile, writeArchiveEntries } from '#node.js';
 import { readTarEntries } from '#tar.js';
 
 const limits = { maximumUnpackedBytes: 1024 * 1024, maximumEntries: 1000 };
@@ -150,5 +150,87 @@ describe('writeArchiveEntries', () => {
         'cancelled',
       );
     });
+  });
+});
+
+describe('fetchVerifiedFile', () => {
+  const body = 'pinned archive bytes';
+  const integrity = `sha256-${createHash('sha256').update(body).digest('base64')}`;
+  const url = 'https://github.example.test/releases/download/v1/archive.tar.gz';
+  const quick = { attempts: 3, initialDelayMilliseconds: 0, maximumDelayMilliseconds: 0 };
+  const unresolved = (): never => {
+    throw new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo'), { code: 'ENOTFOUND' }) });
+  };
+  let directory: string;
+  let path: string;
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'tau-fetch-verified-file-'));
+    path = join(directory, 'cache', 'archive.tar.gz');
+  });
+
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('should use a kept file that matches the pin without a request', async () => {
+    await mkdir(join(directory, 'cache'));
+    await writeFile(path, body);
+    const transport = vi.fn<typeof fetch>();
+
+    const { bytes, fetched } = await fetchVerifiedFile({
+      url,
+      path,
+      integrity,
+      byteLength: body.length,
+      fetch: transport,
+      signal: new AbortController().signal,
+    });
+
+    expect(new TextDecoder().decode(bytes)).toBe(body);
+    expect(fetched).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('should retry a failed name resolution and keep only the verified bytes, renamed into place', async () => {
+    await mkdir(join(directory, 'cache'));
+    await writeFile(path, 'truncated');
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(async () => unresolved())
+      .mockImplementationOnce(async () => new Response(body));
+
+    const { fetched } = await fetchVerifiedFile({
+      url,
+      path,
+      integrity,
+      fetch: transport,
+      retry: quick,
+      signal: new AbortController().signal,
+    });
+
+    expect(fetched).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(await readFile(path, 'utf8')).toBe(body);
+    expect(await readdir(join(directory, 'cache'))).toEqual(['archive.tar.gz']);
+  });
+
+  it('should fail and write nothing when every attempt fails', async () => {
+    const transport = vi.fn<typeof fetch>(async () => unresolved());
+
+    await expect(
+      fetchVerifiedFile({ url, path, integrity, fetch: transport, retry: quick, signal: new AbortController().signal }),
+    ).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED', detail: 'Transport attempt 3/3; codes: ENOTFOUND' });
+    expect(transport).toHaveBeenCalledTimes(3);
+    expect(await readdir(directory)).toEqual([]);
+  });
+
+  it('should refuse bytes that do not match the pin and write nothing', async () => {
+    const transport = vi.fn<typeof fetch>(async () => new Response('tampered'));
+
+    await expect(
+      fetchVerifiedFile({ url, path, integrity, fetch: transport, signal: new AbortController().signal }),
+    ).rejects.toMatchObject({ code: 'INTEGRITY_MISMATCH' });
+    expect(await readdir(directory)).toEqual([]);
   });
 });

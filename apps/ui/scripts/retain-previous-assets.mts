@@ -41,6 +41,11 @@
  * only sends more cached shells to the network first, never fewer. This build's id comes from the record the build
  * writes beside its output (`build/sentry-release`, `tau-ui@<build id>`); without it no floor is stamped.
  *
+ * A request the live origin answers with a 408, a 429 or a 5xx is retried for about 7 s (longer when a
+ * `Retry-After` asks); one that fails without an answer (a network error) for about 60 s, since a production
+ * deploy downloads about 1 GB and a runner link saturated by it can time out new connections for that long. The
+ * CLI also gives each address of a new connection 5 s, not Node's 250 ms happy-eyeballs default, to connect.
+ *
  * It fails closed: a malformed index, an asset that does not match its integrity,
  * a listed asset the live deploy lost, or a live index it cannot read (a network
  * error, any status but 200 or 404 after the retries, or a 200 that is not the
@@ -54,6 +59,10 @@
  *                            (`deploy-ui.yml`), never the public host. Unset: only the new deploy's index is written.
  *   TAU_RETAIN_ASSETS_SKIP   `1` retains nothing and asks the live deploy nothing, with a warning: the emergency
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
+ *   TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE
+ *                            `1` ships without retention, with a warning, when the live deploy cannot be reached
+ *                            after the retries (staging, whose tabs reload into the new build). Any other failure
+ *                            still fails the deploy. Production leaves it unset.
  *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
  *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
  *
@@ -64,6 +73,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { pipeline } from 'node:stream/promises';
@@ -262,8 +272,20 @@ const assetUrl = (origin: string, path: string): string =>
     .join('/')}`;
 const sha384Integrity = /^sha384-[A-Za-z0-9+/]+={0,2}$/u;
 const downloadConcurrency = 8;
-/** Milliseconds to wait before each retry of a failed request. */
+/** Milliseconds to wait before each retry of a request the live origin answered with a retryable status. */
 const retryBackoff = [1000, 2000, 4000] as const;
+/**
+ * Milliseconds to wait before each retry of a request that failed without an answer (a thrown `fetch`), 60 s
+ * in all. A production deploy downloads about 1 GB, eight files at a time, and the saturated runner link can
+ * time out every new connection for longer than the 7 s `retryBackoff` spans (ui@0.15.0 failed twice so).
+ */
+const networkRetryBackoff = [...retryBackoff, 8000, 15_000, 30_000] as const;
+/**
+ * Milliseconds each address of a new connection may take before the CLI gives up on it. Node's happy-eyeballs
+ * default is 250 ms, which a runner link saturated by `downloadConcurrency` large downloads misses for every
+ * address, failing the connection with `ETIMEDOUT` though the origin is healthy.
+ */
+const connectAttemptTimeout = 5000;
 /** Milliseconds one request may take, the body included. */
 const defaultRequestTimeout = 30_000;
 
@@ -567,20 +589,15 @@ const retryAfterWait = (header: string | undefined): number | undefined => {
 };
 
 /**
- * One request, its body read within the timeout. A network error, a 408, a 429 or a 5xx is
- * retried after the backoff, or after the wait a `Retry-After` names (capped).
+ * One request, its body read within the timeout. A 408, a 429 or a 5xx is retried after the
+ * `retryBackoff`, or after the wait a `Retry-After` names (capped); a network error, after the
+ * longer `networkRetryBackoff`. The latest failure picks the schedule for the next wait.
  */
 const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetched> => {
-  let lastError: unknown;
-  let requestedWait: number | undefined;
-  for (const backoff of [0, ...retryBackoff]) {
-    // A `Retry-After` may ask for longer than the backoff, never for less (zero, or a date already past).
-    const wait = Math.min(Math.max(requestedWait ?? 0, backoff), retryAfterCap);
-    if (wait > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
-      await transport.wait(wait);
-    }
-    requestedWait = undefined;
+  for (let attempt = 0; ; attempt += 1) {
+    let failure: unknown;
+    let schedule: readonly number[];
+    let requestedWait: number | undefined;
     try {
       const signal = AbortSignal.timeout(transport.requestTimeout);
       // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
@@ -591,16 +608,36 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
         return { status: response.status, contentType: response.headers.get('content-type') ?? '', body };
       }
       requestedWait = retryAfterWait(response.headers.get('retry-after') ?? undefined);
-      lastError = new Error(`${url} answered ${String(response.status)}`);
+      failure = new Error(`${url} answered ${String(response.status)}`);
+      schedule = retryBackoff;
     } catch (error) {
-      lastError = error;
+      failure = error;
+      schedule = networkRetryBackoff;
     }
+    const backoff = schedule[attempt];
+    if (backoff === undefined) {
+      throw failure;
+    }
+    // A `Retry-After` may ask for longer than the backoff, never for less (zero, or a date already past).
+    // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
+    await transport.wait(Math.min(Math.max(requestedWait ?? 0, backoff), retryAfterCap));
   }
-  throw lastError;
 };
 
 /** The environment variable that skips retention for one deploy, when the live origin is down and a fix must ship. */
 export const skipRetentionVariable = 'TAU_RETAIN_ASSETS_SKIP';
+
+/** The environment variable that lets a deploy ship without retention when the live deploy cannot be reached. */
+export const shipIfUnreachableVariable = 'TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE';
+
+/**
+ * The live deploy could not be reached at all: the request failed, timed out or kept answering 408, 429 or 5xx through
+ * every retry. Only this failure may be shipped past (`TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE`, staging); an index that
+ * answers but is wrong, or an asset that fails its integrity, always fails the deploy.
+ */
+export class LiveIndexUnreachableError extends Error {
+  public override readonly name = 'LiveIndexUnreachableError';
+}
 
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
 const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
@@ -621,7 +658,7 @@ const readLiveIndex = async (
     response = await fetchWithRetry(`${origin}/${fileName}`, transport);
   } catch (error) {
     // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
-    throw unreadableIndex(origin, fileName, String(error));
+    throw new LiveIndexUnreachableError(unreadableIndex(origin, fileName, String(error)).message, { cause: error });
   }
   // No index yet: only a 404. The first deploy that runs this on a site whose catch-all answers 200 skips once.
   if (response.status === 404) {
@@ -963,6 +1000,31 @@ export const stampRetainedBuildFloor = async (buildDirectory: string, floor: num
   return stamped;
 };
 
+/**
+ * Retain the previous assets, or, when the live deploy cannot be reached and the caller allows it, ship with none.
+ *
+ * @param options - As {@link retainPreviousAssets}.
+ * @param fallback - Whether an unreachable live deploy ships without retention, and where the warning goes.
+ * @returns What {@link retainPreviousAssets} returns, from the retaining pass or the pass that keeps nothing.
+ */
+export const retainOrShipWithout = async (
+  options: Parameters<typeof retainPreviousAssets>[0],
+  fallback: { readonly shipIfUnreachable: boolean; readonly warn: (message: string) => void },
+): ReturnType<typeof retainPreviousAssets> => {
+  try {
+    return await retainPreviousAssets(options);
+  } catch (error) {
+    if (!fallback.shipIfUnreachable || !(error instanceof LiveIndexUnreachableError) || options.skip === true) {
+      throw error;
+    }
+    fallback.warn(
+      `::warning::${error.message} ${shipIfUnreachableVariable}=1: this deploy ships with NO previous assets. Pages ` +
+        'open across it reload into the new build when a lazy import fails.',
+    );
+    return retainPreviousAssets({ ...options, skip: true });
+  }
+};
+
 const main = async (): Promise<void> => {
   const configured = process.env['TAU_RETAIN_ASSETS_FROM']?.trim();
   const origin = configured === undefined || configured === '' ? undefined : configured;
@@ -982,13 +1044,15 @@ const main = async (): Promise<void> => {
       `::warning::The build wrote no ${buildRecordFileName} record: the deploy records no builds and its /health/build reports no retained floor.`,
     );
   }
-  const { retained, bytes, storedBytes, index, runtimes, floor } = await retainPreviousAssets({
-    clientDirectory: join(buildDirectory, 'client'),
-    origin,
-    skip,
-    store,
-    buildId,
-  });
+  const { retained, bytes, storedBytes, index, runtimes, floor } = await retainOrShipWithout(
+    { clientDirectory: join(buildDirectory, 'client'), origin, skip, store, buildId },
+    {
+      shipIfUnreachable: process.env[shipIfUnreachableVariable]?.trim() === '1',
+      warn: (message) => {
+        console.warn(message);
+      },
+    },
+  );
   console.log(
     `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB, ${String(Math.round(storedBytes / 1024))} KiB of it from the store) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} assets and ${String(runtimes.assets.length)} runtime files served.`,
   );
@@ -1001,6 +1065,7 @@ const main = async (): Promise<void> => {
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+  setDefaultAutoSelectFamilyAttemptTimeout(connectAttemptTimeout);
   try {
     await main();
   } catch (error) {

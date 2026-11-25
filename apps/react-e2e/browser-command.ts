@@ -8,7 +8,7 @@ import type { Browser, BrowserContext, ElectronApplication, Page } from 'playwri
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import { reactE2ELogPath } from './global-setup.ts';
 import type { ReactTargetDiagnostics, ReactTargetSession, ReactTargetState } from './support/external-target.js';
-import { captureProcessOutput, stopProcess, waitForEndpoint } from './support/process-lifecycle.ts';
+import { assertEndpointFree, captureProcessOutput, stopProcess, waitForEndpoint } from './support/process-lifecycle.ts';
 import { reactE2EEnvironment, resolveReactE2ETarget } from './support/targets.ts';
 import type { ReactE2ETarget } from './support/targets.ts';
 
@@ -96,6 +96,8 @@ const electronDevelopmentSession = async (target: ReactE2ETarget): Promise<Opene
   if (!target.cdpPort) {
     throw new TypeError(`Electron development target ${target.id} has no CDP port.`);
   }
+  const endpoint = `http://127.0.0.1:${target.cdpPort}`;
+  await assertEndpointFree(endpoint);
   const child = spawn(
     resolve(target.root, 'node_modules/.bin/electron-vite'),
     ['--remoteDebuggingPort', String(target.cdpPort)],
@@ -110,7 +112,6 @@ const electronDevelopmentSession = async (target: ReactE2ETarget): Promise<Opene
   captureProcessOutput(child, output);
   let browser: Browser | undefined;
   try {
-    const endpoint = `http://127.0.0.1:${target.cdpPort}`;
     await waitForEndpoint({ child, output, url: `${endpoint}/json/version` });
     browser = await connectToCdp(endpoint);
     const page = browser

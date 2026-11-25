@@ -70,19 +70,47 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     'ui-e2e:test:e2e:filesystem-scenarios',
     'ui-e2e:test:e2e:non-isolated',
   ];
+  /**
+   * Suites admitted after the first batch, each on five consecutive green nightlies. The adaptive web tier ran as its
+   * own nightly job, not a matrix row, so its admission deleted that job (global review 2026-11-24, ruling 11).
+   */
+  const laterAdmissions = ['ui:test:e2e:attachment-image-engines', 'ui-e2e:test:e2e:adaptive'];
 
   it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
     expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
     expect(planScript).toContain('e2e_queue=$(flag e2e-queue)');
     expect(planScript).toContain('echo "e2e-queue-suites=$e2e_queue_suites"');
     expect(ci.jobs['plan']?.outputs?.['e2e-queue-suites']).toBe(expression('steps.plan.outputs.e2e-queue-suites'));
-    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.needs).toEqual(['plan', 'queue-builds']);
     expect(lane?.if).toBe(
       expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true'"),
     );
     expect(lane?.strategy?.matrix?.['suite']).toBe(expression('fromJSON(needs.plan.outputs.e2e-queue-suites)'));
     // The rows carry the nightly's job names, so a suite keeps its name when it moves.
     expect(lane?.name).toBe(nightly.jobs['e2e']?.name);
+  });
+
+  it('should build each UI bundle the rows restore once per merge-queue run (global review 2026-11-24, ruling 6)', () => {
+    const builds = ci.jobs['queue-builds'];
+    // No `needs`: it starts with the run, and only the queue writes what it builds.
+    expect(builds?.needs).toBeUndefined();
+    expect(builds?.if).toBe(expression("github.event_name == 'merge_group'"));
+    expect(builds?.strategy?.matrix?.['target']).toEqual(['queue-build', 'queue-build:serve']);
+    expect(builds?.steps?.at(-1)?.run).toBe('pnpm nx run-many -t "$TARGET" --parallel=1');
+    // The rows wait for it but never for its result: a row whose bundle it did not write builds it, as before.
+    expect(lane?.if).not.toContain('queue-builds');
+    // Each target names the one bundle the ui-e2e queue suites build, and nothing else.
+    const uiEndToEndProject = JSON.parse(read('apps/ui-e2e/project.json')) as {
+      readonly targets: Record<string, { readonly executor?: string; readonly dependsOn?: readonly unknown[] }>;
+    };
+    expect(uiEndToEndProject.targets['queue-build']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build' }],
+    });
+    expect(uiEndToEndProject.targets['queue-build:serve']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build:serve' }],
+    });
   });
 
   it('should require every row in the required check when the plan selected the lane', () => {
@@ -147,7 +175,15 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
         ratcheted.push(`${project.name}:${String(dependency)}`);
       }
     }
-    expect(ratcheted).toEqual(expect.arrayContaining(firstBatch));
+    expect(ratcheted).toEqual(expect.arrayContaining([...firstBatch, ...laterAdmissions]));
+  });
+
+  it('should run the adaptive web tier only in the merge queue, as a suite that opens no chat (ruling 11)', () => {
+    expect(Object.keys(nightly.jobs)).not.toContain('adaptive-web');
+    const runs = Object.values(nightly.jobs).flatMap((job) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    expect(runs.filter((run) => run.includes('test:e2e:adaptive'))).toEqual([]);
+    // It captures no chat log, so the row skips the chat log validation the empty-capture rule would fail.
+    expect(JSON.parse(lane?.env?.['SUITES_WITHOUT_CHAT'] ?? '[]')).toContain('test:e2e:adaptive');
   });
 
   it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {

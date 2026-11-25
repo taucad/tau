@@ -45,6 +45,7 @@ export const workflowPaths = [
   '.github/workflows/desktop-packaged.yml',
   '.github/workflows/release-gate.yml',
   '.github/workflows/timing-budgets.yml',
+  '.github/workflows/flake-repro.yml',
 ] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };

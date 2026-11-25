@@ -477,6 +477,9 @@ export type TargetConfiguration = {
 
 const receiptOutputs = /^\{workspaceRoot\}\/out\/test-results\/shell-conformance\/\*\/[\w-]+(?:\.verdict)?\.json$/u;
 
+/** The target's test outcome rows (`@taucad/vitest-ci`, CI flake quarantine blueprint FQ-1), restored with the receipt. */
+const outcomeOutput = /^\{workspaceRoot\}\/out\/test-results\/\{projectName\}\/[\w.-]+\.outcomes\.jsonl$/u;
+
 /**
  * Why a conformance target could replay false evidence from the cache, or nothing. A target is either uncached, or
  * cacheable with the whole source closure (`default`, `^default`, every external dependency), the environment
@@ -512,8 +515,11 @@ export const cacheViolations = (target: string, configuration: TargetConfigurati
     }
   }
   const outputs = configuration.outputs ?? [];
-  if (outputs.length === 0 || !outputs.every((output) => receiptOutputs.test(output))) {
-    problems.push(`${target}: outputs must be its receipt files under out/test-results/shell-conformance/*/`);
+  const receipts = outputs.filter((output) => !outcomeOutput.test(output));
+  if (receipts.length === 0 || !receipts.every((output) => receiptOutputs.test(output))) {
+    problems.push(
+      `${target}: outputs must be its receipt files under out/test-results/shell-conformance/*/ and its outcome rows`,
+    );
   }
   const command = configuration.options?.command;
   if (typeof command !== 'string' || !command.endsWith(` && ${recordCommand}`)) {

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import type { CDPSession, Page } from 'playwright';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -17,6 +18,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
     include: ['app/components/panes/pane-resize.browser.test.tsx'],
     fileParallelism: false,
     browser: {

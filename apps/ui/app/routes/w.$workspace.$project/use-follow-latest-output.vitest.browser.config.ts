@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** Chat follow-output acceptance against the real Virtuoso list in Chromium. */
@@ -13,6 +14,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
     include: ['app/routes/w.$workspace.$project/use-follow-latest-output.browser.test.tsx'],
     fileParallelism: false,
     browser: {

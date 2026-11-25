@@ -184,6 +184,10 @@
 \* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
 \* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
 \* moved. No action or verdict changes.
+\* FP10 held seed (2026-11-25): `chat-session-store.ts` shows the agent host's terminal code load failure, which the
+\* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
+\* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
+\* changes.
 \* Chat UX F1/F2 (2026-11-25): a send made with nothing running is shown in the thread while it is admitted,
 \* not as a queue row. Stop during that admission, or a host refusal of it, withdraws the entry (Withdraw): an
 \* unprepared, unsteered, never-accepted entry leaves the queue and the submitted set and returns to the composer,

@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** The built viewer page in Chromium against a real `tau mcp` (`nx test:e2e agent-plugin`). */
@@ -7,7 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['e2e/**/*.hosts.test.ts'],
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     testTimeout: 300_000,
     hookTimeout: 300_000,
     fileParallelism: false,

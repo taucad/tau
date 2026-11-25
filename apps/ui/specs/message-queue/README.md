@@ -112,4 +112,6 @@ UI layering W2 re-pinned the drift after `chat-session-store.ts` began importing
 
 UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; no action changed.
 
+The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began showing an agent host load failure that the chat's host read met before a seed's command could; the seed stays held until a host read answers, and no action changed.
+
 Chat UX F1/F2 (send/queue/stop lifecycle) re-pinned the drift after the session machine gained `withdrawTurn` (version 5), `chat-session-store.ts` gained the departing-send presentation, withdrawal and refused-admission return, `chat-message-queue.tsx` left the departing entry out of the strip, and `use-chat.tsx` exposed `departingMessageId`. `MessageQueue.tla` gained `Withdraw`, which removes an unprepared, unsteered, never-accepted entry from the queue and the submitted set; the target config passes and every witness config still fails on its own invariant (see "Departing sends, withdrawal and retraction").

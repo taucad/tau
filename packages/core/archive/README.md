@@ -46,6 +46,7 @@ and its mode, which is the input to a closure receipt.
 | Export                          | Purpose                                                                   |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | `fetchVerified`                 | download with retries and an SRI check; `fetch` is injectable             |
+| `unattendedFetchRetry`          | `fetchVerified` retry schedule for CI and scripts: outlasts ~2 min of DNS |
 | `integrityMatches`              | compare bytes with an npm-style SRI string (strongest algorithm decides)  |
 | `integrityFromHex`              | turn a published hex digest into a canonical SRI string                   |
 | `integrityToHex`                | turn a canonical SRI string back into its algorithm and lowercase hex     |
@@ -56,6 +57,7 @@ and its mode, which is the input to a closure receipt.
 | `findCaseCollisions`            | paths that one case-insensitive filesystem would merge                    |
 | `ArchiveError`                  | typed refusal with `code`, `reason` and `path`                            |
 | `writeArchiveEntries` (`/node`) | exclusive-create writes that hash while writing; links kept or copied     |
+| `fetchVerifiedFile` (`/node`)   | a pinned download kept in a file: reused when it matches, renamed in      |
 
 ## Environment
 

@@ -14,8 +14,8 @@
 #   ::error title=infra-retry::<step> failed after <attempts> attempts: <signature>
 #
 # The signature is a fixed word from the attempt's exit status and output (see `infra_signature`), so the same
-# outage counts as the same event wherever it happens. apt-install.sh sources this file for the same annotations;
-# it lives beside it so that jobs which side-load the installer at `.tau-ci` carry it too.
+# outage counts as the same event wherever it happens. apt-install.sh and download.sh source this file for the same
+# annotations; it lives beside them so that jobs which side-load the installer at `.tau-ci` carry it too.
 #
 # Optional env vars:
 #   INFRA_RETRY_ATTEMPTS        Attempts before the step fails (default: 3)
@@ -49,7 +49,7 @@ infra_signature() {
     echo connection-reset
   elif grep -qiE "Could not connect|Connection failed|connection timed out|ETIMEDOUT|ECONNREFUSED|Connection refused|Could not wait for server fd|Failed to connect" "$log" 2>/dev/null; then
     echo connection-failed
-  elif grep -qiE "\b50[0-9] (Internal|Bad Gateway|Service Unavailable|Gateway Time)|status code:? (50[0-9]|429)|HTTP( error)? (50[0-9]|429)|\b429 Too Many" "$log" 2>/dev/null; then
+  elif grep -qiE "\b50[0-9] (Internal|Bad Gateway|Service Unavailable|Gateway Time)|status code:? (50[0-9]|429)|HTTP( error)? (50[0-9]|429)|returned error: (50[0-9]|429)|\b429 Too Many" "$log" 2>/dev/null; then
     echo http-server-error
   elif grep -qiE "Failed to fetch|Download failed|Failed to download|failed to download|E: Unable to fetch" "$log" 2>/dev/null; then
     echo download-failed

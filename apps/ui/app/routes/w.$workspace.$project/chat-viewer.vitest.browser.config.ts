@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -26,6 +27,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
     include: [
       'app/routes/w.$workspace.$project/chat-viewer.browser.test.tsx',
       'app/routes/w.$workspace.$project/chat-viewer-controls.browser.test.tsx',

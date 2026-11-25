@@ -32,10 +32,10 @@
     "apps/ui/app/components/chat/chat-textarea.tsx": "bae7f32c7acd918a960c9314ccd40ff70679e1634e4d3253321410f0ac8bd73e",
     "apps/ui/app/hooks/use-chat.tsx": "93d33b44552745d414d2ec4a93d802f8d2168ac449772e2f81a32293d4038658",
     "apps/ui/app/machines/chat-session.machine.ts": "1c32cd3a0a59867c31883af7a8fb599af5afd2707220602562f2cc6217cb5a18",
-    "apps/ui/app/services/chat-session-store.ts": "7b9504f3ee09665ff1c081c950dfcab6853a4c1e597c4cd0d8db888d98ed60b5"
+    "apps/ui/app/services/chat-session-store.ts": "c2c02296454f9acb52344ae3c960f1db06e224d6e1529095e257a4639d80fe7c"
   },
   "specs": {
-    "MessageQueue.tla": "1ec1fb6a8ebf02e07a23324a36aa2e57a01ce6dae836e36b516c2ef317813726",
+    "MessageQueue.tla": "005648b20400165b3fd5a85314d461bbcf79d730f9c6ad635391d0a09453ce25",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

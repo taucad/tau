@@ -3,9 +3,8 @@
 # Run one infrastructure setup command (a download, a browser install) with a bounded number of attempts and
 # backoff, and record every retry as a job-level event the CI health report can count.
 #
-# Blueprint FQ-3 and RT-6 (Brain `research/ci-flake-quarantine-blueprint.md`, taucad/tau#2792): an infrastructure
-# step retries three times with backoff, and each retry is an event. RT-7 still holds: this is for setup steps
-# only, never a test, a task or a job. A command that fails every attempt fails the step.
+# An infrastructure step retries three times with backoff, and each retry is an event (taucad/tau#2792). This is
+# for setup steps only, never a test, a task or a job. A command that fails every attempt fails the step.
 #
 # Each failed attempt that is retried writes one warning annotation, and a step that runs out of attempts writes
 # one error annotation, both titled `infra-retry` with a stable message shape (parsed by `infraRetryEvents` in
@@ -26,7 +25,7 @@
 #
 # Usage:
 #   infra-retry.sh <step> <command> [arguments...]
-#   e.g. infra-retry.sh playwright-install pnpm exec playwright install chromium
+#   e.g. infra-retry.sh pnpm-install pnpm install --frozen-lockfile
 #
 # Exit codes:
 #   0  The command succeeded on some attempt

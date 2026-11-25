@@ -40,7 +40,7 @@
 
 set -euo pipefail
 
-# infra_signature, infra_retry_event and infra_retry_exhausted: the job-level retry events FQ-3 counts.
+# infra_signature, infra_retry_event and infra_retry_exhausted: the job-level retry events the CI health report counts.
 # shellcheck source=infra-retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/infra-retry.sh"
 

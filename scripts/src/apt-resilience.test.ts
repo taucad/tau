@@ -24,6 +24,7 @@ type Step = {
   readonly if?: string;
   readonly uses?: string;
   readonly run?: string;
+  readonly shell?: string;
   readonly with?: Record<string, string>;
 };
 type StepList = { readonly steps?: readonly Step[] };
@@ -191,9 +192,9 @@ describe('apt installs in workflows and composite actions', () => {
 });
 
 /*
- * FQ-3 / RT-6 (Brain `research/ci-flake-quarantine-blueprint.md`, #2792): the other infrastructure downloads (the
- * Playwright browsers, Pandoc, pnpm through corepack and its install) retry through `infra-retry.sh` beside the
- * installer, and every retry is an `infra-retry` annotation the CI health report counts. Never a test step.
+ * The other infrastructure downloads (the Playwright browsers, Pandoc, pnpm through corepack and its install) retry
+ * through `infra-retry.sh` beside the installer, and every retry is an `infra-retry` annotation the CI health report
+ * counts. Never a test step.
  */
 describe('infrastructure step retries in workflows and composite actions', () => {
   const lists = stepLists();
@@ -224,6 +225,30 @@ describe('infrastructure step retries in workflows and composite actions', () =>
     }
     expect(bare).toEqual([]);
     expect(wrapped).toBeGreaterThanOrEqual(20);
+  });
+
+  it('should run infra-retry.sh with bash on a Windows host, whose default shell is PowerShell', () => {
+    const unshelled: string[] = [];
+    let windowsSteps = 0;
+    for (const file of readdirSync(resolve(root, '.github/workflows')).filter((name) => /\.ya?ml$/u.test(name))) {
+      const path = `.github/workflows/${file}`;
+      const workflow = load(read(path)) as {
+        readonly jobs?: Record<string, StepList & { readonly 'runs-on'?: unknown }>;
+      };
+      for (const [job, { steps = [], 'runs-on': runsOn }] of Object.entries(workflow.jobs ?? {})) {
+        if (!/windows/iu.test(JSON.stringify(runsOn ?? ''))) {
+          continue;
+        }
+        for (const step of steps.filter((candidate) => retried.test(candidate.run ?? ''))) {
+          windowsSteps++;
+          if (step.shell !== 'bash' || !/(?:^|\s)bash \.\//u.test(step.run ?? '')) {
+            unshelled.push(`${path}#${job}: ${step.name ?? step.run ?? ''}`);
+          }
+        }
+      }
+    }
+    expect(unshelled).toEqual([]);
+    expect(windowsSteps).toBeGreaterThanOrEqual(1);
   });
 
   it('should download pnpm and install dependencies through infra-retry.sh in setup-nx', () => {
@@ -272,7 +297,9 @@ describe('infra-retry.sh', () => {
       'playwright-install',
       'bash',
       '-c',
-      `n=$(( $(cat ${counter} 2>/dev/null || echo 0) + 1 )); echo $n > ${counter}; [ $n -ge 3 ] || { echo 'Error: read ECONNRESET'; exit 1; }`,
+      'n=$(( $(cat "$1" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$1"; [ "$n" -ge 3 ] || { echo \'Error: read ECONNRESET\'; exit 1; }',
+      'retry-counter',
+      counter,
     ]);
     expect(status, output).toBe(0);
     expect(output.match(/^::warning title=infra-retry::.*$/gmu)).toEqual([
@@ -394,7 +421,7 @@ describe('apt-install.sh', () => {
     expect(sources()).toContain('URIs: http://archive.ubuntu.com/ubuntu/');
     expect(sources()).not.toContain('mirror+file:');
     expect(output).toContain('Switching apt sources from the Azure mirror');
-    // Each retry is a job-level `infra-retry` event (FQ-3); the stub fails with no output, so the exit status signs it.
+    // Each retry is a job-level `infra-retry` event; the stub fails with no output, so the exit status signs it.
     expect(output.match(/^::warning title=infra-retry::.*$/gmu)).toEqual([
       '::warning title=infra-retry::apt-install attempt 1 of 4 failed: exit-1; retrying in 0s',
       '::warning title=infra-retry::apt-install attempt 2 of 4 failed: exit-1; retrying in 0s',

@@ -360,7 +360,8 @@ jobs:
         with:
           save-pnpm-store: 'false'
       - name: Install the download browser
-        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
+        shell: bash
+        run: bash ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Observe consumer host and run visible installation with operator evidence
         env:
           TAU_QUALIFICATION_DISPOSABLE_HOST: '1'

@@ -100,7 +100,10 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
       'Prepare API env file',
       'Validate captured chat logs',
     ]) {
-      expect(step(steps, name)?.run, name).toBe(step(nightlySteps, name)?.run);
+      // The nightly runs the retry wrapper from its trusted `.tau-ci` checkout; the merge queue from its own.
+      expect(step(steps, name)?.run, name).toBe(
+        step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/'),
+      );
     }
     expect(step(steps, 'Setup Linux sandbox prerequisites')?.uses).toBe('./.github/actions/setup-linux-sandbox');
     expect(step(steps, 'Setup formal toolchains')?.with).toEqual({ tools: 'tlc' });

@@ -67,7 +67,7 @@ runs:
     # 41670839293 it reset mid-stream (`TypeError: terminated` / `read
     # ECONNRESET`) and took the job with it. Do the download in a step of its
     # own, with retries, so a reset costs seconds instead of a CI round. Each
-    # retry is an `infra-retry` event (`apt-install/infra-retry.sh`, FQ-3).
+    # retry is an `infra-retry` event (`apt-install/infra-retry.sh`).
     - name: Download pnpm through corepack
       shell: bash
       env:
@@ -113,7 +113,7 @@ runs:
     # and three Intel jobs that stalled in this setup on 2026-11-16 (runs 43801415465 and
     # 43813916763) held it until the job's timeout or a lost runner. Outside Windows a watchdog ends
     # an attempt's process group after `INFRA_RETRY_ATTEMPT_SECONDS`, so the next attempt runs
-    # instead. Each retry is an `infra-retry` event (`apt-install/infra-retry.sh`, FQ-3).
+    # instead. Each retry is an `infra-retry` event (`apt-install/infra-retry.sh`).
     - name: Install dependencies
       env:
         INFRA_RETRY_ATTEMPT_SECONDS: '900'

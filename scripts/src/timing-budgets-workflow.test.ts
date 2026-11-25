@@ -150,7 +150,7 @@ describe('timing-budgets.yml (D-DC17)', () => {
       'playwright-browsers': 'chromium',
     });
     expect(step('budgets', 'Install Chromium for Vitest Browser')?.run).toBe(
-      `pnpm exec ${['play', 'wright'].join('')} install chromium`,
+      `./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec ${['play', 'wright'].join('')} install chromium`,
     );
     expect(step('budgets', 'Run the timing-budget spec')?.run).toBe(
       `xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:timing-budgets --projects "$PROJECT" --parallel=1 --outputStyle=stream \${SHARD:+"--shard=$SHARD"}`,

@@ -166,7 +166,7 @@ describe('ci queue health', () => {
       expect(failedSuites(job({ steps: undefined }), [])).toEqual([]);
     });
 
-    describe('infrastructure step retries (FQ-3)', () => {
+    describe('infrastructure step retries', () => {
       const retried = (step: string, attempt: number, signature: string): Annotation => ({
         path: '.github',
         annotation_level: 'warning',

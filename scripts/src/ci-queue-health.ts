@@ -144,8 +144,7 @@ export type CancelledWaste = {
 
 /**
  * One job-level infrastructure retry event: an `infra-retry` annotation that `.github/actions/apt-install/infra-retry.sh`
- * (and `apt-install.sh`) write for each retried attempt of a setup step and for a step that ran out of attempts
- * (Brain `research/ci-flake-quarantine-blueprint.md`, FQ-3 and RT-6).
+ * (and `apt-install.sh`) write for each retried attempt of a setup step and for a step that ran out of attempts.
  */
 export type InfraRetryEvent = {
   /** The setup step: `apt-install`, `playwright-install`, `pandoc-download`, `pnpm-download`, `pnpm-install`. */

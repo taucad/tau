@@ -99,9 +99,6 @@ export const observePoolerCapacity = (capacity: number): (() => void) => {
  * the plain socket when it upgrades it to TLS; the plain socket still emits `close` under TLS.
  */
 class CountedSocket extends net.Socket {
-  /** Read by postgres.js as the TLS server name; it sets this itself only on sockets it opens. */
-  public host: string | undefined;
-  public port: number | undefined;
   #connected = false;
   #closed = false;
 
@@ -128,7 +125,7 @@ class CountedSocket extends net.Socket {
   }
 }
 
-type SocketOptions = Pick<postgres.ParsedOptions, 'host' | 'port' | 'path'>;
+type SocketOptions = Pick<postgres.ParsedOptions, 'path'>;
 
 /**
  * Keeps an error before postgres.js has attached its own listener (it does once the factory returns)
@@ -143,36 +140,29 @@ const ignoreEarlyError = (): void => {
  *
  * postgres.js writes its SSL request or startup message to the returned socket straight away; a
  * `net.Socket` buffers those writes until it connects, and postgres.js's own error, close and
- * connect-timeout handling are unchanged. Hosts of a multi-host URL are tried in turn, one per
- * connection, as postgres.js does without the option.
+ * connect-timeout handling are unchanged. postgres.js picks the host and port, trying the hosts of a
+ * multi-host URL in turn, and names the TLS server itself when it upgrades the socket.
  *
  * @param pool - The pool the sockets belong to.
  * @returns The factory.
  */
-export const countedSocket = (pool: DatabasePool): ((options: SocketOptions) => net.Socket) => {
-  let next = 0;
-  return (options) => {
+export const countedSocket =
+  (pool: DatabasePool): ((options: SocketOptions, host: string, port: number) => net.Socket) =>
+  (options, host, port) => {
     const socket = new CountedSocket(pool);
     socket.on('error', ignoreEarlyError);
     if (options.path) {
       socket.connect(options.path);
-      return socket;
+    } else {
+      socket.connect(port, host);
     }
-    const index = next % options.host.length;
-    next += 1;
-    const host = options.host[index] ?? options.host[0] ?? 'localhost';
-    const port = options.port[index] ?? options.port[0] ?? 5432;
-    socket.host = host;
-    socket.port = port;
-    socket.connect(port, host);
     return socket;
   };
-};
 
 /**
- * The postgres.js `socket` option for `pool`, to spread into its options: postgres.js reads it
- * (`src/connection.js`, `createSocket`) but its type declarations omit it. Counts the pool's open
- * connections into `tau.db.client.connections`.
+ * The postgres.js `socket` option for `pool`, to spread into its options: postgres.js calls it from
+ * `src/socket.js` (`Socket`), but its `SocketLike` declaration does not admit a `net.Socket`, whose
+ * `end` overloads take a callback. Counts the pool's open connections into `tau.db.client.connections`.
  *
  * @param pool - The pool the sockets belong to.
  * @returns The option.

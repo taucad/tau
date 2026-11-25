@@ -10,7 +10,7 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 /**
  * Mirror the session into the revision actor store.

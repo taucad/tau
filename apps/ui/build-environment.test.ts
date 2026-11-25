@@ -1,23 +1,18 @@
 import { describe, expect, it } from 'vitest';
 /* oxlint-disable eslint/no-restricted-imports -- This test exercises the build configuration seam directly. */
 import {
+  resolveServiceWorkerKillSwitch,
   resolveTauBuildRelease,
-  resolveTauCloudBuildEnabled,
+  resolveUiBuildDirectory,
   resolveTauTelemetryHostCloud,
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 
-describe('resolveTauCloudBuildEnabled', () => {
-  it.each([
-    [undefined, false],
-    ['false', false],
-    ['true', true],
-  ])('resolves %s to %s', (value, expected) => {
-    expect(resolveTauCloudBuildEnabled(value)).toBe(expected);
-  });
-
-  it('rejects non-canonical values', () => {
-    expect(() => resolveTauCloudBuildEnabled('1')).toThrow('must be exactly true or false');
+describe('resolveUiBuildDirectory', () => {
+  it('defaults to build and takes one directory name', () => {
+    expect(resolveUiBuildDirectory(undefined)).toBe('build');
+    expect(resolveUiBuildDirectory('build-self-host')).toBe('build-self-host');
+    expect(() => resolveUiBuildDirectory('../elsewhere')).toThrow('one directory name');
   });
 });
 
@@ -53,3 +48,20 @@ describe('resolveTauBuildRelease', () => {
   );
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end of the build environment's variable names. */
+
+describe('resolveServiceWorkerKillSwitch', () => {
+  it.each([
+    [undefined, false],
+    ['', false],
+    ['false', false],
+    ['true', true],
+  ])('resolves %s to %s', (value, expected) => {
+    expect(resolveServiceWorkerKillSwitch(value)).toBe(expected);
+  });
+
+  it('rejects non-canonical values, so a typo never ships the worker it meant to retire', () => {
+    expect(() => resolveServiceWorkerKillSwitch('1')).toThrow(
+      'TAU_SERVICE_WORKER_KILL_SWITCH must be exactly true or false',
+    );
+  });
+});

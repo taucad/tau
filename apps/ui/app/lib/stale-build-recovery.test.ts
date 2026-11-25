@@ -7,7 +7,10 @@ import {
   autoReloadTimesKey,
   createStaleBuildRecovery,
   isStaleModuleError,
+  autoReloadBudgetWindow,
   preloadFollowUpDelay,
+  realmReloadKey,
+  reloadTimeout,
   staleBuildReloadKey,
 } from '#lib/stale-build-recovery.js';
 import type { LiveBuildSource } from '#lib/stale-build-recovery.js';
@@ -199,16 +202,140 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    ['the server runs this build', async (): Promise<number | undefined> => ownBuildId],
-    ['the server cannot be reached or names no build', async (): Promise<number | undefined> => undefined],
-  ])('should report a genuine failure when %s', async (_label, fetchServerBuildId) => {
-    const { recovery, reload, onSuperseded } = setup({ fetchServerBuildId });
+  it('should report a genuine failure when the server cannot be reached or names no build', async () => {
+    const { recovery, reload, onSuperseded } = setup({ fetchServerBuildId: async () => undefined });
 
     await expect(recovery.recover(failure())).resolves.toBe('current');
 
     expect(reload).not.toHaveBeenCalled();
     expect(onSuperseded).not.toHaveBeenCalled();
+  });
+
+  /* PL7 staging defects D19: the server still runs this build, so the fetch failed and not the build; the realm keeps
+   * the failed module, so only a new realm (a document load of the live build) recovers. */
+  describe('a failure on a build the server still runs', () => {
+    const live = async (): Promise<number | undefined> => ownBuildId;
+
+    it('should reload an untouched page into a new realm once, under the guard and budget', async () => {
+      const now = 1_000_000;
+      const { recovery, reload, onSuperseded, onGenuineFailure, storage } = setup({
+        fetchServerBuildId: live,
+        now: () => now,
+      });
+
+      await expect(recovery.recover(failure())).resolves.toBe('reloading');
+
+      expect(reload).toHaveBeenCalledOnce();
+      expect(onSuperseded).not.toHaveBeenCalled();
+      expect(onGenuineFailure).not.toHaveBeenCalled();
+      expect(JSON.parse(storage.getItem(realmReloadKey) ?? 'null')).toStrictEqual({ build: ownBuildId, at: now });
+      expect(JSON.parse(storage.getItem(autoReloadTimesKey) ?? '[]')).toStrictEqual([now]);
+    });
+
+    it('should call a failure that repeats after that reload genuine, and not reload again', async () => {
+      const storage = createStorage();
+      const now = 1_000_000;
+      const first = setup({ fetchServerBuildId: live, storage, now: () => now });
+      await first.recovery.recover(failure());
+      const afterReload = setup({ fetchServerBuildId: live, storage, now: () => now + 5000 });
+      const repeated = failure();
+
+      await expect(afterReload.recovery.recover(repeated)).resolves.toBe('current');
+      await Promise.resolve();
+
+      expect(first.reload).toHaveBeenCalledOnce();
+      expect(afterReload.reload).not.toHaveBeenCalled();
+      expect(afterReload.onGenuineFailure).toHaveBeenCalledWith(repeated);
+      expect(afterReload.recovery.classify(repeated)).toBe('current');
+    });
+
+    it('should renew the realm again once the last renewal is older than the budget window', async () => {
+      const storage = createStorage();
+      storage.setItem(realmReloadKey, JSON.stringify({ build: ownBuildId, at: 0 }));
+      const { recovery, reload } = setup({ fetchServerBuildId: live, storage, now: () => autoReloadBudgetWindow + 1 });
+
+      await expect(recovery.recover(failure())).resolves.toBe('reloading');
+
+      expect(reload).toHaveBeenCalledOnce();
+    });
+
+    it('should not count a renewal on another build as a repeat', async () => {
+      const storage = createStorage();
+      storage.setItem(realmReloadKey, JSON.stringify({ build: deployedBuildId, at: 0 }));
+      const { recovery, reload } = setup({ fetchServerBuildId: live, storage, now: () => 1 });
+
+      await expect(recovery.recover(failure())).resolves.toBe('reloading');
+
+      expect(reload).toHaveBeenCalledOnce();
+    });
+
+    it('should offer the reload, never force it, once the user has worked on the page', async () => {
+      const { recovery, reload, onSuperseded, onGenuineFailure } = setup({
+        fetchServerBuildId: live,
+        canReloadSafely: () => false,
+      });
+      const error = failure();
+
+      await expect(recovery.recover(error)).resolves.toBe('transient');
+      await Promise.resolve();
+
+      expect(reload).not.toHaveBeenCalled();
+      // The update control is for another build; the panel that failed offers Reload itself.
+      expect(onSuperseded).not.toHaveBeenCalled();
+      expect(onGenuineFailure).not.toHaveBeenCalled();
+      expect(recovery.classify(error)).toBe('transient');
+    });
+
+    it('should offer the reload once the tab spent its automatic reload budget', async () => {
+      const storage = createStorage();
+      storage.setItem(autoReloadTimesKey, JSON.stringify(Array.from({ length: autoReloadBudget }, () => 1)));
+      const { recovery, reload } = setup({ fetchServerBuildId: live, storage, now: () => 2 });
+
+      await expect(recovery.recover(failure())).resolves.toBe('transient');
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(storage.getItem(realmReloadKey)).toBeNull();
+    });
+
+    it('should never reload for optional code, which degrades where it failed', async () => {
+      const { recovery, reload, onGenuineFailure } = setup({ fetchServerBuildId: live });
+
+      await expect(recovery.recover(failure(), 'optional')).resolves.toBe('transient');
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(onGenuineFailure).not.toHaveBeenCalled();
+    });
+
+    it('should hand a failure from the code-loading owner to the error tracker itself', async () => {
+      const { recovery, reportToErrorTracker } = setup({ fetchServerBuildId: live });
+      const error = failure();
+
+      await recovery.recover(error, 'loader');
+
+      expect(reportToErrorTracker).toHaveBeenCalledWith(error);
+    });
+
+    it('should decide what a stalled reload into a new realm covered as offered', async () => {
+      vi.useFakeTimers();
+      const { recovery } = setup({ fetchServerBuildId: live });
+      const error = failure();
+
+      await expect(recovery.recover(error)).resolves.toBe('reloading');
+      expect(recovery.readReloadState()).toBe('pending');
+      await vi.advanceTimersByTimeAsync(reloadTimeout);
+
+      expect(recovery.readReloadState()).toBe('stalled');
+      expect(recovery.readOutcome(error)).toBe('transient');
+    });
+
+    it('should never reload for the error tracker’s own chunk, which a content blocker holds back', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { recovery, reload } = setup({ fetchServerBuildId: live });
+
+      await expect(recovery.recover(failure(), 'sdk')).resolves.toBe('current');
+
+      expect(reload).not.toHaveBeenCalled();
+    });
   });
 
   it('should never reload a bundle without a build id', async () => {
@@ -238,7 +365,7 @@ describe('createStaleBuildRecovery', () => {
   });
 
   it('should answer every report of one failure from one check, even after a current outcome', async () => {
-    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => ownBuildId);
+    const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => undefined);
     const { recovery } = setup({ fetchServerBuildId });
     const error = failure();
 
@@ -261,7 +388,10 @@ describe('createStaleBuildRecovery', () => {
   it('should check again for a later failure once the server reported this build', async () => {
     let served = ownBuildId;
     const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => served);
-    const { recovery, reload } = setup({ fetchServerBuildId });
+    const storage = createStorage();
+    // This tab already reloaded into a new realm on this build, so a failure on it now is genuine (D19).
+    storage.setItem(realmReloadKey, JSON.stringify({ build: ownBuildId, at: Date.now() }));
+    const { recovery, reload } = setup({ fetchServerBuildId, storage });
 
     await expect(recovery.recover(failure())).resolves.toBe('current');
     served = deployedBuildId;
@@ -541,7 +671,10 @@ describe('createStaleBuildRecovery', () => {
     it.each(['boundary', 'global', 'preload'] as const)(
       'should tell analytics once of a %s failure decided genuine, when it is decided',
       async (source) => {
-        const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
+        const storage = createStorage();
+        // The tab already reloaded into a new realm on this build, so this failure is genuine (D19).
+        storage.setItem(realmReloadKey, JSON.stringify({ build: ownBuildId, at: Date.now() }));
+        const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId, storage });
         const error = failure();
 
         await recovery.recover(error, source);
@@ -568,7 +701,7 @@ describe('createStaleBuildRecovery', () => {
 
     it.each([
       ['a deploy explains it', async (): Promise<number | undefined> => deployedBuildId, 'superseded'],
-      ['the live build still has it', async (): Promise<number | undefined> => ownBuildId, 'current'],
+      ['the live build failed to load it once', async (): Promise<number | undefined> => ownBuildId, 'transient'],
       ['the server did not say', async (): Promise<number | undefined> => undefined, 'unknown'],
     ] as const)('should tag a failure for the error tracker when %s', async (_label, fetchServerBuildId, tag) => {
       const { recovery } = setup({ fetchServerBuildId, canReloadSafely: () => false });
@@ -713,7 +846,8 @@ describe('createStaleBuildRecovery', () => {
       const { recovery } = setup({ fetchServerBuildId: async () => ownBuildId });
       await recovery.recover(failure());
 
-      expect(recovery.classify(failure())).toBe('current');
+      // On the live build a failure is a fetch a new realm recovers until it repeats after one (D19).
+      expect(recovery.classify(failure())).toBe('transient');
     });
   });
 

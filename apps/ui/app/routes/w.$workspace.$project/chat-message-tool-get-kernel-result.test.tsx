@@ -69,7 +69,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }): React.JSX.Element {
     return (
       <a data-testid='file-link' data-path={path} href={`#${path}`}>
@@ -79,7 +79,7 @@ vi.mock('#components/files/file-link.js', () => ({
   },
 }));
 
-vi.mock('#components/files/viewer-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/viewer-link', () => ({
   ViewerLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }): React.JSX.Element {
     return (
       <a data-testid='viewer-link' data-path={path} href={`#${path}`}>
@@ -89,7 +89,7 @@ vi.mock('#components/files/viewer-link.js', () => ({
   },
 }));
 
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer({ children }: { readonly children: string }): React.JSX.Element {
     return <span>{children}</span>;
   },

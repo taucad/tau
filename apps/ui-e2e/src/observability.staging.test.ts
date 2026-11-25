@@ -1,10 +1,12 @@
 // @vitest-environment node
 import process from 'node:process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium, webkit, request } from 'playwright';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  diagnoseMissingDesktopSignals,
   observeHarnessPage,
   harnessNavigationTimeout,
   harnessPath,
@@ -163,18 +165,33 @@ describe('Later staging signal acceptance — pending implementation', () => {
 });
 
 /*
- * T-R9.3 (desktop resilient startup blueprint, R9 and D5). The staging desktop job forces one file-service configure
- * failure and one unhealthy boot in a staging build of the release under test before this target runs, and names that
- * release in `TAU_DESKTOP_SENTRY_RELEASE` (`tau-desktop@<version>`). The probe then proves the pipe end to end: each
- * event arrives in `tau-desktop` exactly once for that release, carries no path, and the issue alert filtering on its
- * `tau_event` tag fired for it (tau-cloud I1). Neither event exists yet, and whether `tau-desktop` ingests anything
- * from 0.4.0 builds is unverified, so the row lands as `it.fails`; the package that emits the last event removes the
- * mark. Only ids, tag names and counts are asserted or logged.
+ * T-R9.3 (desktop resilient startup blueprint, R9 and D5). `desktop-boot-signals-staging.yml` downloads the published
+ * staging release under test, forces one unhealthy boot and one file-service configure failure in it
+ * (`apps/desktop/scripts/force-boot-signals.sh`), then runs these rows with that release named in
+ * `TAU_DESKTOP_SENTRY_RELEASE` (`tau-desktop@<version>`) and the time the forcing began in `TAU_DESKTOP_SIGNALS_SINCE`,
+ * so only that forcing's events count and the same release can be forced again. The renderer's
+ * `file_service.start_failed` crosses IPC and leaves from main, so both events are filed in `tau-desktop` under main's
+ * environment and release.
+ *
+ * Ingestion and alerting are separate rows, so the pipe can be proved before the issue alerts of tau-cloud I1 exist:
+ * the first looks for each signal on its own, logs what it found for each, and asserts each arrived exactly once and
+ * carries no path; the second that the alert filtering on its `tau_event` tag fired for it. No published staging
+ * release emits both events yet, and I1 is not applied, so both rows land as `it.fails`; each mark goes when its row
+ * passes on a dispatched run. Only ids, tag names and counts are asserted or logged. When a signal is missing the
+ * first row also logs `diagnoseMissingDesktopSignals`: the signal under any environment, every event and session of
+ * the release, whether Sentry lists the release, and the project's error outcomes at ingest over the window.
  */
 const desktopBootSignals = ['file_service.start_failed', 'desktop-boot-unhealthy'] as const;
+type DesktopBootSignal = (typeof desktopBootSignals)[number];
 
 /** A person's home, a macOS temporary folder or a rehearsal folder: what a report must never carry (Rules, 3). */
 const personalPathPattern = /\/(?:Users|home)\/[^/\s"]+|[A-Za-z]:\\{1,2}Users|\/var\/folders\/|tau-desktop-e2e-pick-/u;
+
+/** How long a forced event may take to be searchable, and how often to look. */
+const desktopSignalWindow = 180_000;
+const desktopSignalInterval = 10_000;
+/** After the first sighting, one more read this much later, so a late duplicate is still counted. */
+const desktopSignalSettle = 15_000;
 
 const sentryRead = async (path: string, token: string): Promise<unknown> => {
   const response = await fetch(new URL(path, 'https://us.sentry.io/api/0/'), {
@@ -192,47 +209,133 @@ const sentryRead = async (path: string, token: string): Promise<unknown> => {
   });
 };
 
+/** The oldest forcing the probe reads back: Sentry's event search is not asked further than this. */
+const desktopSignalSinceLimit = 7 * 24 * 60 * 60 * 1000;
+
+type DesktopSignalInputs = { token: string; release: string; since: string };
+
+const desktopSignalInputs = (): DesktopSignalInputs => {
+  const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
+  expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
+  const release = process.env['TAU_DESKTOP_SENTRY_RELEASE'] ?? '';
+  expect(release, 'Name the forced staging release in TAU_DESKTOP_SENTRY_RELEASE').toMatch(/^tau-desktop@\S+$/u);
+  const since = process.env['TAU_DESKTOP_SIGNALS_SINCE'] ?? '';
+  expect(since, 'Name when the forcing began in TAU_DESKTOP_SIGNALS_SINCE (UTC, ISO 8601)').toMatch(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u,
+  );
+  const age = Date.now() - Date.parse(since);
+  expect(age >= -60_000 && age <= desktopSignalSinceLimit, 'TAU_DESKTOP_SIGNALS_SINCE is within the last 7 days').toBe(
+    true,
+  );
+  return { token, release, since };
+};
+
+/** The ids of one signal's events in `tau-desktop` for the release since the forcing began, in staging. */
+const readSignalIds = async (
+  signal: DesktopBootSignal,
+  { release, since, token }: DesktopSignalInputs,
+): Promise<string[]> => {
+  const query = new URLSearchParams({
+    project: '-1',
+    query: `project:tau-desktop tau_event:${signal} release:"${release}"`,
+    field: 'id',
+    start: since,
+    end: new Date().toISOString(),
+  });
+  for (const environment of harnessSentryEnvironments) {
+    query.append('environment', environment);
+  }
+  const listing = await sentryRead(`organizations/taucad/events/?${query.toString()}`, token);
+  return typeof listing === 'object' && listing !== null && 'data' in listing && Array.isArray(listing.data)
+    ? listing.data.flatMap((row: unknown) =>
+        typeof row === 'object' && row !== null && 'id' in row && typeof row.id === 'string' ? [row.id] : [],
+      )
+    : [];
+};
+
+/** Wait for a signal's events to be searchable, then read once more after a settle so a duplicate is counted. */
+const pollSignalIds = async (signal: DesktopBootSignal, inputs: DesktopSignalInputs): Promise<string[]> => {
+  const deadline = Date.now() + desktopSignalWindow;
+  let attempts = 0;
+  // oxlint-disable no-await-in-loop -- Sequential reads that share one bounded deadline.
+  while (Date.now() < deadline) {
+    attempts += 1;
+    const seen = await readSignalIds(signal, inputs);
+    if (seen.length > 0) {
+      await sleep(desktopSignalSettle);
+      const ids = await readSignalIds(signal, inputs);
+      console.info('Desktop boot signal indexed', { signal, attempts, count: ids.length });
+      return ids;
+    }
+    await sleep(Math.min(desktopSignalInterval, Math.max(0, deadline - Date.now())));
+  }
+  // oxlint-enable no-await-in-loop
+  console.info('Desktop boot signal not indexed', { signal, attempts });
+  return [];
+};
+
+const eventCreated = (detail: unknown): number =>
+  typeof detail === 'object' && detail !== null && 'dateCreated' in detail && typeof detail.dateCreated === 'string'
+    ? Date.parse(detail.dateCreated)
+    : Number.NaN;
+
 describe('R9 desktop boot signals on staging (T-R9.3)', () => {
   // Expected-failure: @rifont until 2026-12-15
-  it.fails('should receive one file_service.start_failed and one desktop-boot-unhealthy for the release with no path and fire both alerts', async () => {
-    const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
-    expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
-    const release = process.env['TAU_DESKTOP_SENTRY_RELEASE'] ?? '';
-    expect(release, 'Name the forced staging release in TAU_DESKTOP_SENTRY_RELEASE').toMatch(/^tau-desktop@\S+$/u);
+  it.fails('should receive exactly one file_service.start_failed and one desktop-boot-unhealthy for the release with no path', async () => {
+    const inputs = desktopSignalInputs();
+    /* Each signal is looked for on its own, so a missing one never hides what the other did; the row fails at the
+     * end, naming every signal that was missing, duplicated or carried a path. */
+    const findings = await Promise.all(
+      desktopBootSignals.map(async (signal) => {
+        const ids = await pollSignalIds(signal, inputs);
+        const [id] = ids;
+        const readableId = ids.length === 1 && id !== undefined && /^[\da-f]{32}$/u.test(id);
+        let carriesPath = false;
+        if (readableId) {
+          const detail = await sentryRead(`projects/taucad/tau-desktop/events/${id}/`, inputs.token);
+          // Only a boolean leaves the detail, so a leaked path never reaches the test output.
+          carriesPath = personalPathPattern.test(JSON.stringify(detail));
+        }
+        console.info('Desktop boot signal result', {
+          signal,
+          found: ids.length > 0,
+          count: ids.length,
+          eventIds: ids,
+        });
+        return { signal, count: ids.length, readableId, carriesPath };
+      }),
+    );
+    /* A missing signal explains itself: where else it, or anything of the release, landed, and what ingest did with
+     * the project's errors over the window. Counts and Sentry's own names only. */
+    const missing = findings.filter(({ count }) => count === 0).map(({ signal }) => signal);
+    if (missing.length > 0) {
+      const diagnostics = await diagnoseMissingDesktopSignals(missing, { ...inputs, until: new Date().toISOString() });
+      console.info('Desktop boot signal diagnostics', JSON.stringify(diagnostics));
+    }
+    const problems = findings.flatMap(({ signal, count, readableId, carriesPath }) => {
+      if (count !== 1) {
+        return [`${signal}: ${String(count)} events since the forcing, expected exactly one`];
+      }
+      if (!readableId) {
+        return [`${signal}: the event id is not a Sentry event id`];
+      }
+      return carriesPath ? [`${signal}: carries a path`] : [];
+    });
+    expect(problems, 'each desktop boot signal arrived exactly once, with no path').toEqual([]);
+  }, 480_000);
+
+  // Expected-failure: @rifont until 2026-12-15
+  it.fails('should fire the tau_event issue alert for each forced desktop boot signal (tau-cloud I1)', async () => {
+    const inputs = desktopSignalInputs();
+    const { token } = inputs;
     const rules = await sentryRead('projects/taucad/tau-desktop/rules/?expand=lastTriggered', token);
     expect(Array.isArray(rules), 'tau-desktop issue alert rules').toBe(true);
     for (const signal of desktopBootSignals) {
-      const query = new URLSearchParams({
-        project: '-1',
-        query: `project:tau-desktop tau_event:${signal} release:"${release}"`,
-        field: 'id',
-        statsPeriod: '24h',
-      });
-      for (const environment of harnessSentryEnvironments) {
-        query.append('environment', environment);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- Two queries, read in order so a refusal names its signal.
-      const listing = await sentryRead(`organizations/taucad/events/?${query.toString()}`, token);
-      const ids =
-        typeof listing === 'object' && listing !== null && 'data' in listing && Array.isArray(listing.data)
-          ? listing.data.flatMap((row: unknown) =>
-              typeof row === 'object' && row !== null && 'id' in row && typeof row.id === 'string' ? [row.id] : [],
-            )
-          : [];
-      expect(ids, `exactly one ${signal} for the release`).toHaveLength(1);
-      const id = ids[0] ?? '';
-      expect(id).toMatch(/^[\da-f]{32}$/u);
+      // oxlint-disable-next-line no-await-in-loop -- The ingestion row already waited; one read for each signal.
+      const [id] = await readSignalIds(signal, inputs);
+      expect(id, `a ${signal} event for the release`).toMatch(/^[\da-f]{32}$/u);
       // oxlint-disable-next-line no-await-in-loop -- One detail read for each signal.
-      const detail = await sentryRead(`projects/taucad/tau-desktop/events/${id}/`, token);
-      // Assert only a boolean so a leaked path never reaches the test output.
-      expect(personalPathPattern.test(JSON.stringify(detail)), `${signal} carries no path`).toBe(false);
-      const created =
-        typeof detail === 'object' &&
-        detail !== null &&
-        'dateCreated' in detail &&
-        typeof detail.dateCreated === 'string'
-          ? Date.parse(detail.dateCreated)
-          : Number.NaN;
+      const created = eventCreated(await sentryRead(`projects/taucad/tau-desktop/events/${id ?? ''}/`, token));
       const fired = (Array.isArray(rules) ? rules : []).some((rule: unknown) => {
         const text = JSON.stringify(rule);
         const lastTriggered =
@@ -242,7 +345,6 @@ describe('R9 desktop boot signals on staging (T-R9.3)', () => {
         return text.includes('tau_event') && text.includes(signal) && lastTriggered >= created;
       });
       expect(fired, `the ${signal} alert fired for the event`).toBe(true);
-      console.info('Desktop boot signal observed', { signal, eventId: id });
     }
-  }, 120_000);
+  }, 60_000);
 });

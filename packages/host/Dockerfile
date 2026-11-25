@@ -59,12 +59,10 @@
 #     reports for the bound project with the device credential, and only what
 #     the owner's grant for that project allows.
 
-# Node 26, not the API image's 24.3.0: tsdown's config loader trips a Node bug
-# fixed in 24.11.1 ("Failed to load the config file due to a known Node.js bug"),
-# which every workspace package's build hits. The workspace's own answer to this
-# is the same one — package builds run under 26.7.0 while tests and the daemon
-# run under 24.10.0 — and one version across build and runtime keeps a single
-# native ABI in the pruned tree.
+# Node 26: tsdown's config loader trips a Node bug fixed in 24.11.1 ("Failed to
+# load the config file due to a known Node.js bug") on older 24.x releases, and CI
+# builds and tests on Node 26 too (`setup-nx`). One version across build and runtime
+# keeps a single native ABI in the pruned tree.
 ARG NODE_VERSION=26.7.0
 # The workspace's `packageManager` pin: the deploy below needs pnpm 11.
 ARG PNPM_VERSION=11.7.0

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
-import { useComposerRecord } from '#hooks/composer-record.js';
+import { useComposerRecord } from '@taucad/chat-ui/hooks/composer-record';
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 

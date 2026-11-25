@@ -11,7 +11,10 @@ import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { flush } from '@taucad/xstate-testing/clock';
 import { describe, expect, it, vi } from 'vitest';
-import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
+import {
+  FinancialSessionProvider,
+  FinancialSessionScope,
+} from '@taucad/billing-ui/providers/financial-session-provider';
 import { SessionsProvider, useProjectSession, useSessions } from '#hooks/use-sessions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
@@ -27,7 +30,7 @@ vi.mock('#runtime/project-runtime.session.js', async () => {
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
-vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: async () => undefined }));
 /* A6c: the session builds its file manager through the runtime's host once `rootFiles` holds the shared worker. jsdom
  * has no worker, so the host reports an inert one and a ready stand-in opens. */
 vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {

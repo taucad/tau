@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text.Json;
 using PicoGK;
 namespace Tau.PicoGK.Worker;
@@ -16,7 +15,7 @@ internal static class ComputeLayoutCodec
     }
     internal static string Digest(params Array[] arrays)
     {
-        using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);hash.AppendData("PKLIN001"u8);Span<byte> header=stackalloc byte[8];
+        using var hash=new StreamingSha256();hash.AppendData("PKLIN001"u8);Span<byte> header=stackalloc byte[8];
         foreach(var array in arrays){BinaryPrimitives.WriteInt32LittleEndian(header,array.Length);BinaryPrimitives.WriteInt32LittleEndian(header[4..],array is float[]?1:array.GetType()==typeof(uint[])?2:3);hash.AppendData(header);
             if(array is float[] floats)HashWords(hash,MemoryMarshal.AsBytes(floats.AsSpan()),BitConverter.IsLittleEndian);else if(array.GetType()==typeof(uint[]))HashWords(hash,MemoryMarshal.AsBytes(((uint[])array).AsSpan()),BitConverter.IsLittleEndian);else if(array is int[] sources)HashWords(hash,MemoryMarshal.AsBytes(sources.AsSpan()),BitConverter.IsLittleEndian);else throw new ArgumentException("Unknown layout input array.");}
         return "sha256:"+Convert.ToHexStringLower(hash.GetHashAndReset());
@@ -56,7 +55,7 @@ internal static class ComputeLayoutCodec
         for(int offset=0;offset<native.Length;offset+=4)
             BinaryPrimitives.WriteUInt32LittleEndian(wire[offset..],BinaryPrimitives.ReadUInt32BigEndian(native[offset..]));
     }
-    private static void HashWords(IncrementalHash hash,ReadOnlySpan<byte> native,bool littleEndian)
+    private static void HashWords(StreamingSha256 hash,ReadOnlySpan<byte> native,bool littleEndian)
     {
         if(littleEndian){hash.AppendData(native);return;}
         Span<byte> scratch=stackalloc byte[256];

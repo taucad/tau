@@ -56,8 +56,9 @@ const arm = {
   flangeOrigin: [350, 0, 580],
 } as const;
 
+/** The worm gear system's mechanism on stand-in shapes: the shipped wheel's hob cuts take longer than the framing budget. */
 const wormGear = {
-  locator: 'replicad.worm-gear-system',
+  locator: 'replicad.worm-mechanism-fixture',
   worm: 'component:single-start-worm',
   wheel: 'component:bronze-wheel-30-teeth',
   wheelTeeth: 30,

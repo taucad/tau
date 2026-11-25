@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -118,7 +117,8 @@ internal static class MeshArtifactWriter
          * hash it was a second full pass over every mesh. The scalars are written as whole spans —
          * little-endian, which every supported target is and which the host reader already assumes —
          * instead of one `BinaryWriter` call per float. */
-        using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        // D3: not IncrementalHash, which in the browser holds the whole artifact in a doubling buffer.
+        using var digest = new StreamingSha256();
         using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
             foreach (var component in components)
@@ -224,13 +224,13 @@ internal static class MeshArtifactWriter
         return true;
     }
 
-    private static void Align(Stream stream, IncrementalHash digest)
+    private static void Align(Stream stream, StreamingSha256 digest)
     {
         var padding = (int)((4 - stream.Position % 4) % 4);
         if (padding != 0) Append(stream, digest, new byte[padding]);
     }
 
-    private static void Append(Stream stream, IncrementalHash digest, ReadOnlySpan<byte> bytes)
+    private static void Append(Stream stream, StreamingSha256 digest, ReadOnlySpan<byte> bytes)
     {
         stream.Write(bytes);
         digest.AppendData(bytes);

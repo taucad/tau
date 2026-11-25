@@ -1,0 +1,27 @@
+name: 'Install apt packages'
+description: 'Ubuntu packages and Playwright browser system dependencies, with apt retries, backoff and an archive fallback when the Azure mirror fails'
+
+# Every apt install on a runner goes through here (scripts/src/apt-resilience.test.ts pins it). Playwright jobs pass
+# `playwright-browsers` and then run `playwright install <browsers>` without `--with-deps`. The step still fails once
+# every attempt has failed; see apt-install.sh.
+inputs:
+  packages:
+    description: 'Whitespace-separated `apt-get install -y` arguments: packages, optionally with options such as --no-install-recommends'
+    required: false
+    default: ''
+  playwright-browsers:
+    description: 'Space- or comma-separated Playwright browsers whose system dependencies to install (run after setup-nx or pnpm install)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install apt packages
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        APT_INSTALL_PLAYWRIGHT_BROWSERS: ${{ inputs.playwright-browsers }}
+      run: |
+        read -r -d '' -a arguments <<<"$PACKAGES" || true
+        "$GITHUB_ACTION_PATH/apt-install.sh" "${arguments[@]}"

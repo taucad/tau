@@ -1,0 +1,30 @@
+import process from 'node:process';
+
+import { describe, expect, it } from 'vitest';
+
+import { OutcomeReporter } from '#outcome-reporter.js';
+import { testReporters } from '#test-reporters.js';
+
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+
+describe('testReporters', () => {
+  it('adds github-actions on GitHub Actions and always ends with the outcome recorder', () => {
+    const ci = testReporters('verbose', { GITHUB_ACTIONS: 'true' });
+    expect(ci.slice(0, 2)).toEqual(['verbose', 'github-actions']);
+    expect(ci[2]).toBeInstanceOf(OutcomeReporter);
+
+    const local = testReporters('verbose', {});
+    expect(local[0]).toBe('verbose');
+    expect(local[1]).toBeInstanceOf(OutcomeReporter);
+    expect(local).toHaveLength(2);
+  });
+
+  it('defaults to the default console reporter and the process environment', () => {
+    const reporters = testReporters();
+    expect(reporters[0]).toBe('default');
+    expect(reporters.at(-1)).toBeInstanceOf(OutcomeReporter);
+    expect(reporters).toHaveLength(process.env['GITHUB_ACTIONS'] === 'true' ? 3 : 2);
+  });
+});
+
+/* eslint-enable @typescript-eslint/naming-convention -- End wire names. */

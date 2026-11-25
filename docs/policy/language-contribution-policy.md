@@ -94,7 +94,7 @@ Cover URI normalization, Tier 1 reads, Tier 2 closed-file reads, version lookup,
 - Tier 2 client/server: `apps/libs/lsp-fs/src/sync`
 - Main-thread bridge: `apps/libs/lsp/src/language-fs-bridge.ts`
 - TypeScript worker: `apps/libs/lsp/src/typescript-worker`
-- UI language contributions: `apps/ui/app/lib/*-language`
-- TypeScript view adapters and declarations: `apps/ui/app/lib/typescript-language`
-- Neutral document and checked-edit owners: `apps/libs/editor-ui/src/lib/editor-document-session.ts`, `apps/ui/app/lib/editor-workspace-edits.ts`
+- UI language contributions: `apps/libs/editor-ui/src/lib/*-language`, dispatched by `apps/libs/editor-ui/src/lib/editor-language-runtime.ts`; the app supplies build-owned inputs (staged assets, the KCL worker) through `apps/ui/app/lib/editor-language-runtime.ts`
+- TypeScript view adapters and declarations: `apps/libs/editor-ui/src/lib/typescript-language`
+- Neutral document and checked-edit owners: `apps/libs/editor-ui/src/lib/editor-document-session.ts`, `apps/libs/editor-ui/src/lib/editor-workspace-edits.ts`
 - Shared grammars: `libs/grammars`

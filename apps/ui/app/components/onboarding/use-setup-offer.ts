@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { authClient } from '#lib/auth-client.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { hasUsedPageSince } from '#components/onboarding/home-interaction.js';
@@ -17,8 +17,9 @@ import { setupEntryParameter } from '#components/onboarding/setup-entry.js';
  * @param input - Whether this is the desktop's first run.
  */
 export const useSetupOffer = ({ isDesktopFirstRun }: Readonly<{ isDesktopFirstRun: boolean }>): void => {
-  const isOnboardingEnabled = useFeature('onboarding');
-  const isAutoOpenEnabled = useFeature('onboardingAutoOpen');
+  /* Only a known `on` offers setup; the effect runs again when the flags arrive. */
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
+  const isAutoOpenEnabled = useFeatureState('onboardingAutoOpen') === 'on';
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const { data: session, isPending } = useSession(authClient);

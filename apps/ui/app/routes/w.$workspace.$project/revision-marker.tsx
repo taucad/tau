@@ -38,9 +38,9 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '@taucad/editor-ui/components/code/diff-viewer';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
-import { NamePopover } from '#components/revisions/name-popover.js';
-import { BranchSwatch, HistoryLanesContext } from '#components/revisions/revision-graph-view.js';
-import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
+import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
+import { BranchSwatch, HistoryLanesContext } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 import {
   timelineGutter,
   timelineMarker,
@@ -48,12 +48,12 @@ import {
   timelineRowButton,
   timelineRowContent,
   timelineRowHover,
-} from '#components/revisions/revision-timeline.js';
-import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+} from '@taucad/revisions-ui/components/revisions/revision-timeline';
+import { resolveHighlightLanguageForPath } from '@taucad/editor-ui/lib/code-language-resolution';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProjectRole, useRevisionCommands } from '#hooks/use-revision-status.js';
 import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import {

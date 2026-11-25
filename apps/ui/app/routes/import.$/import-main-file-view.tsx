@@ -4,10 +4,10 @@ import { PageHeader } from '#components/layout/page-header.js';
 import { useId, useMemo } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { ImportViewer } from '#routes/import.$/import-viewer.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
-import { supportedKernelExtensions } from '#routes/import.$/import.utils.js';
+import { isMainFileCandidate } from '#routes/import.$/import.utils.js';
 import type { ImportPreviewLoader } from '#routes/import.$/import-viewer.js';
 
 type ImportMainFileViewProperties = {
@@ -44,11 +44,7 @@ export function ImportMainFileView({
 }: ImportMainFileViewProperties): React.JSX.Element {
   const mainFileLabelId = useId();
   const fileNames = useMemo(() => files.map(({ path }) => path), [files]);
-  const cadSources = useMemo(
-    () =>
-      fileNames.filter((path) => supportedKernelExtensions.some((extension) => path.toLowerCase().endsWith(extension))),
-    [fileNames],
-  );
+  const cadSources = useMemo(() => fileNames.filter((path) => isMainFileCandidate(path)), [fileNames]);
   /*
    * The preview asks for the CAD sources first, then every other file a model
    * may read beside them (a mesh, a data file), all within the loader's byte

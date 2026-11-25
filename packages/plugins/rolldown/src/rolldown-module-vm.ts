@@ -257,11 +257,25 @@ const createSourcePlugin = (
   },
 });
 
-const banner = (modules: ReadonlyMap<string, BuiltinModule>): string =>
-  `${[...modules.values()]
+/**
+ * The script prelude a bundle starts with: one binding per built-in module global, in name order.
+ *
+ * @param modules - The registered built-in modules.
+ * @param names - The module names to bind, or every registered module when omitted.
+ * @returns The banner source.
+ */
+const banner = (modules: ReadonlyMap<string, BuiltinModule>, names?: readonly string[]): string => {
+  const selected = names === undefined ? undefined : new Set(names);
+  const globals = [...modules.entries()]
+    .filter(([name]) => selected === undefined || selected.has(name))
+    .map(([, module]) => module)
     .filter((module) => module.globalName !== undefined && module.registryExpression !== undefined)
     .map((module) => `const ${module.globalName} = ${module.registryExpression};`)
-    .join('\n')}\nconst exports = {};\nconst module = { exports };`;
+    // Each line starts with its global's name, so this orders by name, not by registration.
+    .toSorted()
+    .join('\n');
+  return `${globals}\nconst exports = {};\nconst module = { exports };`;
+};
 
 /** Host-independent Rolldown module VM. @internal */
 export class RolldownModuleVm {
@@ -347,7 +361,11 @@ export class RolldownModuleVm {
    * @param signal - Operation cancellation signal.
    * @returns Bundle output or structured issues.
    */
-  public async bundle(entryPath: string, signal = new AbortController().signal): Promise<RuntimeBundleResult> {
+  public async bundle(
+    entryPath: string,
+    signal = new AbortController().signal,
+    globals?: readonly string[],
+  ): Promise<RuntimeBundleResult> {
     const session = this.#host.beginSession({ mode: 'bundle', signal, entryPath });
     const resolutions = new Map<string, BundlerSourceResolution>();
     const issues: KernelIssue[] = [];
@@ -367,7 +385,7 @@ export class RolldownModuleVm {
         format: 'esm',
         codeSplitting: false,
         sourcemap: 'hidden',
-        banner: banner(this.#builtins),
+        banner: banner(this.#builtins, globals),
       });
       const chunk = output.output.find((item) => item.type === 'chunk');
       if (chunk === undefined) {

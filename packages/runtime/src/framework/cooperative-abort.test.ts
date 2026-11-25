@@ -45,4 +45,33 @@ describe('cooperative-abort', () => {
     controller.abort(new RenderAbortedError());
     expect(checkAbort).toThrow(RenderAbortedError);
   });
+
+  it('throws the cancellation error, not the reason, once a supersede aborted the signal', () => {
+    // A superseded document aborts its signal with a numeric reason; the first check after the shared state moved
+    // does so itself. Every later check must still throw a `RenderAbortedError`, which the kernels and the OCCT
+    // error formatter recognise, instead of the bare reason.
+    const view = documentAbortView(new SharedArrayBuffer(signalBufferByteLength));
+    if (!view) {
+      throw new Error('Expected the document signal view.');
+    }
+    const controller = new AbortController();
+    const state = beginDocumentAbort(view, 1);
+    setAbortContext({
+      signal: controller.signal,
+      documentSignalView: view,
+      documentSignalState: state,
+      onSharedAbort: (reason) => {
+        controller.abort(reason);
+      },
+    });
+    endDocumentAbort(view, 1);
+    expect(checkAbort).toThrow(RenderAbortedError);
+    expect(controller.signal.aborted).toBe(true);
+    expect(checkAbort).toThrow(RenderAbortedError);
+
+    const superseded = new AbortController();
+    setAbortContext({ signal: superseded.signal });
+    superseded.abort(1);
+    expect(checkAbort).toThrow(RenderAbortedError);
+  });
 });

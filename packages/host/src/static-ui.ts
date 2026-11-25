@@ -57,10 +57,31 @@ export const isolationHeaders: Readonly<Record<string, string>> = {
   'x-content-type-options': 'nosniff',
 };
 
+/** A mount's URL path: one lowercase segment between slashes. */
+const wasmMountPath = /^\/[\da-z][\d_a-z-]*\/$/u;
+
+/** The one name shape a wasm mount answers: a plain file name ending in `.wasm`. */
+const wasmFileName = /^[\w-]+\.wasm$/u;
+
 const extensionOf = (pathname: string): string => {
   const dot = pathname.lastIndexOf('.');
   const slash = pathname.lastIndexOf('/');
   return dot > slash ? pathname.slice(dot).toLowerCase() : '';
+};
+
+/**
+ * A read-only directory of WebAssembly modules served beside the UI, such as the installed `cadmpeg-ts` engines the
+ * `tau serve` build fetches same-origin (cadmpeg engine delivery charter D12, W6). Only a direct child named
+ * `<name>.wasm` is answered, as `application/wasm` with the isolation headers; any other path under `path` is
+ * refused, and never falls back to the UI.
+ *
+ * @public
+ */
+export type StaticUiWasmMount = {
+  /** URL path the directory is served at: absolute, ending in `/`, such as `/cadmpeg-engines/`. */
+  readonly path: string;
+  /** Absolute directory of the modules. */
+  readonly root: string;
 };
 
 /** Options for {@link serveStaticUi}. @public */
@@ -71,6 +92,8 @@ export type StaticUiOptions = {
   readonly cookieName: string;
   /** Session cookie value: the daemon's channel admission secret. */
   readonly cookieValue: string;
+  /** WebAssembly directories served beside the UI, answered ahead of it. */
+  readonly wasmMounts?: readonly StaticUiWasmMount[] | undefined;
 };
 
 /** A request handler for the daemon's static UI. @public */
@@ -94,19 +117,74 @@ export type StaticUiHandler = {
  */
 export const serveStaticUi = (options: StaticUiOptions): StaticUiHandler => {
   const root = resolve(options.root);
+  const wasmMounts = (options.wasmMounts ?? []).map((mount) => {
+    if (!wasmMountPath.test(mount.path)) {
+      throw new TypeError(`serveStaticUi: wasm mount path ${JSON.stringify(mount.path)} is not /<segment>/`);
+    }
+    return { path: mount.path, root: resolve(mount.root) };
+  });
   /* `HttpOnly` keeps the secret out of script reach, `SameSite=Strict` keeps a
    * foreign page from driving the daemon through the user's browser, and the
    * absence of `Secure` is deliberate: a loopback origin is plain http. */
   const sessionCookie = `${options.cookieName}=${options.cookieValue}; Path=/; HttpOnly; SameSite=Strict`;
 
+  const refuse = (response: ServerResponse, status: 403 | 404): void => {
+    response.writeHead(status, { ...isolationHeaders, 'content-type': 'text/plain; charset=utf-8' });
+    response.end(status === 403 ? 'Forbidden\n' : 'Not found\n');
+  };
+
+  const sendFile = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    found: { readonly file: string; readonly headers: Record<string, string> },
+  ): void => {
+    response.writeHead(200, found.headers);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    createReadStream(found.file).pipe(response);
+  };
+
+  /* A mount answers one file name, decoded, with no separator and no dot segment: anything else under the mount is a
+   * traversal or a request for a file the mount does not hold, and is refused rather than handed to the SPA. */
+  const sendWasm = async (
+    request: IncomingMessage,
+    response: ServerResponse,
+    wanted: { readonly root: string; readonly name: string },
+  ): Promise<void> => {
+    if (!wasmFileName.test(wanted.name)) {
+      refuse(response, 403);
+      return;
+    }
+    const file = join(wanted.root, wanted.name);
+    const fileStat = await stat(file).catch(() => undefined);
+    if (!fileStat?.isFile()) {
+      refuse(response, 404);
+      return;
+    }
+    sendFile(request, response, {
+      file,
+      headers: { ...isolationHeaders, 'content-type': 'application/wasm', 'content-length': String(fileStat.size) },
+    });
+  };
+
   const send = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
+    const rawPathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const mount = wasmMounts.find(({ path }) => rawPathname.startsWith(path) || `${rawPathname}/` === path);
+    if (mount) {
+      await sendWasm(request, response, {
+        root: mount.root,
+        name: decodeURIComponent(rawPathname.slice(mount.path.length)),
+      });
+      return;
+    }
+    const pathname = decodeURIComponent(rawPathname);
     /* Normalize *then* contain: a `..` segment that escapes the root is a
      * traversal attempt, and a normalized prefix check is the only honest test. */
     const requested = resolve(join(root, normalize(pathname)));
     if (requested !== root && !requested.startsWith(root + sep)) {
-      response.writeHead(403, { ...isolationHeaders, 'content-type': 'text/plain; charset=utf-8' });
-      response.end('Forbidden\n');
+      refuse(response, 403);
       return;
     }
     const candidate = await stat(requested).catch(() => undefined);
@@ -121,8 +199,7 @@ export const serveStaticUi = (options: StaticUiOptions): StaticUiHandler => {
           : undefined;
     const targetStat = target ? await stat(target).catch(() => undefined) : undefined;
     if (!target || !targetStat?.isFile()) {
-      response.writeHead(404, { ...isolationHeaders, 'content-type': 'text/plain; charset=utf-8' });
-      response.end('Not found\n');
+      refuse(response, 404);
       return;
     }
     const extension = extensionOf(target);
@@ -137,12 +214,7 @@ export const serveStaticUi = (options: StaticUiOptions): StaticUiHandler => {
       headers['set-cookie'] = sessionCookie;
       headers['cache-control'] = 'no-store';
     }
-    response.writeHead(200, headers);
-    if (request.method === 'HEAD') {
-      response.end();
-      return;
-    }
-    createReadStream(target).pipe(response);
+    sendFile(request, response, { file: target, headers });
   };
 
   return {

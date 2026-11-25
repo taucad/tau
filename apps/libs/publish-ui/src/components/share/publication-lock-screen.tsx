@@ -46,7 +46,7 @@ type VariantConfig = {
 const needOwnerHelpVariants: ReadonlySet<PublicationLockScreenVariant> = new Set(['signInRequired', 'accessDenied']);
 
 /** The auth routes the lock screen links to, each returning to the page it was shown on; the app's `useAuthLinks` makes them. */
-type PublicationLockAuthLinks = {
+export type PublicationLockAuthLinks = {
   readonly magicLink: string;
   readonly signUp: string;
   readonly signOut: string;
@@ -92,10 +92,11 @@ export function PublicationLockScreen({
         };
       }
       case 'unpublished': {
+        /* A stopped link, or a deleted project: the API answers 410 for both, so no cause is stated. */
         return {
           Icon: Archive,
-          headline: 'This design has been unpublished',
-          body: 'The owner removed this share link.',
+          headline: 'This link is no longer shared',
+          body: 'Ask the owner for a new link.',
           primary: { label: 'Go home', action: 'home' },
         };
       }

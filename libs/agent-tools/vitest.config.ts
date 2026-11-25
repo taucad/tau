@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -12,7 +13,7 @@ export default defineConfig({
       tsconfig: resolve(import.meta.dirname, 'tsconfig.spec.json'),
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/libs/agent-tools',

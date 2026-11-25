@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { chunksOf } from '#machines/chat-projection.logic.js';

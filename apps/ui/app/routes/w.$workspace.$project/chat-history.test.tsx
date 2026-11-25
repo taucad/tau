@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render as renderBare, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type {
@@ -12,6 +16,8 @@ import type {
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
+import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -48,9 +54,11 @@ const publishChatState = (state: MockChatState): void => {
   }
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
+let locationSearch = '';
+let presentedChatId = 'chat_test';
 let archiveOpen = false;
 vi.mock('react-router', () => ({
-  useLocation: () => ({ state: locationState }),
+  useLocation: () => ({ state: locationState, search: locationSearch, key: 'default' }),
   useParams: () => ({ workspace: 'home', project: 'one' }),
 }));
 vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
@@ -105,7 +113,7 @@ vi.mock('#hooks/use-chat.js', () => ({
       rememberedComposerTrays: [],
     });
   },
-  useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
+  useChatContext: () => ({ activeChatId: presentedChatId, persistenceActorRef: fakePersistenceActorRef }),
 }));
 
 // Capture the body the chat client receives on submit so the wire-format
@@ -217,7 +225,17 @@ vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
-  FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  FloatingPanelContent: ({
+    children,
+    className,
+  }: {
+    readonly children: React.ReactNode;
+    readonly className?: string;
+  }) => (
+    <div data-slot='floating-panel-content' className={className}>
+      {children}
+    </div>
+  ),
   FloatingPanelContentHeader: ({
     children,
     className,
@@ -252,6 +270,15 @@ vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
   const { useFileManager } = await import('#hooks/use-file-manager.js');
   return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
 });
+
+/* The chat's questions read the shared file-manager context. */
+const fileManager = mock<FileManagerContextValue>();
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
@@ -357,6 +384,14 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
+  /* The archive has no header row, so the host's titlebar clearance reaches its content instead. */
+  it('gives the archive the classes the host passes for it', () => {
+    archiveOpen = true;
+    render(<ChatHistory archiveClassName='pt-9' headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(screen.getByRole('region', { name: 'Archived chats' }).parentElement).toHaveClass('pt-9');
+  });
+
   it('skips hidden transcript and skill projections, then reveals current messages', () => {
     setMockMessages([message('u1', 'user')]);
     const view = render(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
@@ -389,6 +424,16 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(headers[0]).toHaveClass('gap-1');
     expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
     expect(container.querySelector('.sticky')).toBeNull();
+  });
+
+  /* The host's fixed titlebar controls sit over the header's leading edge; the inset must reach the header itself. */
+  it('gives its header row the classes the host passes for it', () => {
+    const { container } = render(<ChatHistory headerClassName='pl-(--titlebar-controls-width)' />);
+
+    expect(container.querySelector('[data-slot=floating-panel-content-header]')).toHaveClass(
+      'gap-1',
+      'pl-(--titlebar-controls-width)',
+    );
   });
 
   /* PL6: the composer adopts only the native input its own project's placeholder served. */
@@ -622,12 +667,33 @@ describe('ChatHistory — composer refocus', () => {
     capturedTextarea.focus = vi.fn<() => void>();
     persistenceListeners.clear();
     locationState = undefined;
+    locationSearch = '';
+    presentedChatId = 'chat_test';
     setMockMessages([]);
   });
 
   it('focuses the composer when a new-chat surface requests it', () => {
     locationState = { focusChatComposer: true };
     render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('focuses the created chat composer once it is presented, not the previous chat held inert during the switch', () => {
+    /* A same-project switch keeps the previous chat on screen, inert, until the created chat is prepared. A focus
+     * given then is dropped by the browser, so the composer waits for the created chat. */
+    locationState = { focusChatComposer: true };
+    locationSearch = '?chat=chat_created';
+    const { rerender } = render(<ChatHistory />);
+
+    expect(capturedTextarea.focus).not.toHaveBeenCalled();
+
+    presentedChatId = 'chat_created';
+    rerender(<ChatHistory className='presented' />);
+
+    expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+
+    rerender(<ChatHistory className='typing' />);
 
     expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
   });
@@ -708,21 +774,28 @@ const readFrame = (): CommitFrame => ({
  * @param history - What the load resolves to: the chat's turns, or none for a truly empty chat.
  * @returns Every commit's frame, and the step that settles the load.
  */
-const renderOverDeferredTranscript = (history: readonly MyUIMessage[]) => {
+/* A fresh performance clock: a document open the lane ends is ended per clock, so a row that times one gets its own. */
+const freshPerformanceClock = (): WaitClock => ({ now: () => performance.now() });
+
+const renderOverDeferredTranscript = (history: readonly MyUIMessage[], clock: WaitClock = freshPerformanceClock()) => {
   const commits: CommitFrame[] = [];
   publishChatState({ messages: [], transcript: 'loading' });
-  render(
-    <Profiler
-      id='chat-history'
-      onRender={() => {
-        commits.push(readFrame());
-      }}
-    >
-      <ChatHistory />
-    </Profiler>,
+  const tree = (
+    <WaitClockProvider clock={clock}>
+      <Profiler
+        id='chat-history'
+        onRender={() => {
+          commits.push(readFrame());
+        }}
+      >
+        <ChatHistory />
+      </Profiler>
+    </WaitClockProvider>
   );
+  const { unmount } = render(tree);
   return {
     commits,
+    unmount,
     resolve: () => {
       act(() => {
         publishChatState({ messages: history, transcript: history.length === 0 ? 'empty' : 'loaded' });
@@ -780,5 +853,172 @@ describe('ChatHistory — transcript load (I21)', () => {
     expect(load.commits.filter((frame) => !frame.loading && frame.turns === 0)).toEqual([]);
     // The list leaves `loading` once the load settles, so the filter above holds that commit to its turns.
     expect(load.commits.at(-1)).toMatchObject({ loading: false, loaded: true, turns: 2 });
+  });
+});
+
+/*
+ * A15d, C9's new rows (loading states UX blueprint, § Chat lane; U7): while the transcript loads, the chat header's
+ * trailing slot holds the wait indicator, which reveals 1,000 ms into the wait; a lane mounted during the document's own
+ * open counts from navigation start, a later wait from its own start. jsdom runs no CSS, so the rows read the reveal
+ * delay the indicator hands its animation.
+ */
+describe('ChatHistory — transcript wait indicator (A15d)', () => {
+  const history = [message('u1', 'user'), message('a1', 'assistant')];
+  const headerIndicator = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"] [data-slot="wait-indicator"]') ??
+    undefined;
+  const navigationEntry = (name: string): PerformanceEntry => ({
+    name,
+    entryType: 'navigation',
+    startTime: 0,
+    duration: 0,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- The DOM's PerformanceEntry names this member.
+    toJSON: () => ({ name }),
+  });
+  const revealDelay = (): number => {
+    const body = headerIndicator()?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    const revealValue = body?.style.getPropertyValue('--wait-reveal-delay') ?? '';
+    const match = /^calc\((-?[\d.]+)ms \+ var\(--wait-offset, 0ms\)\)$|^(-?[\d.]+)ms$/u.exec(revealValue);
+    return Number(match?.[1] ?? match?.[2] ?? Number.NaN);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockMessages([]);
+    archiveOpen = false;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it.each([
+    { opened: '/w/acme/bracket', current: '/w/acme/bracket' },
+    /* The route rewrites the URL it opened with before the transcript waits (review round 5). */
+    { opened: '/w/acme/bracket', current: '/w/acme/bracket?chat=chat-1' },
+  ])(
+    "shows 'Loading chat' in the header's indicator slot (D14) only from 1,000 ms after navigation for the open's own load, opened at $opened, now at $current",
+    ({ opened, current }) => {
+      globalThis.history.replaceState(null, '', current);
+      vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry(`http://localhost${opened}`)]);
+      vi.spyOn(performance, 'now').mockReturnValue(400);
+      renderOverDeferredTranscript(history);
+
+      const indicator = headerIndicator();
+      expect(indicator).toHaveAttribute('data-state', 'waiting');
+      expect(indicator).toHaveTextContent('Loading chat…');
+      /* 600 ms left of the 1,000 ms, counted from navigation start, not from this mount. */
+      expect(revealDelay()).toBe(600);
+      /* A route open is announced once, by the route: the slot is seen, not live. */
+      expect(indicator).not.toHaveAttribute('role', 'status');
+    },
+  );
+
+  /* Review round 8: the route corrects the slugs with `replaceState`, which keeps the history entry. */
+  it('counts the open from navigation start after the route corrects the URL to canonical slugs', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      navigationEntry('http://localhost/w/ws_01/proj_0123456789ABCDEFGHIJK'),
+    ]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'loaded' } });
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(600);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('times a load from its own start on another history entry than the document loaded', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/')]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'pushed' } });
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /* Review round 10: a pushed entry on the document's project (the archive, then a chat) is a later wait. */
+  it('times a load on a pushed entry of the document project from its own start', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket?chat=archived');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'pushed' } });
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('times a return to the document project, after leaving it, from its own start', () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    const first = renderOverDeferredTranscript(history, clock);
+    expect(revealDelay()).toBe(600);
+    /* To Home, which unmounts the lane, and back 10 s later: the transcript loads again, as a later wait. */
+    globalThis.history.replaceState(null, '', '/');
+    first.unmount();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'now').mockReturnValue(10_400);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(revealDelay()).toBe(1000);
+  });
+
+  it('keeps timing the open from navigation start when the lane remounts on the document project', () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    renderOverDeferredTranscript(history, clock).unmount();
+    vi.spyOn(performance, 'now').mockReturnValue(700);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(revealDelay()).toBe(300);
+  });
+
+  /* Review round 14: a replace keeps the document's entry, so the settled open must end on its own. */
+  it("times a lane remounted over a loading chat after the open's transcript settled from its own start", () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    const open = renderOverDeferredTranscript(history, clock);
+    act(() => {
+      publishChatState({ messages: history, transcript: 'loaded' });
+    });
+    open.unmount();
+    vi.spyOn(performance, 'now').mockReturnValue(9000);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(revealDelay()).toBe(1000);
+  });
+
+  it('times a load that starts after the open from its own start', () => {
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    renderOverDeferredTranscript(history);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(revealDelay()).toBe(1000);
+  });
+
+  it('leaves the slot empty for a chat whose transcript is known', () => {
+    publishChatState({ messages: history, transcript: 'loaded' });
+    render(<ChatHistory />);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'idle');
+    expect(headerIndicator()).toBeEmptyDOMElement();
   });
 });

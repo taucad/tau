@@ -98,6 +98,7 @@ export type { KnownArtifact } from '#types/runtime-artifact.js';
 export type * from '#types/runtime-tracer.types.js';
 export type {
   AssetDependency,
+  BundleDependency,
   ContentDependency,
   Dependency,
   ExportDependency,
@@ -165,6 +166,7 @@ export type {
   RealmHold,
   RealmHoldInput,
   RealmResources,
+  KernelExecuteOptions,
 } from '#types/runtime-kernel.types.js';
 export type {
   Artifact,
@@ -182,6 +184,10 @@ export type {
   RenderResult,
   ResolveInput,
   TessellationReport,
+  BuildReport,
+  KernelBuildReport,
+  OperationCost,
+  OperationReuse,
   ResolveOutput,
   ViewDeclaration,
   ViewInstance,

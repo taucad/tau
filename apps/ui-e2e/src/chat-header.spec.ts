@@ -11,7 +11,8 @@ import { composerSelector, prepareComposerPage } from '#support/chat-attachments
  * the name, in place, with the sidebar row following the new name.
  */
 
-const headerSelector = '[data-slot="floating-panel-content"] > [data-slot="floating-panel-content-header"]';
+// Descendant, not child: the chat pane wraps its header in the drop zone, and a child selector matched nothing.
+const headerSelector = '[data-slot="floating-panel-content"] [data-slot="floating-panel-content-header"]';
 const header = (): Locator => selectors.getByCss(headerSelector).first();
 const nameField = (): Locator => selectors.getByRole('textbox', { name: 'Chat name' });
 
@@ -31,7 +32,9 @@ test('carries the name in one header row and lists the meta in the chat menu', a
   await target.expectVisible(header().getByText('Attachments chat', { exact: true }));
   // The status row is gone: nothing sticky sits between the header and the transcript.
   expect(
-    await target.evaluate(() => document.querySelector('[data-slot="floating-panel-content"] > .sticky') === null),
+    await target.evaluate(
+      () => document.querySelector('[data-slot="floating-panel-content-header"] + .sticky') === null,
+    ),
   ).toBe(true);
 
   await target.click(selectors.getByRole('button', { name: 'Chat options' }));

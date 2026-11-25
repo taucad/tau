@@ -15,6 +15,9 @@ import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from
 import { availableParallelism } from 'node:os';
 import { join, resolve, win32 } from 'node:path';
 
+import { integrityFromHex, unattendedFetchRetry } from '@taucad/archive-core';
+import { fetchVerifiedFile } from '@taucad/archive-core/node';
+
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import * as payload from './git-payload.mjs';
 
@@ -35,23 +38,16 @@ const parseTargets = (): string[] => {
   return selected.length > 0 ? selected : [`${process.platform}-${process.arch}`];
 };
 
+// Retried on the shared unattended schedule, verified against the pin, and renamed into the cache only when it matched.
 const download = async (options: Readonly<{ name: string; sha256: string; url: string }>): Promise<string> => {
-  await mkdir(cacheRoot, { recursive: true });
   const path = resolve(cacheRoot, options.name);
-  if ((await payload.sha256Of(path).catch(() => undefined)) === options.sha256) {
-    return path;
-  }
-  const response = await fetch(options.url);
-  if (!response.ok) {
-    throw new Error(`${options.name} download failed with HTTP ${String(response.status)}`);
-  }
-  const temporary = `${path}.${String(process.pid)}.tmp`;
-  await writeFile(temporary, new Uint8Array(await response.arrayBuffer()));
-  if ((await payload.sha256Of(temporary)) !== options.sha256) {
-    await rm(temporary, { force: true });
-    throw new Error(`${options.name} integrity mismatch`);
-  }
-  await rename(temporary, path);
+  await fetchVerifiedFile({
+    url: options.url,
+    path,
+    integrity: integrityFromHex('sha256', options.sha256),
+    retry: unattendedFetchRetry,
+    signal: AbortSignal.timeout(30 * 60 * 1000),
+  });
   return path;
 };
 

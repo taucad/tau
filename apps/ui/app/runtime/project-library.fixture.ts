@@ -1,13 +1,12 @@
 /**
- * A root file facade for tests of the project library (A4b): a fixed value a test can replace, as `rootFiles` publishes
- * a new record client when its worker is replaced.
+ * A root file facade for tests of the app's project library: project-library's `testRootFiles`, typed by the app's facade.
  */
-import { Topic } from '@taucad/events';
-import type { ProjectLibraryRootFiles } from '#runtime/project-library.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import { testRootFiles as testLibraryRootFiles } from '@taucad/project-library/runtime/project-library.fixture';
+import type { TestRootFiles as TestLibraryRootFiles } from '@taucad/project-library/runtime/project-library.fixture';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 
 /** A root file facade whose value a test sets. @public */
-export type TestRootFiles = ProjectLibraryRootFiles & Readonly<{ replace: (fileManager: unknown) => void }>;
+export type TestRootFiles = TestLibraryRootFiles<ProjectLibraryFacade>;
 
 /**
  * A root file facade over a test's file manager double.
@@ -16,15 +15,5 @@ export type TestRootFiles = ProjectLibraryRootFiles & Readonly<{ replace: (fileM
  * @returns The facade, and its replacement.
  * @public
  */
-export const testRootFiles = (fileManager: unknown): TestRootFiles => {
-  let current = fileManager as ProjectLibraryFileManager;
-  const changes = new Topic<void>({ name: 'test-root-files' });
-  return {
-    get: () => current,
-    subscribe: (listener) => changes.subscribe(listener),
-    replace: (next) => {
-      current = next as ProjectLibraryFileManager;
-      changes.emit(undefined);
-    },
-  };
-};
+export const testRootFiles = (fileManager: unknown): TestRootFiles =>
+  testLibraryRootFiles<ProjectLibraryFacade>(fileManager);

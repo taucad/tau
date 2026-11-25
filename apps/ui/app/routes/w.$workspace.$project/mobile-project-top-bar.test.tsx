@@ -246,6 +246,24 @@ describe('selectProjectStatusLine', () => {
     expect(result.tone).toBe(tone);
   });
 
+  /* R2-016: the header's GitHub line still starts “Saved”, so the phone shortens it to Saved. */
+  it('shortens the header’s Saved · Not on GitHub yet to Saved', () => {
+    const projection = status({
+      remote: {
+        ...revisionStatusHarness.status.remote,
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+      },
+      sync: { ...revisionStatusHarness.status.sync, state: 'manual' },
+    });
+    const { sentence } = selectRevisionFacts(projection, onMain);
+    expect(sentence).toMatch(/^Saved/u);
+    expect(sentence).toContain('Not on GitHub yet');
+    expect(line(projection).text).toBe('Saved');
+  });
+
   it('keeps the viewer’s access in the line where Saved alone would hide it', () => {
     expect(line(status(), { ...onMain, role: 'read' }).text).toBe('Saved · View only');
   });
@@ -312,6 +330,27 @@ describe('MobileProjectTopBar', () => {
     expect(topBar()).toHaveClass('h-12', 'md:hidden');
     /* Export, Revisions and Details are not in the bar (D2). */
     expect(within(topBar()).queryByRole('button', { name: /^(Export|History|Details)$/u })).toBeNull();
+  });
+
+  /* The desktop app's narrow window keeps its titlebar row (traffic lights, the shell's sidebar, Back and Forward):
+   * the bar becomes that row instead of drawing under it. */
+  it('joins the desktop titlebar row after its controls, without a second sidebar trigger', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    try {
+      render(<MobileProjectTopBar />, { wrapper });
+
+      const controls = within(topBar()).getAllByRole('button');
+      expect(controls).toHaveLength(2);
+      const [title, share] = controls;
+      expect(title).toBe(titleButton());
+      expect(title).toHaveClass('h-8');
+      expect(share).toHaveAccessibleName('Share');
+      expect(share).toHaveClass('size-7');
+      expect(topBar()).toHaveClass('h-9', 'pl-(--titlebar-controls-width)', '[app-region:drag]', 'md:hidden');
+      expect(topBar()).not.toHaveClass('h-12');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('reads Saved with an uncoloured glyph at rest, and keeps colour off the words (HDR-03, D3)', async () => {

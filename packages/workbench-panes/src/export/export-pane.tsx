@@ -13,6 +13,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
+import { FormatFileIcon } from '@taucad/ui/components/format-badge';
 import { Label } from '@taucad/ui/components/label';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
@@ -31,7 +32,6 @@ import {
 } from '@taucad/viewer/parameters/rjsf-utils';
 import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import { useWorkbenchPanesHost } from '#host/workbench-host.jsx';
-import { FormatFileIcon } from '#components/format-badge.jsx';
 import {
   compileExportConfigurationManifest,
   defaultExportPreferences,

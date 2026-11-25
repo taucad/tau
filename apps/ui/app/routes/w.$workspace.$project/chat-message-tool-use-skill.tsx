@@ -14,7 +14,7 @@ import {
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { loadedSystemSkillBundles, subscribeSystemSkillBundles } from '#lib/lazy-skill-resolver.js';
 
 type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;

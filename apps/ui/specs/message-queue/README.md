@@ -87,3 +87,21 @@ The target additionally checks unique queue membership, persistence of prepared 
 Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm nx formal:tla ui`. The initial weak model preceded implementation; this strengthened model was added after the delivery barrier and replay protocol were refined. Keep that evidence order distinct from the red-first executable runtime tests.
 
 Explicit reorder atomically moves one pending identity before another (or to the end), only while no delivery or steering command is prepared. It changes the saved sequence but preserves command identity, payload and terminal authorization. FIFO is evaluated against this user-selected order. Store tests cover stale targets, concurrent submissions, failed writes, replayed moves and reopening.
+
+DC-10 revisions-ui slice 2 re-pinned the drift after `use-turn-admission.ts` began importing the revision client registry from `@taucad/revisions-ui`; no action changed.
+
+The Tau Cloud naming audit re-pinned the drift after `chat-session-store.ts` reworded its queue-updates error sentence; no action changed.
+
+DC-10 files-ui slice 9 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/files-ui`; no action changed.
+
+The adaptive app deployment mode C6 change re-pinned the drift after `chat-turn-host.tsx` began rebuilding `snapshot.kernel` from the plan read at admission; no action changed.
+
+DC-10 chat-ui slice 1 re-pinned the drift after `chat-message-queue.machine.ts` moved unchanged to `@taucad/chat-ui` and `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` began importing the moved chat modules from there; no action changed.
+
+PL7 staging defects FP9 re-pinned the drift after `chat-textarea.tsx` began loading the headless capture service through the code-loading owner (`loadCode`); no action changed.
+
+UI layering W2 re-pinned the drift after `chat-session-store.ts` began importing `run-auto-resume` from `@taucad/chat-ui`, where it moved unchanged from `@taucad/ui-core`; no action changed.
+
+UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; no action changed.
+
+The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began showing an agent host load failure that the chat's host read met before a seed's command could; the seed stays held until a host read answers, and no action changed.

@@ -1,6 +1,7 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { CoveringSheetStatus } from '#routes/w.$workspace.$project/covering-sheet.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -9,9 +10,10 @@ import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { ENV } from '#environment.config.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
-const DebugProbes = lazy(async () => {
+const DebugProbes = lazyCode(async () => {
   const module = await import('#chat-clients/debug-probes.js');
   return { default: module.DebugProbes };
 });
@@ -122,9 +124,10 @@ export function ChatInterfaceSessionGate({
 }
 
 /**
- * Visual gate for the chat pane. Decides between the skeleton (while
- * the editor machine is re-ensuring the focused chat), the typed error
- * panel (when ensure rejected), or the pane's real content.
+ * Visual gate for the chat pane. Decides between the lane's frame (while
+ * the project opens, with the transcript's shape, or while the editor
+ * machine is re-ensuring the focused chat), the typed error panel (when
+ * ensure rejected), or the pane's real content.
  *
  * Does NOT mount `<ActiveChatProvider>` — that is owned by
  * {@link ChatInterfaceSessionGate} so the viewer toolbar and every
@@ -152,7 +155,14 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   );
 
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    /* The lane keeps its frame through the open and its feed draws the transcript's shape; the viewer says the open
+       (Progressive Loading Policy rules 15 and 17). The frame's composer box, served from first paint, stays over the
+       lane's foot until a composer adopts it, and queues a send meanwhile (rule 20). */
+    return (
+      <ChatLaneFrame headerStatus={<CoveringSheetStatus />}>
+        <ProjectWaitSkeleton state={availability} shape='transcript' label='Chat' />
+      </ChatLaneFrame>
+    );
   }
   if (focusedChatId === undefined && !focusedChatError) {
     return (
@@ -163,7 +173,7 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
       >
         <p className='text-sm font-medium'>
           {chats === 'disabled'
-            ? 'Chat sync is off'
+            ? 'Chats aren’t included in this project’s backup'
             : chats === 'failed'
               ? 'Couldn’t load chat history'
               : 'Loading chat history'}

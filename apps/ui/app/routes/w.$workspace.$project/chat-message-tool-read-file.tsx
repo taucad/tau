@@ -1,7 +1,7 @@
 import { FileText } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName, fileUnchangedMarker } from '@taucad/chat/constants';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import {
   ChatToolCard,
   ChatToolCardHeader,

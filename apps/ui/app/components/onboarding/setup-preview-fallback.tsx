@@ -67,7 +67,7 @@ function DeviceDrawing({
  * The preview's stand-in when it cannot render: a mouse whose button and modifier light up for orbit, pan and zoom in turn. Under `prefers-reduced-motion` nothing animates and
  * the three gestures stand side by side. It captures `onboarding_preview_fallback_shown` once, with the reason.
  *
- * @param properties - The mapping in effect, why the preview fell back, and a retry for a chunk that failed to load.
+ * @param properties - The mapping in effect, why the preview fell back, and a retry after a lost WebGL context.
  * @returns The diagram.
  */
 export function SetupPreviewFallback({

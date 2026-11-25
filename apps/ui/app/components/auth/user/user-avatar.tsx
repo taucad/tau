@@ -1,5 +1,6 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
-import type { User } from 'better-auth';
+import { useIdentity } from '#hooks/use-identity.js';
+import type { IdentityUser } from '#hooks/use-identity.js';
 import { User2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -11,16 +12,18 @@ export type UserAvatarProps = {
   className?: string;
   fallback?: ReactNode;
   isPending?: boolean;
-  user?: User;
+  user?: Pick<IdentityUser, 'email' | 'image' | 'name'>;
 };
 
 export function UserAvatar({ className, user, isPending, fallback }: UserAvatarProps): React.JSX.Element {
   const { authClient } = useAuth();
-  const { data: session, isPending: sessionPending } = useSession(authClient, {
+  const { isPending: sessionPending } = useSession(authClient, {
     enabled: !user && !isPending,
   });
+  /* The identity owner's user: verified, or the last-known one while the session cannot be checked (W9 R1). */
+  const identity = useIdentity();
 
-  const resolvedUser = user ?? session?.user;
+  const resolvedUser = user ?? identity.user;
 
   /* Until the session names someone, the avatar is a skeleton circle at its final size. */
   if (!resolvedUser && (isPending ?? sessionPending)) {

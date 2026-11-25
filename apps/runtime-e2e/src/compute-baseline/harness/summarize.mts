@@ -98,8 +98,8 @@ for (const path of process.argv.slice(2)) {
       const bucket = (rows[key] ??= {
         wall: [],
         main: [],
-        sessionOpen: [],
-        flush: [],
+        nativeSolve: [],
+        tierOperation: [],
         mesh: [],
         hits: [],
         cacheHits: [],
@@ -108,8 +108,7 @@ for (const path of process.argv.slice(2)) {
         readdirStat: [],
         writes: [],
         writeBytes: [],
-        serialize: [],
-        restore: [],
+        sceneHits: [],
         triangles: [],
         sha: [],
         brep: [],
@@ -122,8 +121,9 @@ for (const path of process.argv.slice(2)) {
           step.spans['kernel.compute']?.ms ??
           0,
       );
-      bucket.sessionOpen.push(step.counters['session.open']?.ms ?? 0);
-      bucket.flush.push(step.counters['session.flush']?.ms ?? 0);
+      // The Replicad live tier: native solves and the whole operation-cache cost, timed at its operation cache.
+      bucket.nativeSolve.push(step.counters['native.solve']?.ms ?? 0);
+      bucket.tierOperation.push(step.counters['tier.operation']?.ms ?? 0);
       bucket.mesh.push(step.spans['kernel.mesh']?.ms ?? 0);
       bucket.hits.push(step.lookups.hit);
       bucket.cacheHits.push(step.lookups.cache);
@@ -134,20 +134,19 @@ for (const path of process.argv.slice(2)) {
       bucket.readdirStat.push(step.counters['fs.readdirStat']?.calls ?? 0);
       bucket.writes.push(step.counters['fs.writeFile']?.calls ?? 0);
       bucket.writeBytes.push(step.counters['fs.writeFile']?.bytes ?? 0);
-      bucket.serialize.push(step.counters['brep.serialize']?.ms ?? 0);
-      bucket.restore.push(step.counters['brep.restore']?.ms ?? 0);
+      bucket.sceneHits.push(step.spans['replicad.scene-table-hit']?.count ?? 0);
       bucket.triangles.push(step.output.triangles);
       bucket.sha.push(step.output.sha256.slice(0, 8));
     }
   }
   if (retried.length) console.log(`retried (excluded) steps: ${retried.join(', ')}`);
   console.log(
-    '\n| arm / step | wall ms | main ms | interfaces ms | session open ms | flush ms | mesh ms | hits(cache)/lookups | records | readdirStat | writes (bytes) | serialize ms | restore ms | triangles | brep8 |',
+    '\n| arm / step | wall ms | main ms | interfaces ms | native solve ms | tier op ms | mesh ms | hits(cache)/lookups | records | readdirStat | writes (bytes) | scene hits | triangles | brep8 |',
   );
-  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|');
+  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|');
   for (const [key, b] of Object.entries(rows)) {
     console.log(
-      `| ${key} | ${fmt(b.wall)} | ${fmt(b.main)} | ${fmt(b.interfaces)} | ${fmt(b.sessionOpen, 1)} | ${fmt(b.flush)} | ${fmt(b.mesh)} | ${median(b.hits)}(${median(b.cacheHits)})/${median(b.lookups)} | ${median(b.records)} | ${fmt(b.readdirStat)} | ${median(b.writes)} (${median(b.writeBytes)}) | ${fmt(b.serialize, 1)} | ${fmt(b.restore, 1)} | ${[...new Set(b.triangles)].sort().slice(0, 3).join('/')}${new Set(b.triangles).size > 3 ? '…' : ''} | ${b.brep.length ? [...new Set(b.brep)].join('/') : '—'} |`,
+      `| ${key} | ${fmt(b.wall)} | ${fmt(b.main)} | ${fmt(b.interfaces)} | ${fmt(b.nativeSolve)} | ${fmt(b.tierOperation)} | ${fmt(b.mesh)} | ${median(b.hits)}(${median(b.cacheHits)})/${median(b.lookups)} | ${median(b.records)} | ${fmt(b.readdirStat)} | ${median(b.writes)} (${median(b.writeBytes)}) | ${median(b.sceneHits)} | ${[...new Set(b.triangles)].sort().slice(0, 3).join('/')}${new Set(b.triangles).size > 3 ? '…' : ''} | ${b.brep.length ? [...new Set(b.brep)].join('/') : '—'} |`,
     );
   }
   // Paired ratios: for each pair, arm X step S wall / bypass step S wall.

@@ -271,9 +271,20 @@ export type KernelRuntime = {
   getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /**
    * Execute bundled JS/TS code via dynamic import and return the module exports.
-   * Browser uses Blob URL, Node.js uses data URL.
+   * Browser uses Blob URL, Node.js uses data URL. The bundler may answer from its execution cache, keyed by `code`;
+   * with `fresh`, that entry is dropped first, so the module runs again and its new instance replaces the cached one
+   * (a kernel whose cached instance holds state it can no longer use).
    */
-  execute(code: string): Promise<ExecuteResult>;
+  execute(code: string, options?: KernelExecuteOptions): Promise<ExecuteResult>;
+};
+
+/**
+ * Options of {@link KernelRuntime.execute}.
+ * @public
+ */
+export type KernelExecuteOptions = {
+  /** Run the module again and replace its cached instance, instead of reusing it. */
+  readonly fresh?: boolean;
 };
 
 // =============================================================================

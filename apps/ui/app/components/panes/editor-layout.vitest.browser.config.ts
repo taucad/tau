@@ -1,12 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** Layout acceptance uses the actual pane engines and browser rendering pipeline. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss()],
   server: {
     host: '127.0.0.1',
@@ -14,6 +15,7 @@ export default defineConfig({
   },
   optimizeDeps: { entries: ['app/components/panes/editor-layout.browser.test.tsx'] },
   test: {
+    reporters: testReporters('default'),
     include: ['app/components/panes/editor-layout.browser.test.tsx'],
     fileParallelism: false,
     browser: {

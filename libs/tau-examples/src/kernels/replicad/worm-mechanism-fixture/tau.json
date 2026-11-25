@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Worm Mechanism Fixture",
+  "description": "The worm gear system's mechanism (a worm driving a 30-tooth wheel at -1/30) on plain cylinders, so kinematics tests open it in seconds instead of building the manufacturing-grade gears.",
+  "tags": ["kinematics", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

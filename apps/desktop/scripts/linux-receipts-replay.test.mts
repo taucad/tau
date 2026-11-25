@@ -206,6 +206,63 @@ const main = (): void => {
     }
   }
 
+  // The qualification workflow's receipts job admits the T-B22.4 recovery rows before it collects the route rows, so
+  // the recovery collector's output must not occupy the directory the rows collector creates fresh.
+  {
+    const { workspace, env } = prepareWorkspace();
+    try {
+      downloadRows(workspace, rowIds);
+      const identity = (version: string, commit: string) => ({
+        tag: `desktop-staging@${version}-staging.1`,
+        version,
+        sourceCommit: commit.repeat(40),
+      });
+      for (const [id, route] of [
+        ['ubuntu-apt-recovery-x11', 'linux-apt'],
+        ['ubuntu-appimage-recovery-x11', 'linux-appimage'],
+      ] as const) {
+        const directory = join(workspace, 'out', 'qualification-recovery', `desktop-route-recovery-${id}`);
+        mkdirSync(directory, { recursive: true });
+        const receipt = {
+          schemaVersion: 1,
+          scenario: 'T-B22.4',
+          id,
+          status: 'passed',
+          route,
+          target: 'linux-x64',
+          channel: 'staging',
+          a: identity('0.9.0', 'a'),
+          b: identity('0.9.1', 'b'),
+          evidence: {
+            a: { pid: 1, recoveryTriggers: ['shell-deadline'], countdown: true, started: true, furthestStage: 'shell' },
+            b: { pid: 2, build: '0.9.1', stage: 'home-ready' },
+            installed: { executableSha256: 'c'.repeat(64), asarSha256: 'd'.repeat(64) },
+          },
+          logs: 'https://github.com/taucad/tau/actions/runs/1',
+        };
+        writeFileSync(join(directory, 'recovery-receipt.json'), JSON.stringify(receipt));
+      }
+      const recovery = runStep('collect-qualification-recovery.mts', workspace, env);
+      assert.equal(recovery.status, 0, `Recovery admission failed:\n${recovery.stderr}`);
+      const collected = runStep('collect-qualification-rows.mts', workspace, env);
+      assert.equal(collected.status, 0, `Collection after recovery admission failed:\n${collected.stderr}`);
+      const admitted = JSON.parse(
+        readFileSync(join(workspace, 'out', 'qualification-recovery-receipts', 'recovery-receipts.json'), 'utf8'),
+      ) as Array<{ id: string }>;
+      assert.deepEqual(
+        admitted.map(({ id }) => id),
+        ['ubuntu-apt-recovery-x11', 'ubuntu-appimage-recovery-x11'],
+      );
+      assert.deepEqual(readdirSync(join(workspace, 'out', 'qualification-receipts')).sort(), [
+        'host-matrix.json',
+        'qualification-binding.json',
+        'route-receipts.json',
+      ]);
+    } finally {
+      rmSync(join(workspace, '..'), { recursive: true, force: true });
+    }
+  }
+
   // A run missing one row (a spot-lost row that was never re-run) yields no receipts.
   {
     const { workspace, env } = prepareWorkspace();

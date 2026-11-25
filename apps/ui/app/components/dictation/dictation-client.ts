@@ -1,7 +1,7 @@
 import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { DictationError, SilentDictationError, dictationMessages } from '#components/dictation/dictation-errors.js';
 
 const unavailable: DictationStatus = { available: false };

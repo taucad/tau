@@ -275,6 +275,11 @@ export type SectionViewTestBridgeApi = Readonly<{
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
   getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
+  /**
+   * Draw the section caps with or without their outlines and request a frame. Off only for a test that compares the
+   * two frames to find the pixels the outlines own; returns false when no section view is mounted.
+   */
+  setSectionCapOutlinesVisible(visible: boolean): boolean;
 }>;
 
 /** A cut's values without its id, as `getSectionState` reports them once the id is set aside. */

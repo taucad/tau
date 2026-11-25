@@ -11,7 +11,7 @@
  * What changes is only where the publication comes from. `apps/desktop`'s main
  * process injects the bearer credential into every renderer request bound for
  * the API (`src/main/header-injection.ts`), so the renderer fetches the same
- * `/v1/publications/<id>` the web loader fetches and needs no second transport.
+ * `/v1/shares/<shareId>` the web loader fetches and needs no second transport.
  * Everything else is the shipped surface: a portable share (`direct`, a Gist, a
  * builtin) already resolves entirely in the browser, and both branches end in
  * the same read-only workbench the web shows.
@@ -46,7 +46,7 @@ import {
   ErrorBoundary as PublicationErrorBoundary,
   PublicationInteractiveSurface,
 } from '#components/share/tau-publication.js';
-import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
+import type { PublicationRouteLoaderData } from '@taucad/publish-ui/components/share/tau-publication';
 import { PortableShareSurface } from '#routes/s.$slug/route.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
@@ -59,11 +59,11 @@ export const handle: Handle = { enablePageWrapper: false };
 export type DesktopShareOutcome =
   /** A provider the browser resolves on its own: `direct`, a Gist, a builtin. */
   | { readonly kind: 'portable' }
-  /** A Tau publication this account may read. */
+  /** A cloud link this account may read. */
   | { readonly kind: 'publication'; readonly data: PublicationRouteLoaderData }
-  /** The publication is private and this shell has no session. */
+  /** The link is private and this shell has no session. */
   | { readonly kind: 'signed-out' }
-  /** The owner withdrew the publication. */
+  /** The owner stopped sharing the link, or deleted the project. */
   | { readonly kind: 'unpublished' }
   /** Nothing in the slug identifies a share. */
   | { readonly kind: 'unopenable' }
@@ -78,8 +78,8 @@ export type DesktopShareOutcome =
 /**
  * Resolve one `/s/:slug` for the desktop shell.
  *
- * Mirrors the status vocabulary of the web loader (`loadPublication` in
- * `#components/share/tau-publication.js`) so both builds answer the same API
+ * Mirrors the status vocabulary of the web loader (`createPublicationLoader` in
+ * `@taucad/publish-ui/components/share/tau-publication`) so both builds answer the same API
  * the same way. Never rejects: every failure is one of the outcomes.
  *
  * @param slug - The share slug from the route parameters.
@@ -90,7 +90,7 @@ export const resolveDesktopShare = async (slug: string | undefined): Promise<Des
     return { kind: 'unopenable' };
   }
 
-  let publicationId: string;
+  let shareId: string;
   try {
     const locator = parseShareSlug(slug);
     if (locator.providerId !== 'tau') {
@@ -99,14 +99,19 @@ export const resolveDesktopShare = async (slug: string | undefined): Promise<Des
     if (locator.reference === undefined || locator.reference === '') {
       return { kind: 'unopenable' };
     }
-    publicationId = locator.reference;
+    shareId = locator.reference;
   } catch {
     /* `parseShareSlug` throws for anything that does not name its provider,
        which the shell's parser cannot tell apart from a real slug. */
     return { kind: 'unopenable' };
   }
 
-  const response = await fetch(`${requireClientEnvironmentUrl('TAU_API_URL')}/v1/publications/${publicationId}`, {
+  /* Only a cloud link id opens; an old per-version link (`tau~pub_…`) is not found, as the web says. */
+  if (!shareId.startsWith('shr_')) {
+    return { kind: 'locked', variant: 'notFound' };
+  }
+
+  const response = await fetch(`${requireClientEnvironmentUrl('TAU_API_URL')}/v1/shares/${shareId}`, {
     headers: { Accept: 'application/json' },
     /* Cookies never leave `app://tau`; main attaches the bearer. Kept for the
        same reason every other client-side API call in this app keeps it: the
@@ -272,8 +277,8 @@ export default function DesktopShareRoute(): React.JSX.Element {
       return (
         <ShareNotice
           icon={<Link2 className='size-6 text-muted-foreground' aria-hidden />}
-          title='This share link is no longer valid.'
-          detail='The owner unpublished it. Ask them for a new link.'
+          title='This link is no longer shared.'
+          detail='Ask the owner for a new link.'
           action={goToProjects}
         />
       );

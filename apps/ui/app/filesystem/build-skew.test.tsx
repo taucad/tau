@@ -663,6 +663,56 @@ describe('build-id skew guard (DF20)', () => {
     expect(server.requests()).toBe(1);
   });
 
+  it("keeps a newer peer's claim, and asks again, when the check it shares with an older live claim gets no answer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay } = await load();
+    const server = serveLiveBuild();
+
+    announce({ buildId: buildId - 1, live: true });
+    await pause();
+    announce(buildId + 1);
+    await pause();
+    expect(server.requests()).toBe(1);
+    await server.settle('unreachable');
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readSupersedingBuildId()).toBe(buildId + 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    expect(server.requests()).toBe(2);
+  });
+
+  it('schedules no recheck for a check answered after the guard closed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, closeBuildSkewChannel, peerRecheckDelay } = await load();
+    const server = serveLiveBuild();
+
+    announce(buildId + 1);
+    await pause();
+    closeBuildSkewChannel();
+    await server.settle('unreachable');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * 2);
+    });
+
+    expect(server.requests()).toBe(1);
+  });
+
+  it('neither resumes writes nor announces when an older live claim is answered after the guard closed', async () => {
+    const { buildId, closeBuildSkewChannel, isBuildSuperseded } = await load();
+    const server = serveLiveBuild();
+
+    announce({ buildId: buildId - 1, live: true });
+    await pause();
+    closeBuildSkewChannel();
+    const post = vi.spyOn(BroadcastChannel.prototype, 'postMessage');
+    await server.settle('spa-fallback');
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("keeps the server's word over a later tab announcement it could not check", async () => {
     const { buildId, isBuildSuperseded, readSupersedingBuildId, queryLiveBuild } = await load();
     await serverSays(queryLiveBuild, buildId - 1);

@@ -64,6 +64,41 @@ const packageIdentity = async (directory: string): Promise<string> => {
   return `${manifest.name}@${manifest.version}`;
 };
 
+/** The manifest fields Node and package managers load a package's code from. */
+const entryFields = ['main', 'module', 'bin', 'exports', 'imports', 'browser'] as const;
+
+/**
+ * Whether a package's own entry points run from its root `src` directory.
+ *
+ * Most published packages run from build output and ship `src` only as source,
+ * but some run from `src` itself (`debug`'s `main` is `./src/index.js`), and
+ * dropping it there leaves a package whose `main` does not exist.
+ * @param directory - Installed package directory.
+ * @returns True when any entry field names a non-TypeScript path under `src/`.
+ */
+const runsFromSource = async (directory: string): Promise<boolean> => {
+  const manifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8')) as Readonly<
+    Record<string, unknown>
+  >;
+  const paths: string[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') {
+      paths.push(value);
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, nested] of Object.entries(value)) {
+        /* Type and source conditions (zod's `@zod/source`) serve tooling, never the runtime. */
+        if (!/^(?:types|typings)$|source$/u.test(key)) {
+          collect(nested);
+        }
+      }
+    }
+  };
+  for (const field of entryFields) {
+    collect(manifest[field]);
+  }
+  return paths.some((path) => /^(?:\.\/)?src(?:\/|$)/u.test(path) && !/\.[cm]?tsx?$/u.test(path));
+};
+
 /** Ordinary dependencies plus only the optional payloads this caller selected. */
 const runtimeDependencies = async (
   directory: string,
@@ -136,10 +171,11 @@ export const copyRuntimeClosure = async (options: {
   const { modulesRoot, filter = (): boolean => true, optionalDependencies = [] } = options;
   const stage = async (packageName: string, from: string, into: string): Promise<void> => {
     const target = resolve(into, packageName);
-    /* `node_modules` is dropped because this function rebuilds it; `src` is
-     * dropped for the same reason the engine packages drop it — published
-     * packages run from their build output. */
-    await copyTree(from, target, (path) => !['node_modules', 'src'].includes(basename(path)) && filter(path));
+    /* `node_modules` is dropped because this function rebuilds it. The root
+     * `src` is dropped because published packages usually run from their build
+     * output, unless the package's own entry points run from it. */
+    const source = (await runsFromSource(from)) ? undefined : resolve(from, 'src');
+    await copyTree(from, target, (path) => basename(path) !== 'node_modules' && path !== source && filter(path));
     for (const dependency of await runtimeDependencies(from, optionalDependencies)) {
       /* oxlint-disable no-await-in-loop -- Siblings would race on the same nested
        * directories; staging one dependency at a time keeps the layout decidable. */

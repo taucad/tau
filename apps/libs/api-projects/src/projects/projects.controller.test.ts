@@ -158,7 +158,7 @@ describe('ProjectsController', () => {
     const registration = controller.register(projectId, { name: 'Bracket' }, ownerId);
     await expect(registration).rejects.toBeInstanceOf(ForbiddenException);
     await expect(registration).rejects.toMatchObject({
-      response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
+      response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to the cloud is a paid plan feature.' },
     });
     expect(inserted).toEqual([]);
     expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
@@ -205,7 +205,7 @@ describe('ProjectsController', () => {
     await expect(registration).rejects.toMatchObject({
       response: {
         code: 'PROJECT_LIMIT_REACHED',
-        message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
+        message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects in the cloud.`,
       },
     });
     expect(inserted).toEqual([]);
@@ -272,7 +272,7 @@ describe('ProjectsController', () => {
       const registration = controller.register(projectId, {}, ownerId);
       await expect(registration).rejects.toBeInstanceOf(GoneException);
       await expect(registration).rejects.toMatchObject({
-        response: { code: 'PROJECT_DELETED', message: 'This project has been deleted from Tau Cloud.' },
+        response: { code: 'PROJECT_DELETED', message: 'This project has been deleted from the cloud.' },
       });
       expect(inserted).toEqual([]);
       expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
@@ -297,7 +297,7 @@ describe('ProjectsController', () => {
     };
     const registration = controller.register(projectId, {}, ownerId);
     await expect(registration).rejects.toBeInstanceOf(GoneException);
-    await expect(registration).rejects.toThrow('This project has been deleted from Tau Cloud.');
+    await expect(registration).rejects.toThrow('This project has been deleted from the cloud.');
     expect(locks).toEqual([[ownerId], [projectId]]);
     expect(inserted).toEqual([]);
   });

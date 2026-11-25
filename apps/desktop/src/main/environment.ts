@@ -17,9 +17,6 @@ export const clientEnvironmentNames = [
   'TAU_API_URL',
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
-  /* The billing screens read this one; without it a cloud build renders an
-   * empty Billing tab because the renderer never resolves an owner identity. */
-  'TAU_BILLING_ENVIRONMENT',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   /* The managed acquisition profile: `locked` keeps the editor's type acquisition static. */

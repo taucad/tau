@@ -20,6 +20,8 @@ import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js'
 
 type CadAgentConfigModule = typeof CadAgentConfigModuleShape;
 
+/* The routing plan the turn reads at admission (adaptive app deployment mode C6): every kernel allowed here. */
+vi.mock('#cloud/kernel-commerce.js', () => ({ useKernelRoutingPlan: () => () => true }));
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: vi.fn(),
   useChatActions: vi.fn(),

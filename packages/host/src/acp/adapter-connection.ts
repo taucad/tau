@@ -35,6 +35,25 @@ import type {
 } from '#acp/acp-session.machine.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 
+/*
+ * Let stderr catch up with the reply that just failed. An adapter writes why it failed to stderr and then answers on
+ * stdout, but the two are separate pipes, read in whatever order the event loop polls them: when the error reply is
+ * handled first, the explanation is already in the stderr pipe and not yet read, and the failure carried no
+ * diagnostics (seen on CI under load). Each turn of the event loop polls every readable pipe, so after the turns below
+ * the bytes the adapter wrote before its reply have been read into the tail.
+ */
+const stderrWrittenBefore = async (): Promise<void> => {
+  for (let turn = 0; turn < 2; turn++) {
+    // oxlint-disable-next-line no-await-in-loop -- one poll phase per turn.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+};
+
+/** How long an exited adapter's stdio may take to close before its exit is reported without it. Milliseconds. */
+const stdioDrain = 1000;
+
 /* A failed call, as the machine reads it: its code, its message, and the stderr tail beside it. */
 const callError = (error: unknown, stderr: string): AcpCallError => {
   const code = isRecord(error) ? error['code'] : undefined;
@@ -173,7 +192,19 @@ export const createAdapterConnection = (
         send({ type: 'adapterExited', stderr: adapter.stderr() });
       }
     };
-    adapter.child.once('exit', onExit);
+    /*
+     * Node emits `exit` while stdio may still be draining and guarantees the adapter's last stderr only on `close`, so
+     * the report waits for `close`. A process the adapter started can hold the pipes open long after the adapter's exit,
+     * so `close` waits for it too: after `stdioDrain` the exit is reported with the stderr read so far.
+     */
+    let drain: NodeJS.Timeout | undefined;
+    adapter.child.once('close', () => {
+      clearTimeout(drain);
+      onExit();
+    });
+    adapter.child.once('exit', () => {
+      drain = setTimeout(onExit, stdioDrain);
+    });
     /* A spawn that never started (ENOENT) emits `error` and may never emit `exit`. */
     adapter.child.once('error', () => {
       if (adapter.child.pid === undefined) {
@@ -193,6 +224,7 @@ export const createAdapterConnection = (
           answer: { method: command.method, result } as unknown as AcpAnswer,
         });
       } catch (error) {
+        await stderrWrittenBefore();
         send({
           type: 'callSettled',
           id,
@@ -244,6 +276,7 @@ export const createAdapterConnection = (
     });
 
     return () => {
+      clearTimeout(drain);
       connection.close();
       /* Every exit of the child ends with SIGKILL to the group (EA-R7); a gone group is ESRCH. */
       adapter.signal('SIGKILL');

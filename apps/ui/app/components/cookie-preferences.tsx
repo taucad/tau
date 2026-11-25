@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@taucad/ui/components/dialog';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import { legalUrl } from '#lib/legal-url.js';
 

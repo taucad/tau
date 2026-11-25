@@ -9,11 +9,12 @@ const freeFallback = entitlementsFromTier('free');
 
 /**
  * The viewer's entitlements. Until the server answers, `isResolved` is false and the value is the Free
- * fallback, so callers that name a plan or offer a purchase render a neutral state instead.
+ * fallback, so callers that name a plan or offer a purchase render a neutral state instead. `isError` says the
+ * request failed (a stated "can't check", adaptive app deployment mode I15).
  */
-export const useEntitlements = (): Entitlements & { readonly isResolved: boolean } => {
+export const useEntitlements = (): Entitlements & { readonly isResolved: boolean; readonly isError: boolean } => {
   const { apiBaseUrl, userId } = useBillingSession();
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['billing', 'entitlements', apiBaseUrl, userId],
     enabled: userId !== undefined && apiBaseUrl !== undefined,
     // Short enough that a plan change made in another tab or in the Stripe portal shows on the next focus.
@@ -26,7 +27,9 @@ export const useEntitlements = (): Entitlements & { readonly isResolved: boolean
       return parseEntitlements(await response.json());
     },
   });
-  return data === undefined ? { ...freeFallback, isResolved: false } : { ...data, isResolved: true };
+  return data === undefined
+    ? { ...freeFallback, isResolved: false, isError }
+    : { ...data, isResolved: true, isError: false };
 };
 
 export const useKernelTierRequirement = (

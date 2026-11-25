@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { CrossTabCoordinator } from '@taucad/filesystem';
-import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
+import { populateBundledTypesMount } from '@taucad/editor-ui/lib/bundled-types-mount';
 
 type HeldLock = {
   readonly acquired: Promise<void>;

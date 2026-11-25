@@ -4,7 +4,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { personFieldFromProfile } from '@taucad/preferences';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
@@ -55,11 +55,12 @@ const isModelResolved = (providerKind: string): boolean => providerKind !== unkn
 /* eslint-disable @typescript-eslint/naming-convention -- the keys are the host's own capability-probe codes. */
 /** Capability-probe codes rendered as the reason the user reads. */
 const capabilityReasons = {
-  WORKER_UNAVAILABLE: 'This browser cannot start the worker Tau runs the agent in.',
-  WEB_LOCKS_UNAVAILABLE: 'This browser does not provide the Web Locks the agent log needs.',
-  BROADCAST_CHANNEL_UNAVAILABLE: 'This browser cannot coordinate tabs for the agent log.',
-  STORAGE_NOT_WRITABLE: 'This project’s storage cannot hold a durable agent log.',
-  SYNC_ACCESS_HANDLE_UNAVAILABLE: 'This browser cannot append to the agent log in this project’s storage.',
+  WORKER_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  WEB_LOCKS_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  BROADCAST_CHANNEL_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  STORAGE_NOT_WRITABLE:
+    'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
+  SYNC_ACCESS_HANDLE_UNAVAILABLE: 'This browser can’t run the Tau agent.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- back to Tau-authored names. */
 
@@ -363,7 +364,8 @@ export const useAgentHostPlacements = (): {
  * @returns The field, or `undefined`.
  */
 const usePersonField = (executionKind: CadAgentConfigInput['execution']['kind']): CadAgentConfigInput['person'] => {
-  const isOnboardingEnabled = useFeature('onboarding');
+  /* Only a known `on` shares the person: a turn sent before PostHog answers carries no personal field. */
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const [isPersonShared] = useCookie(cookieName.chatCtxPerson, true);
   const { profile } = usePersonRecord();
   if (!isOnboardingEnabled || !isPersonShared || executionKind !== 'tau') {

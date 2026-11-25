@@ -3,13 +3,14 @@ title: 'UX Policy'
 description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, keyboard conventions and user-side copy for all Tau UI surfaces.'
 status: active
 created: '2026-04-08'
-updated: '2026-11-13'
+updated: '2026-11-18'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/accessibility-policy.md
   - docs/policy/react-policy.md
   - docs/research/dialog-inline-editing-audit.md
   - docs/research/billing-redesign-blueprint.md
+  - docs/research/cloud-and-account-naming-blueprint.md
 ---
 
 # UX Policy
@@ -230,6 +231,27 @@ Print US dollars as `$10.00` for an amount that is or will be charged and `$20` 
 
 **Why**: four formats (`US$10`, `$10.00 USD`, `10 USD`, `$10`) appeared on one screen, and two spellings of "cancelled" in one flow. Legal documents keep their own governed wording.
 
+### 13. Name the Thing, Not the Product
+
+Inside the product, name a capability by what it is, not by Tau's brand. The place where Tau keeps projects is **the cloud** ("in the cloud", "Back up to the cloud", "cloud copy", "Cloud projects"); the hosted share method is **Cloud link**; the sign-in is **your account** ("Account" as a label). Never write "Tau Cloud" or "Tau Cloud account" in product copy.
+
+Write "Tau" only when the same noun on the same screen belongs to someone else, or when the reader is outside the app:
+
+| Situation                                                       | Write                                                                                           |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Backup destination choice beside "GitHub or another Git host"   | "Tau"                                                                                           |
+| Another party's account in the same sentence or screen          | "your Tau account" ("This GitHub account uses a different email address from your Tau account") |
+| Who keeps the data, said once when work first leaves the device | "Tau keeps a copy so you can open it wherever you sign in."                                     |
+| Emails, CLI output, consent pages                               | "Tau account", "Sign in to Tau"                                                                 |
+| Legal pages, docs, self-hosting docs, operator text             | "Tau Cloud" as the proper name of the operated service                                          |
+| Another vendor's cloud on the same screen                       | "Zoo's cloud", or name the thing                                                                |
+
+A label that is also dropped into sentences needs two forms: "Cloud" (label) and "the cloud" (sentence). Stored labels written before this rule stay as stored; do not add code that rewrites them.
+
+**Why**: the product also runs on this device, so it needs a word for the cloud, but not its own brand in front of every capability. "Tau Cloud" named both storage and the agent runtime, made a subsystem the actor in errors, and was untrue on self-hosted deployments. See `docs/research/cloud-and-account-naming-blueprint.md`.
+
+**Enforced by**: `tau-lint/no-engineering-vocabulary-in-copy` lists "Tau Cloud"; the "Tau account" exceptions are review.
+
 ## Anti-Patterns
 
 - Opening a `Dialog` for a single-field rename or create
@@ -258,6 +280,7 @@ Print US dollars as `$10.00` for an amount that is or will be charged and `$20` 
 - [ ] Each button names its action and object; money buttons carry the exact amount
 - [ ] Errors read "Couldn't … Try again." and claim safety only when it is known
 - [ ] Money goes through the shared formatters; the currency is named once per screen; US spelling
+- [ ] Product copy says "the cloud", "Cloud link" and "your account"; "Tau" only under the collision test or outside the app
 - [ ] Choosing uses ComboBoxResponsive, acting uses DropdownMenu, and nesting in either uses the view-stack sub-view
 - [ ] New interaction patterns reviewed against this policy
 
@@ -268,3 +291,4 @@ Print US dollars as `$10.00` for an amount that is or will be charged and `$20` 
 - [React Policy](react-policy.md) — Component patterns, state management
 - Research: `docs/research/dialog-inline-editing-audit.md`
 - Research: `docs/research/billing-redesign-blueprint.md` — the copy glossary these rules come from
+- Research: `docs/research/cloud-and-account-naming-blueprint.md` — Rule 13's decisions

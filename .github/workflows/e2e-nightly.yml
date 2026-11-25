@@ -47,7 +47,7 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
   # End-to-end suites that open no chat, so capture no chat log for the empty-capture rule to find.
-  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
+  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios", "test:e2e:adaptive"]'
 
 jobs:
   # Picks the commit and lists every suite. Selectors are target names, so a new e2e
@@ -358,56 +358,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vitest-browser-diagnostics-cloud-load
-          path: out/test-results/vitest-browser
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # The adaptive web tier (adaptive app deployment mode W7): the adaptive UI build served with the cloud
-  # stand-ins and a deployment answer per row (funded, unfunded, held), the Cloud chunk blocked and stalled,
-  # hydration over a remembered answer, and a payment return landing while the mode is unknown. No API,
-  # database or secret.
-  adaptive-web:
-    name: Adaptive web tier
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [plan]
-    permissions:
-      contents: 'read'
-      actions: 'read'
-    steps:
-      - *checkout
-      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
-      # workflow's own commit (scripts/src/apt-resilience.test.ts).
-      - name: Check out this workflow's apt installer
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.sha }}
-          path: .tau-ci
-          sparse-checkout: .github/actions/apt-install
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - *setup-nx
-
-      - name: Install Chromium for Vitest Browser (system dependencies)
-        uses: ./.tau-ci/.github/actions/apt-install
-        with:
-          playwright-browsers: chromium
-      - name: Install Chromium for Vitest Browser
-        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
-
-      - name: Run the adaptive web tier
-        timeout-minutes: 45
-        env:
-          TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:adaptive --parallel=1 --outputStyle=stream
-
-      - *root-hygiene
-
-      - name: Upload Vitest Browser diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vitest-browser-diagnostics-adaptive-web
           path: out/test-results/vitest-browser
           if-no-files-found: ignore
           retention-days: 7

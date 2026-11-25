@@ -20,6 +20,7 @@
     "test:e2e:queue": {
       "executor": "nx:noop",
       "dependsOn": [
+        "test:e2e:adaptive",
         "test:e2e:daemon-host",
         "test:e2e:deploy-skew",
         "test:e2e:development",
@@ -353,7 +354,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Adaptive web tier (adaptive app deployment mode charter W7): the first command builds the UI, `adaptive` since the flip (W8), and global-setup.ts serves it. No API runs: the cloud stand-ins answer the signed-in session, and each row of src/adaptive-web.spec.ts answers GET /v1/deployment funded or unfunded, holds it, or blocks or stalls the Cloud chunk, which the spec finds in the build's module-id manifest. Every other tier skips the spec. Its own PORT keeps it from reusing a server another e2e target started."
+        "description": "Adaptive web tier (adaptive app deployment mode charter W7): the first command builds the UI, `adaptive` since the flip (W8), and global-setup.ts serves it. No API runs: the cloud stand-ins answer the signed-in session, and each row of src/adaptive-web.spec.ts answers GET /v1/deployment funded or unfunded, holds it, or blocks or stalls the Cloud chunk, which the spec finds in the build's module-id manifest. Every other tier skips the spec. Its own PORT keeps it from reusing a server another e2e target started. Admitted to the merge queue through test:e2e:queue after five consecutive green nightlies (CI decomposition DC-24, global review 2026-11-24 ruling 11; about 5.5 min), which deleted its own e2e-nightly.yml job."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",

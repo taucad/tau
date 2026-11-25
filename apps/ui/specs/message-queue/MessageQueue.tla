@@ -189,6 +189,7 @@
 \* unprepared, unsteered, never-accepted entry leaves the queue and the submitted set and returns to the composer,
 \* and the session machine's `withdrawTurn` abandons the admission. The person may submit it again.
 \* The store waits for a withdrawal's removal before it re-reads the outbox, so no delivery reads it half-written.
+\* A Stop with no run, or over a run that already ended, sends no cancel (Cancel needs a live observed run).
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

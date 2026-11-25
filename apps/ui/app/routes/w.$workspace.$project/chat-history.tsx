@@ -25,7 +25,7 @@ import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
-import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
@@ -324,8 +324,11 @@ const ExpandedChatHistory = memo(function ({
 
   // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
   // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.
-  const sessionStore = useChatSessionStore();
+  const sessionStore = useOptionalChatSessionStore();
   useEffect(() => {
+    if (!sessionStore) {
+      return;
+    }
     let frame: number | undefined;
     const unsubscribe = sessionStore.subscribeDraftReturned(activeChatId, () => {
       if (frame !== undefined) {

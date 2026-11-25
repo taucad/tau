@@ -84,6 +84,7 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 });
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({ observedChatIdsOf: () => [], subscribeMembership: () => () => undefined }),
+  useOptionalChatSessionStore: () => undefined,
 }));
 const chats = [
   { id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' },

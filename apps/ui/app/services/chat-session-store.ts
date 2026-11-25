@@ -3117,19 +3117,17 @@ export class ChatSessionStore {
           : selectCurrentRun(projected)?.runId;
     const connector = this.#projectHostConnectors.get(session.projectId);
     const lifecycle = runId === undefined ? undefined : projected?.ledger.runs[runId]?.lifecycle;
-    if (
-      runId === undefined ||
-      connector === undefined ||
-      lifecycle === 'completed' ||
-      lifecycle === 'failed' ||
-      lifecycle === 'cancelled'
-    ) {
+    if (runId === undefined || lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
       /* Nothing live to cancel: a Stop over a run that already ended must not wait for an end that came before it,
        * nor send a cancel the host can only refuse. */
       if (session.stopRequested) {
         session.stopRequested = false;
         this.#chatTopics.get(session.chatId)?.emit();
       }
+      return;
+    }
+    if (connector === undefined) {
+      /* A live run whose host is not attached yet: the Stop waits for the run's terminal row, as before. */
       return;
     }
     const command: HostCommand = {

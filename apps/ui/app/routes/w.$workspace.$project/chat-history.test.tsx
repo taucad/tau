@@ -63,39 +63,25 @@ vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [ar
 vi.mock('#routes/w.$workspace.$project/archived-chats.js', () => ({
   ArchivedChats: () => <section aria-label='Archived chats' />,
 }));
-// Fake persistence actor — `chat-history.tsx` subscribes to
-// `restoreCancelledDraft` emits to refocus the composer after the
-// persistence machine lifts a cancelled user message back into the draft.
-// The fake captures registered callbacks so the empty-cancel test below
-// can drive the emit synchronously.
-type FakePersistenceListener = (payload: unknown) => void;
-const persistenceListeners = new Map<string, Set<FakePersistenceListener>>();
-const fakePersistenceActorRef = {
-  on: (type: string, callback: FakePersistenceListener) => {
-    let bucket = persistenceListeners.get(type);
-    if (!bucket) {
-      bucket = new Set();
-      persistenceListeners.set(type, bucket);
-    }
-    bucket.add(callback);
-    const ownedBucket = bucket;
-    return {
-      unsubscribe: () => {
-        ownedBucket.delete(callback);
-      },
+// Fake session store: `chat-history.tsx` subscribes to `subscribeDraftReturned` to refocus the composer once a
+// stopped send's message is back in the draft. The fake captures the listeners so the tests below can drive it.
+const draftReturnedListeners = new Set<() => void>();
+const fakeSessionStore = {
+  subscribeDraftReturned: (_chatId: string, listener: () => void) => {
+    draftReturnedListeners.add(listener);
+    return () => {
+      draftReturnedListeners.delete(listener);
     };
   },
 };
 
-const emitRestoreCancelledDraft = (payload: unknown): void => {
-  const bucket = persistenceListeners.get('restoreCancelledDraft');
-  if (!bucket) {
-    return;
-  }
-  for (const listener of bucket) {
-    listener(payload);
+const emitDraftReturned = (): void => {
+  for (const listener of draftReturnedListeners) {
+    listener();
   }
 };
+
+vi.mock('#hooks/chat-session-store-provider.js', () => ({ useOptionalChatSessionStore: () => fakeSessionStore }));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: unknown) => unknown) => {
@@ -111,7 +97,7 @@ vi.mock('#hooks/use-chat.js', () => ({
       rememberedComposerTrays: [],
     });
   },
-  useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
+  useChatContext: () => ({ activeChatId: 'chat_test' }),
 }));
 
 // Capture the body the chat client receives on submit so the wire-format
@@ -663,7 +649,7 @@ describe('ChatHistory — composer refocus', () => {
     vi.clearAllMocks();
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.focus = vi.fn<() => void>();
-    persistenceListeners.clear();
+    draftReturnedListeners.clear();
     locationState = undefined;
     setMockMessages([]);
   });
@@ -675,7 +661,7 @@ describe('ChatHistory — composer refocus', () => {
     expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
   });
 
-  it('refocuses the composer on the next animation frame when persistence emits restoreCancelledDraft', async () => {
+  it('refocuses the composer on the next animation frame when a stopped send returns to the draft', () => {
     const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0);
       return 0;
@@ -684,23 +670,12 @@ describe('ChatHistory — composer refocus', () => {
     try {
       render(<ChatHistory />);
 
-      const userMessage: MyUIMessage = {
-        id: 'msg_user_cancelled',
-        role: 'user',
-        parts: [{ type: 'text', text: 'design a bracket' }],
-      };
-
       // Subscriber registers during the mount effect.
-      expect(persistenceListeners.get('restoreCancelledDraft')?.size).toBe(1);
+      expect(draftReturnedListeners.size).toBe(1);
       expect(capturedTextarea.focus).not.toHaveBeenCalled();
 
       act(() => {
-        emitRestoreCancelledDraft({
-          type: 'restoreCancelledDraft',
-          userMessage,
-          truncatedMessages: [],
-          cause: 'user_stop',
-        });
+        emitDraftReturned();
       });
 
       expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
@@ -710,14 +685,14 @@ describe('ChatHistory — composer refocus', () => {
     }
   });
 
-  it('unsubscribes the restore listener on unmount', () => {
+  it('unsubscribes the draft-returned listener on unmount', () => {
     const { unmount } = render(<ChatHistory />);
 
-    expect(persistenceListeners.get('restoreCancelledDraft')?.size).toBe(1);
+    expect(draftReturnedListeners.size).toBe(1);
 
     unmount();
 
-    expect(persistenceListeners.get('restoreCancelledDraft')?.size ?? 0).toBe(0);
+    expect(draftReturnedListeners.size).toBe(0);
   });
 });
 

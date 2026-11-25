@@ -329,15 +329,26 @@ const valueEnd = (text: string, start: number): number => {
   }
   let depth = 0;
   for (let position = start; position < text.length; position += 1) {
-    const char = text[position];
-    if (char === '"') {
-      position = stringEnd(text, position) - 1;
-    } else if (char === '{' || char === '[') {
-      depth += 1;
-    } else if (char === '}' || char === ']') {
-      depth -= 1;
-      if (depth === 0) {
-        return position + 1;
+    switch (text[position]) {
+      case '"': {
+        position = stringEnd(text, position) - 1;
+        break;
+      }
+      case '{':
+      case '[': {
+        depth += 1;
+        break;
+      }
+      case '}':
+      case ']': {
+        depth -= 1;
+        if (depth === 0) {
+          return position + 1;
+        }
+        break;
+      }
+      default: {
+        break;
       }
     }
   }
@@ -363,12 +374,23 @@ const memberSpan = (text: string, objectStart: number, key: string): Span | unde
   return undefined;
 };
 
+/** Code-unit order, as `Array.prototype.sort` without a compare function sorts strings. */
+const byCodeUnit = (a: unknown, b: unknown): number => {
+  const left = String(a);
+  const right = String(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+};
+
 const lineStart = (text: string, index: number): number => text.lastIndexOf('\n', index - 1) + 1;
 const indentAt = (text: string, index: number): string =>
   /^[ \t]*/u.exec(text.slice(lineStart(text, index)))?.[0] ?? '';
 
 /** Prettier's JSON layout (oxfmt): an array of strings on one line when it fits in 120 columns, else one a line. */
-const formatArray = (items: readonly string[], indent: string, prefix: string, suffix: string): string => {
+const formatArray = (
+  items: readonly string[],
+  line: { readonly indent: string; readonly prefix: string; readonly suffix: string },
+): string => {
+  const { indent, prefix, suffix } = line;
   const inline = `[${items.map((item) => JSON.stringify(item)).join(', ')}]`;
   if (items.length === 0 || `${indent}${prefix}${inline}${suffix}`.length <= 120) {
     return inline;
@@ -383,7 +405,11 @@ const replaceDependsOn = (text: string, objectStart: number, items: readonly str
     throw new Error('the target has no dependsOn');
   }
   const suffix = text[skipSpace(text, span.end)] === ',' ? ',' : '';
-  const array = formatArray(items, indentAt(text, span.keyStart), text.slice(span.keyStart, span.start), suffix);
+  const array = formatArray(items, {
+    indent: indentAt(text, span.keyStart),
+    prefix: text.slice(span.keyStart, span.start),
+    suffix,
+  });
   return `${text.slice(0, span.start)}${array}${text.slice(span.end)}`;
 };
 
@@ -412,14 +438,14 @@ export const promoteProjectJson = (text: string, target: string): string => {
   const queueSpan = memberSpan(edited, targets.start, queueTarget);
   if (queueSpan) {
     const queued = (config.targets?.[queueTarget]?.dependsOn ?? []).filter((entry) => typeof entry === 'string');
-    edited = replaceDependsOn(edited, queueSpan.start, [...new Set([...queued, target])].sort());
+    edited = replaceDependsOn(edited, queueSpan.start, [...new Set([...queued, target])].sort(byCodeUnit));
   } else {
     const indent = indentAt(edited, shadowSpan.keyStart);
     const inner = `${indent}  `;
     const block = [
       `${JSON.stringify(queueTarget)}: {`,
       `${inner}"executor": "nx:noop",`,
-      `${inner}"dependsOn": ${formatArray([target], inner, '"dependsOn": ', ',')},`,
+      `${inner}"dependsOn": ${formatArray([target], { indent: inner, prefix: '"dependsOn": ', suffix: ',' })},`,
       `${inner}"metadata": {`,
       `${inner}  "description": ${JSON.stringify(queueDescription)}`,
       `${inner}}`,
@@ -447,7 +473,7 @@ export const promoteProjectJson = (text: string, target: string): string => {
   }
   const expectedQueue = expected.targets[queueTarget];
   if (expectedQueue) {
-    expectedQueue.dependsOn = [...new Set([...(expectedQueue.dependsOn ?? []), target])].sort();
+    expectedQueue.dependsOn = [...new Set([...(expectedQueue.dependsOn ?? []), target])].sort(byCodeUnit);
   } else {
     const created = after.targets[queueTarget];
     if (JSON.stringify(created?.dependsOn) !== JSON.stringify([target])) {

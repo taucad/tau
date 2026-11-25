@@ -137,6 +137,8 @@ export function ChatTurnHost(): ReactNode {
             : turnAgent.contextPayload;
         /* A host that unmounted during the catalog wait admits nothing for a closed chat. */
         mountedRef.current?.signal.throwIfAborted();
+        /* The waits above can be long (a cloud open): the command is built from the fold as it is now. */
+        const admittedMessages = store.getCurrentTranscript(activeChatId);
         const withPayload = contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
         /* C6 (adaptive app deployment mode I4): the routing set is read now, at admission, not from the snapshot a
          * passive effect last handed the ref; an unresolved plan leaves Zoo out of automatic routing. */
@@ -170,7 +172,7 @@ export function ChatTurnHost(): ReactNode {
             leaseTurnId: intent.leaseTurnId,
             request: {
               kind: 'continue',
-              command: commandOf({ kind: 'continue' }, messages, {
+              command: commandOf({ kind: 'continue' }, admittedMessages, {
                 chatId: activeChatId,
                 commandId: generatePrefixedId(idPrefix.request),
                 runId,
@@ -184,23 +186,23 @@ export function ChatTurnHost(): ReactNode {
             : generatePrefixedId(idPrefix.request);
         const transcript =
           gesture.kind === 'send'
-            ? [...messages, gesture.message]
+            ? [...admittedMessages, gesture.message]
             : gesture.kind === 'edit'
               ? (() => {
-                  const index = messages.findIndex((message) => message.id === gesture.messageId);
+                  const index = admittedMessages.findIndex((message) => message.id === gesture.messageId);
                   if (index === -1) {
                     throw new Error('That message is no longer in this chat, so it cannot be edited.');
                   }
                   return [
-                    ...messages.slice(0, index),
-                    buildEditedUserMessage(messages[index]!, {
+                    ...admittedMessages.slice(0, index),
+                    buildEditedUserMessage(admittedMessages[index]!, {
                       text: gesture.text,
                       ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
                       ...(gesture.references === undefined ? {} : { references: gesture.references }),
                     }),
                   ];
                 })()
-              : messages;
+              : admittedMessages;
         const browserHost = hostAdmission({
           agent: admittedAgent,
           chatId: activeChatId,

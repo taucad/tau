@@ -54,6 +54,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '@taucad/ui-core/utils/da
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { formatElapsed } from '#components/chat/chat-activity-status.js';
 import { chatInputTextClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
@@ -746,25 +747,50 @@ const AssistantActivityGroup = memo(function AssistantActivityGroup({
   });
 });
 
+/** The wall-clock time a settled turn worked, from its request's admission to its run's end; none under a second. */
+const workedFor = (createdAt: number | undefined, endedAt: number | undefined): string | undefined => {
+  const elapsed = createdAt === undefined || endedAt === undefined ? Number.NaN : endedAt - createdAt;
+  return Number.isFinite(elapsed) && elapsed >= 1000 ? formatElapsed(elapsed) : undefined;
+};
+
 function AssistantParts({
   parts,
   messageId,
   isPastTurn,
+  createdAt,
+  endedAt,
 }: {
   readonly parts: readonly MyMessagePart[];
   readonly messageId: string;
   readonly isPastTurn: boolean;
+  readonly createdAt: number | undefined;
+  readonly endedAt: number | undefined;
 }): React.JSX.Element {
   const groups = useMemo(() => groupAssistantParts(parts), [parts]);
   const lastGroupIndex = groups.length - 1;
   const isMessageActive = useChatSelector(
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
-  /* Folded when the next request is sent, never while the turn is read live, so no text leaves under the reader. */
-  const fold = useMemo(
-    () => (isPastTurn && !isMessageActive ? splitWorkingNarrative(groups) : undefined),
-    [groups, isPastTurn, isMessageActive],
-  );
+  /* A line the reader opened before the turn folded stays theirs: the turn waits for the next request to fold. */
+  const [readerOpened, setReaderOpened] = useState(false);
+  const elapsed = workedFor(createdAt, endedAt);
+  /* Folded once the turn has finished (its run recorded an end) or a later request follows it, never while it is read
+   * live. A one-line narrative folds only when the line adds the time worked. */
+  const fold = useMemo(() => {
+    const settled = isPastTurn || (endedAt !== undefined && !readerOpened);
+    const split = settled && !isMessageActive ? splitWorkingNarrative(groups) : undefined;
+    return split !== undefined && (split.narrative.length > 1 || elapsed !== undefined) ? split : undefined;
+  }, [groups, isPastTurn, isMessageActive, endedAt, readerOpened, elapsed]);
+  const noteOpening = (event: React.MouseEvent): void => {
+    if (
+      fold === undefined &&
+      !readerOpened &&
+      event.target instanceof Element &&
+      event.target.closest('[aria-expanded="false"]') !== null
+    ) {
+      setReaderOpened(true);
+    }
+  };
   const renderGroup = (group: ActivityGroup): React.JSX.Element => {
     const groupIndex = groups.indexOf(group);
     return (
@@ -779,21 +805,26 @@ function AssistantParts({
     );
   };
 
-  if (fold === undefined) {
-    return <>{groups.map((group) => renderGroup(group))}</>;
-  }
+  /* One parent in both shapes, so the answer's groups keep their keys, and stay mounted, as the narrative folds. */
   return (
-    <>
-      <ChatWorkedFold summary={fold.summary}>{fold.narrative.map((group) => renderGroup(group))}</ChatWorkedFold>
-      {fold.kept.map((group) => renderGroup(group))}
-      {fold.answer.map((group) => renderGroup(group))}
-    </>
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- observes the disclosures' own clicks (keyboard activation included); it handles nothing itself
+    <div className='contents' onClickCapture={noteOpening}>
+      {fold === undefined
+        ? groups.map((group) => renderGroup(group))
+        : [
+            <ChatWorkedFold key='worked-fold' summary={fold.summary} elapsed={elapsed}>
+              {fold.narrative.map((group) => renderGroup(group))}
+            </ChatWorkedFold>,
+            ...fold.kept.map((group) => renderGroup(group)),
+            ...fold.answer.map((group) => renderGroup(group)),
+          ]}
+    </div>
   );
 }
 
 type ChatMessageProperties = {
   readonly messageId: string;
-  /** A later request follows this message's turn, so its working narrative folds to one line. */
+  /** A later request follows this message's turn, so its working narrative folds to one line whatever the reader opened. */
   readonly isPastTurn?: boolean;
   /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
   readonly footer?: React.ReactNode;
@@ -1062,7 +1093,13 @@ export const ChatMessage = memo(function ({
                   ))}
                 </div>
               ) : (
-                <AssistantParts parts={inlineParts} messageId={displayMessage.id} isPastTurn={isPastTurn} />
+                <AssistantParts
+                  parts={inlineParts}
+                  messageId={displayMessage.id}
+                  isPastTurn={isPastTurn}
+                  createdAt={displayMessage.metadata?.createdAt}
+                  endedAt={displayMessage.metadata?.endedAt}
+                />
               )}
             </ChatMessageSurface>
           </When>

@@ -9,18 +9,20 @@ type ChatWorkedFoldProps = {
   readonly summary: string;
   /** The working narrative: commentary and activity lines, in order. */
   readonly children: React.ReactNode;
+  /** How long the turn worked, formatted ("5m 32s"); absent when its run has not recorded an end. */
+  readonly elapsed?: string;
 };
 
 /**
- * An older turn's working narrative, folded to one line once the next request is sent.
+ * A finished turn's working narrative, folded to one line with the time the turn worked.
  *
  * The line rests closed and only the reader opens it, like every transcript disclosure. Opened, the narrative reads
  * as it did live, under a hairline that marks where it ends and the answer begins.
  *
- * @param properties - The fold's summary and the narrative it holds.
+ * @param properties - The fold's summary, the time worked and the narrative it holds.
  * @returns The fold's line and, once opened, the narrative.
  */
-export function ChatWorkedFold({ summary, children }: ChatWorkedFoldProps): React.JSX.Element {
+export function ChatWorkedFold({ summary, children, elapsed }: ChatWorkedFoldProps): React.JSX.Element {
   const detail = summary === '' ? '' : ` · ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
   return (
     <Collapsible data-slot='worked-fold'>
@@ -32,7 +34,7 @@ export function ChatWorkedFold({ summary, children }: ChatWorkedFoldProps): Reac
         >
           <ListCollapse aria-hidden='true' className='size-3 shrink-0' />
           <span className='min-w-0 truncate'>
-            <span className='font-medium'>Worked</span>
+            <span className='font-medium'>{elapsed === undefined ? 'Worked' : `Worked for ${elapsed}`}</span>
             {detail}
           </span>
           <ChevronRight

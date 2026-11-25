@@ -62,9 +62,10 @@ measurements remain explicit.
   A diff inside a file row is a meaningful second level. Format-specific export
   options start collapsed below the primary export choice. Commentary, answers
   and deliverables stay outside routine activity folds while a turn is current.
-  Once the next request is sent, an older turn's working narrative (its
-  commentary and activity up to its last tool call) folds to one line; its
-  answer, decisions and deliverables stay in view. Supporting file trees
+  Once a turn finishes, its working narrative (commentary and activity up to
+  its last tool call) folds to one line with the wall-clock time it worked; its
+  answer, decisions and deliverables stay in place. A turn whose disclosure the
+  reader opened while it ran waits for the next request. Supporting file trees
   may start collapsed, but Reveal in files must expand and select the target.
 - **Respect inspection.** Streaming, telemetry and save settlement must not
   reopen a closed disclosure, erase an edit draft, reset selection, move focus

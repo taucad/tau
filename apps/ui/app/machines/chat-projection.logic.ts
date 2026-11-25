@@ -45,6 +45,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { TurnRevisionLog } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import {
   agentApprovalToolName,
+  endedChunk,
   parseAgentHostApproval,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
@@ -421,6 +422,10 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/** The metadata chunk that states when an answer's work ended; a reopened run has not ended, so it goes too. */
+const isEndedChunk = (chunk: UIMessageChunk): boolean =>
+  chunk.type === 'message-metadata' && isRecord(chunk.messageMetadata) && 'endedAt' in chunk.messageMetadata;
 
 /**
  * Cut the active segment's dropped messages (the host reducer's prefix cut, at message granularity).
@@ -803,7 +808,8 @@ const foldRunViews = (
             ...(previous?.segments ?? []),
             {
               user: previous?.steering ?? previous?.user,
-              chunks: previous?.chunks ?? [],
+              // The steering input ends the sealed answer's work, as a terminal row ends a run's.
+              chunks: [...chunksOf(previous?.chunks), endedChunk(Date.parse(row.recordedAt))],
               providerIds: previous?.providerIds,
               messages: previous?.messages,
             },
@@ -812,9 +818,15 @@ const foldRunViews = (
       sealedSegment?.chunks ??
       (steering === undefined
         ? reopened
-          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type))
+          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type) && !isEndedChunk(chunk))
           : (previous?.chunks ?? [])
-        : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk]);
+        : [
+            {
+              type: 'start',
+              messageId: segmentId,
+              messageMetadata: { createdAt: Date.parse(row.recordedAt) },
+            } satisfies UIMessageChunk,
+          ]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
     const { terminal: _terminal, ...prior } = previous ?? {};

@@ -157,6 +157,11 @@ export const snapshotSchema = z.object({
  */
 export const messageMetadataSchema = z.object({
   createdAt: z.number().optional(),
+  /**
+   * When an assistant message's work ended, epoch milliseconds: its run's settling row, or the steering input that
+   * sealed it. Absent while the run is open; the wall-clock time a turn worked is `endedAt - createdAt`.
+   */
+  endedAt: z.number().optional(),
   status: z.enum(messageStatuses).optional(),
   /** The structured geometry references a user message carries; its text holds each one's `@cad[...]` token. */
   references: cadReferencesSchema.optional(),

@@ -698,6 +698,69 @@ describe('ChatMessage older turn fold', () => {
     expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
   });
 
+  /** `worked` is milliseconds. */
+  const finished = (message: MyUIMessage, worked: number): MyUIMessage => ({
+    ...message,
+    metadata: { createdAt: 1_788_220_800_000, endedAt: 1_788_220_800_000 + worked },
+  });
+
+  it('folds the latest turn once it has finished, with the time it worked', () => {
+    setMessages([finished(narrated, 332_749)]);
+
+    render(<ChatMessage messageId={narrated.id} />);
+
+    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · read files, commands failed$/u });
+    expect(line).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
+    expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
+  });
+
+  it('names the time on an older turn too', () => {
+    setMessages([finished(narrated, 7532)]);
+
+    render(<ChatMessage messageId={narrated.id} isPastTurn />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 7s · read files, commands failed$/u })).toBeVisible();
+  });
+
+  it('waits for the next request when the reader opened a line while the turn ran', () => {
+    setMessages([narrated]);
+    const { rerender } = render(<ChatMessage messageId={narrated.id} />);
+    const [firstLine] = screen.getAllByRole('button', { expanded: false });
+    fireEvent.click(firstLine!);
+
+    setMessages([finished(narrated, 7532)]);
+    rerender(<ChatMessage messageId={narrated.id} footer={null} />);
+
+    expect(screen.queryByRole('button', { name: /^Worked/u })).not.toBeInTheDocument();
+    expect(screen.getByText('Reading the model first.')).toBeVisible();
+
+    rerender(<ChatMessage isPastTurn messageId={narrated.id} footer={null} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toBeVisible();
+  });
+
+  it('folds a one-line narrative when the line adds the time worked', () => {
+    const message: MyUIMessage = finished(
+      { id: 'msg-one-line-timed', role: 'assistant', parts: [read('read-1'), { type: 'text', text: 'Done.' }] },
+      12_000,
+    );
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 12s · read files$/u })).toBeVisible();
+    expect(screen.queryAllByTestId('chat-activity-group')).toHaveLength(0);
+  });
+
+  it('states no time under a second', () => {
+    setMessages([finished(narrated, 400)]);
+
+    render(<ChatMessage messageId={narrated.id} />);
+
+    expect(screen.getByRole('button', { name: /^Worked · read files, commands failed$/u })).toBeVisible();
+  });
+
   it('leaves a turn whose narrative is one line alone', () => {
     const message: MyUIMessage = {
       id: 'msg-one-line',

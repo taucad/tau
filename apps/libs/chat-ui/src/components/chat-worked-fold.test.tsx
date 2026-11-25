@@ -31,4 +31,14 @@ describe('ChatWorkedFold', () => {
 
     expect(screen.getByRole('button', { name: 'Worked' })).toBeInTheDocument();
   });
+
+  it('leads with the time the turn worked when it has one', () => {
+    render(
+      <ChatWorkedFold summary='Read files' elapsed='5m 32s'>
+        <p>Reading the model first.</p>
+      </ChatWorkedFold>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Worked for 5m 32s · read files' })).toBeInTheDocument();
+  });
 });

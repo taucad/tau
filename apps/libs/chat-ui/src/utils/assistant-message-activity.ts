@@ -491,7 +491,7 @@ export type WorkingNarrative = {
  * its answer.
  *
  * Commentary text and activity fold; a decision, a deliverable or an attachment never does, so those stay in view.
- * A narrative of one line is left alone, because a fold over one line only restates it.
+ * Whether a one-line narrative is worth folding is the caller's call: it is when the fold line adds the time worked.
  *
  * @param groups - The turn's groups, from {@link groupAssistantParts}.
  * @returns The split, or `undefined` when there is nothing worth folding.
@@ -506,9 +506,6 @@ export const splitWorkingNarrative = (groups: readonly ActivityGroup[]): Working
   for (const group of groups.slice(0, lastToolGroup + 1)) {
     const isCommentary = group.kind === 'singleton' && group.part.type === 'text';
     (group.kind === 'aggregated' || isCommentary ? narrative : kept).push(group);
-  }
-  if (narrative.length < 2) {
-    return undefined;
   }
   const toolParts = narrative.flatMap((group) =>
     group.kind === 'aggregated' ? group.parts.filter((part) => cachedCategory(part) === 'research') : [],

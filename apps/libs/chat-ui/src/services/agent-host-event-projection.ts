@@ -970,6 +970,20 @@ const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undef
   return false;
 };
 
+/**
+ * The chunk that states when an answer's work ended, epoch milliseconds, through the AI SDK's own message metadata.
+ * A failed or cancelled run's `error` and `abort` chunks carry no metadata, so the end rides ahead of them; a steering
+ * input appends it to the answer it seals.
+ *
+ * @param endedAt - When the work ended.
+ * @returns The metadata chunk.
+ * @public
+ */
+export const endedChunk = (endedAt: number): UIMessageChunk => ({
+  type: 'message-metadata',
+  messageMetadata: { endedAt },
+});
+
 const lifecycleChunks = (
   event: Extract<PresentationEvent, { readonly type: 'run.lifecycle' }>,
   streamedBlocks: AgentHostLiveBlocks | undefined,
@@ -996,13 +1010,22 @@ const lifecycleChunks = (
       return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'finish-step' }];
     }
     case 'completed': {
-      return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
+      return [
+        {
+          type: 'finish',
+          finishReason: 'stop',
+          messageMetadata: { status: 'success', endedAt: Date.parse(event.recordedAt) },
+        },
+      ];
     }
     case 'failed': {
-      return [{ type: 'error', errorText: runFailureText(event.detail) }];
+      return [endedChunk(Date.parse(event.recordedAt)), { type: 'error', errorText: runFailureText(event.detail) }];
     }
     case 'cancelled': {
-      return [{ type: 'abort', reason: errorText(event.detail, 'cancelled') }];
+      return [
+        endedChunk(Date.parse(event.recordedAt)),
+        { type: 'abort', reason: errorText(event.detail, 'cancelled') },
+      ];
     }
   }
 };

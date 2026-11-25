@@ -21,6 +21,7 @@ import type { UIMessage, UIMessageChunk } from 'ai';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
+import type { MyUIMessage } from '@taucad/chat';
 import { projectAgentHostEvent, runFailureText } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   chatProjectionLogic,
@@ -58,7 +59,18 @@ const logs = [
 ] as const;
 
 const terminalChunk = new Set(['finish', 'error', 'abort']);
-const durable = (chunks: ReadonlyArray<{ type: string }>) => chunks.filter((chunk) => !terminalChunk.has(chunk.type));
+/** What a reopen keeps: everything but the terminal marker and the end time stated ahead of it. */
+const durable = (chunks: ReadonlyArray<{ type: string; messageMetadata?: unknown }>) =>
+  chunks.filter(
+    (chunk) =>
+      !terminalChunk.has(chunk.type) &&
+      !(
+        chunk.type === 'message-metadata' &&
+        typeof chunk.messageMetadata === 'object' &&
+        chunk.messageMetadata !== null &&
+        'endedAt' in chunk.messageMetadata
+      ),
+  );
 
 const readLog = (name: string): AgentLogEvent[] =>
   readFileSync(
@@ -2589,5 +2601,82 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
       calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
     );
     expect(message?.parts.filter((part) => part.type === 'reasoning')).toMatchObject([{ text, state: 'done' }]);
+  });
+});
+
+describe('the time an answer worked', () => {
+  const at = (row: Readonly<Record<string, unknown>>, recordedAt: string) => ({ ...row, recordedAt });
+  const assistantTimes = (messages: readonly MyUIMessage[]) =>
+    messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => [message.id, message.metadata?.createdAt, message.metadata?.endedAt]);
+
+  it('should end each recorded answer at its run settling row, wall clock from its admission', async () => {
+    const hexnut = await materializeTranscript(project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7));
+    expect(
+      hexnut
+        .filter((message) => message.role === 'assistant')
+        .map((message) => message.metadata!.endedAt! - message.metadata!.createdAt!),
+    ).toEqual([38_768, 7532, 27_790, 4225]);
+
+    // Stopped for an approval at 04:58:49, failed by a later host at 05:07:09: wall clock counts the wait.
+    const kinetic = await materializeTranscript(project(readLog('recorded/kinetic-regenerate-resume'), 7));
+    const [, last] = kinetic.filter((message) => message.role === 'assistant');
+    expect(last?.metadata?.endedAt).toBe(Date.parse('2026-10-04T05:07:09.700Z'));
+    expect(last!.metadata!.endedAt! - last!.metadata!.createdAt!).toBe(832_628);
+  });
+
+  it('should take the end away when a stopped run resumes, and state the later end once it settles again', async () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(2, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Working' } }),
+        '2026-09-28T00:00:10.000Z',
+      ),
+      at(lifecycleRow(3, 'cancelled'), '2026-09-28T00:00:39.000Z'),
+      at(lifecycleRow(4, 'running'), '2026-09-28T00:13:00.000Z'),
+      at(lifecycleRow(5, 'completed'), '2026-09-28T00:14:06.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(assistantTimes(await materializeTranscript(project(rows.slice(0, 4), 1)))).toEqual([
+      ['run_1', start, start + 39_000],
+    ]);
+    expect(assistantTimes(await materializeTranscript(project(rows.slice(0, 5), 1)))).toEqual([
+      ['run_1', start, undefined],
+    ]);
+    expect(assistantTimes(await materializeTranscript(project(rows, 1)))).toEqual([['run_1', start, start + 846_000]]);
+  });
+
+  it('should end a steered answer at the steering input and start the next one there', async () => {
+    const user = { id: 'user-1', role: 'user', content: 'Build it' } as const;
+    const rows = [
+      at(
+        { ...lifecycleRow(0, 'admitted'), admission: { kind: 'tau', turnId: user.id, message: user } },
+        '2026-09-28T00:00:00.000Z',
+      ),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(logRow(2, { type: 'message.appended', message: user }), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(3, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Before' } }),
+        '2026-09-28T00:00:05.000Z',
+      ),
+      at(
+        logRow(4, { type: 'message.appended', message: { id: 'steer:c-1', role: 'user', content: 'Steer' } }),
+        '2026-09-28T00:00:20.000Z',
+      ),
+      at(
+        logRow(5, { type: 'message.appended', message: { id: 'a-2', role: 'assistant', content: 'After' } }),
+        '2026-09-28T00:00:25.000Z',
+      ),
+      at(lifecycleRow(6, 'completed'), '2026-09-28T00:01:00.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(assistantTimes(await materializeTranscript(project(rows, 2)))).toEqual([
+      ['run_1', start, start + 20_000],
+      ['run_1:steer:c-1', start + 20_000, start + 60_000],
+    ]);
   });
 });

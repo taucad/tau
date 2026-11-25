@@ -704,7 +704,7 @@ jobs:
             typecheck-*) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
             # shellcheck disable=SC2086 # BUILD_TARGETS is a word list
             build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;
-            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
           node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
@@ -812,16 +812,16 @@ jobs:
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
-              # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
+              # this runner. `ci:nightly-only` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
-              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
               # The task graph also holds the tasks `test` depends on (builds and the like),
               # so keep the `test` tasks, and drop an excluded tag again in case another
               # project's `test` ever depends on one of theirs.
               projects=$(jq -c '
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
-                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:nightly-only") | not))' "$RUNNER_TEMP/test-graph.json")
               # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
               # tasks, every one of them, in place of the project; the rest enter as projects.
               units=$(jq -c --argjson projects "$projects" '

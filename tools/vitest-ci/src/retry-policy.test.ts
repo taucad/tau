@@ -7,6 +7,7 @@ import process from 'node:process';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { utcDay } from '#quarantine.js';
 import type { ChangedFiles, RetriedPass, RetryEnvironment } from '#retry-policy.js';
 import {
   judgeRetries,
@@ -493,8 +494,18 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  /** Runs one fixture as a CI task whose change is `NX_BASE..NX_HEAD` of the temporary repository. */
-  const runTask = (fixture: string, base: string, head: string) => {
+  /**
+   * Runs fixtures as a CI task whose change is `NX_BASE..NX_HEAD` of the temporary repository. The config is this
+   * package's fixture config unless the repository holds its own copy, which makes the repository the project root.
+   */
+  const runTask = (
+    fixture: string | readonly string[],
+    base: string,
+    head: string,
+    config = join(fixtures, 'vitest.config.ts'),
+  ) => {
+    const filters = typeof fixture === 'string' ? [fixture] : fixture;
+    const label = filters.join('+');
     const require = createRequire(import.meta.url);
     const vitestBin = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
     const env: Record<string, string> = {};
@@ -503,7 +514,7 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
         env[key] = value;
       }
     }
-    const summary = join(directory, '..', `${fixture}.summary.md`);
+    const summary = join(directory, '..', `${label}.summary.md`);
     Object.assign(env, {
       CI: 'true',
       GITHUB_ACTIONS: 'true',
@@ -517,11 +528,11 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
       NX_TASK_TARGET_TARGET: 'test',
       TAU_RETRY_FIXTURE_ROOT: directory,
     });
-    const child = spawnSync(
-      process.execPath,
-      [vitestBin, 'run', '--config', join(fixtures, 'vitest.config.ts'), fixture],
-      { cwd: packageRoot, env, encoding: 'utf8' },
-    );
+    const child = spawnSync(process.execPath, [vitestBin, 'run', '--config', config, ...filters], {
+      cwd: packageRoot,
+      env,
+      encoding: 'utf8',
+    });
     let summaryText = '';
     try {
       summaryText = readFileSync(summary, 'utf8');
@@ -586,6 +597,74 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
     expect(task.status, task.output).toBe(1);
     expect(task.output).toContain('Task failed: 4 retried passes in this task, over the budget of 3 (RT-4)');
   }, 60_000);
+
+  describe('beside a quarantined failure: the retry policy runs after the quarantine verdict', () => {
+    const quarantined = 'quarantined-failure.fixture.ts > quarantined: always fails here';
+
+    /** Makes the repository a project with its own config and a `quarantine.json` that names the quarantined test. */
+    const quarantineProject = (): string => {
+      mkdirSync(join(directory, 'node_modules', '@taucad'));
+      symlinkSync(packageRoot, join(directory, 'node_modules', '@taucad', 'vitest-ci'), 'dir');
+      writeFileSync(
+        join(directory, 'package.json'),
+        `${JSON.stringify({ name: 'fixture', private: true, type: 'module' })}\n`,
+      );
+      copyFileSync(join(fixtures, 'vitest.config.ts'), join(directory, 'vitest.config.ts'));
+      const today = utcDay();
+      writeFileSync(
+        join(directory, 'quarantine.json'),
+        `${JSON.stringify({
+          entries: [
+            {
+              test: quarantined,
+              owner: 'rifont',
+              issue: 2787,
+              class: 'race',
+              created: today,
+              expires: utcDay(new Date(Date.now() + 14 * 86_400_000)),
+              evidence: '2 flake events in 61 executions',
+            },
+          ],
+        })}\n`,
+      );
+      place('quarantined-failure.fixture.ts');
+      return join(directory, 'vitest.config.ts');
+    };
+
+    it('a quarantined failure alone exits 0', () => {
+      const config = quarantineProject();
+      const base = commitAll(directory, 'base');
+      const head = commitAll(directory, 'no change');
+
+      const task = runTask('quarantined-failure', base, head, config);
+      expect(task.status, task.output).toBe(0);
+      expect(task.output).toContain(`::notice title=Quarantined failure::quarantined failure, non-gating, #2787`);
+    }, 60_000);
+
+    it('a quarantined failure with four retried passes exits 1 (RT-4)', () => {
+      const config = quarantineProject();
+      place('four-retried-passes.fixture.ts');
+      const base = commitAll(directory, 'base');
+      const head = commitAll(directory, 'no change');
+
+      const task = runTask(['quarantined-failure', 'four-retried-passes'], base, head, config);
+      expect(task.status, task.output).toBe(1);
+      expect(task.output).toContain('::notice title=Quarantined failure::');
+      expect(task.output).toContain('Task failed: 4 retried passes in this task, over the budget of 3 (RT-4)');
+    }, 60_000);
+
+    it('a quarantined failure with a retried pass in a file the change touches exits 1 (RT-3)', () => {
+      const config = quarantineProject();
+      const base = commitAll(directory, 'base');
+      place('one-retried-pass.fixture.ts');
+      const head = commitAll(directory, 'add the test');
+
+      const task = runTask(['quarantined-failure', 'one-retried-pass'], base, head, config);
+      expect(task.status, task.output).toBe(1);
+      expect(task.output).toContain('::notice title=Quarantined failure::');
+      expect(task.output).toContain('earns no credit: its file is changed by this change (RT-3)');
+    }, 60_000);
+  });
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- End wire names. */

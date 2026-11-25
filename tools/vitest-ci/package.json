@@ -12,6 +12,8 @@
   "exports": {
     ".": "./src/test-reporters.ts",
     "./outcome-reporter": "./src/outcome-reporter.ts",
+    "./quarantine": "./src/quarantine.ts",
+    "./quarantine-verdict": "./src/quarantine-verdict.ts",
     "./retry-policy": "./src/retry-policy.ts",
     "./package.json": "./package.json"
   }

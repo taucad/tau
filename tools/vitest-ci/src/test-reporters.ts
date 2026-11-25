@@ -3,9 +3,11 @@
  *
  * The list keeps the config's own console reporter, adds `github-actions` on GitHub Actions (a failure becomes a
  * check-run annotation), adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
- * cache replay restores the original run's rows, and ends with the {@link RetryPolicyReporter}, which reads that file
- * at the end of the run (testing policy § 16.2). A change to how every config reports is one change here.
- * {@link testRetry} is the `retry` every config sets beside it.
+ * cache replay restores the original run's rows, then the {@link QuarantineVerdict}, which lets a failure the
+ * project's `quarantine.json` names report without gating, and ends with the {@link RetryPolicyReporter}, which reads
+ * that file at the end of the run (testing policy § 16.1 and § 16.2). The retry policy runs after the quarantine
+ * verdict, so a verdict that lowers the exit code cannot hide a broken retry rule. A change to how every config
+ * reports is one change here. {@link testRetry} is the `retry` every config sets beside it.
  *
  * The outcome recorder is imported through the package's own subpath, not a `#` alias, because the configs that
  * import this module are type-checked under other projects' compiler options, some with a `#*` path alias. The list
@@ -16,13 +18,14 @@ import process from 'node:process';
 
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import type { OutcomeEnvironment } from '@taucad/vitest-ci/outcome-reporter';
+import { QuarantineVerdict } from '@taucad/vitest-ci/quarantine-verdict';
 import { onCi, RetryPolicyReporter, retryBudget, underVerification } from '@taucad/vitest-ci/retry-policy';
 import type { RetryEnvironment } from '@taucad/vitest-ci/retry-policy';
 import type { BuiltinReporters } from 'vitest/node';
 
 /**
  * The reporter list for a Tau Vitest config: the config's console reporter, `github-actions` on GitHub Actions,
- * the {@link OutcomeReporter} and the {@link RetryPolicyReporter}.
+ * the {@link OutcomeReporter}, the {@link QuarantineVerdict} and, last, the {@link RetryPolicyReporter}.
  *
  * @param base - The console reporter the config uses, `verbose` or `default` in Tau.
  * @param env - The environment to read `GITHUB_ACTIONS` from. Defaults to `process.env`.
@@ -40,12 +43,15 @@ import type { BuiltinReporters } from 'vitest/node';
 export const testReporters = (
   base: BuiltinReporters = 'default',
   env: OutcomeEnvironment = process.env,
-): Array<BuiltinReporters | OutcomeReporter | RetryPolicyReporter> => {
+): Array<BuiltinReporters | OutcomeReporter | QuarantineVerdict | RetryPolicyReporter> => {
   const outcome = new OutcomeReporter();
   return [
     base,
     ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
     outcome,
+    // Both read the outcome file the recorder writes in the same `onTestRunEnd` round. The retry policy comes last:
+    // the quarantine verdict may lower the exit code to 0, and a broken retry rule must still raise it to 1.
+    new QuarantineVerdict(outcome),
     new RetryPolicyReporter({ outcome }),
   ];
 };

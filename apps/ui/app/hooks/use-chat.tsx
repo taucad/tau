@@ -39,7 +39,6 @@
  */
 
 import type { ChatStatus } from 'ai';
-import type { ChatView } from '#services/deferred-chat.js';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -69,9 +68,7 @@ import { pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
-type ChatInstance = ChatView;
-
-type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
+type SendMessageInput = MyUIMessage;
 
 const emptyMessages: readonly MyUIMessage[] = Object.freeze([]);
 
@@ -86,13 +83,6 @@ export type ChatContextValue = {
    * explicit `chatId` argument).
    */
   activeChatId: string;
-  /**
-   * The live AI SDK `Chat` instance for the resolved chat. Always defined
-   * for the active chat (the provider guarantees the session). May be
-   * `undefined` only when the caller passes an explicit `chatId` that is
-   * not currently mounted (cross-chat read pattern).
-   */
-  chat: ChatInstance | undefined;
   /**
    * Persistence machine for the resolved chat. Always defined for the
    * active chat; may be `undefined` for cross-chat reads of non-mounted
@@ -109,12 +99,10 @@ export type ChatContextValue = {
 };
 
 type SessionSnapshotFields = {
-  chat: ChatInstance | undefined;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined;
 };
 
 const emptySessionSnapshot: SessionSnapshotFields = {
-  chat: undefined,
   persistenceActorRef: undefined,
 };
 
@@ -123,7 +111,6 @@ function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapsho
     return emptySessionSnapshot;
   }
   return {
-    chat: session.chat,
     persistenceActorRef: session.persistenceActorRef,
   };
 }
@@ -141,11 +128,10 @@ export function useChatContext(chatId?: string): ChatContextValue {
   return useMemo<ChatContextValue>(
     () => ({
       activeChatId: resolvedChatId,
-      chat: snapshot.chat,
       persistenceActorRef: snapshot.persistenceActorRef,
       draftActorRef: active.draftActorRef,
     }),
-    [resolvedChatId, snapshot.chat, snapshot.persistenceActorRef, active.draftActorRef],
+    [resolvedChatId, snapshot.persistenceActorRef, active.draftActorRef],
   );
 }
 
@@ -508,7 +494,6 @@ export type ChatActions = DraftActions & {
    */
   continueChat: () => void;
   stop: (origin: StopOrigin) => void;
-  setMessages: (messages: MyUIMessage[]) => void;
   editMessage: (
     messageId: string,
     content: string,
@@ -567,8 +552,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!requireSession('sendMessage')) {
           return;
         }
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
-        const outgoingMessage = message as MyUIMessage;
+        const outgoingMessage = message;
         /* I5: the composer is this message's only copy until the dispatch
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
@@ -603,14 +587,6 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         store.stopRun(resolvedChatId, origin);
       },
-      setMessages(messages: MyUIMessage[]) {
-        const session = requireSession('setMessages');
-        if (!session) {
-          return;
-        }
-        store.replaceMessages(resolvedChatId, messages);
-      },
-
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {
         const session = resolveSession();
         const resolved = originalMessage ?? session?.messages.find((m) => m.id === messageId);

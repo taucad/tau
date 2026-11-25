@@ -1,21 +1,21 @@
 /**
- * An approval's chunks stay a valid AI SDK stream at every point of a recorded ACP log: the transcript read, and the
- * run watch opened on each prefix, a pause or a resume, never meet an answer whose request the stream lost.
+ * An approval's chunks stay a valid UI message stream at every point of a recorded ACP log: the transcript fold of each
+ * prefix, replayed from any sequence, through a pause or a resume, never meets an answer whose request the stream lost
+ * (T4: the fold replaced the SDK reader and the run watch, so a lost request is a skipped chunk, D1).
  */
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { readUIMessageStream } from 'ai';
 import type { AgentLogEvent } from '@taucad/agent-host';
-import type { MyUIMessage } from '@taucad/chat';
 import { agentApprovalToolName } from '@taucad/chat-ui/services/agent-host-event-projection';
-import { openRunWatch } from '#chat-clients/_internal/run-watch.js';
+import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
 import {
+  chunksOf,
   initialChatProjection,
-  materializeTranscript,
   reduceChatProjection,
-  selectCurrentRun,
+  selectTranscript,
+  selectTranscriptSource,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 
@@ -49,32 +49,15 @@ const fold = (state: ChatProjection, from: number, to: number): ChatProjection =
     },
   }).state;
 
-/** Read the current run's watch, as the SDK chat reads it on resume, through the pinned SDK's own reader. */
-const watchCurrentRun = async (
-  projection: ChatProjection,
-  message: MyUIMessage | undefined,
-): Promise<MyUIMessage | undefined> => {
-  const run = selectCurrentRun(projection);
-  if (run === undefined || projection.views[run.runId] === undefined) {
-    return message;
-  }
-  const watch = openRunWatch({
-    runId: run.runId,
-    getProjection: () => projection,
-    subscribe: () => () => undefined,
-  });
-  // The projection never moves here: what the watch replayed is all it will send.
-  watch.detach();
-  let last = message;
-  for await (const next of readUIMessageStream<MyUIMessage>({
-    stream: watch.stream,
-    terminateOnError: true,
-    ...(message === undefined ? {} : { message }),
-  })) {
-    last = next;
-  }
-  return last;
-};
+/** Chunks of the transcript the fold could not place: an answer whose request the stream lost. */
+const skippedOf = (projection: ChatProjection): number =>
+  selectTranscriptSource(projection).reduce(
+    (total, run) =>
+      total +
+      reduceChunks(chunksOf(run.chunks)).skipped +
+      (run.segments ?? []).reduce((sum, segment) => sum + reduceChunks(chunksOf(segment.chunks)).skipped, 0),
+    0,
+  );
 
 describe('approval chunks over a recorded ACP log', () => {
   it('records a request refined while paused and answered before its call completes', () => {
@@ -89,19 +72,18 @@ describe('approval chunks over a recorded ACP log', () => {
     }
   });
 
-  it('should materialize every prefix, replayed from every sequence, without a stream error', async () => {
+  it('should fold every prefix, replayed from every sequence, through each pause and resume, skipping no chunk', () => {
     for (let start = 0; start <= rows.length; start++) {
       let state = start === 0 ? initialChatProjection : fold(initialChatProjection, 0, start);
       for (let at = start; at < rows.length; at++) {
         state = fold(state, at, at + 1);
-        // oxlint-disable-next-line no-await-in-loop -- each prefix is read in log order.
-        await expect(materializeTranscript(state), `replay from ${start}, row ${at}`).resolves.toBeDefined();
+        expect(skippedOf(state), `replay from ${start}, row ${at}`).toBe(0);
       }
     }
   });
 
-  it('should keep every answered approval as its own settled part in the full transcript', async () => {
-    const messages = await materializeTranscript(fold(initialChatProjection, 0, rows.length));
+  it('should keep every answered approval as its own settled part in the full transcript', () => {
+    const messages = selectTranscript(fold(initialChatProjection, 0, rows.length));
     const approvals = messages.flatMap((message) =>
       message.parts.flatMap((part) =>
         part.type === 'dynamic-tool' && part.toolName === agentApprovalToolName
@@ -110,31 +92,5 @@ describe('approval chunks over a recorded ACP log', () => {
       ),
     );
     expect(approvals).toEqual(interrupts.map((id) => ({ id, state: 'output-available' })));
-  });
-
-  it('should watch the run at every row, through each pause and resume, without a stream error', async () => {
-    let state = initialChatProjection;
-    let held: MyUIMessage | undefined;
-    for (let at = 0; at < rows.length; at++) {
-      state = fold(state, at, at + 1);
-      // A fresh watch replays the run's whole segment, as a reattach does.
-      // oxlint-disable-next-line no-await-in-loop -- each prefix is read in log order.
-      await expect(
-        watchCurrentRun(state, undefined).then(() => 'read'),
-        `fresh watch at row ${at}`,
-      ).resolves.toBe('read');
-      const run = selectCurrentRun(state);
-      if (run?.lifecycle === 'paused') {
-        // oxlint-disable-next-line no-await-in-loop -- the pause's message is what the resume continues.
-        held = await watchCurrentRun(state, undefined);
-      } else if (run?.lifecycle === 'running' && held !== undefined) {
-        // The SDK chat continues the message it held at the pause.
-        // oxlint-disable-next-line no-await-in-loop -- each prefix is read in log order.
-        await expect(
-          watchCurrentRun(state, structuredClone(held)).then(() => 'read'),
-          `resumed watch at row ${at}`,
-        ).resolves.toBe('read');
-      }
-    }
   });
 });

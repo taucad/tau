@@ -2,8 +2,7 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { createActor } from 'xstate';
-import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type * as ThemeModule from '#hooks/use-theme.js';
@@ -117,12 +116,6 @@ const { useChatSelector } = await import('#hooks/use-chat.js');
 
 const { ChatMessage } = await import('#routes/w.$workspace.$project/chat-message.js');
 const { TooltipProvider } = await import('@taucad/ui/components/tooltip');
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 it('should render first held reasoning through production ChatMessage before durable completion', async () => {
   dependencies.sessions = createSessionsActor().start();
   let store: ChatSessionStore | undefined;

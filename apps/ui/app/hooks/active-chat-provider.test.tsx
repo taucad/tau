@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-/* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
@@ -20,24 +18,12 @@ import { resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
-// the AI SDK `Chat` class (with subscriber-callback emit helpers so tests
-// can drive `useChatSessionSnapshot` re-renders), the cookie hooks
+// the cookie hooks
 // (`useModels` / `useKernel`) for stable strategy-helper input, and the
 // resize actor for the image-resize toast subscriber assertions.
 // ---------------------------------------------------------------------------
 
-type FakeChat = {
-  id: string;
-  messages: MyUIMessage[];
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
-  error: Error | undefined;
-  emitMessagesChange: () => void;
-  emitStatusChange: () => void;
-  emitErrorChange: () => void;
-};
-
 const harness = vi.hoisted(() => ({
-  created: [] as FakeChat[],
   patchChat: vi.fn(),
   touchChatRecency: vi.fn(),
   getChat: vi.fn(),
@@ -54,68 +40,6 @@ const harness = vi.hoisted(() => ({
   homeFiles: new Map<string, Uint8Array<ArrayBuffer>>(),
   homeReadFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
   homeWriteFile: vi.fn<(path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>>(),
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id: string;
-    public messages: MyUIMessage[] = [];
-    public status: 'submitted' | 'streaming' | 'ready' | 'error' = 'ready';
-    public error: Error | undefined = undefined;
-    public sendMessage = vi.fn().mockResolvedValue(undefined);
-    public regenerate = vi.fn().mockResolvedValue(undefined);
-    public stop = vi.fn().mockResolvedValue(undefined);
-    public makeRequest = vi.fn().mockResolvedValue(undefined);
-    public resumeStream = vi.fn().mockResolvedValue(undefined);
-    readonly #messagesListeners = new Set<() => void>();
-    readonly #statusListeners = new Set<() => void>();
-    readonly #errorListeners = new Set<() => void>();
-
-    constructor(init: { id: string; messages?: MyUIMessage[] }) {
-      this.id = init.id;
-      this.messages = init.messages ?? [];
-      const fake: FakeChat = Object.assign(this, {
-        emitMessagesChange: () => {
-          for (const l of this.#messagesListeners) {
-            l();
-          }
-        },
-        emitStatusChange: () => {
-          for (const l of this.#statusListeners) {
-            l();
-          }
-        },
-        emitErrorChange: () => {
-          for (const l of this.#errorListeners) {
-            l();
-          }
-        },
-      });
-      harness.created.push(fake);
-    }
-
-    public '~registerMessagesCallback' = (onChange: () => void): (() => void) => {
-      this.#messagesListeners.add(onChange);
-      return () => {
-        this.#messagesListeners.delete(onChange);
-      };
-    };
-
-    public '~registerStatusCallback' = (onChange: () => void): (() => void) => {
-      this.#statusListeners.add(onChange);
-      return () => {
-        this.#statusListeners.delete(onChange);
-      };
-    };
-
-    public '~registerErrorCallback' = (onChange: () => void): (() => void) => {
-      this.#errorListeners.add(onChange);
-      return () => {
-        this.#errorListeners.delete(onChange);
-      };
-    };
-  },
 }));
 
 vi.mock('ai', async (importOriginal) => ({
@@ -276,6 +200,7 @@ const {
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
 const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSelector } = await import('#hooks/use-chat.js');
 /* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
 const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
   await import('#hooks/chat-session-store.fixture.js');
@@ -333,7 +258,6 @@ function createHomeWrapper() {
 }
 
 beforeEach(() => {
-  harness.created = [];
   harness.patchChat.mockReset().mockResolvedValue(undefined);
   harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
   harness.getChat.mockReset().mockResolvedValue(undefined);
@@ -378,12 +302,6 @@ beforeEach(() => {
 afterEach(() => {
   unloadEnvironment?.stop();
   unloadEnvironment = undefined;
-});
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
 });
 
 describe('ChatComposerProvider', () => {
@@ -978,7 +896,6 @@ describe('ActiveChatProvider', () => {
     expect(result.current.draftActorRef).toBeDefined();
     expect(result.current.session).toBeDefined();
     expect(result.current.session!.activeChatId).toBe('chat_active');
-    expect(result.current.session!.chat).toBeDefined();
     expect(result.current.session!.persistenceActorRef).toBeDefined();
   });
 
@@ -988,7 +905,6 @@ describe('ActiveChatProvider', () => {
     });
 
     expect(result.current.activeChatId).toBe('chat_active');
-    expect(result.current.chat).toBeDefined();
     expect(result.current.persistenceActorRef).toBeDefined();
     expect(result.current.draftActorRef).toBeDefined();
   });
@@ -1092,45 +1008,6 @@ describe('ActiveChatProvider', () => {
     });
     expect(result.current.store.isStopping('chat_stop')).toBe(true);
     expect(result.current.composer.agentActivity).toBe('stopping');
-  });
-
-  it('should scan messages for the latest data-context-usage part', () => {
-    const initialMessages: MyUIMessage[] = [
-      {
-        id: 'm1',
-        role: 'assistant',
-        metadata: { createdAt: 0, status: 'success' },
-        parts: [
-          { type: 'text', text: 'hello' },
-          {
-            type: 'data-context-usage',
-            data: {
-              type: 'context-usage',
-              id: 'usage-1',
-              totalInputTokens: 100,
-              contextWindow: 200_000,
-              percentUsed: 0.05,
-              modelId: 'gpt-5.4-medium',
-            },
-          },
-        ],
-      },
-    ];
-
-    const { result } = renderHook(() => useChatComposer(), {
-      wrapper: createSessionWrapper('chat_usage'),
-    });
-
-    expect(result.current.contextUsage).toBeUndefined();
-
-    act(() => {
-      const live = harness.created[0]!;
-      live.messages = initialMessages;
-      live.emitMessagesChange();
-    });
-
-    expect(result.current.contextUsage?.totalInputTokens).toBe(100);
-    expect(result.current.contextUsage?.percentUsed).toBe(0.05);
   });
 
   // ── Session-backed model resolver (chat row preferred, cookie fallback,
@@ -1452,7 +1329,14 @@ describe('ActiveChatProvider', () => {
 
       function Viewer(): ReactNode {
         const session = useActiveChatSession();
-        identities.push([session.activeChatId, session.chat.id]);
+        const store = useChatSessionStore();
+        /* The session the view is handed is the store's session for the chat it names. */
+        identities.push([
+          session.activeChatId,
+          store.get(session.activeChatId)?.persistenceActorRef === session.persistenceActorRef
+            ? session.activeChatId
+            : 'another session',
+        ]);
         useEffect(() => {
           mounted();
           return disposed;
@@ -1507,7 +1391,8 @@ describe('ActiveChatProvider', () => {
       const store = useChatSessionStore();
       stores.push(store);
       const session = useActiveChatSession();
-      const text = `${session.activeChatId}:${session.chat.messages.map((message) => message.id).join(',')}`;
+      const messages = useChatSelector((state) => state.messages);
+      const text = `${session.activeChatId}:${messages.map((message) => message.id).join(',')}`;
       seen.push(text);
       return <button type='button'>{text}</button>;
     }

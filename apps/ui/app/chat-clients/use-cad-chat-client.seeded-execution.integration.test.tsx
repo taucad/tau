@@ -11,8 +11,7 @@
  * `ChatSessionStore` over a chat row that carries both an `activeExecution`
  * and a pending startup request, and asserts on the one durable host command.
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
@@ -292,12 +291,6 @@ beforeEach(() => {
   harness.files.clear();
   resetChatTurnServices();
   vi.clearAllMocks();
-});
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
 });
 
 describe('seeded first turn execution', () => {

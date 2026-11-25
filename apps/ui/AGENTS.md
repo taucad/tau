@@ -4,7 +4,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 
 ## Local Rules
 
-- Build CAD turns with `useCadAgentConfig` and `useCadChatClient`. Use `BrowserPlacementChatTransport` to watch accepted host runs; API `DefaultChatTransport` clients are reserved for project-name and commit-name profiles.
+- Build CAD turns with `useCadAgentConfig` and `useCadChatClient`. The transcript is the store's synchronous fold of the host log projection (`selectTranscript`); never load the AI SDK to show it. API `DefaultChatTransport` clients are reserved for project-name and commit-name profiles.
 - Send each turn gesture to the resident host with one stable command id and its chosen execution; the host log, not a mounted view, decides admission and placement.
 - Treat the portable host event log as authoritative when attaching or reattaching. Rebuild the UI transcript from the whole log; do not append a second competing history.
 - Close project-scoped workers, services, and subscriptions when project identity changes. Route editor, file, and revision transitions through their owning XState machines and filesystem authorities.

@@ -109,3 +109,5 @@ The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began s
 use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.
 
 use_skill startup latency T3 re-pins the drift after `chat-session-store.ts`, `use-chat.tsx` and `use-cad-chat-client.ts` began reading the chat's status from the run phase and the command in flight, with no SDK stream armed; no action changed.
+
+use_skill startup latency T4 re-pins the drift after `chat-session-store.ts` and `use-chat.tsx` dropped the AI SDK `Chat`, its watch, presentation hold, retries and materialization, leaving the fold as the transcript's one owner; no action changed.

@@ -274,8 +274,51 @@ function staticSpecifiers(file: string): string[] {
   return specifiers;
 }
 
+/**
+ * Modules the transcript path's lazy walk does not enter (T4), each loading the AI SDK for its own reason, never to
+ * show a transcript. Same rule as {@link knownHeavyReach}: the list only shrinks.
+ */
+const transcriptPathStops: Readonly<Record<string, string>> = {
+  'libs/chat/src/schemas/message.schema.ts':
+    'record and draft validation (`safeValidateUiMessages`), not the transcript',
+  'components/chat/chat-textarea.tsx': "the composer's `prewarmChatSdk`, which no transcript reader consumes since T4",
+  'chat-clients/_internal/name-generator-client.ts': 'the project/chat name profile client (`DefaultChatTransport`)',
+};
+
+/** Every specifier a module may load, its `import()` calls included: the lazy edges {@link staticSpecifiers} stops at. */
+function loadedSpecifiers(file: string): string[] {
+  if (nameOf(file) in transcriptPathStops) {
+    return [];
+  }
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.ESNext,
+    false,
+    file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const specifiers = [...staticSpecifiers(file)];
+  const visit = (node: ts.Node): void => {
+    const [argument] = ts.isCallExpression(node) ? node.arguments : [];
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      argument !== undefined &&
+      ts.isStringLiteralLike(argument)
+    ) {
+      specifiers.push(argument.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specifiers;
+}
+
 /** The static graph from app-relative roots: each reached node and the node that first imported it. */
-function staticGraph(fromRoots: readonly string[]): Map<string, string | undefined> {
+function staticGraph(
+  fromRoots: readonly string[],
+  specifiersOfModule: (file: string) => string[] = staticSpecifiers,
+): Map<string, string | undefined> {
   const importerOf = new Map<string, string | undefined>();
   const queue = fromRoots.map((root) => join(appRoot, root));
   for (const file of queue) {
@@ -295,7 +338,7 @@ function staticGraph(fromRoots: readonly string[]): Map<string, string | undefin
       }
       continue;
     }
-    for (const specifier of staticSpecifiers(node)) {
+    for (const specifier of specifiersOfModule(node)) {
       for (const target of resolveSpecifier(specifier, node)) {
         reach(target, node);
       }
@@ -457,6 +500,29 @@ describe('critical module graph', () => {
       'services/headless-capture.ts -> npm:@taucad/ui-core/services/headless-capture-presentation -> apps/libs/ui-core/src/services/headless-capture-presentation.ts -> npm:three',
     );
   });
+
+  /*
+   * Use_skill startup latency T4: the transcript is a synchronous fold of the log projection, so no AI SDK chunk loads
+   * to show it, not even behind `import()`. The walk follows lazy edges too, from the store, the projection and the
+   * chat hooks, except into {@link transcriptPathStops}; the name/commit clients' own SDK import stays theirs
+   * (`apps/libs/api-chat`).
+   */
+  it('should reach no AI SDK module from the transcript path, lazily or not (T4)', () => {
+    const graph = staticGraph(
+      ['services/chat-session-store.ts', 'machines/chat-projection.logic.ts', 'hooks/use-chat.tsx'],
+      loadedSpecifiers,
+    );
+    const sdk = heavyReach(graph).get('ai');
+    const loader = [...graph.keys()].find((node) => nameOf(node) === 'apps/libs/chat-ui/src/services/chat-sdk.ts');
+    const stops = Object.keys(transcriptPathStops).filter(
+      (stop) => ![...graph.keys()].some((node) => nameOf(node) === stop),
+    );
+    expect(
+      { sdk, loader: loader === undefined ? undefined : chainTo(graph, loader), stops },
+      `the transcript path loads the AI SDK, or a stop is no longer reached: ${stops.join(', ')}`,
+    ).toEqual({ sdk: undefined, loader: undefined, stops: [] });
+    // The lazy walk parses most of the app: seconds alone, longer under a full parallel run.
+  }, 30_000);
 
   it('should hold the lint rule on the same heavy list (G1)', () => {
     expect(heavyImportRuleOptions().modules).toEqual(heavySpecifiers);

@@ -126,13 +126,14 @@ const reportSyncSettingError = (error: unknown): void => {
  */
 /**
  * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one *Loading history…* sentence, never
- * *No revisions yet*.
+ * *No revisions yet*. The rows show from the wait ladder's skeleton mark (300 ms, `wait-skeleton`), counted from when
+ * they mount, so a History that answers at once draws its frame and then its rows (Progressive Loading Policy rule 16).
  *
  * @returns The loading geometry.
  */
 function HistoryLoading(): React.JSX.Element {
   return (
-    <div aria-hidden data-testid='history-skeleton' className='flex flex-col gap-2 px-2 py-1'>
+    <div aria-hidden data-testid='history-skeleton' className='flex wait-skeleton flex-col gap-2 px-2 py-1'>
       {[0, 1, 2].map((row) => (
         <div key={row} className='flex items-center gap-2'>
           <Skeleton className='size-2 rounded-full' />
@@ -338,7 +339,10 @@ function WhereYouAre(): React.JSX.Element {
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
       <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
         {isUnknown ? (
-          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+          /* From the wait ladder's 300 ms mark, on a wrapper so the pill keeps its pulse (rule 16). */
+          <span aria-hidden className='inline-flex wait-skeleton'>
+            <Skeleton className='h-6 w-24 rounded-full' />
+          </span>
         ) : (
           <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
         )}

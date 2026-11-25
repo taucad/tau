@@ -1,6 +1,6 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useEffect, useReducer } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -114,7 +114,7 @@ export function AgentsPanelBody(props: AgentsPanelBodyProps): React.JSX.Element 
   return availability === 'ready' ? (
     <AgentsPanelBodyContent {...props} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='list' label='Agents' />
   );
 }
 

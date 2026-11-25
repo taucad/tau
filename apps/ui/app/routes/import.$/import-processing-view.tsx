@@ -110,7 +110,7 @@ export function ImportProcessingView({
         <div className='max-w-xl min-w-0 space-y-4'>
           <p className='font-mono text-sm break-all'>{title}</p>
           {isComplete ? (
-            <p className='text-sm'>{withEllipsis(projectOpenCopy.connecting.label)}</p>
+            <p className='text-sm'>{withEllipsis(projectOpenCopy.label)}</p>
           ) : (
             <>
               <ol className='divide-y'>

@@ -323,7 +323,15 @@ export class WorkspaceFileService {
         }
         return this._externalChanges.isProbePending(storageRootKey) ? 'pending' : (state ?? 'pending');
       },
-      revokeProjectRoute: (path, notifyPeers) => {
+      revokeProjectRoute: (path, notifyPeers, boundTo) => {
+        const mount = this._mountTable.getExactMount(path);
+        if (
+          boundTo !== undefined &&
+          mount !== undefined &&
+          (mount.storageRootKey !== boundTo.storageRootKey || mount.providerBasePath !== boundTo.providerBasePath)
+        ) {
+          return;
+        }
         this._revokeProjectRoute(path, notifyPeers);
       },
     });

@@ -32,7 +32,7 @@ describe('ProjectSyncStatus', () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.getByRole('button', { name: 'Downloading files…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Getting changes…' })).toBeInTheDocument();
     rerender(
       <TooltipProvider>
         <ProjectSyncStatus sync={healthy} isCloudPending={false} onOpenDetails={vi.fn()} />
@@ -42,11 +42,21 @@ describe('ProjectSyncStatus', () => {
   });
 
   it('should distinguish inbound, outgoing and recovery work without a three-second timeout', () => {
-    expect(projectSyncIndicator(healthy, true)?.label).toBe('Preparing files…');
-    expect(projectSyncIndicator(undefined, true)?.label).toBe('Opening project…');
-    expect(projectSyncIndicator(undefined, true)?.detail).toBe('Opening this project on this device.');
-    expect(projectSyncIndicator({ ...healthy, pullPhase: 'fetching' }, false)?.label).toBe('Downloading files…');
-    expect(projectSyncIndicator({ ...healthy, pullPhase: 'applying' }, false)?.label).toBe('Preparing files…');
+    // An open says its one label at every step, with no sentence about the device or the transfer (rules 18, 19).
+    for (const sync of [
+      undefined,
+      healthy,
+      { ...healthy, pullPhase: 'fetching' },
+      { ...healthy, pullPhase: 'applying' },
+    ]) {
+      expect(projectSyncIndicator(sync as SyncFacet | undefined, true)).toEqual({
+        label: 'Opening project…',
+        kind: 'busy',
+      });
+    }
+    // A pull into a project that is already open is not an open.
+    expect(projectSyncIndicator({ ...healthy, pullPhase: 'fetching' }, false)?.label).toBe('Getting changes…');
+    expect(projectSyncIndicator({ ...healthy, pullPhase: 'applying' }, false)?.label).toBe('Getting changes…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'records', chats: 'loading' }, false)?.label).toBe(
       'Loading chats…',
     );
@@ -71,14 +81,14 @@ describe('ProjectSyncStatus', () => {
         />
       </TooltipProvider>,
     );
-    const trigger = screen.getByRole('button', { name: 'Downloading files…' });
+    const trigger = screen.getByRole('button', { name: 'Getting changes…' });
     await user.tab();
     expect(trigger).toHaveFocus();
     await waitFor(() => {
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Bringing this project to this device.');
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Bringing in the latest changes. You can keep working.');
     });
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('dialog', { name: 'Project status' })).toHaveTextContent('Downloading files…');
+    expect(screen.getByRole('dialog', { name: 'Project status' })).toHaveTextContent('Getting changes…');
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(trigger).toHaveFocus();

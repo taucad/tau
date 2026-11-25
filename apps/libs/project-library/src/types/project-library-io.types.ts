@@ -146,7 +146,11 @@ export type ProjectLibraryWorker = ProjectLibraryObjectStore &
     hasPendingProjectOperationForWorkspace: (workspaceId: string) => Promise<boolean>;
     prepareProjectCreation: (request: ProjectCreationRequest) => Promise<PendingCreateProjectOperation>;
     prepareProjectDuplicate: (request: ProjectDuplicateRequest) => Promise<PendingDuplicateProjectOperation>;
-    beginPermanentDeleteProject: (projectId: string, storage: PendingProjectStorage) => Promise<string>;
+    beginPermanentDeleteProject: (
+      projectId: string,
+      storage: PendingProjectStorage,
+      options?: Readonly<{ copy?: boolean }>,
+    ) => Promise<string>;
     touchProjectActivity: (projectId: string, activityAt?: number) => Promise<ProjectLibraryState | undefined>;
     trashProject: (projectId: string) => Promise<ProjectLibraryState | undefined>;
     restoreProject: (projectId: string) => Promise<ProjectLibraryState | undefined>;

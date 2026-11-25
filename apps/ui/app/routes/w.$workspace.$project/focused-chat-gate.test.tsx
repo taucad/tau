@@ -8,6 +8,7 @@ import {
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -42,7 +43,8 @@ const buildState = ({
   readonly focusedChatId?: string;
   readonly focusedChatError?: Error;
 }): unknown => ({
-  context: { focusedChatId, focusedChatError },
+  /* The sessions' record shares this double: the open's wait start reads its availability. */
+  context: { focusedChatId, focusedChatError, status: {} },
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
@@ -68,9 +70,11 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
+    projectId: 'p',
     editorRef: { send: mockEditorRefSend },
   }),
 }));
+vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => ({}) }));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (_reference: unknown, selector: (state: unknown) => unknown) => selector(mockState.current),
@@ -92,15 +96,19 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ),
 }));
 
-/* The chat sync and availability stubs are shared: every test starts from chats loading on a ready project. */
+/* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
+ * workspace opens and the chat gate shows while the focused chat is ensured. */
+/* Every case starts from the same doubles: a case that leaves the chats waiting or failed must not decide what a later
+ * one sees, whatever order the cases run in. */
 beforeEach(() => {
   chatSync.state = 'loading';
   availability.whole = 'ready';
   availability.chats = 'ready';
+  mockState.current = undefined;
+  syncNow.mockClear();
+  mockEditorRefSend.mockClear();
 });
 
-/* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
- * workspace opens and the chat gate shows while the focused chat is ensured. */
 describe('ChatLaneFrame', () => {
   it("renders the workspace frame's chat lane with its testid and no busy state of its own", () => {
     render(<ChatLaneFrame />);
@@ -155,11 +163,6 @@ describe('FocusedChatErrorPanel', () => {
 });
 
 describe('ChatHistoryGate', () => {
-  beforeEach(() => {
-    syncNow.mockClear();
-    mockEditorRefSend.mockClear();
-  });
-
   /* SP2h: a chat opens on its records while the apply still writes the files. */
   it('opens the focused chat on the chats surface, before the whole apply lands', () => {
     chatSync.state = 'ready';
@@ -182,6 +185,52 @@ describe('ChatHistoryGate', () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId('chat-pane-child')).toBeNull();
+  });
+
+  /* Progressive Loading Policy rules 15 and 17 (cloud open loading states, Part 5): the lane keeps one frame from the
+   * first frame to the chats, its feed draws the transcript's shape from 300 ms, and it says nothing: the viewer
+   * speaks for the open. A failed open stops the bars and offers no action here. */
+  it('should keep one chat lane frame through the open, drawing the transcript’s shape from 300 ms with no words', () => {
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'chat-123' });
+    const clock = { now: (): number => 0 };
+    const gate = (): React.JSX.Element => (
+      <WaitClockProvider clock={clock}>
+        <MemoryRouter>
+          <ChatHistoryGate>
+            <div data-testid='chat-pane-child'>chat content</div>
+          </ChatHistoryGate>
+        </MemoryRouter>
+      </WaitClockProvider>
+    );
+    availability.chats = 'connecting';
+    const { rerender } = render(gate());
+    const frame = screen.getByTestId('chat-lane-frame');
+    const feed = screen.getByRole('group', { name: 'Chat' });
+    const bars = feed.querySelector<HTMLElement>('[data-slot=project-wait-skeleton]');
+    expect(frame).toContainElement(feed);
+    expect(feed).toHaveAttribute('aria-busy', 'true');
+    expect(bars).toHaveClass('wait-skeleton');
+    expect(bars?.style.getPropertyValue('--wait-skeleton-delay')).toBe('300ms');
+    expect(bars?.querySelectorAll('[data-slot=skeleton]').length).toBeGreaterThan(0);
+    expect(frame.textContent).toBe('');
+    expect(frame.querySelector('[data-slot=wait-indicator]')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByTestId('chat-lane-frame-composer')).toBeInTheDocument();
+
+    for (const step of ['downloading', 'preparing'] as const) {
+      availability.chats = step;
+      rerender(gate());
+      expect(screen.getByTestId('chat-lane-frame'), step).toBe(frame);
+      expect(feed.querySelector('[data-slot=project-wait-skeleton]'), step).toBe(bars);
+    }
+
+    availability.chats = 'failed';
+    rerender(gate());
+    expect(screen.getByTestId('chat-lane-frame')).toBe(frame);
+    expect(feed.querySelector('[data-slot=project-wait-skeleton]')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(frame.textContent).toBe('');
   });
 
   it('should retry failed chat discovery without hiding available project files', () => {

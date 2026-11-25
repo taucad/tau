@@ -2,43 +2,27 @@ import type { RevisionStatusProjection } from '@taucad/revisions';
 import { cloudOpenAccountReason } from '#lib/tau-cloud-intent.js';
 
 /*
- * The words a project open says, in one place (cloud open loading states). The viewer's pill and caption, the project
- * placeholder, the project status control and the route's busy markers all read them here, so the steps say the same
- * thing wherever they show. `project-open-copy.policy.node.test.ts` fails on these words spelled anywhere else.
+ * The words a project open says, in one place (cloud open loading states; Progressive Loading Policy rules 18 and 19).
+ * The viewer's pill and caption, the project status control, the route's busy markers and its announcement read them
+ * here. `project-open-copy.policy.node.test.ts` fails on these words spelled anywhere else, and on retired words
+ * anywhere at all.
+ *
+ * An open says one label from its first step to its last, the request the person made: it never names an internal
+ * step, the device or the transport. The device is named only where the next step depends on it (offline).
  */
 
-/** The steps of a project open on this device, as the project's availability names them. */
+/** The steps of a project open, as the project's availability names them. They share one label. */
 export type ProjectOpenStep = 'connecting' | 'downloading' | 'preparing';
 
-/** What one open step says. */
-export type ProjectOpenStepCopy = Readonly<{
-  /** The step's words, without an ellipsis: a running indicator adds its own (`WaitIndicator`, {@link withEllipsis}). */
-  label: string;
-  /** The sentence under or beside the label. */
-  helper: string;
-  /** The label once the step has run past its slow mark, without an ellipsis. */
-  slowLabel?: string;
-  /** What to do once the step has run past its slow mark. */
-  slowHelper?: string;
-}>;
-
-/** Each open step's words. The viewer's caption leaves out the opening step's helper: its pill already says it. */
+/** What a running project open says. Labels have no ellipsis: a running indicator adds its own ({@link withEllipsis}). */
 export const projectOpenCopy = {
-  connecting: {
-    label: 'Opening project',
-    helper: 'Opening this project on this device.',
-  },
-  downloading: {
-    label: 'Downloading files',
-    helper: 'Bringing this project to this device.',
-    slowLabel: 'Still downloading files',
-    slowHelper: 'Check your connection, then try again.',
-  },
-  preparing: {
-    label: 'Preparing files',
-    helper: 'Getting your files ready to open.',
-  },
-} as const satisfies Record<ProjectOpenStep, ProjectOpenStepCopy>;
+  /** The one label, for every step of the open. */
+  label: 'Opening project',
+  /** The label once the open has made no progress for the slow mark. */
+  slowLabel: 'Still opening project',
+  /** What to do once the open has made no progress for the slow mark. */
+  slowHelper: 'Check your connection, then try again.',
+} as const;
 
 /**
  * A running label as a surface that draws no indicator of its own says it.
@@ -48,18 +32,16 @@ export const projectOpenCopy = {
  */
 export const withEllipsis = (label: string): string => `${label}…`;
 
-/** Where a project open is on this device: a running step, a failure, or ready. */
+/** Where a project open is: a running step, a failure, or ready. */
 export type ProjectOpenState = ProjectOpenStep | 'offline' | 'failed' | 'account' | 'ready';
 
-const stepMessage = (step: ProjectOpenStep): readonly [string, string] => [
-  withEllipsis(projectOpenCopy[step].label),
-  projectOpenCopy[step].helper,
-];
+/** A running step's words: the one label and no sentence. */
+const running = [withEllipsis(projectOpenCopy.label), ''] as const;
 
 const messages = {
-  connecting: stepMessage('connecting'),
-  downloading: stepMessage('downloading'),
-  preparing: stepMessage('preparing'),
+  connecting: running,
+  downloading: running,
+  preparing: running,
   offline: ['You’re offline', 'This project isn’t on this device yet. Go online, then try again.'],
   failed: ['Couldn’t open this project', 'The download didn’t finish. Try again.'],
   account: ['Sign in to continue', cloudOpenAccountReason],
@@ -67,8 +49,8 @@ const messages = {
 } satisfies Record<ProjectOpenState, readonly [string, string]>;
 
 /**
- * What the project placeholder says: the failure's own class where it names one, so a refused push or a conflicted
- * pull never reads as a download that did not finish.
+ * What a project open says: the one label while it runs, and a failure's own words, by its class where it names one,
+ * so a refused push or a conflicted pull never reads as a download that did not finish.
  *
  * @param state - The project's availability.
  * @param status - The revision status the failure's class is read from.
@@ -107,11 +89,15 @@ export const projectFilesCopy = (
 };
 
 /**
- * Joins a step's title and helper into one sentence pair for a screen reader, without a second stop after a title
- * that already ends in "…" or ".".
+ * Joins a title and its helper into one sentence pair for a screen reader, without a second stop after a title that
+ * already ends in "…" or ".". A running open has no helper: it is said by its label alone.
  *
  * @param copy - The title and helper from `projectFilesCopy`.
  * @returns The text a live region announces.
  */
-export const announcementOf = ([title, helper]: readonly [string, string]): string =>
-  /[.…]$/u.test(title) ? `${title} ${helper}` : `${title}. ${helper}`;
+export const announcementOf = ([title, helper]: readonly [string, string]): string => {
+  if (helper === '') {
+    return title;
+  }
+  return /[.…]$/u.test(title) ? `${title} ${helper}` : `${title}. ${helper}`;
+};

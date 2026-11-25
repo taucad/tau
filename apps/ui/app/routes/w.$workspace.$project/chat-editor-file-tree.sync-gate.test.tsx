@@ -145,7 +145,8 @@ describe('the Files tree while the open pull is running', () => {
 
     renderTree();
 
-    expect(screen.getByRole('region', { name: 'Opening project…' })).toBeInTheDocument();
+    /* The tree keeps its frame and draws its shape; the viewer says the open (Progressive Loading Policy rule 17). */
+    expect(screen.getByRole('group', { name: 'Files' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 
@@ -156,7 +157,7 @@ describe('the Files tree while the open pull is running', () => {
     renderTree();
 
     expect(screen.getByRole('treeitem', { name: /bracket\.scad/u })).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Opening project…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Files' })).not.toBeInTheDocument();
   });
 
   it('should keep waiting after checking expires while the first download remains pending', () => {
@@ -165,7 +166,7 @@ describe('the Files tree while the open pull is running', () => {
 
     renderTree();
 
-    expect(screen.getByRole('region', { name: 'Downloading files…' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Files' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 
@@ -186,7 +187,7 @@ describe('the Files tree while the open pull is running', () => {
     const row = screen.getByRole('treeitem', { name: /gear\.scad/u });
     expect(row.querySelector('[data-arriving]')).not.toBeNull();
     expect(row).toHaveTextContent('Arriving');
-    expect(screen.queryByRole('region', { name: 'Preparing files…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Files' })).not.toBeInTheDocument();
   });
 
   /* An arriving row is not on disk yet: renaming, moving or making something inside it would act on nothing (I7). */

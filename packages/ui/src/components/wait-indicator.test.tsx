@@ -103,7 +103,7 @@ describe('WaitIndicator', () => {
     expect(slot()).toBe(before);
   });
 
-  it('should swap in the slow words and Retry at 10,000 ms', () => {
+  it('should swap in the slow words and Try again at 10,000 ms', () => {
     const onRetry = vi.fn();
     renderWithClock(createTestClock(0), {
       active: true,
@@ -118,8 +118,75 @@ describe('WaitIndicator', () => {
     expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
     expect(slow).toHaveTextContent('Still loading chat…');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('should restart the slow mark each time the progress moves, so a wait that is moving is never called slow', () => {
+    const clock = createTestClock(0);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Opening project',
+      slowLabel: 'Still opening project',
+      onRetry: () => undefined,
+      progress: 0.1,
+    });
+    const words = (): HTMLElement => document.querySelector<HTMLElement>('[data-slot=wait-indicator-label]')!;
+    const firstBody = body();
+    const firstWords = words();
+    clock.set(9000);
+    view.rerenderWith({ progress: 0.2 });
+
+    // The swapped words are new elements with the slow mark 10 s after the progress; the reveal keeps its element.
+    expect(body()).toBe(firstBody);
+    expect(words()).not.toBe(firstWords);
+    expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+    expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+
+    // No progress after that: slow from 19,000 ms. A re-render with the same progress keeps the swap's elements.
+    const secondWords = words();
+    clock.set(12_000);
+    view.rerenderWith({ progress: 0.2 });
+    expect(words()).toBe(secondWords);
+    expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+  });
+
+  it('should restart the slow mark when its progress key moves while the percentage stands still', () => {
+    const clock = createTestClock(0);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Opening project',
+      slowLabel: 'Still opening project',
+      progress: 0.5,
+      progressKey: 'downloading:1024',
+    });
+    const words = (): HTMLElement => document.querySelector<HTMLElement>('[data-slot=wait-indicator-label]')!;
+    const first = words();
+    clock.set(6000);
+    view.rerenderWith({ progress: 0.5, progressKey: 'downloading:2048' });
+
+    expect(words()).not.toBe(first);
+    expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+  });
+
+  it('should keep the label through a hold that ends a wait whose progress moved inside the last 10 s', () => {
+    // Mounted 9,800 ms in, so it holds from the settle at 10,100 ms; the progress at 9,900 ms kept it from being slow.
+    const clock = createTestClock(9800);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Opening project',
+      slowLabel: 'Still opening project',
+      onRetry: () => undefined,
+      startedAt: 0,
+      progress: 0.1,
+    });
+    clock.set(9900);
+    view.rerenderWith({ progress: 0.9 });
+    clock.set(10_100);
+    view.rerenderWith({ active: false, progress: 0.9 });
+
+    expect(document.querySelector('[data-slot=wait-indicator-slow]')).toHaveClass('invisible');
+    expect(document.querySelector('[data-slot=wait-indicator-label]')).not.toHaveClass('invisible');
   });
 
   it('should always carry words, and a percentage when the fraction is known', () => {

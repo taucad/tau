@@ -6,16 +6,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/p
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { sidebarRowButtonClass } from '#components/nav/sidebar-row.js';
 import { projectOpenCopy, withEllipsis } from '#lib/project-open-copy.js';
-import type { ProjectOpenStep } from '#lib/project-open-copy.js';
 
-type SyncIndicator = Readonly<{ label: string; detail: string; kind: 'busy' | 'offline' | 'attention' }>;
+type SyncIndicator = Readonly<{ label: string; detail?: string; kind: 'busy' | 'offline' | 'attention' }>;
 
-/** A running open step, in the open's own words ({@link projectOpenCopy}). */
-const openStepIndicator = (step: ProjectOpenStep): SyncIndicator => ({
-  label: withEllipsis(projectOpenCopy[step].label),
-  detail: projectOpenCopy[step].helper,
+/** A running open, at any step, in the open's one label and no sentence ({@link projectOpenCopy}). */
+const openIndicator: SyncIndicator = { label: withEllipsis(projectOpenCopy.label), kind: 'busy' };
+
+/** A pull into a project that is already open. */
+const pullIndicator: SyncIndicator = {
+  label: 'Getting changes…',
+  detail: 'Bringing in the latest changes. You can keep working.',
   kind: 'busy',
-});
+};
 
 function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boolean): SyncIndicator | undefined {
   if (sync?.state === 'conflicted') {
@@ -55,11 +57,8 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
   if (failure) {
     return failure;
   }
-  if (sync?.pullPhase === 'fetching') {
-    return openStepIndicator('downloading');
-  }
-  if (sync?.pullPhase === 'applying') {
-    return openStepIndicator('preparing');
+  if (sync?.pullPhase === 'fetching' || sync?.pullPhase === 'applying') {
+    return isCloudPending ? openIndicator : pullIndicator;
   }
   if (sync?.chats === 'failed') {
     return {
@@ -71,11 +70,8 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
   if (sync?.chats === 'loading' || sync?.pullPhase === 'records') {
     return { label: 'Loading chats…', detail: 'Files are ready. Your chats are still loading.', kind: 'busy' };
   }
-  if (isCloudPending && sync?.hasAppliedRemote) {
-    return openStepIndicator('preparing');
-  }
   if (isCloudPending) {
-    return openStepIndicator('connecting');
+    return openIndicator;
   }
   if (sync?.state === 'checking') {
     return { label: 'Checking for changes…', detail: 'Checking for new changes.', kind: 'busy' };
@@ -128,12 +124,12 @@ export function ProjectSyncStatus({
         </TooltipTrigger>
         <TooltipContent side='bottom' align='start' className='max-w-64'>
           <p className='font-medium'>{indicator.label}</p>
-          <p>{indicator.detail}</p>
+          {indicator.detail === undefined ? null : <p>{indicator.detail}</p>}
         </TooltipContent>
       </Tooltip>
       <PopoverContent side='bottom' align='start' aria-label='Project status' className='space-y-2 text-sm'>
         <p className='font-medium'>{indicator.label}</p>
-        <p>{indicator.detail}</p>
+        {indicator.detail === undefined ? null : <p>{indicator.detail}</p>}
         <Button variant='outline' size='sm' onClick={onOpenDetails}>
           Open History
         </Button>

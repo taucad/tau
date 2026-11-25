@@ -1,7 +1,7 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { runWhenRendered, subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -2232,7 +2232,7 @@ function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | un
   /* "No files" speaks for every authored file: while an open's apply still writes them, it waits (I7). */
   const availability = useProjectAvailability('absence');
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='tree' label='Files' />;
   }
   return (
     <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card'>

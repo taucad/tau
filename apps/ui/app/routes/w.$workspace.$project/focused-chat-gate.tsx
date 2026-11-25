@@ -1,5 +1,6 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { CoveringSheetStatus } from '#routes/w.$workspace.$project/covering-sheet.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -126,9 +127,10 @@ export function ChatInterfaceSessionGate({
 }
 
 /**
- * Visual gate for the chat pane. Decides between the skeleton (while
- * the editor machine is re-ensuring the focused chat), the typed error
- * panel (when ensure rejected), or the pane's real content.
+ * Visual gate for the chat pane. Decides between the lane's frame (while
+ * the project opens, with the transcript's shape, or while the editor
+ * machine is re-ensuring the focused chat), the typed error panel (when
+ * ensure rejected), or the pane's real content.
  *
  * Does NOT mount `<ActiveChatProvider>` — that is owned by
  * {@link ChatInterfaceSessionGate} so the viewer toolbar and every
@@ -156,7 +158,14 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   );
 
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    /* The lane keeps its frame through the open and its feed draws the transcript's shape; the viewer says the open
+       (Progressive Loading Policy rules 15 and 17). The frame's composer box, served from first paint, stays over the
+       lane's foot until a composer adopts it, and queues a send meanwhile (rule 20). */
+    return (
+      <ChatLaneFrame headerStatus={<CoveringSheetStatus />}>
+        <ProjectWaitSkeleton state={availability} shape='transcript' label='Chat' />
+      </ChatLaneFrame>
+    );
   }
   if (focusedChatId === undefined && !focusedChatError) {
     return (

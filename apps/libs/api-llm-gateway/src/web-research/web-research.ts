@@ -9,10 +9,13 @@
  */
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
+import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
 import { Readable } from 'node:stream';
+import type { Transform } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { z } from 'zod';
 
@@ -42,9 +45,43 @@ export type WebResearchDependencies = Readonly<{
   lookup: (hostname: string) => Promise<readonly ResolvedAddress[]>;
 }>;
 
+/* The content codings a page fetch decodes, as the platform fetch it replaces did. */
+const decoders: Readonly<Record<string, () => Transform>> = {
+  gzip: createGunzip,
+  'x-gzip': createGunzip,
+  deflate: createInflate,
+  br: createBrotliDecompress,
+};
+
+/**
+ * A response's body as its reader should see it: decoded when it is gzip, deflate or brotli, with the headers rewritten
+ * to describe the decoded body, as the platform fetch's do. The decoded body is what a reader counts against its bound,
+ * so a small compressed body cannot expand past it unread.
+ *
+ * @param response - The raw response.
+ * @param headers - The response's headers, rewritten in place when the body is decoded.
+ * @returns The body, or the refusal of a coding nothing here decodes.
+ */
+const decodedBody = (response: IncomingMessage, headers: Headers): Readable | Error => {
+  const coding = (headers.get('content-encoding') ?? '').trim().toLowerCase();
+  if (coding === '' || coding === 'identity') {
+    return response;
+  }
+  const decoder = decoders[coding];
+  if (decoder === undefined) {
+    return new Error(`Unsupported content encoding: ${coding}`);
+  }
+  const decoding = decoder();
+  response.once('error', (error) => decoding.destroy(error));
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  return response.pipe(decoding);
+};
+
 /**
  * GET `url` over a connection to `address`, whatever its host resolves to now. TLS still verifies the certificate
- * against the URL's host name. The body is asked for uncompressed, since nothing here inflates it.
+ * against the URL's host name. A gzip, deflate or brotli body is decoded, as the platform fetch decodes it, and one in
+ * any other coding is refused rather than handed on as bytes no reader can use.
  *
  * @param url - The URL to request.
  * @param init - The request's headers and signal; the method is always GET and redirects are returned, not followed.
@@ -66,7 +103,7 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
       target,
       {
         method: 'GET',
-        headers: { ...Object.fromEntries(new Headers(init.headers).entries()), 'accept-encoding': 'identity' },
+        headers: { ...Object.fromEntries(new Headers(init.headers).entries()), 'accept-encoding': 'gzip, deflate, br' },
         lookup,
         /* No pooled socket: a kept-alive one to this host may have been opened to an address checked for an earlier
          * request, and reusing it would skip this lookup. */
@@ -85,9 +122,15 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
         if (empty) {
           response.resume();
         }
+        const body = empty ? undefined : decodedBody(response, headers);
+        if (body instanceof Error) {
+          response.destroy();
+          reject(body);
+          return;
+        }
         try {
           resolve(
-            new Response(empty ? null : (Readable.toWeb(response) as unknown as ReadableStream), {
+            new Response(body === undefined ? null : (Readable.toWeb(body) as unknown as ReadableStream), {
               status,
               statusText: response.statusMessage,
               headers,
@@ -95,6 +138,7 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
           );
         } catch (error) {
           /* A status the Fetch API cannot represent: fail this fetch, not the process. */
+          body?.destroy();
           response.destroy();
           reject(error instanceof Error ? error : new Error(String(error)));
         }
@@ -386,6 +430,17 @@ const truncate = (content: string): string =>
     ? `${content.slice(0, maxPageCharacters)}\n\n[Truncated: ${String(content.length - maxPageCharacters)} more characters]`
     : content;
 
+/** How a page's body is read, by its media type; `undefined` for one the tool cannot read. */
+const pageKind = (mimeType: string): 'html' | 'pdf' | 'text' | undefined => {
+  if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml') {
+    return 'html';
+  }
+  if (mimeType === 'application/pdf') {
+    return 'pdf';
+  }
+  return mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === '' ? 'text' : undefined;
+};
+
 /**
  * Fetch one page, re-checking every redirect hop, and return its text.
  *
@@ -418,7 +473,16 @@ const fetchPage = async (
       address,
     );
     const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location !== null) {
+    const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
+    const kind = pageKind(mimeType);
+    const followed = response.status >= 300 && response.status < 400 && location !== null;
+    if (followed || !response.ok || kind === undefined) {
+      /* A body nobody reads is released now: each hop has its own connection, which would otherwise stay open until
+       * the fetch's deadline. */
+      // oxlint-disable-next-line no-await-in-loop -- one unread body is released before the next hop.
+      await response.body?.cancel().catch(() => undefined);
+    }
+    if (followed) {
       if (hop >= maxRedirects) {
         throw new Error(`Too many redirects (over ${String(maxRedirects)})`);
       }
@@ -428,20 +492,18 @@ const fetchPage = async (
     if (!response.ok) {
       throw new Error(`HTTP ${String(response.status)}${response.statusText === '' ? '' : ` ${response.statusText}`}`);
     }
-    const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
-    // oxlint-disable-next-line no-await-in-loop -- the final hop's body is read once.
-    const bytes = await readBounded(response);
-    let content: string;
-    if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml') {
-      content = htmlToText(new TextDecoder().decode(bytes));
-    } else if (mimeType === 'application/pdf') {
-      // oxlint-disable-next-line no-await-in-loop -- the final hop's body is parsed once.
-      content = await extractPdfText(bytes);
-    } else if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === '') {
-      content = new TextDecoder().decode(bytes);
-    } else {
+    if (kind === undefined) {
       throw new Error(`Unsupported content type: ${mimeType}`);
     }
+    // oxlint-disable-next-line no-await-in-loop -- the final hop's body is read once.
+    const bytes = await readBounded(response);
+    const content =
+      kind === 'html'
+        ? htmlToText(new TextDecoder().decode(bytes))
+        : kind === 'pdf'
+          ? // oxlint-disable-next-line no-await-in-loop -- the final hop's body is parsed once.
+            await extractPdfText(bytes)
+          : new TextDecoder().decode(bytes);
     return { url: current.href, content: truncate(content) };
   }
 };

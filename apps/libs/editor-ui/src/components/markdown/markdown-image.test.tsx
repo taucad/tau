@@ -48,6 +48,16 @@ describe('MarkdownImage', () => {
     expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
   });
 
+  it('should load a linked image without following its link', async () => {
+    const { container } = renderMarkdown('[![build](https://badges.example/ci.svg)](https://ci.example/runs)');
+    const button = await screen.findByRole('button', { name: 'build from badges.example: load' });
+    expect(button.closest('a')).toHaveAttribute('href', 'https://ci.example/runs');
+
+    /* `fireEvent` answers false when a handler cancelled the click, which is what keeps the link from opening. */
+    expect(fireEvent.click(button)).toBe(false);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'https://badges.example/ci.svg');
+  });
+
   it('should ask again when the same image takes another remote source', () => {
     const { container, rerender } = render(<MarkdownImage src='https://elsewhere.example/a.png' alt='plot' />);
     fireEvent.click(screen.getByRole('button', { name: 'plot from elsewhere.example: load' }));

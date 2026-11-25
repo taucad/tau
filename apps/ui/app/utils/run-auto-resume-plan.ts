@@ -71,6 +71,9 @@ const refusedAtKey = 'refusedAt';
 /** A refusal recorded before the log was read: no later run can be told from an earlier one. */
 const unreadLog = 'unread';
 
+/** The detail a refusal made before the log was read records its time under, the only order it has against a run. */
+const refusedTimeKey = 'refusedTime';
+
 /** The detail a refusal of a gesture records the gesture's kind under. */
 const refusedGestureKey = 'refusedGesture';
 
@@ -95,18 +98,34 @@ export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue';
 export const refusalOfGesture = (
   error: NormalizedChatError,
   gesture: Readonly<{ kind: RefusedGesture; projection: ChatProjection | undefined; createId: () => string }>,
-): NormalizedChatError => ({
-  ...error,
-  requestId: error.requestId ?? `gesture:${gesture.createId()}`,
-  details: {
-    ...error.details,
-    [refusedAtKey]:
-      gesture.projection !== undefined && selectCaughtUp(gesture.projection)
-        ? logPositionOf(selectCurrentRun(gesture.projection))
-        : unreadLog,
-    [refusedGestureKey]: gesture.kind,
-  },
-});
+): NormalizedChatError => {
+  const isLogRead = gesture.projection !== undefined && selectCaughtUp(gesture.projection);
+  return {
+    ...error,
+    requestId: error.requestId ?? `gesture:${gesture.createId()}`,
+    details: {
+      ...error.details,
+      [refusedAtKey]: isLogRead ? logPositionOf(selectCurrentRun(gesture.projection)) : unreadLog,
+      ...(isLogRead ? {} : { [refusedTimeKey]: new Date().toISOString() }),
+      [refusedGestureKey]: gesture.kind,
+    },
+  };
+};
+
+/**
+ * Whether a refusal recorded before the log was read is still newer than the log's current run. Its time is the only
+ * order it has: a run admitted after it (on this page or another) retires it, as a run after a caught-up refusal's
+ * position does. A refusal with no time (recorded before times were kept) stays shown, as it did. Two devices' clocks
+ * can disagree by seconds, while a refusal and a later run are a person's gestures apart.
+ */
+const isUnreadRefusalCurrent = (
+  refusedTime: unknown,
+  projection: ChatProjection,
+  run: ReturnType<typeof selectCurrentRun>,
+): boolean => {
+  const admittedAt = run === undefined ? undefined : projection.views[run.runId]?.admittedAt;
+  return typeof refusedTime !== 'string' || admittedAt === undefined || admittedAt <= refusedTime;
+};
 
 /**
  * The chat's visible failure and its durable identity. Only the caught-up host log can retire a legacy chat-wide error.
@@ -124,7 +143,13 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
   const refusedAt = state.persistedError?.details?.[refusedAtKey];
   const gestureRefusal =
     state.persistedError?.requestId !== undefined && typeof refusedAt === 'string' ? state.persistedError : undefined;
-  if (caughtUp && gestureRefusal !== undefined && (refusedAt === unreadLog || refusedAt === logPositionOf(run))) {
+  if (
+    caughtUp &&
+    gestureRefusal !== undefined &&
+    (refusedAt === unreadLog
+      ? isUnreadRefusalCurrent(gestureRefusal.details?.[refusedTimeKey], projection, run)
+      : refusedAt === logPositionOf(run))
+  ) {
     return { error: gestureRefusal, id: `refusal:${String(gestureRefusal.requestId)}` };
   }
   const persistedError = caughtUp && gestureRefusal !== undefined ? undefined : state.persistedError;

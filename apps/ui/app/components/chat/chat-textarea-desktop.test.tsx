@@ -873,6 +873,34 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(setDraftText).not.toHaveBeenCalled();
     });
 
+    /* The chat moved to can report its draft after the switch: empty first, then the text its draft restores. */
+    it('should not undo a draft that arrives after the switch back to empty', async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      view.rerenderWith(codexSession, 'The restored draft.');
+      await settle();
+      setDraftText.mockClear();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The restored draft.');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
     it('should still undo an edit made in the chat the composer moved to', async () => {
       const view = renderComposer('', codexSession);
       const editor = editorOf(view.container);

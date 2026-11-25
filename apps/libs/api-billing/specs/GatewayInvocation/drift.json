@@ -2,10 +2,10 @@
   "alphabet": [],
   "sources": {
     "src/billable-model-invocation.service.ts#cancel": "20416c5f7a80775307ef97af5cc14047acb7cec61608e0417b7440018c6d258d",
-    "src/billable-model-invocation.service.ts#finish": "53cac32aafa85e70b67dad9e1993ca0eab20d48f59635ccfa3aa90d9b780ce96"
+    "src/billable-model-invocation.service.ts#finish": "ab528b1419d6bd58a5cac896dbe7e1afda578a31dd4d5ab76aa793d6fcf696a5"
   },
   "specs": {
-    "GatewayInvocation.tla": "d9381232cfa13ad3b6f41a2f2158cd52fcff4c1cfbdc5e5264d209d9c9b6f3d6"
+    "GatewayInvocation.tla": "d767371013e5b3bcf5da5a2fa258913e6fd94683db67d2e8857142ff7adc504e"
   },
   "tables": {}
 }

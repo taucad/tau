@@ -16,7 +16,7 @@ import type {
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
 import type { InputCountCapability } from '#billable-model-input-count.js';
-import { CreditLedgerService } from '#credit-ledger.service.js';
+import { CreditLedgerService, StaleCreditOperationGenerationError } from '#credit-ledger.service.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import type { DatabaseService } from '@taucad/api-database';
 import type { QualifiedAdmissionInput, TerminalEvidence, TerminalReceipt } from '#credit-ledger.types.js';
@@ -1049,11 +1049,15 @@ describe('BillableModelInvocationService', () => {
         throw new TypeError('fetch failed');
       });
       const { ledger, service } = admitted(qualified);
-      ledger.terminalizeOperation.mockRejectedValue(new Error('Stale credit operation generation'));
+      ledger.terminalizeOperation.mockRejectedValue(new StaleCreditOperationGenerationError());
+      const logged = vi.spyOn(Logger.prototype, 'error');
 
       await expect(service.invoke(intent())).rejects.toSatisfy(
         (error: unknown) => error instanceof LlmGatewayError && gatewayErrorType(error) === 'PROVIDER_UNAVAILABLE',
       );
+      /* The sweep's settlement is an expected end, not a failed one. */
+      expect(logged).not.toHaveBeenCalled();
+      logged.mockRestore();
     });
   });
 

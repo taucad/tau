@@ -539,9 +539,11 @@ export const ChatTextareaDesktop = memo(function ({
     if (isPaintedText) {
       paintedTextRef.current = undefined;
     }
+    /* Content the draft hands in (a restore, a chat switch, a send that cleared it) is not an edit of the person's: it
+     * stays out of the undo history, so an undo can never revert to whatever the editor held before it landed. */
     if (inputText === '') {
       if (current.text !== '') {
-        editor.commands.clearContent(false);
+        editor.chain().setMeta('addToHistory', false).clearContent(false).run();
       }
       forgetStaleHistory();
       return undefined;
@@ -569,9 +571,11 @@ export const ChatTextareaDesktop = memo(function ({
       /* The editor may hold this text by now (a painted draft written at its handover, with its caret): nothing to do. */
       const latest = extractContent(editor);
       if (latest.text !== inputText || chipCount > latest.contextChips.length) {
-        editor.commands.setContent(buildEditorContentJson(segments), {
-          emitUpdate: false,
-        });
+        editor
+          .chain()
+          .setMeta('addToHistory', false)
+          .setContent(buildEditorContentJson(segments), { emitUpdate: false })
+          .run();
       }
       forgetStaleHistory();
     });

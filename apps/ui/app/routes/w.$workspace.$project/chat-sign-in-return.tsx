@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
@@ -41,10 +41,34 @@ export function ChatSignInReturn(): undefined {
   const { refetch } = useSession(authClient);
   const routeChatId = projectChatIdFromSearch(search);
   const isArmed = marker !== '';
+  const refetchRef = useRef(refetch);
+  useEffect(() => {
+    refetchRef.current = refetch;
+  }, [refetch]);
+  /* A return from sign-in is when who is signed in may just have changed, and the session query can still hold the
+   * answer it had before the sign-in: a stale "nobody" would drop the marker the person signed in to use. The owner
+   * asks once per arrival and reads the identity only after that answer. */
+  const [answeredArrival, setAnsweredArrival] = useState<string | undefined>(undefined);
+  const askedArrival = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!isArmed || askedArrival.current === key) {
+      return;
+    }
+    askedArrival.current = key;
+    const ask = async (): Promise<void> => {
+      try {
+        await refetchRef.current();
+      } catch {
+        /* A failed check is an answer too; the identity owner reads it as it reads any failed check. */
+      }
+      setAnsweredArrival(key);
+    };
+    void ask();
+  }, [isArmed, key]);
   const step = useChatSelector((state) =>
     isArmed
       ? signInReturnStep({
-          identity,
+          identity: answeredArrival === key ? identity : 'unknown',
           chatShown: routeChatId === undefined || routeChatId === activeChatId,
           transcript: state.transcript,
           hasRequest: state.messages.some((message) => message.role === 'user'),
@@ -78,10 +102,6 @@ export function ChatSignInReturn(): undefined {
     selectAwaitsSignIn(state) ? selectVisibleChatErrorEntry(state)?.id : undefined,
   );
   const asked = useRef<string | undefined>(undefined);
-  const refetchRef = useRef(refetch);
-  useEffect(() => {
-    refetchRef.current = refetch;
-  }, [refetch]);
   useEffect(() => {
     if (refusedAttempt === undefined || identity !== 'verified' || isArmed || asked.current === refusedAttempt) {
       return;

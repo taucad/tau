@@ -868,6 +868,7 @@ export const TauMetrics = {
         'recovery_in_progress',
         'recovery_failed',
         'operator_route_paused',
+        'route_rates_expired',
       ]),
     }),
   }),

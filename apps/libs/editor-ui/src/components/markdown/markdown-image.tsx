@@ -48,7 +48,10 @@ export function MarkdownImage({
       type='button'
       className='inline-flex max-w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 align-middle text-xs text-muted-foreground hover:bg-muted'
       title={source}
-      onClick={() => {
+      onClick={(event) => {
+        /* A linked image (a badge) sits inside its link: loading it must not also follow the link. */
+        event.preventDefault();
+        event.stopPropagation();
         setApproved(source);
       }}
     >

@@ -190,6 +190,37 @@ describe('ChatSignInReturn (launch audit N-2)', () => {
     expect(continueChat).not.toHaveBeenCalled();
   });
 
+  /* The session query can still hold its answer from before the sign-in when the return lands. */
+  it('should ask who is signed in on the return before it drops the marker', async () => {
+    world.identity = 'signed-out';
+    let answer: (() => void) | undefined;
+    refetch.mockImplementationOnce(
+      async () =>
+        new Promise<undefined>((resolve) => {
+          answer = () => {
+            world.identity = 'verified';
+            resolve(undefined);
+          };
+        }),
+    );
+    arriveAt('/w/home/p?chat=chat_1&chatResume=1');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(location()).toContain('chatResume=1');
+
+    await act(async () => {
+      answer?.();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(continueChat).toHaveBeenCalledTimes(1);
+    });
+    expect(location()).toBe('/w/home/p?chat=chat_1');
+  });
+
   it('should remove the marker and resume nothing when the chat holds no turn a sign-in resumes', async () => {
     world.awaitsSignIn = false;
     arriveAt('/w/home/p?chat=chat_1&chatResume=1');

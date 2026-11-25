@@ -30,6 +30,7 @@ import {
   CreditLedgerService,
   isBillingAdmissionInvalid,
   recordSettledGenAiUsage,
+  StaleCreditOperationGenerationError,
 } from '#credit-ledger.service.js';
 import type {
   GatewayProviderId,
@@ -825,14 +826,27 @@ export class BillableModelInvocationService {
             ? 'none'
             : 'other',
     });
-    const receipt = await this.ledger.terminalizeOperation({
-      operationId: row.id,
-      accountId: row.accountId,
-      requestDigest: row.requestDigest,
-      expectedGeneration: generation,
-      evidence,
-      resolvedAt: new Date(),
-    });
+    let receipt: Awaited<ReturnType<CreditLedgerService['terminalizeOperation']>>;
+    try {
+      receipt = await this.ledger.terminalizeOperation({
+        operationId: row.id,
+        accountId: row.accountId,
+        requestDigest: row.requestDigest,
+        expectedGeneration: generation,
+        evidence,
+        resolvedAt: new Date(),
+      });
+    } catch (error) {
+      /* A step cut at its deadline races the recovery sweep, which claims the row at the same due time. A sweep that
+       * won settles it from the evidence recorded above, to the receipt this call would have written: an expected
+       * outcome, not a failed settlement. */
+      if (!(error instanceof StaleCreditOperationGenerationError)) {
+        throw error;
+      }
+      this.turnSteps.delete(row);
+      this.logger.log({ operationId: row.id }, 'Recovery settled the step before its live finish');
+      return;
+    }
     recordSettledGenAiUsage(
       this.metrics,
       { ...genAiAttributes(qualification), 'tau.activity': row.activity },

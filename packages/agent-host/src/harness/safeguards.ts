@@ -337,7 +337,7 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
         kind: 'terminate',
         pattern: anomalyPattern.identicalCall,
         reason: `\`${tail.toolName}\` was called with identical arguments ${count} times in a row, after a reminder that the result would not change.`,
-        signature: `${signature}:loop`,
+        signature: `${signature}:any-result`,
         eventIndexes: indexes(events.slice(-count)),
       };
     }
@@ -504,6 +504,38 @@ export type SafeguardOutcome = {
   readonly helped: boolean;
 };
 
+/**
+ * The trigger counts a session runs with. A run is ended only after the reminder its end names, so an end count left
+ * out follows the reminder count given (twice it for identical calls), and an end count at or below its reminder count
+ * is refused.
+ *
+ * @param overrides - The counts a caller sets.
+ * @returns Every count, defaults filled in.
+ * @public
+ */
+export const resolveSafeguardThresholds = (overrides?: Partial<SafeguardThresholds>): SafeguardThresholds => {
+  const thresholds = { ...defaultSafeguardThresholds, ...overrides };
+  const resolved: SafeguardThresholds = {
+    ...thresholds,
+    identicalCallTerminate:
+      overrides?.identicalCallTerminate ?? Math.max(thresholds.identicalCallTerminate, thresholds.identicalCall * 2),
+    identicalErrorTerminate:
+      overrides?.identicalErrorTerminate ??
+      Math.max(thresholds.identicalErrorTerminate, thresholds.identicalErrorNudge * 2),
+  };
+  for (const [nudge, end] of [
+    ['identicalCall', 'identicalCallTerminate'],
+    ['identicalErrorNudge', 'identicalErrorTerminate'],
+  ] as const) {
+    if (resolved[end] <= resolved[nudge]) {
+      throw new RangeError(
+        `Safeguard threshold ${end} (${String(resolved[end])}) must exceed ${nudge} (${String(resolved[nudge])}).`,
+      );
+    }
+  }
+  return resolved;
+};
+
 type CreateSafeguardsOptions = {
   readonly thresholds?: Partial<SafeguardThresholds> | undefined;
   readonly detectors?: readonly SafeguardDetector[] | undefined;
@@ -527,7 +559,7 @@ export const createAgentSafeguards = (
   readonly wrapStreamFn: (base: StreamFn) => StreamFn;
   readonly firedSignatures: ReadonlySet<string>;
 } => {
-  const thresholds = { ...defaultSafeguardThresholds, ...options.thresholds };
+  const thresholds = resolveSafeguardThresholds(options.thresholds);
   const detectors = options.detectors ?? buildDetectors(thresholds);
   const fired = new Set(options.firedSignatures);
   const hash = options.hash ?? browserHash;

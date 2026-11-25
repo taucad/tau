@@ -1,7 +1,8 @@
 import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
-import { createAgentSafeguards } from '#harness/safeguards.js';
+import { createAgentSafeguards, resolveSafeguardThresholds } from '#harness/safeguards.js';
+import { safeguardPatternOf } from '#harness/safeguard-pattern.js';
 import type { SafeguardRecord } from '#harness/safeguards.js';
 import { stubModel } from '#harness/harness.fixture.js';
 
@@ -117,6 +118,28 @@ describe('AgentSafeguards', () => {
       ]);
       expect(recorded[1]?.kind === 'terminate' ? recorded[1].reason : '').toContain('10 times in a row');
       expect(asked).toBe(false);
+    });
+
+    it('should record the end as an identical call, as the ledger reads it', async () => {
+      const { recorded } = await run(repeatedCalls(10));
+
+      expect(recorded.map((entry) => safeguardPatternOf(entry.signature))).toEqual([
+        'identical_call',
+        'identical_call',
+      ]);
+    });
+
+    it('should end a run only after the reminder its end names, whatever counts are set', () => {
+      expect(resolveSafeguardThresholds({ identicalCall: 12 })).toMatchObject({
+        identicalCall: 12,
+        identicalCallTerminate: 24,
+      });
+      expect(resolveSafeguardThresholds({ identicalErrorNudge: 4 })).toMatchObject({ identicalErrorTerminate: 8 });
+      expect(resolveSafeguardThresholds()).toMatchObject({ identicalCallTerminate: 10, identicalErrorTerminate: 6 });
+      expect(() => resolveSafeguardThresholds({ identicalCall: 12, identicalCallTerminate: 10 })).toThrow(RangeError);
+      expect(() => resolveSafeguardThresholds({ identicalErrorNudge: 6, identicalErrorTerminate: 6 })).toThrow(
+        RangeError,
+      );
     });
 
     it('should not end a run at nine identical calls', async () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as ChatErrorPayload } from '@taucad/types';
@@ -285,6 +285,38 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
     expect(selectVisibleChatErrorEntry({ ...later, attachmentStatus: 'lost', persistedError })?.error.code).toBe(
       'RATE_LIMITED',
     );
+  });
+
+  /* A send refused while the page was still reading the log: no position to tell a later run from an earlier one. */
+  it('should retire a refusal made before the log was read once a run admitted after it is in the log', () => {
+    const refusedAt = (time: string): ChatErrorPayload => {
+      vi.setSystemTime(new Date(time));
+      return refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+        kind: 'send',
+        projection: undefined,
+        createId: gestureId,
+      });
+    };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      /* The fixture's run was admitted 2026-09-28T00:00:00Z. */
+      const before = refusedAt('2026-09-27T23:00:00.000Z');
+      const after = refusedAt('2026-09-28T01:00:00.000Z');
+      const failed = failedRun(rateLimited());
+
+      expect(selectVisibleChatErrorEntry({ ...failed, persistedError: before })?.error.code).toBe('RATE_LIMITED');
+      expect(selectVisibleFailureResumable({ ...failed, persistedError: before })).toBe(true);
+      expect(selectVisibleChatErrorEntry({ ...failed, persistedError: after })?.error.code).toBe('INSUFFICIENT_CREDIT');
+      expect(
+        selectVisibleChatErrorEntry({
+          projection: caughtUpEmptyProjection(),
+          attachmentStatus: 'attached',
+          persistedError: before,
+        })?.error.code,
+      ).toBe('INSUFFICIENT_CREDIT');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /* The run under a refusal is not the refused gesture's: a card for a refused send may not offer to resume it. */

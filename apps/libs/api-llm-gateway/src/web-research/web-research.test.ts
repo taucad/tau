@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -204,6 +205,36 @@ describe('browseWeb', () => {
     });
   });
 
+  it('should release the body of every response it does not read', async () => {
+    const released: string[] = [];
+    const tracked = (name: string, init: ResponseInit): Response =>
+      new Response(
+        new ReadableStream({
+          pull: (controller) => {
+            controller.enqueue(new TextEncoder().encode('unread'));
+          },
+          cancel: () => {
+            released.push(name);
+          },
+        }),
+        init,
+      );
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith('/start')
+        ? tracked('redirect', { status: 302, headers: { location: '/missing' } })
+        : url.endsWith('/missing')
+          ? tracked('not found', { status: 404 })
+          : tracked('binary', { status: 200, headers: { 'content-type': 'application/zip' } }),
+    );
+
+    await browseWeb(
+      { urls: ['https://example.com/start', 'https://example.com/archive.zip'], signal: signal() },
+      { fetch, lookup: publicLookup },
+    );
+
+    expect(released.toSorted()).toEqual(['binary', 'not found', 'redirect']);
+  });
+
   it('should refuse a non-http scheme', async () => {
     const fetch = vi.fn();
 
@@ -283,6 +314,42 @@ describe('fetchAtAddress', () => {
       await expect(
         fetchAtAddress(`http://pinned.invalid:${String(port)}/odd`, { signal: signal() }, at),
       ).rejects.toThrow();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should decode a gzip or brotli body, and refuse a coding it cannot decode', async () => {
+    const page = 'compressed page text';
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'text/plain');
+      if (request.url === '/gzip') {
+        response.setHeader('content-encoding', 'gzip');
+        response.end(gzipSync(page));
+      } else if (request.url === '/br') {
+        response.setHeader('content-encoding', 'br');
+        response.end(brotliCompressSync(page));
+      } else {
+        response.setHeader('content-encoding', 'zstd');
+        response.end('opaque');
+      }
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const at = { address: '127.0.0.1', family: 4 } as const;
+    const get = async (path: string) =>
+      fetchAtAddress(`http://pinned.invalid:${String(port)}${path}`, { signal: signal() }, at);
+    try {
+      for (const path of ['/gzip', '/br']) {
+        // oxlint-disable-next-line no-await-in-loop -- one request at a time against one server.
+        const response = await get(path);
+        expect(response.headers.get('content-encoding')).toBeNull();
+        // oxlint-disable-next-line no-await-in-loop -- one request at a time against one server.
+        expect(await response.text()).toBe(page);
+      }
+      await expect(get('/zstd')).rejects.toThrow('Unsupported content encoding: zstd');
     } finally {
       server.close();
     }

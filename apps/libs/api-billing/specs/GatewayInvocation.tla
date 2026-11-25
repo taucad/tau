@@ -498,6 +498,9 @@ ApiFinish(k) ==
        ELSE UNCHANGED <<row, acctHeld>>   \* a stale generation throws; a terminal row returns its receipt
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
+\* Launch audit review (2026-11-25): finish() now catches the stale generation's throw by its type
+\* (StaleCreditOperationGenerationError) and returns, logging the sweep's settlement as expected
+\* rather than as a failed one. The row is untouched either way, so this action is unchanged.
 
 -----------------------------------------------------------------------------
 (* Recovery sweep (credit-ledger.service.ts claimDueOperations, recover, defer, absorb). *)

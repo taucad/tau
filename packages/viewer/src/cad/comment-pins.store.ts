@@ -35,7 +35,31 @@ export type CommentPin = {
 };
 
 /** Where a pin's head sits on screen this frame, in CSS pixels of the viewer surface. */
-export type CommentPinScreen = { x: number; y: number; isOccluded: boolean; isBehindCamera: boolean };
+export type CommentPinScreen = {
+  x: number;
+  y: number;
+  /** Where the pin's foot (its surface point) sits, so a drag can keep the grab offset. */
+  footX: number;
+  footY: number;
+  isOccluded: boolean;
+  isBehindCamera: boolean;
+};
+
+/** Where a pin stands: everything a move replaces. The comment, id and number stay. */
+export type CommentPinAnchor = Pick<
+  CommentPin,
+  'point' | 'normal' | 'renderPoint' | 'renderNormal' | 'componentId' | 'componentLabel' | 'geometryKey'
+>;
+
+/** A surface pick answered by the scene. */
+export type CommentSurfacePick = {
+  point: [number, number, number];
+  normal: [number, number, number];
+  renderPoint: [number, number, number];
+  geometryKey: string;
+  componentId?: string;
+  componentLabel?: string;
+};
 
 /** What the spike's scene bridge answers for a host: a frame of the live canvas and a ray pick. */
 export type CommentSceneBridge = {
@@ -44,19 +68,9 @@ export type CommentSceneBridge = {
     from?: CommentPinView,
   ) => Promise<{ dataUrl: string; width: number; height: number; view: CommentPinView & { aspect: number } }>;
   /** The first visible surface a tau:root ray meets. */
-  pickRay: (
-    origin: [number, number, number],
-    direction: [number, number, number],
-  ) =>
-    | {
-        point: [number, number, number];
-        normal: [number, number, number];
-        renderPoint: [number, number, number];
-        geometryKey: string;
-        componentId?: string;
-        componentLabel?: string;
-      }
-    | undefined;
+  pickRay: (origin: [number, number, number], direction: [number, number, number]) => CommentSurfacePick | undefined;
+  /** The first visible surface under a point of the viewer surface, in CSS pixels from its top left. */
+  pickScreen: (x: number, y: number) => CommentSurfacePick | undefined;
   /** The current camera. */
   view: () => (CommentPinView & { aspect: number }) | undefined;
 };
@@ -79,6 +93,8 @@ export type CommentPinsStore = {
   setActive: (isActive: boolean) => void;
   addPin: (pin: CommentPin) => void;
   updateComment: (id: string, comment: string) => void;
+  /** Re-anchors a pin on another surface point. Its comment and number are unchanged. */
+  movePin: (id: string, anchor: CommentPinAnchor, view?: CommentPinView) => void;
   removePin: (id: string) => void;
   openPin: (id: string | undefined) => void;
   clear: () => void;
@@ -137,6 +153,9 @@ export function createCommentPinsStore(): CommentPinsStore {
     },
     updateComment(id, comment) {
       set({ pins: state.pins.map((pin) => (pin.id === id ? { ...pin, comment } : pin)) });
+    },
+    movePin(id, anchor, view) {
+      set({ pins: state.pins.map((pin) => (pin.id === id ? { ...pin, ...anchor, view: view ?? pin.view } : pin)) });
     },
     removePin(id) {
       screens.delete(id);

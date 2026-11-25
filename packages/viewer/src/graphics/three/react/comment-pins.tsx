@@ -12,7 +12,7 @@ import type { EventManager } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { commentPinsStore, useCommentPins } from '#cad/comment-pins.store.js';
-import type { CommentPin, CommentPinView } from '#cad/comment-pins.store.js';
+import type { CommentPin, CommentPinView, CommentSurfacePick } from '#cad/comment-pins.store.js';
 import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRenderFrame } from '#hooks/use-graphics.jsx';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
@@ -104,6 +104,8 @@ function PinMarker({
     commentPinsStore.placeHead(pin.id, {
       x: ((projected.x + 1) / 2) * size.width,
       y: ((1 - projected.y) / 2) * size.height,
+      footX: ((toPoint.x + 1) / 2) * size.width,
+      footY: ((1 - toPoint.y) / 2) * size.height,
       isOccluded,
       isBehindCamera: projected.z > 1 || projected.z < -1,
     });
@@ -250,10 +252,25 @@ export function CommentSceneBridge(): undefined {
         return { dataUrl, width: gl.domElement.width, height: gl.domElement.height, view: captured };
       },
       pickRay(origin, direction) {
-        const raycaster = new THREE.Raycaster(
-          toThreeRenderPoint({ renderFrame, pointMeters: origin }),
-          new THREE.Vector3(...direction).normalize(),
+        return pickWith(
+          new THREE.Raycaster(
+            toThreeRenderPoint({ renderFrame, pointMeters: origin }),
+            new THREE.Vector3(...direction).normalize(),
+          ),
         );
+      },
+      pickScreen(x, y) {
+        const raycaster = new THREE.Raycaster();
+        setRaycasterFromCamera(
+          raycaster,
+          new THREE.Vector2((x / size.width) * 2 - 1, -(y / size.height) * 2 + 1),
+          camera,
+        );
+        return pickWith(raycaster);
+      },
+    };
+    function pickWith(raycaster: THREE.Raycaster): CommentSurfacePick | undefined {
+      {
         const meshes: THREE.Mesh[] = [];
         scene.traverseVisible((object) => {
           if (
@@ -285,8 +302,8 @@ export function CommentSceneBridge(): undefined {
           componentId,
           componentLabel: componentId ? (manifest?.nodesById[componentId]?.name ?? componentId) : undefined,
         };
-      },
-    };
+      }
+    }
     return () => {
       commentPinsStore.bridge = undefined;
     };

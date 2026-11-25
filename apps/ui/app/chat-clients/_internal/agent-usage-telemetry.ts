@@ -527,7 +527,7 @@ export const recordToolResultFolded = (runId: string, callId: string, timed: boo
 export const recordToolResultShown = (runId: string, callId: string, shownDelay: number): void => {
   quietly(() => {
     const delivery = deliveryOf(runId);
-    if (delivery.folded.get(callId) === true && !delivery.shown.has(callId)) {
+    if (delivery.folded.get(callId) === true && !delivery.shown.has(callId) && Number.isFinite(shownDelay)) {
       delivery.shown.set(callId, Math.max(0, shownDelay));
     }
   });
@@ -554,7 +554,10 @@ const takeDeliveryOf = (
   }
   const { admissionDelay, ...labels } = delivery.admission;
   const timed = [...delivery.folded.values()].filter(Boolean).length;
-  const delays = [...delivery.shown.values()];
+  /* A result folded again untimed (a replay) after it was shown no longer counts: the counts stay nonnegative. */
+  const delays = [...delivery.shown]
+    .filter(([callId]) => delivery.folded.get(callId) === true)
+    .map(([, delay]) => delay);
   return {
     ...(delivery.folded.size === 0
       ? {}

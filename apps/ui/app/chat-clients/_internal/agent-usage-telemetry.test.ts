@@ -641,6 +641,22 @@ describe('trackAgentTurn', () => {
     });
   });
 
+  /* The ingest rejects a negative count or NaN for the whole batch, so a replay or a bad clock must not produce one. */
+  it('should keep the counts nonnegative when a shown result is folded again untimed, and drop a delay that is not finite', () => {
+    const { publish, report } = harness('run_replayed');
+    recordToolResultFolded('run_replayed', 'call_a', true);
+    recordToolResultShown('run_replayed', 'call_a', 0.4);
+    recordToolResultFolded('run_replayed', 'call_a', false);
+    recordToolResultFolded('run_replayed', 'call_b', true);
+    recordToolResultShown('run_replayed', 'call_b', Number.NaN);
+
+    publish([lifecycleRow(0, 'admitted', 'run_replayed'), lifecycleRow(0, 'completed', 'run_replayed')], 1100);
+
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail).toMatchObject({ toolResults: 1, toolResultsExcluded: 1, toolResultsUnsettled: 1 });
+    expect(detail).not.toHaveProperty('toolResultDelayMax');
+  });
+
   it('should report no delivery field for a run with nothing recorded, nor reuse one already reported', () => {
     recordToolResultFolded('run_once', 'call_a', true);
     const first = harness('run_once');

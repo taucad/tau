@@ -29,7 +29,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { client, retries } from '#ci-github-client.js';
+import { client, listRuns, retries } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import {
   buildReport,
@@ -39,7 +39,6 @@ import {
   latestAttempt,
   renderMarkdown,
   reportWindow,
-  splitWindow,
 } from '#ci-queue-health.js';
 import type { Annotation, RunEvidence, WorkflowJob, WorkflowRun } from '#ci-queue-health.js';
 import {
@@ -61,38 +60,7 @@ import {
 } from '#ci-flake-ledger.js';
 import type { ComparedFile, FlakeEntry, FlakePair, FlakeReport, Ledger } from '#ci-flake-ledger.js';
 
-/** The runs API returns at most this many results for one query. */
-const searchLimit = 1000;
 const concurrency = 4;
-
-type RunQuery = { readonly workflow: string; readonly event: string; readonly from: string; readonly to: string };
-
-const listRuns = async (github: Client, query: RunQuery): Promise<WorkflowRun[]> => {
-  const { workflow, event, ...window } = query;
-  const base = `/repos/${github.repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=${encodeURIComponent(event)}&created=${window.from}..${window.to}&per_page=100`;
-  const first = await github.get<{
-    total_count: number;
-    workflow_runs: WorkflowRun[];
-  }>(`${base}&page=1`);
-  if (first.total_count > searchLimit) {
-    const [early, late] = splitWindow(window);
-    const parts = await Promise.all([
-      listRuns(github, { workflow, event, ...early }),
-      listRuns(github, { workflow, event, ...late }),
-    ]);
-    return parts.flat();
-  }
-  const runs = [...first.workflow_runs];
-  for (let page = 2; runs.length < first.total_count; page += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
-    const next = await github.get<{ workflow_runs: WorkflowRun[] }>(`${base}&page=${page}`);
-    if (next.workflow_runs.length === 0) {
-      break;
-    }
-    runs.push(...next.workflow_runs);
-  }
-  return runs;
-};
 
 const listJobs = async (github: Client, runId: number): Promise<WorkflowJob[]> => {
   const jobs: WorkflowJob[] = [];

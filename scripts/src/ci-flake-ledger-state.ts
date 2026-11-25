@@ -34,7 +34,7 @@
  * alias, and the ledger folds the old history into the new identity on its next run (D2, Renames).
  */
 import { lineageOf, touchesFailingTest } from '#ci-flake-ledger.js';
-import type { ComparedFile } from '#ci-flake-ledger.js';
+import type { Alias, ComparedFile } from '#ci-flake-ledger.js';
 import type { WorkflowRun } from '#ci-queue-health.js';
 
 /** The version of {@link LedgerState}; a reader refuses one it does not know. */
@@ -346,38 +346,6 @@ export const serializeState = (state: LedgerState): string => {
     null,
     2,
   )}\n`;
-};
-
-/** An old identity and the one it was renamed to (`flake-ledger.json` `aliases`). */
-export type Alias = { readonly from: string; readonly to: string };
-
-/** Problems with the aliases: an empty or self alias, an old identity listed twice, or a cycle. */
-export const aliasProblems = (aliases: readonly Alias[]): string[] => {
-  const problems: string[] = [];
-  const targets = new Map<string, string>();
-  for (const alias of aliases) {
-    const name = `flake-ledger.json alias "${alias.from}"`;
-    if (alias.from.trim() === '' || alias.to.trim() === '') {
-      problems.push(`${name}: from and to must name a test`);
-    } else if (alias.from === alias.to) {
-      problems.push(`${name}: points to itself`);
-    } else if (targets.has(alias.from)) {
-      problems.push(`${name}: listed twice`);
-    } else {
-      targets.set(alias.from, alias.to);
-    }
-  }
-  for (const start of targets.keys()) {
-    const seen = new Set([start]);
-    for (let next = targets.get(start); next !== undefined; next = targets.get(next)) {
-      if (seen.has(next)) {
-        problems.push(`flake-ledger.json alias "${start}": the aliases form a cycle`);
-        break;
-      }
-      seen.add(next);
-    }
-  }
-  return problems;
 };
 
 /** The current identity of an id: aliases followed to the end (a renamed test renamed again). */

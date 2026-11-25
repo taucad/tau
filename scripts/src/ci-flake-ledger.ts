@@ -278,7 +278,47 @@ export type LedgerEntry = {
   readonly note: string;
 };
 
-export type Ledger = { readonly entries: readonly LedgerEntry[] };
+export type Ledger = {
+  readonly entries: readonly LedgerEntry[];
+  /**
+   * Renamed tests: each old outcome-row identity and the identity it became. The renaming pull request adds one,
+   * and the flake ledger's state (`ci-flake-ledger-state.ts`) folds the old history into the new identity.
+   */
+  readonly aliases?: readonly Alias[];
+};
+
+/** An old identity and the one it was renamed to (`flake-ledger.json` `aliases`). */
+export type Alias = { readonly from: string; readonly to: string };
+
+/** Problems with the aliases: an empty or self alias, an old identity listed twice, or a cycle. */
+export const aliasProblems = (aliases: readonly Alias[]): string[] => {
+  const problems: string[] = [];
+  const targets = new Map<string, string>();
+  for (const alias of aliases) {
+    const name = `flake-ledger.json alias "${alias.from}"`;
+    if (alias.from.trim() === '' || alias.to.trim() === '') {
+      problems.push(`${name}: from and to must name a test`);
+    } else if (alias.from === alias.to) {
+      problems.push(`${name}: points to itself`);
+    } else if (targets.has(alias.from)) {
+      problems.push(`${name}: listed twice`);
+    } else {
+      targets.set(alias.from, alias.to);
+    }
+  }
+  for (const start of targets.keys()) {
+    const seen = new Set([start]);
+    for (let next = targets.get(start); next !== undefined; next = targets.get(next)) {
+      if (seen.has(next)) {
+        problems.push(`flake-ledger.json alias "${start}": the aliases form a cycle`);
+        break;
+      }
+      seen.add(next);
+    }
+  }
+  return problems;
+};
+
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/u;
 const login = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
@@ -288,7 +328,7 @@ const endOfDay = (day: string): number => Date.parse(`${day}T23:59:59.999Z`);
 
 /** Problems with the shape of a ledger: a bad date, owner or key, a duplicate, or an expiry too far out. */
 export const ledgerProblems = (ledger: Ledger): string[] => {
-  const problems: string[] = [];
+  const problems: string[] = aliasProblems(ledger.aliases ?? []);
   const seen = new Set<string>();
   for (const entry of ledger.entries) {
     const name = `flake-ledger.json "${entry.key}"`;

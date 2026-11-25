@@ -7,6 +7,9 @@
  */
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { splitWindow } from '#ci-queue-health.js';
+import type { WorkflowRun } from '#ci-queue-health.js';
+
 /** Requests left untouched when the rate limit runs low, so a rerun in the same hour can still start. */
 const rateReserve = 50;
 /** Retries of a 5xx, a rate-limit refusal or a network reset: 2 s doubling to 64 s, about two minutes in all. */
@@ -121,4 +124,44 @@ export const client = (options: {
       return (await response.json()) as T;
     },
   };
+};
+
+/** The runs API returns at most this many results for one query. */
+const searchLimit = 1000;
+export type RunQuery = {
+  readonly workflow: string;
+  readonly event: string;
+  readonly from: string;
+  readonly to: string;
+  /** `completed`, say; every status when unset. */
+  readonly status?: string | undefined;
+};
+
+/** Every run of a workflow for one event created in the window, splitting the window past the search limit. */
+export const listRuns = async (github: Client, query: RunQuery): Promise<WorkflowRun[]> => {
+  const { workflow, event, status, ...window } = query;
+  const filter = status ? `&status=${encodeURIComponent(status)}` : '';
+  const base = `/repos/${github.repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=${encodeURIComponent(event)}${filter}&created=${window.from}..${window.to}&per_page=100`;
+  const first = await github.get<{
+    total_count: number;
+    workflow_runs: WorkflowRun[];
+  }>(`${base}&page=1`);
+  if (first.total_count > searchLimit) {
+    const [early, late] = splitWindow(window);
+    const parts = await Promise.all([
+      listRuns(github, { workflow, event, status, ...early }),
+      listRuns(github, { workflow, event, status, ...late }),
+    ]);
+    return parts.flat();
+  }
+  const runs = [...first.workflow_runs];
+  for (let page = 2; runs.length < first.total_count; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
+    const next = await github.get<{ workflow_runs: WorkflowRun[] }>(`${base}&page=${page}`);
+    if (next.workflow_runs.length === 0) {
+      break;
+    }
+    runs.push(...next.workflow_runs);
+  }
+  return runs;
 };

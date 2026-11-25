@@ -1341,6 +1341,78 @@ describe('BillableModelInvocationService', () => {
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
   });
 
+  it('should answer a route whose published rates have expired as a route to switch from, never a provider outage', async () => {
+    const qualified = qualification();
+    const metrics = { ...genAiMetrics(), billingFundedOperationDenials: { add: vi.fn() } };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'route_rates_expired' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    /* Resuming re-sends to the same route and meets the same refusal; the client's card for this code offers the
+     * model switch and no Resume. */
+    expect(refusal.getStatus()).toBe(503);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'MODEL_ROUTE_PAUSED',
+        message: 'This model route is paused: its published price has expired.',
+        details: { routeId: qualified.routeId },
+      },
+    });
+    expect(metrics.billingFundedOperationDenials.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'deployment.environment': 'development',
+      'tau.billing.capacity_pool': 'primary',
+      'tau.billing.denial.reason': 'route_rates_expired',
+    });
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+
+  it('should keep an admission reason it has no answer for out of the sentence a person reads', async () => {
+    const qualified = qualification();
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'policy_unavailable' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    expect(refusal.getStatus()).toBe(503);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'PROVIDER_UNAVAILABLE',
+        message: 'Tau cannot start requests to this model right now. Try again shortly, or switch to another model.',
+        details: { admissionDenial: 'policy_unavailable' },
+      },
+    });
+  });
+
   it('should answer a restricted account with 403 BILLING_ACCOUNT_RESTRICTED, never a provider outage', async () => {
     const qualified = qualification();
     const ledger = {
@@ -1374,6 +1446,8 @@ describe('BillableModelInvocationService', () => {
     const retired = [
       ['This model route is paused while Tau reconciles', 'its supplier evidence'].join(' '),
       ['Model admission failed:', 'account_restricted'].join(' '),
+      // An admission reason interpolated into the sentence a person reads.
+      'Model admission failed: $'.concat('{'),
     ];
     // The API's source: the app and the server libraries it is composed from.
     const apps = resolve(import.meta.dirname, '../../..');

@@ -15,6 +15,7 @@ import {
   LlmGatewayError,
   maximumModelRequestBytes,
   modelRoutePausedError,
+  modelRouteRatesExpiredError,
   readUpstreamRefusal,
   recognizeProviderAccountRefusal,
   textMarker,
@@ -1115,6 +1116,15 @@ export class BillableModelInvocationService {
       });
       return modelRoutePausedError(routeId);
     }
+    if (reason === 'route_rates_expired') {
+      const { pool } = classifyFundedLlmCapacity(intent.activity);
+      this.metrics?.billingFundedOperationDenials.add(1, {
+        'deployment.environment': intent.environment,
+        'tau.billing.capacity_pool': pool,
+        'tau.billing.denial.reason': 'route_rates_expired',
+      });
+      return modelRouteRatesExpiredError(routeId);
+    }
     if (reason === 'account_restricted') {
       return billingAccountRestrictedError();
     }
@@ -1132,10 +1142,14 @@ export class BillableModelInvocationService {
         helper ? 'Too many funded helper operations are active.' : 'Too many funded model operations are active.',
       );
     }
+    /* A person reads this sentence on the card, so it says what they can do. The reason is the ledger's word for
+     * operators: it travels in the details, which the client keeps for its debug view, and as the request's
+     * `error.type`. */
     return new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,
       'PROVIDER_UNAVAILABLE',
-      `Model admission failed: ${reason}.`,
+      'Tau cannot start requests to this model right now. Try again shortly, or switch to another model.',
+      { admissionDenial: reason },
     );
   }
 }

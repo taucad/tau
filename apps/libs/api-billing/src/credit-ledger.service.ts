@@ -735,7 +735,7 @@ export class CreditLedgerService {
           invocation.supplierRatesValidUntil !== null &&
           new Date(invocation.supplierRatesValidUntil) <= effective.selectedAt
         ) {
-          return { status: 'denied', reason: 'policy_unavailable' };
+          return { status: 'denied', reason: 'route_rates_expired' };
         }
         const quantities = new Map(
           input.maximumQuantities.map((item) => [`${item.dimension}:${item.tier ?? ''}`, item.quantity]),

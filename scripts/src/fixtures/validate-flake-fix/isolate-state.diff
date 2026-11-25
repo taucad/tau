@@ -1,0 +1,16 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { describe, expect, it, vi } from 'vitest';
+
+ describe('boot', () => {
++  afterEach(() => {
++    vi.useRealTimers();
++    resetRegistry();
++  });
++
+   it('mounts the worker', async () => {
+     const worker = await boot();
+     expect(worker.state).toBe('ready');
+   });
+ });

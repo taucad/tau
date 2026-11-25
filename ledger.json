@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:51:42.612Z",
+  "updatedAt": "2026-11-25T23:53:31.576Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2250,6 +2250,19 @@
       "counted": 1391,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45724303705,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2865",
+      "sha": "fed01aadc523f2b1064a8638e1ed6403623eee65",
+      "at": "2026-11-25T23:53:17Z",
+      "conclusion": "cancelled",
+      "artifacts": 1,
+      "counted": 1369,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3262,12 +3275,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "scripts:test": {
-      "executions": 30,
-      "tests": 34522,
-      "failures": 0,
+      "executions": 31,
+      "tests": 35891,
+      "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:51:27Z"
+      "lastSeen": "2026-11-25T23:53:17Z"
     },
     "scripts:test:e2e": {
       "executions": 33,
@@ -3671,6 +3684,46 @@
       ],
       "failureShas": [
         "2d3d44bb0966bbbd1ecddf20c9e65a58a12c165d"
+      ],
+      "aliases": []
+    },
+    "scripts › src/flake-regression-workflow.test.ts > flake regression workflow > should check out every module the CLI imports, and the project roots": {
+      "project": "scripts",
+      "targetKey": "test",
+      "file": "src/flake-regression-workflow.test.ts",
+      "firstSeen": "2026-11-25T23:53:17Z",
+      "lastSeen": "2026-11-25T23:53:17Z",
+      "lastFailure": "2026-11-25T23:53:17Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-25T23:53:17Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45724303705,
+          "attempt": 1,
+          "at": "2026-11-25T23:53:17Z",
+          "hash": "11093888197775366146",
+          "variant": "linux-x64",
+          "sha": "fed01aadc523f2b1064a8638e1ed6403623eee65",
+          "lineage": "pr-2865",
+          "base": "484d98507e516938ea12bf8f080f96f031011356",
+          "execution": 1,
+          "error": "AssertionError: expected [ 'project.json', …(9) ] to include 'scripts/src/ci-shadow-rows.ts'"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "fed01aadc523f2b1064a8638e1ed6403623eee65"
       ],
       "aliases": []
     },

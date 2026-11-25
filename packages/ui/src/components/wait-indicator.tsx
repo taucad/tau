@@ -27,6 +27,12 @@ export type WaitIndicatorProps = Readonly<{
    * the slow words and "Try again" appear only after 10,000 ms in which it has not moved.
    */
   progress?: number;
+  /**
+   * Changes whenever the wait moves on in a way `progress` does not show, such as a byte count under a percentage that
+   * has not yet changed, or a new step. Each change counts as progress, as a change of `progress` does. Defaults to
+   * `progress`; a wait that passes it includes the percentage's own changes in it.
+   */
+  progressKey?: number | string;
   /** Retries the wait. Offered beside the slow words. */
   onRetry?: () => void;
   /** The retry control's words. Defaults to "Try again" (UX Policy rule 10). */
@@ -124,13 +130,14 @@ export function WaitIndicator({
   slowLabel,
   startedAt,
   progress,
+  progressKey,
   onRetry,
   retryLabel = 'Try again',
   live = true,
   variant = 'inline',
   className,
 }: WaitIndicatorProps): React.JSX.Element {
-  const { timing, wait, stall, revealed } = useWaitClock({ active, startedAt, progress });
+  const { timing, wait, stall, revealed } = useWaitClock({ active, startedAt, progress: progressKey ?? progress });
   const isWaiting = timing.state === 'waiting';
   const hasSlowWords = slowLabel !== undefined || onRetry !== undefined;
   const words = wordClasses(timing, hasSlowWords);

@@ -92,7 +92,7 @@ const isServer = (): boolean => false;
 type TrackedWait = Readonly<{
   active: boolean;
   startedAt: number;
-  progress: number | undefined;
+  progress: number | string | undefined;
   progressedAt: number | undefined;
   stall: number;
   shownAt: number;
@@ -144,17 +144,18 @@ export type UseWaitClockOptions = Readonly<{
    */
   startedAt?: number;
   /**
-   * How far the wait is, for a wait that reports progress. Each change counts as progress: the slow mark moves to
-   * 10,000 ms after it, so the slow words and "Try again" appear only after 10,000 ms without progress.
+   * How far the wait is, for a wait that reports progress: a fraction, or a key such as a byte count and a step that
+   * changes whenever the wait moves on. Each change counts as progress: the slow mark moves to 10,000 ms after it, so
+   * the slow words and "Try again" appear only after 10,000 ms without progress.
    */
-  progress?: number;
+  progress?: number | string;
 }>;
 
 /**
  * Time one wait on the timing ladder: the indicator reveals 1,000 ms after the wait started, turns slow 10,000 ms after
- * its start or its last progress, and once shown stays at least 500 ms. The result is CSS delays for the indicator's animation, read from the clock
- * only when the wait starts or ends, so no timer runs and the server render and hydration agree: before hydration the
- * delays come from navigation start through `--wait-offset`.
+ * its start or its last progress, and once shown stays at least 500 ms. The result is CSS delays for the indicator's
+ * animation, read from the clock only when the wait starts, ends or moves on, so no timer runs and the server render and
+ * hydration agree: before hydration the delays come from navigation start through `--wait-offset`.
  *
  * @param options - Whether the wait is running, when it started and how far it is.
  * @returns The indicator's timing, and counts of waits and of progress moves to key its animated elements on.
@@ -279,7 +280,7 @@ export function useWaitClock({ active, startedAt = 0, progress }: UseWaitClockOp
  * @param now - The current time on the animation timeline. Milliseconds.
  * @returns The wait with its slow mark moved.
  */
-function progressed(tracked: TrackedWait, progress: number | undefined, now: number): TrackedWait {
+function progressed(tracked: TrackedWait, progress: number | string | undefined, now: number): TrackedWait {
   return {
     ...tracked,
     progress,

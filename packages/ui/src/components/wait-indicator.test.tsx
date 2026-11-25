@@ -151,6 +151,24 @@ describe('WaitIndicator', () => {
     expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
   });
 
+  it('should restart the slow mark when its progress key moves while the percentage stands still', () => {
+    const clock = createTestClock(0);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Opening project',
+      slowLabel: 'Still opening project',
+      progress: 0.5,
+      progressKey: 'downloading:1024',
+    });
+    const words = (): HTMLElement => document.querySelector<HTMLElement>('[data-slot=wait-indicator-label]')!;
+    const first = words();
+    clock.set(6000);
+    view.rerenderWith({ progress: 0.5, progressKey: 'downloading:2048' });
+
+    expect(words()).not.toBe(first);
+    expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+  });
+
   it('should keep the label through a hold that ends a wait whose progress moved inside the last 10 s', () => {
     // Mounted 9,800 ms in, so it holds from the settle at 10,100 ms; the progress at 9,900 ms kept it from being slow.
     const clock = createTestClock(9800);

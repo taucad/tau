@@ -250,6 +250,13 @@ const cases: ReadonlyArray<{
   { name: 'reordered-suite-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
   { name: 'fake-clock-real-timers', classification: 'tolerance', rules: ['fake-clock-timer'] },
   { name: 'ambiguous-wait-reshuffle', classification: 'tolerance', rules: ['widened-wait'] },
+  { name: 'swapped-suite-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
+  {
+    name: 'swapped-suite-timeouts',
+    classification: 'tolerance',
+    rules: ['raised-timeout'],
+    message: budget,
+  },
   { name: 'mixed-timers', classification: 'forbidden', rules: ['fixed-sleep'] },
   { name: 'widened-wait-same-condition', classification: 'tolerance', rules: ['widened-wait'] },
   { name: 'widened-wait-new-bounded', classification: 'tolerance', rules: ['widened-wait'] },
@@ -280,6 +287,16 @@ describe('validateFlakeFix', () => {
       findings: [],
       files: [{ path: 'apps/ui/src/boot.test.ts', kind: 'test' }],
     });
+  });
+
+  it('should name suite A as the raised timeout when B moves before it and A and B trade values', () => {
+    const [finding] = validateFlakeFix(fixture('swapped-suite-timeouts'), budget).findings;
+    expect(finding?.message).toContain('raises a test or hook timeout (5000)');
+    const { testTimeouts } = measure(fixture('swapped-suite-timeouts')[0]!.after!);
+    expect(testTimeouts.map(({ id, value }) => [id, value])).toEqual([
+      ['suite:B > test:works', 1000],
+      ['suite:A > test:works', 5000],
+    ]);
   });
 
   it('should fail an empty diff', () => {

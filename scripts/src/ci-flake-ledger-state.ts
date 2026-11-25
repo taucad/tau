@@ -40,6 +40,7 @@
 import { lineageOf, touchesFailingTest } from '#ci-flake-ledger.js';
 import type { Alias, ComparedFile } from '#ci-flake-ledger.js';
 import type { WorkflowRun } from '#ci-queue-health.js';
+import type { ShadowRowState } from '#ci-shadow-rows.js';
 
 /** The version of {@link LedgerState}; a reader refuses one it does not know. */
 export const ledgerStateSchema = 1;
@@ -333,6 +334,8 @@ export type LedgerState = {
   ingested: IngestedRun[];
   identities: Record<string, IdentityState>;
   tasks: Record<string, TaskState>;
+  /** Shadow rows' consecutive passing runs, by `<project>:<target>` (FQ-13, `ci-shadow-rows.ts`). */
+  shadowRows?: Record<string, ShadowRowState>;
 };
 
 export const emptyState = (now: Date): LedgerState => ({
@@ -372,6 +375,7 @@ export const serializeState = (state: LedgerState): string =>
       ingested: [...state.ingested].sort((a, b) => a.run - b.run || a.attempt - b.attempt),
       tasks: byKey(state.tasks),
       identities: byKey(state.identities),
+      ...(state.shadowRows ? { shadowRows: byKey(state.shadowRows) } : {}),
     },
     undefined,
     2,

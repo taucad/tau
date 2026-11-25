@@ -572,8 +572,11 @@ describe('hooks resolution rules', () => {
         8,
       );
     });
+    /* The replacement shows with the next transcript announcement (D-UI-10). */
+    await waitFor(() => {
+      expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
+    });
     expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
-    expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
   });
 
   // =========================================================================

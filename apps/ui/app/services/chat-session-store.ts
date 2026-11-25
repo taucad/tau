@@ -277,7 +277,11 @@ export type ChatSession = {
    */
   readonly composerRecordRef: ComposerRecordRef;
   readonly messageQueueRef: ChatMessageQueueActor;
-  /** The displayed transcript: the fold of the chat's log, with the accepted gesture and the unsent seed (T2). */
+  /**
+   * The displayed transcript: the fold of the chat's log, with the accepted gesture and the unsent seed (T2). While a
+   * D-UI-10 announcement is pending it is the transcript last announced, so a reader woken by another topic (the
+   * projection's) sees it change at most every 50 ms.
+   */
   readonly messages: readonly MyUIMessage[];
   /**
    * The transcript's load state (I21): `loaded` with the turns it shows, `empty` only once its load has settled with
@@ -599,8 +603,9 @@ type InternalSession = ChatSession & {
     messages: readonly MyUIMessage[];
   }>;
   acceptedGesture: AcceptedGesture | undefined;
-  /** The transcript last announced, and the D-UI-10 throttle that announces the next. */
+  /** The transcript last announced, the one subscribers last heard, and the D-UI-10 throttle that announces the next. */
   announcedMessages: readonly MyUIMessage[];
+  publishedMessages: readonly MyUIMessage[];
   announceTimer: ReturnType<typeof setTimeout> | undefined;
   announcePending: boolean;
   /** The log's transcript shown with authority (or its read failed) for this session: an empty one is settled (I21). */
@@ -2683,7 +2688,7 @@ export class ChatSessionStore {
     if (
       session === undefined ||
       session.transcriptSettled ||
-      session.messages.length > 0 ||
+      this.#displayedTranscript(session).length > 0 ||
       !this.#answeredLogReads.has(chatId) ||
       this.#foreignScanState(chatId) !== 'failed'
     ) {
@@ -3392,7 +3397,10 @@ export class ChatSessionStore {
         this.#syncProjection(session.chatId, 'none');
         return;
       }
-      if (request.kind === 'edit' && !session.messages.some((message) => message.id === request.messageId)) {
+      if (
+        request.kind === 'edit' &&
+        !this.#displayedTranscript(session).some((message) => message.id === request.messageId)
+      ) {
         throw new Error('That message is no longer in this chat, so it cannot be edited.');
       }
     } catch (error) {
@@ -3623,7 +3631,7 @@ export class ChatSessionStore {
     }
     /* The run's answer is its tail: the segment a steering input opened, else the run's own message. */
     const answerId = this.#projectionContext(session.chatId)?.views[runId]?.segmentId ?? runId;
-    const hasText = session.messages.some(
+    const hasText = this.#displayedTranscript(session).some(
       (message) =>
         message.id === answerId &&
         message.role === 'assistant' &&
@@ -3696,7 +3704,7 @@ export class ChatSessionStore {
    * devices' history is all the chat has.
    */
   #presentTranscript(session: InternalSession, projection: ChatProjection | undefined): void {
-    const { messages } = session;
+    const messages = this.#displayedTranscript(session);
     if (
       session.acceptedGesture !== undefined &&
       session.displayedOwn?.views[session.acceptedGesture.runId] !== undefined
@@ -3728,6 +3736,7 @@ export class ChatSessionStore {
       session.announcePending = true;
       return;
     }
+    session.publishedMessages = session.announcedMessages;
     this.#chatTopics.get(session.chatId)?.emit();
     session.announceTimer = setTimeout(() => {
       session.announceTimer = undefined;
@@ -3836,7 +3845,7 @@ export class ChatSessionStore {
    * turns: then it waits for that scan (I21). The device keeps what it remembers of the trays.
    */
   #latchUnreadTranscript(session: InternalSession): void {
-    if (session.messages.length === 0 && this.#foreignScanState(session.chatId) === 'pending') {
+    if (this.#displayedTranscript(session).length === 0 && this.#foreignScanState(session.chatId) === 'pending') {
       session.transcriptAwaitsForeignScan = true;
       return;
     }
@@ -4495,7 +4504,8 @@ export class ChatSessionStore {
     session = {
       chatId,
       get messages() {
-        return displayed();
+        // ponytail: an idle read refolds, so a change no announcement covers still shows (as before D-UI-10 reads).
+        return session.announceTimer === undefined ? displayed() : session.publishedMessages;
       },
       get transcript() {
         return transcriptOf(session);
@@ -4533,6 +4543,7 @@ export class ChatSessionStore {
       displayedMessages: { fold: noMessages, gesture: undefined, seed: undefined, messages: noMessages },
       acceptedGesture: undefined,
       announcedMessages: noMessages,
+      publishedMessages: noMessages,
       announceTimer: undefined,
       announcePending: false,
       transcriptSettled: this.#createdEmpty.delete(chatId),

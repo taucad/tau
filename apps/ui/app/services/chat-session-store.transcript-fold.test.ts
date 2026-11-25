@@ -124,6 +124,11 @@ const openReader = async (): Promise<Reader> => {
       await settle();
       record();
     }
+    /* The transcript a reader sees moves at most every 50 ms (D-UI-10): let the trailing announcement land. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 60);
+    });
+    record();
   };
   return {
     store,
@@ -610,7 +615,10 @@ describe('displayed transcript replay cases (T2)', () => {
       publishLogPage(reader.store, chatId, runD.slice(4), { cursor: 4, endCursor: runD.length });
       await settle();
 
-      expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      /* The reread's end shows with the next transcript announcement (D-UI-10). */
+      await vi.waitFor(() => {
+        expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      });
       expectNoRegression([...reader.seen, reader.session.messages]);
     } finally {
       reader.dispose();

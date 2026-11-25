@@ -599,10 +599,12 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       3,
     );
     await Promise.all([prepared, alsoPrepared]);
-    expect(session.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([
-      'old-message',
-      'new-message',
-    ]);
+    await vi.waitFor(() => {
+      expect(session.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([
+        'old-message',
+        'new-message',
+      ]);
+    });
     store.release(session.chatId);
     expect(store.get(session.chatId)).toBeUndefined();
   });
@@ -3740,6 +3742,10 @@ describe('ChatSessionStore', () => {
         12,
       );
       await store.preparePresentation(chatId, new AbortController().signal);
+      /* The correction shows with the next transcript announcement (D-UI-10). */
+      await vi.waitFor(() => {
+        expect(session.messages).not.toBe(original);
+      });
 
       expect(session.messages).toHaveLength(original.length);
       expect(session.messages[0]).toBe(original[0]);

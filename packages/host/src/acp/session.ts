@@ -237,6 +237,13 @@ export const advertised = (capability: unknown): boolean => capability !== null 
 /** @internal */
 export const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
 
+/* A vendor string a durable row requires to be non-empty: an empty one is absent (launch audit E-3). */
+const named = (value: string | null | undefined): string | undefined =>
+  value === null || value === undefined || value === '' ? undefined : value;
+
+/** The `call.toolCallId` recorded for a vendor call that names none. */
+export const unnamedVendorCallId = 'unnamed';
+
 /**
  * A path is inside the session's own directory, and reachable there at the
  * intended access, or it is refused.
@@ -1864,15 +1871,17 @@ export const createTurnProjection = (options: {
    */
   const callFacts = (update: AcpToolUpdate): NonNullable<ToolInputProviderMessage['call']> => {
     const nativeName = nativeToolName(update, options.nativeToolName ?? acpNativeToolNamePaths);
+    /* The row schema refuses an empty id or path; a refused row would blind the rest of the turn (E-3). */
+    const locations = update.locations?.filter((location) => location.path !== '');
     return {
-      toolCallId: update.toolCallId,
+      toolCallId: named(update.toolCallId) ?? unnamedVendorCallId,
       ...(isPresent(update.kind) ? { kind: update.kind } : {}),
       ...(isPresent(update.title) ? { title: update.title } : {}),
       ...(isPresent(update.status) ? { status: update.status } : {}),
       ...(nativeName ? { nativeName } : {}),
-      ...(isPresent(update.locations)
+      ...(isPresent(locations)
         ? {
-            locations: update.locations.map(({ line, ...location }) =>
+            locations: locations.map(({ line, ...location }) =>
               typeof line === 'number' ? { ...location, line } : location,
             ),
           }
@@ -1995,7 +2004,9 @@ export const createTurnProjection = (options: {
     const inputMessageId = options.createId();
     const facts = callFacts(update);
     const tauMcp = normalizedTauMcpCall(update, options.tauMcpServerName, options.agentId);
-    const callToolName = tauMcp?.toolName ?? facts.nativeName ?? update.title;
+    /* The first non-empty name: an empty title is no name, and the row schema refuses an empty one (E-3). */
+    const callToolName =
+      named(tauMcp?.toolName) ?? named(facts.nativeName) ?? named(update.title) ?? named(update.kind) ?? 'tool';
     const input = tauMcp?.arguments ?? asJson(update.rawInput ?? { title: update.title });
     const inputMessage: ToolInputProviderMessage = {
       id: inputMessageId,

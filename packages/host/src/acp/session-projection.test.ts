@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { ExternalAgentLogEvent } from '@taucad/agent-host/launcher';
-import { reduceEventLog } from '@taucad/agent-host';
+import { providerMessageSchema, reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { openAcpSession } from '#acp/acp-session.js';
@@ -2526,3 +2526,35 @@ it.each(['denied', 'once', 'aborted', 'cancel-during-read', 'wrong-call', 'throw
     ).toEqual([{ actual: 'result' }]);
   },
 );
+
+it('should record a vendor call with empty names, ids and paths as rows the log accepts (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({ agentId: 'codex', createId: randomUUID, turn: stubTurn(appended) });
+
+  projection.update({
+    sessionUpdate: 'tool_call',
+    toolCallId: '',
+    title: '',
+    kind: 'execute',
+    status: 'pending',
+    locations: [{ path: '' }, { path: 'src/main.ts', line: 3 }],
+  } as SessionUpdate);
+  projection.update({
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: 'after' },
+  } as SessionUpdate);
+  await projection.flush();
+
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  for (const message of messages) {
+    expect(providerMessageSchema.safeParse(message).success).toBe(true);
+  }
+  const input = messages.find((message): message is MessageOf<'tool-input'> => message.role === 'tool-input');
+  expect(input).toMatchObject({
+    toolName: 'execute',
+    call: { toolCallId: 'unnamed', locations: [{ path: 'src/main.ts', line: 3 }] },
+  });
+  expect(
+    messages.some((message) => message.role === 'assistant' && JSON.stringify(message.content).includes('after')),
+  ).toBe(true);
+});

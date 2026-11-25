@@ -86,6 +86,17 @@ describe('MarkdownImage', () => {
   });
 });
 
+describe('MarkdownImage on the server', () => {
+  /* The server and the render that hydrates it must agree, whatever origin the page turns out to have. */
+  it('should render an absolute image as the load button on the server, as the hydrating render does', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const html = renderToString(<MarkdownImage src={`${globalThis.location.origin}/logo.png`} alt='logo' />);
+
+    expect(html).toContain('<button');
+    expect(html).not.toContain('<img');
+  });
+});
+
 describe('remoteImageHost', () => {
   it.each([
     ['https://elsewhere.example/x', 'elsewhere.example'],

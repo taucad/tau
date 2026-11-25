@@ -68,11 +68,8 @@ describe('AgentSafeguards', () => {
       kind: 'nudge',
       pattern: 'identical_call',
     });
-    expect(recorded[0]?.kind === 'nudge' ? recorded[0].reminder : '').toContain(
-      'The result will not change between calls.',
-    );
+    expect(recorded[0]?.kind === 'nudge' ? recorded[0].reminder : '').toContain('received the same result each time');
     expect(recordOutcome).toHaveBeenCalledWith(expect.objectContaining({ pattern: 'identical_call', helped: false }));
-    expect(safeguards.firedSignatures.size).toBe(1);
   });
 
   it('short-circuits the provider on the identical-error termination threshold', async () => {
@@ -159,6 +156,23 @@ describe('AgentSafeguards', () => {
       },
     );
 
+    /* A camera still, a page, an external agent's tool: asked the same thing, each answer is new. */
+    it('should neither remind nor end a call whose answer changes each time', async () => {
+      /* Each answer differs from the one before: a new frame of the same camera. */
+      let frame = 0;
+      const answeredAnew = repeatedCalls(20, false, 'capture_machine_still').map((message): AgentMessage => {
+        if (message.role !== 'toolResult') {
+          return message;
+        }
+        frame += 1;
+        return { ...message, content: [{ type: 'text', text: `frame ${String(frame)}` }] };
+      });
+      const { recorded, asked } = await run(answeredAnew);
+
+      expect(recorded).toEqual([]);
+      expect(asked).toBe(true);
+    });
+
     it('should still end a polling tool that fails identically', async () => {
       const { recorded } = await run(repeatedCalls(6, true, 'check_job'));
 
@@ -191,6 +205,28 @@ describe('AgentSafeguards', () => {
 
       expect(recorded).toEqual([]);
       expect(base).toHaveBeenCalledTimes(1);
+    });
+
+    /* The reminder given in an earlier turn does not stand for this one: the loop is reminded again before it ends. */
+    it('should remind again in a later turn before the same loop ends it', async () => {
+      const recorded: SafeguardRecord[] = [];
+      const safeguards = createAgentSafeguards({
+        record: async (entry) => {
+          recorded.push(entry);
+        },
+        hash: async (input) => `hash:${input}`,
+        isPersonsMessage,
+      });
+      const first = [person('Read it.'), ...repeatedCalls(5)];
+      const reminded = await safeguards.transformContext(first);
+      const second = [...reminded, person('Read it once more.')];
+      const loop = repeatedCalls(10);
+      for (let count = 1; count <= 10; count++) {
+        // oxlint-disable-next-line no-await-in-loop -- each step of the loop sees the context the one before left.
+        await safeguards.transformContext([...second, ...loop.slice(0, count * 2)]);
+      }
+
+      expect(recorded.map((entry) => entry.kind)).toEqual(['nudge', 'nudge', 'terminate']);
     });
 
     it('should not count calls made before the person last spoke toward a reminder', async () => {

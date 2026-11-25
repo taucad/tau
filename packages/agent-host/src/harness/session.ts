@@ -1698,7 +1698,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     thresholds: options.safeguardThresholds,
     isPersonsMessage: (message) => isPersonsContextMessage(message, record.messages),
     recordOutcome: options.onSafeguardOutcome,
-    firedSignatures: initialEvents.flatMap((event) => (event.type === 'safeguard.recorded' ? [event.safeguardId] : [])),
+    nudgeSignatureOf: (message) => {
+      const internal = record.messages.metadata(message)?.tauInternal;
+      const anchorId = internal?.['anchorId'];
+      return internal?.['kind'] === 'safeguard' && typeof anchorId === 'string' ? anchorId : undefined;
+    },
     record: async (decision, reminder) => {
       if (decision.kind === 'terminate') {
         await record.append({

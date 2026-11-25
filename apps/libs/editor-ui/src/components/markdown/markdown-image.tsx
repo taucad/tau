@@ -1,5 +1,5 @@
 import { ImageIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { ComponentProps } from 'react';
 
 /**
@@ -19,8 +19,12 @@ export const remoteImageHost = (source: string, base: string): string | undefine
   }
 };
 
-/* Server rendering has no page; any origin there treats every absolute image as remote. */
-const pageUrl = (): string => ('location' in globalThis ? globalThis.location.href : 'http://localhost/');
+/* Server rendering has no page: there, and in the render that hydrates it, the page is an origin no image can name, so
+ * every absolute image is remote in both and they agree. The real page is read once hydrated. */
+const unknownPage = 'http://server.invalid/';
+const subscribeToNothing = (): (() => void) => () => undefined;
+const readPageUrl = (): string => ('location' in globalThis ? globalThis.location.href : unknownPage);
+const readServerPageUrl = (): string => unknownPage;
 
 /**
  * Markdown image. Markdown here is written by a model or an agent, so an image on another host loads only when the
@@ -34,7 +38,8 @@ export function MarkdownImage({
   ...properties
 }: ComponentProps<'img'> & { readonly node?: unknown }): React.JSX.Element | undefined {
   const source = typeof src === 'string' ? src : undefined;
-  const host = source === undefined ? undefined : remoteImageHost(source, pageUrl());
+  const page = useSyncExternalStore(subscribeToNothing, readPageUrl, readServerPageUrl);
+  const host = source === undefined ? undefined : remoteImageHost(source, page);
   /* The source the person approved, not a flag: a later source in the same place asks again. */
   const [approved, setApproved] = useState<string | undefined>(undefined);
   if (source === undefined || source === '') {

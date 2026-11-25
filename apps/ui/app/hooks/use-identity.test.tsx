@@ -6,6 +6,7 @@ type SessionState = {
   readonly data: unknown;
   readonly isSuccess: boolean;
   readonly error?: unknown;
+  readonly refetch?: (options?: { cancelRefetch?: boolean }) => Promise<unknown>;
 };
 
 const { mockUseSession } = vi.hoisted(() => ({
@@ -148,6 +149,34 @@ describe('useIdentity', () => {
 
     expect(result.current.state).toBe('signed-out');
     expect(localStorage.getItem(recordKey)).toBeNull();
+  });
+
+  /* Two windows side by side: signing in in one writes the record, and the other's query still says nobody. */
+  it('asks the session again when another tab signs in', () => {
+    const refetch = vi.fn(async () => undefined);
+    mockUseSession.mockReturnValue({ data: null, isSuccess: true, refetch });
+    const { result } = renderHook(() => useIdentity());
+    expect(result.current.state).toBe('signed-out');
+
+    localStorage.setItem(recordKey, JSON.stringify(one));
+    act(() => {
+      globalThis.dispatchEvent(new StorageEvent('storage', { key: recordKey }));
+    });
+
+    expect(refetch).toHaveBeenCalledExactlyOnceWith({ cancelRefetch: false });
+  });
+
+  it('does not ask again for a record change that agrees with its answer', () => {
+    const refetch = vi.fn(async () => undefined);
+    mockUseSession.mockReturnValue({ data: { user: one }, isSuccess: true, refetch });
+    renderHook(() => useIdentity());
+
+    act(() => {
+      globalThis.dispatchEvent(new StorageEvent('storage', { key: recordKey }));
+      globalThis.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }));
+    });
+
+    expect(refetch).not.toHaveBeenCalled();
   });
 
   it('reads a corrupt record as none', () => {

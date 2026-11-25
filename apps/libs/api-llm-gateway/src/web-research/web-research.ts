@@ -13,7 +13,7 @@ import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
-import { Readable } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
 import type { Transform } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
@@ -37,11 +37,12 @@ export type ResolvedAddress = Readonly<{ address: string; family: number }>;
 /**
  * Injected I/O, so tests run without the network.
  *
- * A page fetch passes `address`: the address its host was checked to resolve to. The fetch must connect there and
- * nowhere else, so a name that resolves somewhere else the second time it is asked cannot steer it.
+ * A page fetch passes `addresses`: every address its host was checked to resolve to. The fetch must connect to one of
+ * them and nowhere else, so a name that resolves somewhere else the second time it is asked cannot steer it; it may
+ * fall back from one to the next, as a connection to a host with several addresses does.
  */
 export type WebResearchDependencies = Readonly<{
-  fetch: (url: string, init: RequestInit, address?: ResolvedAddress) => Promise<Response>;
+  fetch: (url: string, init: RequestInit, addresses?: readonly ResolvedAddress[]) => Promise<Response>;
   lookup: (hostname: string) => Promise<readonly ResolvedAddress[]>;
 }>;
 
@@ -71,32 +72,48 @@ const decodedBody = (response: IncomingMessage, headers: Headers): Readable | Er
   if (decoder === undefined) {
     return new Error(`Unsupported content encoding: ${coding}`);
   }
-  const decoding = decoder();
-  response.once('error', (error) => decoding.destroy(error));
   headers.delete('content-encoding');
   headers.delete('content-length');
-  return response.pipe(decoding);
+  /* `pipeline` ends both together: a reader that cancels the decoded body, or a body that fails to decode, also
+   * closes the raw response and its connection. */
+  return pipeline(response, decoder(), () => undefined);
 };
 
 /**
- * GET `url` over a connection to `address`, whatever its host resolves to now. TLS still verifies the certificate
+ * GET `url` over a connection to one of `addresses`, whatever its host resolves to now: Node tries them in turn
+ * (`autoSelectFamily`, on by default), as it does any host with several addresses. TLS still verifies the certificate
  * against the URL's host name. A gzip, deflate or brotli body is decoded, as the platform fetch decodes it, and one in
  * any other coding is refused rather than handed on as bytes no reader can use.
  *
  * @param url - The URL to request.
  * @param init - The request's headers and signal; the method is always GET and redirects are returned, not followed.
- * @param address - The checked address to connect to.
+ * @param addresses - The checked addresses to connect to.
  * @returns The response, with its body as a web stream.
  */
-export const fetchAtAddress = async (url: string, init: RequestInit, address: ResolvedAddress): Promise<Response> =>
+export const fetchAtAddress = async (
+  url: string,
+  init: RequestInit,
+  addresses: readonly ResolvedAddress[],
+): Promise<Response> =>
   new Promise<Response>((resolve, reject) => {
     const target = new URL(url);
-    /* Node's connect asks with `all: true` (happy eyeballs) and wants a list back; otherwise one address. */
+    /* Node's connect asks with `all: true` (happy eyeballs) and wants the list back; otherwise one address, of the
+     * family it asks for when it names one. */
     const lookup: LookupFunction = (_hostname, options, callback) => {
+      const listed = addresses.map(({ address, family }) => ({ address, family }));
+      const one = listed.find(
+        ({ family }) => options.family === undefined || options.family === 0 || family === options.family,
+      );
       if (options.all === true) {
-        callback(null, [{ address: address.address, family: address.family }]);
+        callback(null, listed);
+      } else if (one === undefined) {
+        callback(
+          Object.assign(new Error(`No checked address of family ${String(options.family)}`), { code: 'ENOTFOUND' }),
+          '',
+          0,
+        );
       } else {
-        callback(null, address.address, address.family);
+        callback(null, one.address, one.family);
       }
     };
     const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
@@ -162,8 +179,8 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
 
 /** The default dependencies: the platform fetch (a page fetch connects to its checked address) and the system resolver. */
 export const defaultWebResearchDependencies: WebResearchDependencies = {
-  fetch: async (url, init, address) =>
-    address === undefined ? globalThis.fetch(url, init) : fetchAtAddress(url, init, address),
+  fetch: async (url, init, addresses) =>
+    addresses === undefined ? globalThis.fetch(url, init) : fetchAtAddress(url, init, addresses),
   lookup: async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }),
 };
 
@@ -314,7 +331,10 @@ export const isPublicAddress = (address: string): boolean => {
 
 /* Check that `url` may be fetched and return the address to connect to: the first of its host's addresses, all of
  * which must be public. The fetch connects there rather than resolving the name again. */
-const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup']): Promise<ResolvedAddress> => {
+const assertPublicUrl = async (
+  url: URL,
+  lookup: WebResearchDependencies['lookup'],
+): Promise<readonly ResolvedAddress[]> => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Unsupported URL scheme ${url.protocol}`);
   }
@@ -323,11 +343,10 @@ const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup
   }
   const host = url.hostname.replace(/^\[(.*)\]$/u, '$1');
   const addresses = isIP(host) === 0 ? await lookup(host) : [{ address: host, family: isIP(host) }];
-  const [first] = addresses;
-  if (first === undefined || !addresses.every(({ address }) => isPublicAddress(address))) {
+  if (addresses.length === 0 || !addresses.every(({ address }) => isPublicAddress(address))) {
     throw new Error(`${url.hostname} does not resolve to a public address`);
   }
-  return first;
+  return addresses;
 };
 
 const entities: Readonly<Record<string, string>> = {
@@ -458,7 +477,7 @@ const fetchPage = async (
   const bounded = withTimeout(signal);
   for (let hop = 0; ; hop += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
-    const address = await assertPublicUrl(current, dependencies.lookup);
+    const addresses = await assertPublicUrl(current, dependencies.lookup);
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
     const response = await dependencies.fetch(
       current.href,
@@ -470,7 +489,7 @@ const fetchPage = async (
           accept: 'text/html, text/markdown, application/pdf, text/*;q=0.9, */*;q=0.1',
         },
       },
-      address,
+      addresses,
     );
     const location = response.headers.get('location');
     const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';

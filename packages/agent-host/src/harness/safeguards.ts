@@ -16,6 +16,8 @@ export type ToolEventSummary = {
   readonly errorCode?: string | undefined;
   readonly errorHash?: string | undefined;
   readonly errorPreview?: string | undefined;
+  /** The hash of what the call answered, error or not: two calls answered alike learned nothing new. */
+  readonly resultHash?: string | undefined;
   readonly isError: boolean;
   readonly isEmptyResult: boolean;
   readonly isMutation: boolean;
@@ -221,9 +223,10 @@ export const summarizeToolEvents = async (
   }
   return Promise.all(
     pending.map(async ({ index, message, call, value, content, errorCode, errorMessage }) => {
-      const [argsHash, errorHash] = await Promise.all([
+      const [argsHash, errorHash, resultHash] = await Promise.all([
         call ? hash(canonicalJson(call.args ?? null)) : Promise.resolve(undefined),
         errorCode ? hash(`${errorCode}:${errorMessage}`) : Promise.resolve(undefined),
+        hash(content),
       ]);
       return {
         index,
@@ -231,6 +234,7 @@ export const summarizeToolEvents = async (
         argsKnown: call !== undefined,
         ...(call ? { argsHash, argsPreview: oneLine(canonicalJson(call.args ?? null), 80) } : {}),
         ...(errorCode ? { errorCode, errorHash, errorPreview: oneLine(errorMessage ?? content, 120) } : {}),
+        resultHash,
         isError: message.isError,
         isEmptyResult: !message.isError && emptyResult(message.toolName, value),
         isMutation: ['edit_file', 'create_file', 'delete_file'].includes(message.toolName),
@@ -262,11 +266,12 @@ export const summarizeToolEvents = async (
 };
 
 /**
- * Tools whose answer changes with time rather than with their arguments: a job's progress, a machine's state, a shell
- * command that reads something outside the project. Calling one again unchanged is how the agent waits, so the
- * identical-call detector neither reminds nor ends a run for it. Every other tool answers the same arguments the same
- * way within a turn, so repeating one unchanged is a loop. A polling tool that fails identically is still ended by
- * the identical-error detector.
+ * Tools an agent waits with: a job's progress, a machine's state, a shell command that reads something outside the
+ * project. Each answers alike while what it watches has not moved, so asking again unchanged and being answered the
+ * same is how the agent waits, and the identical-call detector neither reminds nor ends a run for it. Any other tool
+ * asked the same thing and answering the same thing again has told the agent nothing new, whatever the tool: a tool
+ * whose answer moves with time (a camera still, a page, an external agent's tool) is not counted while its answers
+ * differ. A polling tool that fails identically is still ended by the identical-error detector.
  *
  * @public
  */
@@ -274,6 +279,9 @@ export const pollingToolNames: ReadonlySet<string> = new Set(['check_job', 'get_
 
 const callSignature = (event: ToolEventSummary): string | undefined =>
   event.argsHash ? `${event.toolName}:${event.argsHash}` : undefined;
+/* The same call answered the same way: the identical-call detector's unit. */
+const answeredCallSignature = (event: ToolEventSummary): string | undefined =>
+  event.argsHash && event.resultHash ? `${event.toolName}:${event.argsHash}:${event.resultHash}` : undefined;
 const errorSignature = (event: ToolEventSummary): string | undefined =>
   event.argsHash ? `${event.toolName}:${event.argsHash}:${event.errorHash ?? '-'}` : undefined;
 const indexes = (events: readonly ToolEventSummary[]): number[] => events.map((event) => event.index);
@@ -322,12 +330,12 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
   },
   (events) => {
     const tail = events.at(-1);
-    const signature = tail && !pollingToolNames.has(tail.toolName) ? callSignature(tail) : undefined;
+    const signature = tail && !pollingToolNames.has(tail.toolName) ? answeredCallSignature(tail) : undefined;
     if (!tail || !signature) {
       return { kind: 'clear' };
     }
     let count = 0;
-    for (let index = events.length - 1; index >= 0 && callSignature(events[index]!) === signature; index--) {
+    for (let index = events.length - 1; index >= 0 && answeredCallSignature(events[index]!) === signature; index--) {
       count++;
     }
     /* A proven loop: the same call answered the same way this many times since the person spoke, past the reminder
@@ -336,8 +344,8 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
       return {
         kind: 'terminate',
         pattern: anomalyPattern.identicalCall,
-        reason: `\`${tail.toolName}\` was called with identical arguments ${count} times in a row, after a reminder that the result would not change.`,
-        signature: `${signature}:any-result`,
+        reason: `\`${tail.toolName}\` was called with identical arguments and answered the same way ${count} times in a row, after a reminder that the result was not changing.`,
+        signature: `${signature}:same-result`,
         eventIndexes: indexes(events.slice(-count)),
       };
     }
@@ -345,12 +353,12 @@ const buildDetectors = (thresholds: SafeguardThresholds): SafeguardDetector[] =>
       ? {
           kind: 'nudge',
           pattern: anomalyPattern.identicalCall,
-          reminder: `You called \`${tail.toolName}\` with identical arguments ${count} times. The result will not change between calls.
+          reminder: `You called \`${tail.toolName}\` with identical arguments ${count} times and received the same result each time.
 
   Arguments: ${tail.argsPreview ?? '<unknown>'}
 
 If you need fresh data, change the arguments. If you already have the result, use it from the prior call instead of re-invoking the tool.`,
-          signature: `${signature}:any-result`,
+          signature: `${signature}:same-result`,
           eventIndexes: indexes(events.slice(-count)),
         }
       : { kind: 'clear' };
@@ -539,7 +547,12 @@ export const resolveSafeguardThresholds = (overrides?: Partial<SafeguardThreshol
 type CreateSafeguardsOptions = {
   readonly thresholds?: Partial<SafeguardThresholds> | undefined;
   readonly detectors?: readonly SafeguardDetector[] | undefined;
-  readonly firedSignatures?: Iterable<string> | undefined;
+  /**
+   * The signature of the safeguard reminder a context message is, read from its recorded provenance (`anchorId`), or
+   * `undefined` for any other message. A reminder is given once per window: one already in the window is not given
+   * again, and one given in an earlier window does not stand for this one.
+   */
+  readonly nudgeSignatureOf?: ((message: AgentMessage) => string | undefined) | undefined;
   /**
    * Whether a message is one the person wrote, as opposed to a reminder, a summary or another row Tau put in the
    * context itself. The detectors count only the tool calls made since the last such message: what the agent did
@@ -557,11 +570,14 @@ export const createAgentSafeguards = (
 ): {
   readonly transformContext: (messages: AgentMessage[]) => Promise<AgentMessage[]>;
   readonly wrapStreamFn: (base: StreamFn) => StreamFn;
-  readonly firedSignatures: ReadonlySet<string>;
 } => {
   const thresholds = resolveSafeguardThresholds(options.thresholds);
   const detectors = options.detectors ?? buildDetectors(thresholds);
-  const fired = new Set(options.firedSignatures);
+  /* The reminders this instance gave, by message, and those of the window it last saw, for a caller whose context does
+   * not carry a reminder's provenance back. */
+  const givenReminders = new WeakMap<AgentMessage, string>();
+  let givenWindow: AgentMessage | undefined;
+  const givenInWindow = new Set<string>();
   const hash = options.hash ?? browserHash;
   let lastNudge: { readonly pattern: AnomalyPattern; readonly signature: string } | undefined;
   let terminate: Extract<SafeguardDetection, { readonly kind: 'terminate' }> | undefined;
@@ -585,9 +601,23 @@ export const createAgentSafeguards = (
     const summarized = await summarizeToolEvents(messages, hash);
     const events = lastSpoke === -1 ? summarized : summarized.filter((event) => event.index > lastSpoke);
     let selected: SafeguardRecord | undefined;
+    /* A reminder stands for the window it was given in: a later turn that repeats the same loop is reminded again
+     * before the loop can end it, as the end's reason says. */
+    const windowStart = lastSpoke === -1 ? undefined : messages[lastSpoke];
+    if (windowStart !== givenWindow) {
+      givenWindow = windowStart;
+      givenInWindow.clear();
+    }
+    const given = new Set(givenInWindow);
+    for (const message of messages.slice(lastSpoke + 1)) {
+      const signature = options.nudgeSignatureOf?.(message) ?? givenReminders.get(message);
+      if (signature !== undefined) {
+        given.add(signature);
+      }
+    }
     for (const detector of detectors) {
       const detection = detector(events);
-      if (detection.kind === 'clear' || (detection.kind === 'nudge' && fired.has(detection.signature))) {
+      if (detection.kind === 'clear' || (detection.kind === 'nudge' && given.has(detection.signature))) {
         continue;
       }
       selected = detection;
@@ -607,7 +637,8 @@ export const createAgentSafeguards = (
       timestamp: 0,
     };
     await options.record(selected, reminder);
-    fired.add(selected.signature);
+    givenInWindow.add(selected.signature);
+    givenReminders.set(reminder, selected.signature);
     lastNudge = { pattern: selected.pattern, signature: selected.signature };
     return [...messages, reminder];
   };
@@ -645,5 +676,5 @@ Please review what was attempted, and either rephrase the request or correct the
       return stream;
     };
 
-  return { transformContext, wrapStreamFn: wrapStreamFunction, firedSignatures: fired };
+  return { transformContext, wrapStreamFn: wrapStreamFunction };
 };

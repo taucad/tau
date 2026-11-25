@@ -153,6 +153,8 @@ export type RunView = Readonly<{
   streamVersion?: number;
   user?: MyUIMessage;
   admittedAt: string;
+  /** When the run's last lifecycle row was recorded: a resumed attempt moves it, where `admittedAt` stays the run's. */
+  lifecycleAt?: string;
   terminal?: 'completed' | 'failed' | 'cancelled';
   /** Prior assistant segments sealed by an authentic steering input. */
   segments?: readonly TranscriptSegment[];
@@ -899,6 +901,7 @@ const foldRunViews = (
     views[row.runId] = {
       ...prior,
       admittedAt,
+      ...(row.type === 'run.lifecycle' ? { lifecycleAt: row.recordedAt } : {}),
       chunks: nextChunks,
       ...(messages === undefined ? {} : { messages }),
       ...(correctedIds.size === 0 && !rewriteMessage ? {} : { streamVersion: (previous?.streamVersion ?? 0) + 1 }),

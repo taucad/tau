@@ -114,17 +114,19 @@ export const refusalOfGesture = (
 
 /**
  * Whether a refusal recorded before the log was read is still newer than the log's current run. Its time is the only
- * order it has: a run admitted after it (on this page or another) retires it, as a run after a caught-up refusal's
- * position does. A refusal with no time (recorded before times were kept) stays shown, as it did. Two devices' clocks
- * can disagree by seconds, while a refusal and a later run are a person's gestures apart.
+ * order it has: a run admitted, or an attempt of one resumed, after it (on this page or another) retires it, as a later
+ * run or attempt retires a caught-up refusal by its position. A refusal with no time (recorded before times were kept)
+ * stays shown, as it did. Two devices' clocks can disagree by seconds, while a refusal and a later run are a person's
+ * gestures apart.
  */
 const isUnreadRefusalCurrent = (
   refusedTime: unknown,
   projection: ChatProjection,
   run: ReturnType<typeof selectCurrentRun>,
 ): boolean => {
-  const admittedAt = run === undefined ? undefined : projection.views[run.runId]?.admittedAt;
-  return typeof refusedTime !== 'string' || admittedAt === undefined || admittedAt <= refusedTime;
+  const view = run === undefined ? undefined : projection.views[run.runId];
+  const movedAt = view?.lifecycleAt ?? view?.admittedAt;
+  return typeof refusedTime !== 'string' || movedAt === undefined || movedAt <= refusedTime;
 };
 
 /**

@@ -319,6 +319,47 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
     }
   });
 
+  it('should retire a refusal made before the log was read once the run is resumed after it', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-28T01:00:00.000Z'));
+      const refusal = refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+        kind: 'send',
+        projection: undefined,
+        createId: gestureId,
+      });
+      const failed = failedRun(rateLimited());
+      const resumed = createActor(chatProjectionLogic).start();
+      resumed.send({
+        type: 'batch',
+        answer: {
+          status: 'batch',
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events: [
+            lifecycleRow(0, 'admitted'),
+            lifecycleRow(1, 'running'),
+            logRow(2, { type: 'run.lifecycle', state: 'failed', attempt: 1, detail: { code: 'RATE_LIMITED' } }),
+            /* Another device resumes the run an hour after the refusal. */
+            logRow(3, { type: 'run.lifecycle', state: 'running', attempt: 2, recordedAt: '2026-09-28T02:00:00.000Z' }),
+          ],
+        },
+      });
+      const { context } = resumed.getSnapshot();
+      resumed.stop();
+
+      expect(selectVisibleChatErrorEntry({ ...failed, persistedError: refusal })?.error.code).toBe(
+        'INSUFFICIENT_CREDIT',
+      );
+      expect(
+        selectVisibleChatErrorEntry({ projection: context, attachmentStatus: 'attached', persistedError: refusal }),
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /* The run under a refusal is not the refused gesture's: a card for a refused send may not offer to resume it. */
   it('should call the run resumable for its own failure and for a refused Resume, not for a refused send', () => {
     const failed = failedRun(rateLimited());

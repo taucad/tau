@@ -204,17 +204,20 @@ describe('assistant message activity', () => {
   });
 
   it('lets a session record without a plan pass without splitting activity, and keeps one with a plan visible', () => {
-    const session = (plan?: unknown): Part =>
-      ({
-        type: 'data-acp-session',
-        data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [], plan },
-      }) as unknown as Part;
+    type SessionPart = Extract<Part, { type: 'data-acp-session' }>;
+    const session = (plan?: SessionPart['data']['plan']): SessionPart => ({
+      type: 'data-acp-session',
+      data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [], plan },
+    });
 
     expect(classifyActivityPart(session())).toBe('skip');
     expect(groupAssistantParts([tool('tool-read_file'), session(), tool('tool-shell')])).toHaveLength(1);
     expect(findLastMeaningfulPartIndex([text('Done'), session()])).toBe(0);
 
-    const plan = { type: 'items', entries: [{ content: 'Inspect', priority: 'high', status: 'pending' }] };
+    const plan: SessionPart['data']['plan'] = {
+      type: 'items',
+      entries: [{ content: 'Inspect', priority: 'high', status: 'pending' }],
+    };
     expect(classifyActivityPart(session(plan))).toBe('data');
     expect(groupAssistantParts([tool('tool-read_file'), session(plan), tool('tool-shell')])).toHaveLength(3);
   });

@@ -388,13 +388,15 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       expect(pendingAgentHostApprovals(chat.messages)).toEqual([]);
       expect(chat.status).toBe('ready');
       const cancels = host.hostCommand.mock.calls.filter(([command]) => command.type === 'cancel');
-      expect(cancels.map(([command]) => command.payload)).toEqual([{ chatId: 'chat', runId: 'run_1' }]);
+      /* The person's own Stop asks to take the turn back; the host keeps a committed turn as USER_STOPPED either way. */
+      expect(cancels.map(([command]) => command.payload)).toEqual([{ chatId: 'chat', runId: 'run_1', withdraw: true }]);
       // The cancel's facts are logged as JSON text, which the desktop log keeps whole.
       const logged = info.mock.calls.find(([label]) => label === '[ChatSessionStore] host cancel');
       expect(typeof logged?.[1]).toBe('string');
       expect(JSON.parse(logged![1] as string)).toEqual({
         chatId: 'chat',
         runId: 'run_1',
+        withdraw: true,
         commandId: cancels[0]![0].commandId,
         origin: 'stop-button',
       });

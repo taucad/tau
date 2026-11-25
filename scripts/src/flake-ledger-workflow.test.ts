@@ -19,11 +19,11 @@ type Workflow = {
     readonly workflow_dispatch?: unknown;
   };
   readonly permissions: Record<string, string>;
-  readonly concurrency: { readonly group: string; readonly 'cancel-in-progress': boolean };
   readonly jobs: Record<
     string,
     {
       readonly if?: string;
+      readonly concurrency?: { readonly group: string; readonly 'cancel-in-progress': boolean };
       readonly environment?: unknown;
       readonly permissions?: Record<string, string>;
       readonly steps: Step[];
@@ -44,8 +44,11 @@ describe('flake ledger workflow', () => {
     expect(workflow.on.workflow_dispatch).toBeDefined();
   });
 
-  it('should queue one writer at a time without cancelling it', () => {
-    expect(workflow.concurrency).toEqual({ group: 'flake-ledger', 'cancel-in-progress': false });
+  it('should queue one writer at a time without cancelling it, and let skipped runs stay out of the queue', () => {
+    expect((workflow as { concurrency?: unknown }).concurrency).toBeUndefined();
+    for (const job of Object.values(workflow.jobs)) {
+      expect(job.concurrency).toEqual({ group: 'flake-ledger', 'cancel-in-progress': false });
+    }
   });
 
   it('should ingest only the merge queue and pushes to main', () => {

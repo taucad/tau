@@ -18,7 +18,8 @@
  * `--state-file` reads and writes a local file instead of the branch (a replay; nothing is written to GitHub).
  * Env: GITHUB_TOKEN (`actions: read`; `contents: write` to update the branch), GITHUB_REPOSITORY (default
  * taucad/tau), GITHUB_API_URL.
- * Exit codes: 0 ingested, or nothing to ingest; 1 API failure, or the branch moved while this ran; 2 usage, or an
+ * Exit codes: 0 ingested, or nothing to ingest; 1 API failure (what was counted before it is still written), or the
+ * branch moved while this ran; 2 usage, or an
  * invalid `flake-ledger.json`; 3 state written, but outcome lines were rejected (unknown schema or malformed).
  */
 import { execFileSync } from 'node:child_process';
@@ -46,7 +47,7 @@ import {
   renderLedgerMarkdown,
   summarizeLedger,
 } from '#ci-flake-ledger-state.js';
-import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate } from '#ci-flake-ledger-state.js';
+import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
@@ -95,6 +96,23 @@ const readArtifact = async (github: Client, artifact: Artifact, directory: strin
 type Compares = {
   readonly github: Client;
   readonly cache: Map<string, Promise<ComparedFile[] | undefined>>;
+};
+
+type RunOutcomes = { readonly artifacts: number; readonly rows: OutcomeRow[]; readonly problems: string[] };
+
+/** Every outcome row of a run's `test-outcomes-*` artifacts, and the lines that were not a valid row. */
+const readRun = async (github: Client, runId: number, directory: string): Promise<RunOutcomes> => {
+  const listed = await listArtifacts(github, runId);
+  const artifacts = listed.filter((artifact) => artifact.name.startsWith(artifactPrefix) && !artifact.expired);
+  const rows: OutcomeRow[] = [];
+  const problems: string[] = [];
+  for (const artifact of artifacts) {
+    // oxlint-disable-next-line no-await-in-loop -- one artifact at a time keeps memory to one zip
+    const parsed = parseOutcomes(await readArtifact(github, artifact, directory), `${runId}/${artifact.name}`);
+    rows.push(...parsed.rows);
+    problems.push(...parsed.problems);
+  }
+  return { artifacts: artifacts.length, rows, problems };
 };
 
 const compareFiles = async (
@@ -246,6 +264,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   const events: Array<{ id: string; event: FlakeEvent }> = [];
   const rejectedLines: string[] = [];
   const ingested: number[] = [];
+  let failed = false;
   try {
     for (const run of batch) {
       // Runs are counted in order, since a run's passes close the failures of the runs before it.
@@ -253,19 +272,20 @@ const main = async (args: readonly string[]): Promise<number> => {
         console.error('The request budget ran out; the remaining runs are left for the next invocation');
         break;
       }
-      // oxlint-disable-next-line no-await-in-loop -- runs are ingested in order
-      const listed = await listArtifacts(github, run.id);
-      const artifacts = listed.filter((artifact) => artifact.name.startsWith(artifactPrefix) && !artifact.expired);
-      const rows = [];
-      let rejected = 0;
-      for (const artifact of artifacts) {
-        // oxlint-disable-next-line no-await-in-loop -- one artifact at a time keeps memory to one zip
-        const parsed = parseOutcomes(await readArtifact(github, artifact, directory), `${run.id}/${artifact.name}`);
-        rows.push(...parsed.rows);
-        rejected += parsed.problems.length;
-        rejectedLines.push(...parsed.problems.slice(0, 20));
+      let read: RunOutcomes;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- runs are ingested in order
+        read = await readRun(github, run.id, directory);
+      } catch (error) {
+        // What was counted so far is still written; this run and the ones after it wait for the next invocation.
+        console.error(`Run ${run.id}: ${error instanceof Error ? error.message : String(error)}`);
+        failed = true;
+        break;
       }
-      const result = ingestRun(state, { run, rows, artifacts: artifacts.length, rejected, aliases });
+      const { artifacts, rows, problems } = read;
+      const rejected = problems.length;
+      rejectedLines.push(...problems.slice(0, 20));
+      const result = ingestRun(state, { run, rows, artifacts, rejected, aliases });
       events.push(...result.events);
       for (const candidate of result.candidates) {
         // oxlint-disable-next-line no-await-in-loop -- a confirmation belongs to the run just counted
@@ -276,7 +296,7 @@ const main = async (args: readonly string[]): Promise<number> => {
       }
       ingested.push(run.id);
       console.error(
-        `Run ${run.id} attempt ${run.run_attempt ?? 1}: ${artifacts.length} artifacts, ${result.record.counted} executions, ` +
+        `Run ${run.id} attempt ${run.run_attempt ?? 1}: ${artifacts} artifacts, ${result.record.counted} executions, ` +
           `${result.record.replayed} replayed, ${rejected} rejected, ${result.events.length} events`,
       );
     }
@@ -314,6 +334,9 @@ const main = async (args: readonly string[]): Promise<number> => {
   console.log(markdown);
   if (values.summary) {
     await appendFile(values.summary, `${markdown}\n`);
+  }
+  if (failed) {
+    return 1;
   }
   return rejectedLines.length > 0 ? 3 : 0;
 };

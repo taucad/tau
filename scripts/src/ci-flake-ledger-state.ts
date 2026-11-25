@@ -292,6 +292,12 @@ export type IdentityState = {
   failureShas: string[];
   /** Earlier identities folded into this one through `flake-ledger.json` `aliases`. */
   aliases: string[];
+  /**
+   * Executions of its target and variant the ledger counted before it was first tracked: each passed the test on its
+   * first attempt or did not run it (a test added since). The stable baseline of the flaky-regression class (FQ-12,
+   * `flake-regression.ts`); absent for an identity first tracked before the count existed.
+   */
+  stableBefore?: number;
 };
 
 /** Executions per Nx task: the denominators for the tests that are not tracked. */
@@ -306,6 +312,11 @@ export type TaskState = {
   otherFailures: number;
   firstSeen: string;
   lastSeen: string;
+  /**
+   * Executions per target and variant (`<target> <variant>`, the shard kept): what a test not tracked yet has run,
+   * for {@link IdentityState.stableBefore}. Absent in a state written before it was added.
+   */
+  targets?: Record<string, number>;
 };
 
 /** A run attempt the ledger has ingested. */
@@ -440,6 +451,7 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, renamed: st
     passHashes: [...new Set([...older.passHashes, ...newer.passHashes])].slice(-maximumPassHashes),
     failureShas: [...new Set([...older.failureShas, ...newer.failureShas])].slice(-maximumFailureShas),
     aliases: [...new Set([...older.aliases, ...newer.aliases, renamed])].sort(),
+    ...(older.stableBefore === undefined ? {} : { stableBefore: older.stableBefore }),
   };
 };
 
@@ -723,6 +735,9 @@ const ownRows = (
   return { own, replayed };
 };
 
+/** The key of {@link TaskState.targets}: the row's target (its shard kept) and variant. */
+const targetExecutionKey = (row: OutcomeRow): string => `${row.target} ${variantKey(row.variant)}`;
+
 /** Count a row into its task's totals; true when it is a test row. */
 const countTask = (
   state: LedgerState,
@@ -745,6 +760,8 @@ const countTask = (
   if (!executions.has(execution)) {
     executions.add(execution);
     task.executions += 1;
+    const target = targetExecutionKey(row);
+    task.targets = { ...task.targets, [target]: (task.targets?.[target] ?? 0) + 1 };
   }
   const failed = row.state === 'failed' ? 1 : 0;
   if (row.kind !== 'test') {
@@ -791,6 +808,9 @@ export const ingestRun = (
         continue;
       }
       identity = newIdentity(row, at);
+      /* An earlier execution of its target and variant that failed it or retried it would have tracked it. */
+      const before = (state.tasks[`${row.project}:${row.targetKey}`]?.targets?.[targetExecutionKey(row)] ?? 1) - 1;
+      identity.stableBefore = Math.max(0, before);
       state.identities[id] = identity;
     }
     const variant = variantKey(row.variant);

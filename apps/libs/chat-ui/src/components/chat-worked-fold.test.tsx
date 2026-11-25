@@ -50,7 +50,7 @@ describe('ChatWorkedFold', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Worked for 27s · 2 failed · ran commands, read files' })).toBeVisible();
-    expect(screen.getByText('· 2 failed')).toHaveClass('shrink-0');
-    expect(screen.getByText('· ran commands, read files')).toHaveClass('truncate');
+    expect(screen.getByText('2 failed')).toHaveClass('shrink-0');
+    expect(screen.getByText('ran commands, read files')).toHaveClass('truncate');
   });
 });

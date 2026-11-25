@@ -360,12 +360,13 @@ const lowerInitial = (value: string): string => `${value.charAt(0).toLowerCase()
  *
  * @param parts - The group's tool parts.
  * @param options - `failuresFirst` leads with the families where something did not go through; `omitShortfall` leaves
- *   out each family's "(1 of 3 failed)" count, for a line that states the tally on its own.
+ *   out each family's "(1 of 3 failed)" count, for a line that states the tally on its own; `settled` reads a call the
+ *   turn ended without settling (a steered segment's) as done, never as still running or awaiting approval.
  * @returns The summary, such as "Read files, ran commands (1 of 3 failed)".
  */
 export const describeActivity = (
   parts: readonly MyMessagePart[],
-  options: { readonly failuresFirst?: boolean; readonly omitShortfall?: boolean } = {},
+  options: { readonly failuresFirst?: boolean; readonly omitShortfall?: boolean; readonly settled?: boolean } = {},
 ): string => {
   const orderedFamilies: ActivityFamily[] = [];
   const byFamily = new Map<ActivityFamily, MyMessagePart[]>();
@@ -391,12 +392,10 @@ export const describeActivity = (
   return families
     .map((family, index) => {
       const familyParts = byFamily.get(family)!;
-      const { state: familyOutcome, suffix: shortfall } = familyState(familyParts);
-      /* With the tally stated apart, a family that only failed reads as the work it attempted. */
-      const state =
-        options.omitShortfall && (familyOutcome === 'error' || familyOutcome === 'denied')
-          ? 'completed'
-          : familyOutcome;
+      const { state: outcome, suffix: shortfall } = familyState(familyParts);
+      const state = options.settled && (outcome === 'active' || outcome === 'approval') ? 'completed' : outcome;
+      /* With the tally stated apart, a family that partly failed reads as the work it did; one that only failed still
+       * says so ("model rendering failed"). */
       const suffix = options.omitShortfall ? '' : shortfall;
       const phrase =
         family === 'other'
@@ -567,7 +566,7 @@ export const splitWorkingNarrative = (groups: readonly ActivityGroup[]): Working
     leading,
     kept,
     answer,
-    summary: describeActivity(toolParts, { failuresFirst: true, omitShortfall: true }),
+    summary: describeActivity(toolParts, { failuresFirst: true, omitShortfall: true, settled: true }),
     shortfall: [...count('error', 'failed'), ...count('denied', 'denied')].join(', '),
   };
 };

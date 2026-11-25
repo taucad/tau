@@ -270,7 +270,7 @@ describe('a finished turn split at its last tool call', () => {
     ];
     const split = splitWorkingNarrative(groupAssistantParts(parts));
 
-    expect(split?.summary).toBe('Ran commands, read files');
+    expect(split?.summary).toBe('Commands failed, read files');
     expect(split?.shortfall).toBe('1 failed');
     expect(partsOf(split!.narrative)).toEqual(parts.slice(0, 4));
     expect(split?.kept).toEqual([]);
@@ -308,7 +308,7 @@ describe('a finished turn split at its last tool call', () => {
 
     const split = splitWorkingNarrative(groupAssistantParts(parts));
 
-    expect(split?.summary).toBe('Ran commands, read files, edited files');
+    expect(split?.summary).toBe('Commands failed, read files, edited files');
     expect(split?.shortfall).toBe('1 failed');
   });
 
@@ -355,6 +355,12 @@ describe('a finished turn split at its last tool call', () => {
 
     expect(partsOf(split!.narrative)).toEqual(parts);
     expect(split?.answer).toEqual([]);
+  });
+
+  it('reads a call the turn ended without settling as done, not still running', () => {
+    const parts = [tool('tool-read_file'), tool('tool-shell', 'input-available'), text('Steered elsewhere.')];
+
+    expect(splitWorkingNarrative(groupAssistantParts(parts))?.summary).toBe('Read files, ran commands');
   });
 
   it('keeps a decision that came before any of the work above the fold line', () => {

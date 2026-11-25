@@ -25,7 +25,8 @@ type ChatWorkedFoldProps = {
  * @returns The fold's line and, once opened, the narrative.
  */
 export function ChatWorkedFold({ summary, children, elapsed, shortfall }: ChatWorkedFoldProps): React.JSX.Element {
-  const detail = summary === '' ? '' : ` · ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+  const detail = summary === '' ? '' : `${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+  const separator = <span className='shrink-0 whitespace-pre'> · </span>;
   return (
     <Collapsible data-slot='worked-fold'>
       <CollapsibleTrigger asChild>
@@ -36,12 +37,20 @@ export function ChatWorkedFold({ summary, children, elapsed, shortfall }: ChatWo
         >
           <ListCollapse aria-hidden='true' className='size-3 shrink-0' />
           {/* The time and the shortfall never truncate; the summary gives way first. */}
-          <span className='flex min-w-0 whitespace-pre'>
+          <span className='flex min-w-0'>
             <span className='shrink-0 font-medium'>{elapsed === undefined ? 'Worked' : `Worked for ${elapsed}`}</span>
             {shortfall === undefined || shortfall === '' ? undefined : (
-              <span className='shrink-0'>{` · ${shortfall}`}</span>
+              <>
+                {separator}
+                <span className='shrink-0'>{shortfall}</span>
+              </>
             )}
-            <span className='min-w-0 truncate'>{detail}</span>
+            {detail === '' ? undefined : (
+              <>
+                {separator}
+                <span className='min-w-0 truncate'>{detail}</span>
+              </>
+            )}
           </span>
           <ChevronRight
             aria-hidden='true'

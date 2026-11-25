@@ -665,7 +665,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
-    const line = screen.getByRole('button', { name: /^Worked · 1 failed · ran commands, read files$/u });
+    const line = screen.getByRole('button', { name: /^Worked · 1 failed · commands failed, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -709,7 +709,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · 1 failed · ran commands, read files$/u });
+    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · 1 failed · commands failed, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -721,7 +721,7 @@ describe('ChatMessage older turn fold', () => {
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
     expect(
-      screen.getByRole('button', { name: /^Worked for 7s · 1 failed · ran commands, read files$/u }),
+      screen.getByRole('button', { name: /^Worked for 7s · 1 failed · commands failed, read files$/u }),
     ).toBeVisible();
   });
 
@@ -758,6 +758,25 @@ describe('ChatMessage older turn fold', () => {
     rerender(<ChatMessage messageId={focused.id} footer={null} />);
 
     expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toHaveFocus();
+  });
+
+  it('leaves focus on the page when the reader clicked away before the turn folded', async () => {
+    const away: MyUIMessage = { ...narrated, id: 'msg-focus-away' };
+    setMessages([away]);
+    const { rerender } = render(<ChatMessage messageId={away.id} />);
+    const [firstLine] = screen.getAllByRole('button', { expanded: false });
+    await act(async () => {
+      firstLine!.focus();
+      // A click on empty transcript space: focus goes to the page, the line stays.
+      firstLine!.blur();
+      await Promise.resolve();
+    });
+
+    setMessages([finished(away, 7532)]);
+    rerender(<ChatMessage messageId={away.id} footer={null} />);
+
+    expect(screen.getByRole('button', { name: /^Worked for 7s/u })).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
   });
 
   it('leaves focus where the reader moved it, and never pulls it back into an older turn', () => {
@@ -849,7 +868,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    expect(screen.getByRole('button', { name: /^Worked · 1 failed · ran commands, read files$/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Worked · 1 failed · commands failed, read files$/u })).toBeVisible();
   });
 
   it('leaves a turn whose narrative is one line alone', () => {

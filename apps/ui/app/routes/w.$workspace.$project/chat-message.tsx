@@ -807,9 +807,17 @@ function AssistantParts({
     focusedRef.current = event.target;
   };
   const noteBlur = (event: React.FocusEvent): void => {
+    const { target } = event;
     if (event.relatedTarget !== null) {
       focusedRef.current = undefined;
+      return;
     }
+    // Focus left for the page. A node the fold unmounted is gone by then; one still here, the reader left.
+    queueMicrotask(() => {
+      if (target.isConnected && focusedRef.current === target) {
+        focusedRef.current = undefined;
+      }
+    });
   };
   const wasFolded = useRef(false);
   useLayoutEffect(() => {
@@ -828,8 +836,9 @@ function AssistantParts({
       ?.querySelector<HTMLElement>('[data-slot="worked-fold"] button')
       ?.focus({ preventScroll: true });
   }, [fold]);
+  const groupIndices = useMemo(() => new Map(groups.map((group, index) => [group, index])), [groups]);
   const renderGroup = (group: ActivityGroup): React.JSX.Element => {
-    const groupIndex = groups.indexOf(group);
+    const groupIndex = groupIndices.get(group)!;
     return (
       <AssistantActivityGroup
         key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}

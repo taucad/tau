@@ -192,6 +192,7 @@
 \* A Stop with no run, or over a run that already ended, sends no cancel (Cancel needs a live observed run).
 \* Audit A-5: a cancel the host refuses or never answers lets go of the Stop; one owed while no host is attached is
 \* sent when it attaches; a Stop deferred to a command that started no run is let go. Cancel and delivery unchanged.
+\* The outbox logs which gate holds its head each time that gate changes; the gates themselves are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

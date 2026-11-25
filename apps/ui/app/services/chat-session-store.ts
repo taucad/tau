@@ -640,6 +640,8 @@ type InternalSession = ChatSession & {
   transcriptSourceVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
+  /** The gate the outbox last waited on, for its diagnostic (logged once per change). */
+  queueHold: string | undefined;
   /** What asked for the pending stop; logged with the cancel it sends. */
   stopOrigin: StopOrigin | undefined;
   /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
@@ -2661,7 +2663,7 @@ export class ChatSessionStore {
       const projection = this.#projectionContext(session.chatId);
       const connector = this.#projectHostConnectors.get(session.projectId);
       if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
-        return { items: record.items, status: 'waiting' };
+        return this.#holdQueue(session, record.items, 'log-not-caught-up');
       }
       const observation = this.#observed.get(session.chatId);
       const placement = observation?.status === 'attached' ? observation.placement : undefined;
@@ -2673,26 +2675,34 @@ export class ChatSessionStore {
         }
       }
       if (!canDeliver) {
-        return { items: record.items, status: 'waiting' };
+        return this.#holdQueue(session, record.items, 'not-deliverable-here');
       }
       const item =
         record.items.find((entry) => entry.command !== undefined || entry.steer !== undefined) ?? record.items[0];
-      if (
-        item === undefined ||
-        connector === undefined ||
-        chatTurnAdmit(session.chatId) === undefined ||
-        session.commandInFlight ||
-        this.#isAdmittingTurn(session) ||
-        session.persistenceActorRef.getSnapshot().context.isLoadingChat
-      ) {
-        return { items: record.items, status: 'waiting' };
+      const notReady =
+        item === undefined
+          ? 'empty'
+          : connector === undefined
+            ? 'no-host'
+            : chatTurnAdmit(session.chatId) === undefined
+              ? 'no-turn-host'
+              : session.commandInFlight
+                ? 'command-in-flight'
+                : this.#isAdmittingTurn(session)
+                  ? 'admitting'
+                  : session.persistenceActorRef.getSnapshot().context.isLoadingChat
+                    ? 'chat-loading'
+                    : undefined;
+      if (item === undefined || connector === undefined || notReady !== undefined) {
+        return this.#holdQueue(session, record.items, notReady ?? 'empty');
       }
       const run = selectCurrentRun(projection);
       const phase = selectRunPhase(projection);
       if (item.command !== undefined) {
         if (run !== undefined && run.runId !== item.command.payload.runId && retainsLiveRun(phase)) {
-          return { items: record.items, status: 'waiting' };
+          return this.#holdQueue(session, record.items, 'unrelated-live-run');
         }
+        session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
         const answer = await sendHostCommand(
@@ -2726,10 +2736,10 @@ export class ChatSessionStore {
             record.rebasedPlacement === observedPlacement
           )
         ) {
-          return { items: record.items, status: 'waiting' };
+          return this.#holdQueue(session, record.items, 'after-run-unseen');
         }
         if (isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)) {
-          return { items: record.items, status: 'waiting' };
+          return this.#holdQueue(session, record.items, 'machine-live');
         }
         const steering = item.steer;
         if (steering !== undefined && retainsLiveRun(phase) && run?.runId === steering.payload.runId) {
@@ -2738,7 +2748,7 @@ export class ChatSessionStore {
           if (answer.status === 'refused') {
             throw new Error(`Could not steer: ${answer.message}`);
           }
-          return { items: record.items, status: 'waiting' };
+          return this.#holdQueue(session, record.items, 'steered');
         }
         const authorizedTerminal =
           (phase === 'cancelled' || phase === 'failed') && item.afterTerminalRunId === run?.runId;
@@ -2746,7 +2756,7 @@ export class ChatSessionStore {
           run !== undefined &&
           (retainsLiveRun(phase) || (phase !== 'completed' && item.steer === undefined && !authorizedTerminal))
         ) {
-          return { items: record.items, status: 'waiting' };
+          return this.#holdQueue(session, record.items, 'run-not-ended');
         }
       }
       signal.throwIfAborted();
@@ -2756,6 +2766,7 @@ export class ChatSessionStore {
         const current = await session.messageQueueStore.read();
         return { items: current.items, status: 'changed' };
       }
+      session.queueHold = undefined;
       session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
       session.dispatchTask = undefined;
       await this.#requestTurn(
@@ -2796,6 +2807,28 @@ export class ChatSessionStore {
    * person's own Send and never a second copy of the same request; a composer already holding new text keeps it, and
    * the entry stays in the strip with the reason and Retry.
    */
+  /**
+   * The outbox waits: log once per change which gate holds its head, so a queue that waits with nothing visibly
+   * running names its reason in the console and in replays.
+   */
+  #holdQueue(session: InternalSession, items: readonly QueuedChatMessage[], reason: string): QueueAdvanceResult {
+    const hold = items.length === 0 ? undefined : reason;
+    if (hold !== undefined && hold !== session.queueHold) {
+      const projection = this.#projectionContext(session.chatId);
+      const run = projection === undefined ? undefined : selectCurrentRun(projection);
+      logFacts('info', '[ChatSessionStore] queue held', {
+        chatId: session.chatId,
+        reason: hold,
+        queued: items.length,
+        runId: run?.runId,
+        phase: projection === undefined ? undefined : selectRunPhase(projection),
+        machine: session.stateActorRef.getSnapshot().value,
+      });
+    }
+    session.queueHold = hold;
+    return { items, status: 'waiting' };
+  }
+
   async #refuseQueuedSend(session: InternalSession, item: QueuedChatMessage): Promise<QueueAdvanceResult> {
     const reason = session.stateActorRef.getSnapshot().context.failureReason;
     const draft = session.draftActorRef.getSnapshot().context;
@@ -5296,6 +5329,7 @@ export class ChatSessionStore {
       transcriptSourceVersion: 0,
       commandInFlight: false,
       stopRequested: false,
+      queueHold: undefined,
       stopOrigin: undefined,
       refreshDeferred: false,
       restoredStoppedRunId: undefined,

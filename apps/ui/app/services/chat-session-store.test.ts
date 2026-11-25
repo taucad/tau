@@ -5512,6 +5512,8 @@ describe('ChatSessionStore', () => {
       it('should keep a send queued, and out of the thread, while a run is live', async () => {
         const chatId = 'departing_behind_live';
         const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+        const unadmit = queueAdmission(chatId);
         try {
           publishLogRows(store, chatId, runningRows('live'));
           session.stateActorRef.send({ type: 'runLifecycle', phase: 'running', runId: 'live' });
@@ -5522,7 +5524,14 @@ describe('ChatSessionStore', () => {
           });
           expect(store.departingSendOf(chatId)).toBeUndefined();
           expect(session.messages.some((message) => message.id === 'behind')).toBe(false);
+          // The wait names its gate once, so a queue held with nothing visibly running says why.
+          const holds = info.mock.calls.filter(([label]) => label === '[ChatSessionStore] queue held');
+          expect(holds.map(([, facts]) => JSON.parse(String(facts)) as unknown)).toContainEqual(
+            expect.objectContaining({ chatId, reason: 'run-not-ended', runId: 'live', phase: 'running' }),
+          );
         } finally {
+          info.mockRestore();
+          unadmit();
           unpublish();
           store.release(chatId);
         }

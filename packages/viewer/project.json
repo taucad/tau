@@ -65,6 +65,18 @@
         "command": "vitest run --config src/graphics/three/post-processing-antialias.vitest.browser.config.ts"
       }
     },
+    "test:e2e:webgpu": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The viewer's real-GPU rows: e2e-gpu-smoke.yml runs this target with TAU_E2E_WEBGPU_PROFILE=hardware on a disposable GPU host, weekly and by dispatch, never as a merge gate. It holds the files whose rows make hardware claims (2560 px and 5K pixels, square-pixel coverage against the analytic oracle); on the software lane (test:e2e:viewer-resize) the same rows assert the work the viewer does instead. The config refuses any profile but hardware or software."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts src/graphics/three/node-frame-reference.browser.test.ts src/graphics/three/post-processing-antialias.browser.test.tsx",
+        "env": { "TAU_E2E_WEBGPU_PROFILE": "hardware" }
+      }
+    },
     "capture:viewer-parity": {
       "executor": "nx:run-commands",
       "metadata": {

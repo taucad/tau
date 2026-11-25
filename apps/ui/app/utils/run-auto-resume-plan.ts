@@ -61,6 +61,44 @@ function liveErrorId(error: Error | NormalizedChatError): string {
 const refusalId = (refusal: NormalizedChatError): string | undefined =>
   refusal.requestId === undefined ? undefined : `refusal:${refusal.requestId}`;
 
+/** Where a chat's log stands: its current run's attempt, or that it holds no run. */
+const logPositionOf = (run: (Readonly<{ runId: string }> & { readonly attempt: number }) | undefined): string =>
+  run === undefined ? 'none' : `${run.runId}:${String(run.attempt)}`;
+
+/** The detail a refusal of a gesture records its log position under. */
+const refusedAtKey = 'refusedAt';
+
+/** A refusal recorded before the log was read: no later run can be told from an earlier one. */
+const unreadLog = 'unread';
+
+/**
+ * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume), as the chat keeps it.
+ *
+ * Nothing ran, so the host log holds no trace of it, and the chat's saved error is its only record. It is a fact
+ * about that gesture at that moment: it carries the gesture's own identity, and where the log stood when it was
+ * refused, so a reader can tell it from a run that began afterwards, on this page or another. Without both it was
+ * indistinguishable from a legacy chat-wide error, and was hidden as one on every healthy chat.
+ *
+ * @param error - The parsed refusal.
+ * @param projection - The chat's projection when the gesture was refused.
+ * @param createId - A source of unique ids.
+ * @returns The refusal to persist.
+ * @public
+ */
+export const refusalOfGesture = (
+  error: NormalizedChatError,
+  projection: ChatProjection | undefined,
+  createId: () => string,
+): NormalizedChatError => ({
+  ...error,
+  requestId: error.requestId ?? `gesture:${createId()}`,
+  details: {
+    ...error.details,
+    [refusedAtKey]:
+      projection !== undefined && selectCaughtUp(projection) ? logPositionOf(selectCurrentRun(projection)) : unreadLog,
+  },
+});
+
 /**
  * The chat's visible failure and its durable identity. Only the caught-up host log can retire a legacy chat-wide error.
  *
@@ -72,6 +110,15 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
   const { projection } = state;
   const caughtUp = projection !== undefined && selectCaughtUp(projection);
   const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
+  /* A refusal of a gesture is newer than every run the log held when it was made, so it is shown over that run's own
+   * failure; once the log holds a later run or attempt, that run is the chat's news and the refusal is retired. */
+  const refusedAt = state.persistedError?.details?.[refusedAtKey];
+  const gestureRefusal =
+    state.persistedError?.requestId !== undefined && typeof refusedAt === 'string' ? state.persistedError : undefined;
+  if (caughtUp && gestureRefusal !== undefined && (refusedAt === unreadLog || refusedAt === logPositionOf(run))) {
+    return { error: gestureRefusal, id: `refusal:${String(gestureRefusal.requestId)}` };
+  }
+  const persistedError = caughtUp && gestureRefusal !== undefined ? undefined : state.persistedError;
   if (
     projection !== undefined &&
     (run?.lifecycle === 'failed' || (run?.lifecycle === 'cancelled' && run.failure?.code === 'USER_STOPPED'))
@@ -96,7 +143,7 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     // when a different page admitted that run and this page never cleared the
     // old chat record. A refused Resume still belongs to the same paused run;
     // the persisted command records that run identity, not just its command ID.
-    const refusal = state.persistedError;
+    const refusal = persistedError;
     if (refusal?.requestId === undefined) {
       return undefined;
     }
@@ -114,8 +161,9 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     const error = parseErrorForPersistence(state.error);
     return { error, id: refusalId(error) ?? liveErrorId(state.error) };
   }
-  const persisted = state.persistedError;
-  return persisted === undefined ? undefined : { error: persisted, id: refusalId(persisted) ?? liveErrorId(persisted) };
+  return persistedError === undefined
+    ? undefined
+    : { error: persistedError, id: refusalId(persistedError) ?? liveErrorId(persistedError) };
 }
 
 /**

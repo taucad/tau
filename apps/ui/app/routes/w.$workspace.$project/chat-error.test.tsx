@@ -16,7 +16,7 @@ import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
-import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 /* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
@@ -1412,6 +1412,45 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(continueChat).not.toHaveBeenCalled();
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  /* The state every seeded first turn and every queued send is admitted in: the host attached and the log read to its
+   * end. The page's own credit refusal used to be hidden there as a legacy error (launch audit N-1, A-10). */
+  it('should show the credits card for a turn refused at admission on a healthy, attached chat', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({ type: 'batch', answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] } });
+    const { context } = projection.getSnapshot();
+    projection.stop();
+    const refusal = refusalOfGesture(
+      {
+        category: errorCategory.credits,
+        title: 'Credit Limit Reached',
+        message: 'Insufficient Tau credit for this model request.',
+        code: 'INSUFFICIENT_CREDIT',
+      },
+      context,
+      () => 'gesture-1',
+    );
+    machine.waiting = undefined;
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: refusal,
+        projection: context,
+        attachmentStatus: 'attached',
+      } as unknown as CombinedChatState),
+    );
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <MemoryRouter>
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        </MemoryRouter>
+      ),
+    });
+
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
   });
 
   it('renders decoded Google provider errors instead of opaque byte lists', () => {

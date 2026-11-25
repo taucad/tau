@@ -6,6 +6,7 @@ import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { parseAdmissionFailureForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-placement.js';
@@ -208,8 +209,12 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
          * reaches offers a restart rather than a resume. The distinction is
          * structural and belongs here, where it is a fact rather than a guess
          * at the message. */
-        error: parseAdmissionFailureForPersistence(
-          error instanceof Error ? error : new Error('Durable workspace admission failed', { cause: error }),
+        error: refusalOfGesture(
+          parseAdmissionFailureForPersistence(
+            error instanceof Error ? error : new Error('Durable workspace admission failed', { cause: error }),
+          ),
+          store.getProjection(activeChatId),
+          randomUuid,
         ),
       });
     },

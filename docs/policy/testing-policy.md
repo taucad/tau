@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-24'
+updated: '2026-11-25'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -426,7 +426,7 @@ Run coverage explicitly when validating coverage thresholds. A normal passing te
 
 A CI or merge-queue failure in a project the change affects, including a crash with no failing assertion, is never re-queued or re-run to green by hand. Root-cause it, fix it in that PR or a prerequisite PR, and show the before/after evidence. Re-queue only a failure in a project the diff does not affect, with evidence that it also fails without the change. The only retry is the recorded one of § 16.2; nothing else re-runs a test, a task, a job or a queue entry.
 
-Thresholds marked **[O3: pending]** await the operator's bounds decision (O3 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md#decisions-for-the-operator)); the blueprint's proposed value is given beside each. Until the shared reporter and `validate-quarantine` enforce § 16.2–16.4, no test is quarantined, and the silent `retry: 2` in `ui-e2e` and `react-e2e` is the only exception to this section, pending its replacement by § 16.2.
+The thresholds below are the operator's bounds decision (O3 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md#decisions-for-the-operator)); the evidence behind them is that blueprint's [quarantine thresholds from history](../research/ci-flake-quarantine-blueprint.md#quarantine-thresholds-from-history-2026-11-25). Until the shared reporter and `validate-quarantine` enforce § 16.2–16.4, no test is quarantined, and the silent `retry: 2` in `ui-e2e` and `react-e2e` is the only exception to this section, pending its replacement by § 16.2.
 
 ### 16.1 Definition of Green
 
@@ -439,7 +439,7 @@ A task is green when every gating test passed, at most on its second attempt; ev
 | One attempt more           | CI gives every Vitest test one in-process retry, set by the shared helper; no suite sets a higher count                         |
 | Recorded                   | A retried pass is written to the outcome record, the job summary and a warning annotation, and counts as a flake event          |
 | Own changes earn no credit | A test in a file the entry's diff changes, or a new test, gets no retry credit: its retried pass fails the task                 |
-| Budget                     | More than three retried passes in a task fail it; more than **[O3: pending]** in a run fail it (blueprint RT-4: five)           |
+| Budget                     | More than three retried passes in a task fail it; more than five in a run fail it                                               |
 | Under verification         | A test whose fix is being verified (§ 16.5) has no retry                                                                        |
 | Infrastructure steps       | Non-test steps (apt, downloads, browser install) retry up to three times with backoff, each retry recorded as a job-level event |
 | No other retry             | No task-level or job-level automatic re-run, no automatic re-queue, and no manual re-queue of an affected project               |
@@ -456,13 +456,13 @@ A flake is a pass and a failure of one test on the same inputs (one Nx task hash
 - **Effect.** The quarantined test runs in the same job as before; its failure is printed, annotated and recorded. Only the task's verdict ignores it.
 - **Who edits it.** Only the ledger job adds, releases or expires entries; a fix never touches them (§ 16.5).
 
-| Bound                    | Value                                                                  | When reached                                                                                        |
-| ------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Entries in the workspace | **[O3: pending]** (blueprint: 20)                                      | No new quarantine; the flake keeps gating behind the retry                                          |
-| Entries per project      | **[O3: pending]** (blueprint: 5)                                       | The same, for that project                                                                          |
-| Age                      | **[O3: pending]** (blueprint: 14 days)                                 | **[O3: pending]** (blueprint: the entry is removed, the test gates again and the operator is paged) |
-| Renewal                  | **[O3: pending]** (blueprint: once, by a human, to 28 days in all)     | A further renewal fails validation                                                                  |
-| Return after release     | **[O3: pending]** (blueprint: within 30 days counts as the same entry) | Goes to the operator, not the agent                                                                 |
+| Bound                    | Value                                                       | When reached                                                         |
+| ------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------- |
+| Entries in the workspace | 20                                                          | No new quarantine; the flake keeps gating behind the retry           |
+| Entries per project      | 8                                                           | The same, for that project                                           |
+| Age                      | 14 days                                                     | The entry is removed, the test gates again and the operator is paged |
+| Renewal                  | Once, by the operator, to 28 days in all                    | A further renewal fails validation                                   |
+| Return after release     | A return within 30 days of release counts as the same entry | Goes to the operator, not the agent                                  |
 
 ### 16.4 Never-Quarantine Set
 
@@ -472,12 +472,12 @@ Tests for money, data integrity, security boundaries and the formal models are n
 
 An agent reproduces, classifies and fixes the flake through the normal merge queue. The fix states its mechanism, the reproducing mode with its failure count before the fix, and at least 100 straight passes after it.
 
-| Fix                                                                                  | Landing                         |
-| ------------------------------------------------------------------------------------ | ------------------------------- |
-| Test-only, reproduced, with the stress proof and a green `validate-flake-fix`        | Auto-merges through the queue   |
-| Touches product code, widens a tolerance or loosens a matcher, or was not reproduced | Waits for the operator's review |
+| Fix                                                                                                               | Landing                         |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Test-only, reproduced, with the stress proof and a green `validate-flake-fix`                                     | Auto-merges through the queue   |
+| Touches product code, widens a tolerance (including a raised timeout) or loosens a matcher, or was not reproduced | Waits for the operator's review |
 
-A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry`, `testTimeout` or a per-test timeout, adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these.
+A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
 
 Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
 
@@ -494,4 +494,4 @@ Before merging a test:
 - [ ] Mock factories are shared, not duplicated per test file
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
-- [ ] A flaky test is fixed at its cause, not skipped, slept on or given a longer timeout or more retries
+- [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`

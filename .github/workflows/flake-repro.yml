@@ -164,7 +164,7 @@ jobs:
           BROWSERS: ${{ steps.browsers.outputs.browsers }}
         run: |
           read -r -a browsers <<<"$BROWSERS"
-          pnpm exec playwright install "${browsers[@]}"
+          ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install "${browsers[@]}"
 
       # libfaketime for the clock mode's year-end and DST variants. Without it those variants are reported as not run.
       - name: Install libfaketime

@@ -11,7 +11,7 @@ const session = vi.hoisted(() => ({ signedIn: true }));
 const draft = vi.hoisted(() => {
   type Listener = (() => void) | { next: () => void };
   const listeners = new Set<Listener>();
-  let snapshot = { context: { draftText: '', draftAttachments: [] as unknown[] } };
+  let snapshot = { context: { draftText: '', draftAttachments: [] as unknown[], touched: { draft: false } } };
   return {
     actor: {
       getSnapshot: () => snapshot,
@@ -24,8 +24,22 @@ const draft = vi.hoisted(() => {
         };
       },
     },
-    type(text: string) {
+    reset() {
+      snapshot = { context: { draftText: '', draftAttachments: [], touched: { draft: false } } };
+    },
+    /** A saved record read in after mount (`hydrateDraft`): not written here. */
+    hydrate(text: string) {
       snapshot = { context: { ...snapshot.context, draftText: text } };
+      for (const listener of listeners) {
+        if (typeof listener === 'function') {
+          listener();
+        } else {
+          listener.next();
+        }
+      }
+    },
+    type(text: string) {
+      snapshot = { context: { ...snapshot.context, draftText: text, touched: { draft: true } } };
       for (const listener of listeners) {
         if (typeof listener === 'function') {
           listener();
@@ -170,16 +184,29 @@ describe('createProjectNameAhead', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it('should ask again after a failed answer, and give a submit it covers the default name rather than a request', async () => {
+  it('should ask again after a failed answer, leaving a submit to the create while the cap is not spent', async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
     nameAhead.update(textDraft('A wall bracket'), true);
     calls[0]?.reply.reject(new Error('offline'));
     await vi.runAllTimersAsync();
 
-    await expect(nameAhead.take(textDraft('A wall bracket'))).resolves.toBe('New Project');
+    expect(nameAhead.take(textDraft('A wall bracket for a pipe'))).toBeUndefined();
     nameAhead.update(textDraft('A wall bracket'), true);
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('should give a submit the default name once every request of the draft failed', async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    for (const text of ['A wall bracket', 'A phone stand', 'A cable clip']) {
+      nameAhead.update(textDraft(text), true);
+    }
+    calls[2]?.reply.reject(new Error('offline'));
+    await vi.runAllTimersAsync();
+
+    await expect(nameAhead.take(textDraft('A cable clip'))).resolves.toBe('New Project');
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it('should clear a pending pause on dispose', () => {
@@ -198,7 +225,7 @@ describe('useProjectNameAhead', () => {
     mockGenerate.mockReset();
     mockGenerate.mockResolvedValue('Pipe Wall Bracket');
     session.signedIn = true;
-    draft.type('');
+    draft.reset();
     return () => {
       vi.useRealTimers();
     };
@@ -225,6 +252,21 @@ describe('useProjectNameAhead', () => {
     const { rerender } = renderHook(() => useProjectNameAhead());
     await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
     rerender();
+    expect(mockGenerate).not.toHaveBeenCalled();
+
+    act(() => {
+      draft.type('A wall bracket for a pipe, 32 mm');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not ask for a saved draft read in after mount until the person changes it', async () => {
+    renderHook(() => useProjectNameAhead());
+    act(() => {
+      draft.hydrate('A wall bracket for a pipe');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
     expect(mockGenerate).not.toHaveBeenCalled();
 
     act(() => {

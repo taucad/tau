@@ -53,7 +53,7 @@ const attachmentsKey = (attachments: NameAheadDraft['attachments']): string =>
 const covers = (named: Named, text: string, attachments: string): boolean =>
   named.attachments === attachments &&
   text.startsWith(named.text) &&
-  (text.length === named.text.length || !/\w/.test(text.charAt(named.text.length))) &&
+  (text.length === named.text.length || !/[\p{L}\p{N}_]/u.test(text.charAt(named.text.length))) &&
   named.text.length * 2 >= text.length;
 
 /**
@@ -67,7 +67,7 @@ const covers = (named: Named, text: string, attachments: string): boolean =>
 export const createProjectNameAhead = (initialRequest: NameAheadRequest): ProjectNameAhead => {
   let request = initialRequest;
   let latest: (Named & { readonly controller: AbortController }) | undefined;
-  /* The last request that failed: a submit it covers takes the fallback rather than asking a fourth time. */
+  /* The last request that failed: once the cap is spent, a submit it covers takes the fallback, never a fourth ask. */
   let failed: Named | undefined;
   let requests = 0;
   let projectId = generatePrefixedId(idPrefix.project);
@@ -92,6 +92,8 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
 
   const ask = (draft: NameAheadDraft, text: string, attachments: string): void => {
     latest?.controller.abort();
+    /* A newer request supersedes an earlier failure: a submit it no longer covers asks at creation instead. */
+    failed = undefined;
     requests += 1;
     const entry = {
       text,
@@ -135,8 +137,9 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
       clearTimeout(timer);
       const text = draft.text.trim();
       const attachments = attachmentsKey(draft.attachments);
-      const entry = [latest, failed].find((named) => named !== undefined && covers(named, text, attachments));
-      /* The request for this text failed: today's fallback, not another request at creation. */
+      const spent = requests >= nameAheadRequestsPerDraft ? failed : undefined;
+      const entry = [latest, spent].find((named) => named !== undefined && covers(named, text, attachments));
+      /* The request for this text failed with the cap spent: today's fallback, not another request at creation. */
       return entry === undefined ? undefined : nameOrDefault(entry);
     },
     replaceRequest(next) {
@@ -183,6 +186,8 @@ export function useProjectNameAhead(): Readonly<{
   const { generate } = useProjectNameClient();
   const text = useSelector(draftActorRef, (state) => state.context.draftText);
   const attachments = useSelector(draftActorRef, (state) => state.context.draftAttachments);
+  /* Only text the person changed in this composer is named ahead: a record hydrated in is not (C1). */
+  const written = useSelector(draftActorRef, (state) => state.context.touched.draft);
   /* One per mounted composer: a dependency changing identity swaps the request, so the draft keeps its cap. */
   const [nameAhead] = useState(() =>
     createProjectNameAhead(requestThrough({ generate, recordFiles, attachmentSource })),
@@ -208,10 +213,10 @@ export function useProjectNameAhead(): Readonly<{
       }
       restored.current = undefined;
     }
-    if (isSignedIn) {
+    if (isSignedIn && written) {
       nameAhead.update({ text, attachments }, isPaste);
     }
-  }, [attachments, isSignedIn, nameAhead, text]);
+  }, [attachments, isSignedIn, nameAhead, text, written]);
   return useMemo(
     () => ({
       take: nameAhead.take,

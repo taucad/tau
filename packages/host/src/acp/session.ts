@@ -238,8 +238,7 @@ export const advertised = (capability: unknown): boolean => capability !== null 
 export const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
 
 /* A vendor string a durable row requires to be non-empty: an empty one is absent (launch audit E-3). */
-const named = (value: string | null | undefined): string | undefined =>
-  value === null || value === undefined || value === '' ? undefined : value;
+const named = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 
 /** The `call.toolCallId` recorded for a vendor call that names none. */
 export const unnamedVendorCallId = 'unnamed';

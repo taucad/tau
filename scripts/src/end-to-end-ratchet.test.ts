@@ -56,7 +56,7 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
   const queueRun = (name: string): string | undefined =>
     step(nightlySteps, name)?.run?.replaceAll('./.tau-ci/.github/', './.github/');
   it('should run the nightly on dispatch only, with no schedule (operator ruling Q4)', () => {
-    const on = (nightly as Workflow & { readonly on: Record<string, unknown> }).on;
+    const { on } = nightly as Workflow & { readonly on: Record<string, unknown> };
     expect(Object.keys(on)).toEqual(['workflow_dispatch']);
     expect(on).not.toHaveProperty('schedule');
   });

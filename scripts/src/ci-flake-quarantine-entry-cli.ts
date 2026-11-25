@@ -70,7 +70,11 @@ export type Workspace = {
   readonly quarantines: readonly QuarantineText[];
 };
 
-const encodePath = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
+const encodePath = (path: string): string =>
+  path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
 
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
@@ -108,7 +112,7 @@ export const readWorkspace = async (root: string): Promise<Workspace> => {
 };
 
 type Ref = { readonly ref: string; readonly object: { readonly sha: string } };
-type Pull = { readonly number: number; readonly state: string; readonly merged_at?: string | null };
+type Pull = { readonly number: number; readonly state: string };
 type ComparedFile = { readonly filename: string; readonly status: string };
 
 /**
@@ -118,13 +122,12 @@ type ComparedFile = { readonly filename: string; readonly status: string };
 export const readPending = async (github: Client, base: string): Promise<QuarantineText[]> => {
   const repo = `/repos/${github.repository}`;
   const prefix = `refs/heads/${entryBranchPrefix}`;
-  const refs = (await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`)).filter(
-    (ref) => ref.ref.startsWith(prefix),
-  );
+  const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`);
+  const branches = listed.filter((reference) => reference.ref.startsWith(prefix));
   const owner = github.repository.split('/')[0] ?? '';
   const pending: QuarantineText[] = [];
-  for (const ref of refs) {
-    const branch = ref.ref.replace(/^refs\/heads\//u, '');
+  for (const reference of branches) {
+    const branch = reference.ref.replace(/^refs\/heads\//u, '');
     // oxlint-disable-next-line no-await-in-loop -- few branches, read in order
     const pulls = await github.get<Pull[]>(
       `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
@@ -134,7 +137,7 @@ export const readPending = async (github: Client, base: string): Promise<Quarant
     }
     // oxlint-disable-next-line no-await-in-loop -- one compare per branch
     const compare = await github.get<{ files?: ComparedFile[] }>(
-      `${repo}/compare/${encodeURIComponent(base)}...${ref.object.sha}?per_page=100`,
+      `${repo}/compare/${encodeURIComponent(base)}...${reference.object.sha}?per_page=100`,
     );
     for (const file of compare.files ?? []) {
       if (baseName(file.filename) !== 'quarantine.json' || file.status === 'removed') {
@@ -142,7 +145,7 @@ export const readPending = async (github: Client, base: string): Promise<Quarant
       }
       // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
       const text = await github.getText(
-        `${repo}/contents/${encodePath(file.filename)}?ref=${ref.object.sha}`,
+        `${repo}/contents/${encodePath(file.filename)}?ref=${reference.object.sha}`,
         'application/vnd.github.raw+json',
       );
       pending.push({ path: file.filename, text });
@@ -198,7 +201,16 @@ export const validatePlan = (
     planned.entry.issue > 0 ? planned : { ...planned, entry: { ...planned.entry, issue: 1 } };
   const problemsWith = (admitted: readonly PlannedEntry[]): string[] =>
     quarantineProblems(
-      sources(workspace, withFiles(workspace.quarantines, proposedFiles(workspace.quarantines, admitted.map(checked)))),
+      sources(
+        workspace,
+        withFiles(
+          workspace.quarantines,
+          proposedFiles(
+            workspace.quarantines,
+            admitted.map((planned) => checked(planned)),
+          ),
+        ),
+      ),
       readTracked,
       today,
     );
@@ -237,7 +249,7 @@ export const trackedPaths = (workspace: Workspace, admitted: readonly PlannedEnt
   return [...paths].sort();
 };
 
-type Issue = { readonly number: number; readonly body?: string | null; readonly pull_request?: unknown };
+type Issue = { readonly number: number; readonly body?: string; readonly pull_request?: unknown };
 
 /** Open owner issues by their identity marker. */
 const openIssues = async (github: Client): Promise<Map<string, number>> => {
@@ -346,11 +358,10 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
   };
 
   for (const refusal of neverQuarantine) {
+    const body = issueBody(refusal, { repository: github.repository, refusal: refusal.reason });
     // oxlint-disable-next-line no-await-in-loop -- issues are opened one at a time
-    issues.set(
-      refusal.id,
-      await ownerIssue(refusal, issueBody(refusal, { repository: github.repository, refusal: refusal.reason })),
-    );
+    const issue = await ownerIssue(refusal, body);
+    issues.set(refusal.id, issue);
   }
   const admitted: PlannedEntry[] = [];
   for (const planned of plan.admitted) {
@@ -466,7 +477,7 @@ const main = async (args: readonly string[]): Promise<number> => {
     return 2;
   }
   const token = process.env['GITHUB_TOKEN'] ?? '';
-  const offline = values.offline;
+  const { offline } = values;
   const dryRun = values['dry-run'] || offline;
   const maxRequests = Number(values['max-requests']);
   if (
@@ -546,7 +557,9 @@ const main = async (args: readonly string[]): Promise<number> => {
     if (values.out) {
       for (const file of proposedFiles(workspace.quarantines, plan.admitted)) {
         const target = join(resolve(values.out), file.path);
+        // oxlint-disable-next-line no-await-in-loop -- a few files, written in order
         await mkdir(dirname(target), { recursive: true });
+        // oxlint-disable-next-line no-await-in-loop -- a few files, written in order
         await writeFile(target, file.text);
         outcome.push(`Wrote ${target}.`);
       }

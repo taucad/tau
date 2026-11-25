@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { readQuarantine } from '@taucad/vitest-ci/quarantine';
 
 import { emptyState, ingestRun, parseOutcomes } from '#ci-flake-ledger-state.js';
-import type { IdentityState, IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
+import type { FlakeEvent, IdentityState, IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { applyPlan, mayAutoMerge, proposedFiles, validatePlan } from '#ci-flake-quarantine-entry-cli.js';
 import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
 import {
@@ -120,12 +120,17 @@ const fakeGitHub = (options: { refusePullRequests?: boolean; issues?: unknown[] 
         throw new GitHubError(`GET ${path}`, 404);
       }
       if (path.includes('/git/commits/')) {
-        return { tree: { sha: 'base-tree' } } as T;
+        const commit: unknown = { tree: { sha: 'base-tree' } };
+        return commit as T;
       }
       throw new Error(`unexpected GET ${path}`);
     },
-    getText: async () => Promise.reject(new Error('unexpected getText')),
-    getBytes: async () => Promise.reject(new Error('unexpected getBytes')),
+    async getText(): Promise<string> {
+      throw new Error('unexpected getText');
+    },
+    async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
+      throw new Error('unexpected getBytes');
+    },
     async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
       requests.push({ method, path, body });
       if (path.endsWith('/pulls') && options.refusePullRequests) {
@@ -133,12 +138,15 @@ const fakeGitHub = (options: { refusePullRequests?: boolean; issues?: unknown[] 
       }
       next += 1;
       if (path.endsWith('/issues')) {
-        return { number: next } as T;
+        const issue: unknown = { number: next };
+        return issue as T;
       }
       if (path.endsWith('/pulls')) {
-        return { number: 9001, node_id: 'PR_node' } as T;
+        const pull: unknown = { number: 9001, node_id: 'PR_node' };
+        return pull as T;
       }
-      return { sha: `sha-${next}`, data: {} } as T;
+      const written: unknown = { sha: `sha-${next}`, data: {} };
+      return written as T;
     },
   };
   return { github, requests };
@@ -256,7 +264,8 @@ describe('the replay week (FQ-6 acceptance)', () => {
     expect(requests.some((request) => request.path === '/graphql')).toBe(false);
     const comments = requests.filter((request) => request.path.endsWith('/comments'));
     expect(comments).toHaveLength(2);
-    expect((comments[0]?.body as { body: string }).body).toContain(
+    const [first] = comments;
+    expect((first?.body as { body: string } | undefined)?.body).toContain(
       `https://github.com/taucad/tau/compare/main...${result.branch ?? ''}?expand=1`,
     );
   });
@@ -395,7 +404,15 @@ describe('the entry helpers', () => {
   });
 
   it('should narrow to an OS only when the test also ran on another', () => {
-    const event = { kind: 'retry' as const, at: '', run: 1, attempt: 1, failedRun: 1, failedAttempt: 1, execution: 1 };
+    const event: Omit<FlakeEvent, 'variant'> = {
+      kind: 'retry',
+      at: '',
+      run: 1,
+      attempt: 1,
+      failedRun: 1,
+      failedAttempt: 1,
+      execution: 1,
+    };
     const ran = { executions: 3, failures: 0, events: 0, lastSeen: '' };
 
     expect(

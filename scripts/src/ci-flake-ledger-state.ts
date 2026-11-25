@@ -912,7 +912,7 @@ export const pruneState = (state: LedgerState, now: Date): void => {
 export const eventsInLast = (identity: IdentityState, executions: number): number =>
   identity.events.filter((event) => event.execution > identity.executions - executions).length;
 
-/** Whether an identity meets D3's entry rule today (reported only; acting on it is FQ-6). */
+/** Whether an identity meets D3's entry rule today (`ci-flake-quarantine-entry.ts` acts on it). */
 export const meetsEntryRule = (identity: IdentityState): boolean =>
   entryRule.some((rule) => eventsInLast(identity, rule.executions) >= rule.events);
 
@@ -996,7 +996,7 @@ export const renderLedgerMarkdown = (summary: LedgerSummary, limit = 50): string
     return lines.join('\n');
   }
   lines.push(
-    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3, reported only.',
+    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3; the entry job quarantines such a test unless its newest execution failed every attempt.',
     '',
     '| Test | Events (retry / same-hash / lineage) | All events | Executions | Failures | Retried passes | Variants | First seen | Last seen | 2 in 80 / 3 in 230 |',
     '| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |',

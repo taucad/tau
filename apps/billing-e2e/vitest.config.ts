@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -9,7 +10,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     env: {
       // The support modules name the run at import; unit tests never write a run directory.
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

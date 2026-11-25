@@ -23,6 +23,7 @@
         }
       ],
       "inputs": ["default", "^production", "serviceEnvironment", { "env": "TAU_CI_SHARD" }],
+      "outputs": ["{workspaceRoot}/out/test-results/{projectName}/test-scenarios.outcomes.jsonl"],
       "cache": true,
       "options": {
         "cwd": "{projectRoot}",

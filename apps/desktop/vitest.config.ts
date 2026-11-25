@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -29,7 +30,7 @@ export default defineConfig({
     execArgv: process.versions.v8.startsWith('13.')
       ? ['--wasm-wrapper-tiering-budget=1000000000', '--no-wasm-code-gc']
       : [],
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/apps/desktop',

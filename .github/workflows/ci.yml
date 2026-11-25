@@ -886,6 +886,17 @@ jobs:
         if: always() && steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate-workspace-root
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always() && startsWith(matrix.lane, 'test-') && steps.queue.outputs.run-id == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-${{ matrix.lane }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The package checks (publint, attw, madge, the public-surface audit and the README quickstart) of the
   # affected projects that have one. The plan deals them by measured uncached `pkgcheck` seconds
   # (scripts/src/pkgcheck-shard-durations.json, with the test shards' dealer), one shard per 600 s and at most
@@ -1130,6 +1141,17 @@ jobs:
           name: browser-evidence
           path: out/reports/
           retention-days: 14
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-browser
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Standalone-project oracles, in `standalone-projects.yml` (also nightly): on every push to
   # `main` only. Not required checks, so they wait for the required gate rather than take three
@@ -1399,6 +1421,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-e2e-${{ matrix.suite.slug }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Compute reuse qualification (audit R5): the cheap subset of the Replicad qualification matrix, run whenever the
   # plan's input check selects it. It asserts reuse-off GLB hashes, byte parity with reuse on across cache histories,
   # multi-thread WASM parity and the per-step work counts pinned in
@@ -1425,6 +1458,17 @@ jobs:
         timeout-minutes: 40
         # The plan selected the lane through the target; the one project that declares it runs.
         run: pnpm nx run-many -t compute-qualify-ci --parallel=1 --outputStyle=stream
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-compute-qualify
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (every package-check shard, browser, GeoSpec example
@@ -2424,6 +2468,17 @@ jobs:
         if: ${{ !cancelled() && matrix.shard == 1 && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-api-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The required check `API tests (Postgres + MinIO)` (main ruleset), and the job `staging.yml` and the gate read:
   # it passes only when both API shards passed, and is skipped exactly when they were.
   api:
@@ -2473,6 +2528,17 @@ jobs:
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-billing-e2e
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
   # `tau agent` as real child processes against real kernels, 13 to 14 minutes on one runner.
   # Their own lane, out of the test shards, where they were the floor of one shard: it runs when
@@ -2508,3 +2574,14 @@ jobs:
 
       - name: Run the CLI end-to-end suites
         run: pnpm nx run-many -t test:scenarios --parallel=1 --outputStyle=static
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-cli-e2e-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

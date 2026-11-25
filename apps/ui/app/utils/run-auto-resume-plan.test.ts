@@ -302,6 +302,24 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
     expect(autoResumePlanOf({ ...failed, persistedError: refused('send') }, 0)).toBeUndefined();
   });
 
+  it('should stop a resumed wait answering once a send is refused over its failure', () => {
+    const failed = failedRun(rateLimited());
+    const plan = autoResumePlanOf(failed, now, noJitter);
+    expect(plan).toBeDefined();
+    if (plan === undefined) {
+      return;
+    }
+    const refused = (gesture: 'send' | 'continue'): ChatErrorPayload =>
+      refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+        kind: gesture,
+        projection: failed.projection,
+        createId: gestureId,
+      });
+
+    expect(autoResumeStillAnswers(plan, { ...failed, persistedError: refused('continue') })).toBe(true);
+    expect(autoResumeStillAnswers(plan, { ...failed, persistedError: refused('send') })).toBe(false);
+  });
+
   it('should still retire a legacy chat-wide error that carries no identity', () => {
     const legacy: ChatErrorPayload = {
       category: errorCategory.generic,

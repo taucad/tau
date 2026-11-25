@@ -363,9 +363,6 @@ export function autoResumePlanOf(
 export function autoResumeStillAnswers(plan: AutoResumePlan, state: VisibleFailureSource): boolean {
   const target = selectAutoResumeTarget(state.projection);
   return (
-    target !== undefined &&
-    autoResumeKeyOf(plan.kind, target) === plan.key &&
-    selectRunResumable(state.projection) &&
-    selectVisibleChatErrorEntry(state) !== undefined
+    target !== undefined && autoResumeKeyOf(plan.kind, target) === plan.key && selectVisibleFailureResumable(state)
   );
 }

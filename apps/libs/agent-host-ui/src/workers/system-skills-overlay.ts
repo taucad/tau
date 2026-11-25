@@ -50,6 +50,8 @@ const attemptFetch = async (url: string): Promise<Attempt> => {
   try {
     const response = await fetch(url, { signal: stop.signal });
     if (!response.ok) {
+      /* Nothing reads a refused answer's body: release it rather than hold the connection open for it. */
+      stop.abort();
       return {
         failure: ioError(`Resource request failed with HTTP ${String(response.status)}.`),
         retry: isTransientStatus(response.status),

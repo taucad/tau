@@ -43,11 +43,14 @@ afterEach(() => {
 
 const chatId = 'chat';
 
-const createStore = (): ChatSessionStore => {
+/** A store whose filesystem holds `files` (other devices' segments) by path, and nothing else. */
+const createStore = (files: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map()): ChatSessionStore => {
   const store = new ChatSessionStore();
   const missing = async (): Promise<never> => {
     throw Object.assign(new Error('Missing record'), { code: 'ENOENT' });
   };
+  const under = (directory: string): string[] =>
+    [...files.keys()].flatMap((path) => (path.startsWith(`${directory}/`) ? [path.slice(directory.length + 1)] : []));
   store.setDependencies({
     getChat: async () => ({ id: chatId, resourceId: 'project', name: '', messages: [], createdAt: 0, updatedAt: 0 }),
     patchChat: async () => undefined,
@@ -55,8 +58,8 @@ const createStore = (): ChatSessionStore => {
     consumeChatStartupRequest: async () => undefined,
     commitCancelledDraftRestore: async () => undefined,
     client: {
-      readFile: missing,
-      readdir: async () => [],
+      readFile: async (path: string) => files.get(path) ?? missing(),
+      readdir: async (path: string) => under(path),
       exists: async () => false,
       writeFile: async () => undefined,
       rmdir: async () => undefined,
@@ -717,6 +720,44 @@ describe('displayed transcript replay cases (T2)', () => {
     const { logged, shown } = await acceptGesture({ kind: 'regenerate' }, 'refused');
 
     expect(shown).toEqual(logged);
+  });
+
+  it("should settle the parts of Run D arriving through another device's segment", async () => {
+    const segment = `/projects/project/.tau/chats/${chatId}/events/peer.jsonl`;
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const write = (rows: readonly unknown[]): void => {
+      files.set(segment, new TextEncoder().encode(rows.map((row) => `${JSON.stringify(row)}\n`).join('')));
+    };
+    const store = createStore(files);
+    const session = store.acquire(chatId, 'project');
+    try {
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      publishLogRows(store, chatId, []);
+      write(runD.slice(0, 9));
+      await store.refreshRemoteSegments(chatId, 'project');
+      await vi.waitFor(() => {
+        expect(toolsOf(session.messages)).toEqual({
+          'skill-a': { state: 'input-available' },
+          'skill-b': { state: 'input-available' },
+        });
+      });
+      expect(store.getProjection(chatId)?.remote?.views['run_1']).toBeDefined();
+
+      write(runD);
+      await store.refreshRemoteSegments(chatId, 'project');
+
+      await vi.waitFor(() => {
+        expect(toolsOf(session.messages)).toEqual({
+          'skill-a': { state: 'output-available', output: 'skill-a instructions' },
+          'skill-b': { state: 'output-available', output: 'skill-b instructions' },
+        });
+      });
+      expect(textOf(session.messages)).toBe('Building the washer.');
+    } finally {
+      store.release(chatId);
+    }
   });
 
   it('should show the transcript when the SDK cannot reconstruct the run', async () => {

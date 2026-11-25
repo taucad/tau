@@ -290,7 +290,10 @@ const outcomeOf = (next: SpecState, operationId: string): ReplayOutcome => {
  * project; a delete removes one directory, so the project stays exactly when the model's next state still holds it,
  * another copy carrying the id (W0, `Applied`).
  */
-const settled = (harness: Harness, operationId: string, outcome: ReplayOutcome, next: SpecState): void => {
+const settled = (
+  harness: Harness,
+  { operationId, outcome, next }: Readonly<{ operationId: string; outcome: ReplayOutcome; next: SpecState }>,
+): void => {
   const { held } = harness;
   if (outcome.status !== 'recovered') {
     return;
@@ -367,7 +370,7 @@ const apply = async (harness: Harness, state: SpecState): Promise<void> => {
         throw new Error(`${state.act}: no replaying row settles.`);
       }
       const outcome = outcomeOf(state, operationId);
-      settled(harness, operationId, outcome, state);
+      settled(harness, { operationId, outcome, next: state });
       if (state.act === 'ReplaySettled') {
         held.replay?.resolve(outcome);
         held.replay = undefined;

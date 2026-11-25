@@ -52,7 +52,7 @@ beforeAll(async () => {
   await loadChatSdk();
 });
 
-describe('ChatSessionStore with the pinned real SDK', () => {
+describe('ChatSessionStore live delivery through the displayed fold (T3)', () => {
   it.each(['running', 'paused'] as const)(
     'should defer foreign storage refresh during %s until the host settles while preserving active local output',
     async (phase) => {
@@ -62,7 +62,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
         encode.encode(foreignRows.map((row) => JSON.stringify(row)).join('\n') + '\n'),
       );
       const store = createStore({ readdir: async () => (foreignRows.length === 0 ? [] : ['peer.jsonl']), readFile });
-      const { chat } = store.acquire('chat', 'project');
+      const session = store.acquire('chat', 'project');
       await vi.waitFor(() => {
         expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
@@ -83,7 +83,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
         }),
       ]);
       await vi.waitFor(() => {
-        expect(visible(chat.messages).map((message) => message.text)).toContain('Held local output');
+        expect(visible(session.messages).map((message) => message.text)).toContain('Held local output');
       });
       foreignRows = [
         {
@@ -110,17 +110,17 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       if (phase === 'paused') {
         publishLogRows(store, 'chat', [lifecycleRow(3, 'paused', 'local')], 3);
         await vi.waitFor(() => {
-          expect(chat.status).toBe('ready');
+          expect(store.getChatStatus('chat')).toBe('ready');
         });
       }
       const terminalCursor = phase === 'paused' ? 4 : 3;
       try {
         await store.refreshFromStorage('chat');
         expect(readFile).not.toHaveBeenCalled();
-        expect(visible(chat.messages).map((message) => message.text)).toContain('Held local output');
+        expect(visible(session.messages).map((message) => message.text)).toContain('Held local output');
         publishLogRows(store, 'chat', [lifecycleRow(terminalCursor, 'completed', 'local')], terminalCursor);
         await vi.waitFor(() => {
-          expect(visible(chat.messages).map((message) => message.text)).toEqual([
+          expect(visible(session.messages).map((message) => message.text)).toEqual([
             'Foreign prompt',
             'Unique foreign answer',
             'Local prompt',
@@ -141,7 +141,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     { kind: 'text', checkpoint: true },
     { kind: 'thinking', checkpoint: true },
   ] as const)(
-    'should rearm the real SDK when authoritative $kind replaces its preview (checkpoint=$checkpoint)',
+    'should show authoritative $kind replacing its preview (checkpoint=$checkpoint)',
     async ({ kind, checkpoint }) => {
       const store = createStore();
       const startCursor = checkpoint ? 3 : 2;
@@ -208,18 +208,18 @@ describe('ChatSessionStore with the pinned real SDK', () => {
         },
         close: vi.fn(async () => undefined),
       });
-      const { chat } = store.acquire('chat', 'project');
+      const session = store.acquire('chat', 'project');
       const unobserve = store.observe('chat', 'project');
       const unpublish = store.publishProjectHostConnector('project', connect);
       const output = (): string =>
-        chat.messages
+        session.messages
           .flatMap((message) =>
             message.parts.flatMap((part) => (part.type === 'text' || part.type === 'reasoning' ? [part.text] : [])),
           )
           .join('|');
       await vi.waitFor(() => {
         expect(deliverLive).toBeDefined();
-        expect(chat.messages[0]?.id).toBe('u');
+        expect(session.messages[0]?.id).toBe('u');
       });
       const identity = {
         sourceGeneration: 'writer-live',
@@ -264,7 +264,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       });
       publishLogRows(store, 'chat', [lifecycleRow(startCursor + 1, 'completed')], startCursor + 1);
       await vi.waitFor(() => {
-        expect(chat.status).toBe('ready');
+        expect(store.getChatStatus('chat')).toBe('ready');
         expect(output()).toBe('Prompt|BBBB');
       });
       expect(hostCommand).not.toHaveBeenCalled();
@@ -339,12 +339,12 @@ describe('ChatSessionStore with the pinned real SDK', () => {
         close: vi.fn(async () => undefined),
       });
       const presented = vi.fn<(chatId: string, runId: string, at: number) => Promise<void>>(async () => undefined);
-      const { chat } = store.acquire('chat', 'project');
+      const session = store.acquire('chat', 'project');
       const unobserve = store.observe('chat', 'project');
       const unpublish = store.publishProjectHostConnector('project', connect, { presented });
       await vi.waitFor(() => {
         expect(deliverLive).toBeDefined();
-        expect(chat.messages[0]?.id).toBe('u');
+        expect(session.messages[0]?.id).toBe('u');
       });
       const identity = {
         sourceGeneration: 'writer-live',
@@ -357,7 +357,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       deliverLive?.('chat', { ...identity, type: 'text-delta', delta: 'AA', offset: 0 });
       deliverLive?.('chat', { ...identity, type: 'text-delta', delta: 'BB', offset: 2 });
       await vi.waitFor(() => {
-        expect(visible(chat.messages).some((message) => message.text.endsWith('AABB'))).toBe(true);
+        expect(visible(session.messages).some((message) => message.text.endsWith('AABB'))).toBe(true);
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 0);
@@ -415,13 +415,13 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     store.release('chat');
   });
 
-  it('keeps durable steering between preceding and subsequent output throughout the live watch', async () => {
+  it('keeps durable steering between preceding and subsequent output throughout live delivery', async () => {
     const store = createStore();
-    const { chat } = store.acquire('chat', 'project');
+    const session = store.acquire('chat', 'project');
     const user = { id: 'original', role: 'user', content: 'Make a part' };
     const snapshots: Array<ReturnType<typeof visible>> = [];
-    chat['~registerMessagesCallback'](() => {
-      snapshots.push(visible(chat.messages));
+    const unsubscribe = store.subscribeChat('chat', () => {
+      snapshots.push(visible(session.messages));
     });
     publishLogRows(store, 'chat', [
       {
@@ -439,7 +439,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       }),
     ]);
     await vi.waitFor(() => {
-      expect(visible(chat.messages)).toEqual([
+      expect(visible(session.messages)).toEqual([
         { id: 'original', text: 'Make a part' },
         { id: 'run_1', text: 'Before steering' },
       ]);
@@ -456,7 +456,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       3,
     );
     await vi.waitFor(() => {
-      expect(visible(chat.messages).slice(0, 3)).toEqual([
+      expect(visible(session.messages).slice(0, 3)).toEqual([
         { id: 'original', text: 'Make a part' },
         { id: 'run_1', text: 'Before steering' },
         { id: 'steer:command', text: 'Use PETG' },
@@ -478,7 +478,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       4,
     );
     await vi.waitFor(() => {
-      expect(visible(chat.messages)).toEqual([
+      expect(visible(session.messages)).toEqual([
         { id: 'original', text: 'Make a part' },
         { id: 'run_1', text: 'Before steering' },
         { id: 'steer:command', text: 'Use PETG' },
@@ -487,23 +487,25 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     });
     publishLogRows(store, 'chat', [lifecycleRow(5, 'completed')], 5);
     await vi.waitFor(() => {
-      expect(chat.status).toBe('ready');
+      expect(store.getChatStatus('chat')).toBe('ready');
     });
     expect(snapshots.every((snapshot) => new Set(snapshot.map((message) => message.id)).size === snapshot.length)).toBe(
       true,
     );
-    expect(visible(chat.messages).map((message) => message.text)).toEqual([
+    expect(visible(session.messages).map((message) => message.text)).toEqual([
       'Make a part',
       'Before steering',
       'Use PETG',
       'After steering',
     ]);
+    expect(snapshots.length).toBeGreaterThan(0);
+    unsubscribe();
     store.release('chat');
   });
 
-  it('does not arm a new response until its canonical input is available', async () => {
+  it('should show no answer for a new run until its canonical input is available', async () => {
     const store = createStore();
-    const { chat } = store.acquire('chat', 'project');
+    const session = store.acquire('chat', 'project');
     const first = { id: 'original', role: 'user', content: 'Which printer?' };
     publishLogRows(store, 'chat', [
       {
@@ -522,7 +524,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       lifecycleRow(3, 'completed'),
     ]);
     await vi.waitFor(() => {
-      expect(visible(chat.messages)).toEqual([
+      expect(visible(session.messages)).toEqual([
         { id: 'original', text: 'Which printer?' },
         { id: 'run_1', text: 'Use X1C' },
       ]);
@@ -531,11 +533,11 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 20);
     });
-    expect(visible(chat.messages)).toEqual([
+    expect(visible(session.messages)).toEqual([
       { id: 'original', text: 'Which printer?' },
       { id: 'run_1', text: 'Use X1C' },
     ]);
-    expect(chat.status).toBe('ready');
+    expect(store.getChatStatus('chat')).toBe('streaming');
     publishLogRows(
       store,
       'chat',
@@ -563,7 +565,7 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       6,
     );
     await vi.waitFor(() => {
-      expect(visible(chat.messages).map((message) => message.text)).toEqual([
+      expect(visible(session.messages).map((message) => message.text)).toEqual([
         'Which printer?',
         'Use X1C',
         'What other printers?',

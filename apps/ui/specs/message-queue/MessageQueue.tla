@@ -191,6 +191,10 @@
 \* use_skill startup latency T2 (2026-11-26): the transcript `chat-session-store.ts`, `chat-turn-host.tsx`,
 \* `use-cad-chat-client.ts` and `use-chat.tsx` read is the fold of the projection, with a durably accepted gesture shown
 \* until its run folds; delivery, persistence, acknowledgement and the queue are untouched. No action or verdict changes.
+\* use_skill startup latency T3 (2026-11-26): the chat's status in `chat-session-store.ts`, `use-chat.tsx` and
+\* `use-cad-chat-client.ts` is the run phase, else the command in flight; the store arms no SDK stream, and its usage,
+\* trays and first-text timing read the fold. Dispatch, acknowledgement and the queue are untouched. No action or
+\* verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

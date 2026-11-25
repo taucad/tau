@@ -272,10 +272,10 @@ it('should render first held reasoning through production ChatMessage before dur
         [...current.getMessagePresentation('mounted').messagesById.values()].flatMap((entry) => entry.parts),
       ).toContainEqual(expect.objectContaining({ type: 'reasoning', text: 'Unique mounted held reasoning' }));
     });
-    const assistant = session.chat.messages.find((entry) => entry.role === 'assistant');
+    const assistant = session.messages.find((entry) => entry.role === 'assistant');
     expect(assistant).toBeDefined();
     if (assistant === undefined) {
-      throw new Error('The real SDK assistant message is absent');
+      throw new Error('The displayed assistant message is absent');
     }
     const presentation = current.getMessagePresentation('mounted');
     expect(presentation.messagesById.get(assistant.id)?.id).toBe(assistant.id);
@@ -287,7 +287,7 @@ it('should render first held reasoning through production ChatMessage before dur
       expect(rendered.getByText('Unique mounted held reasoning')).toBeVisible();
     });
     expect(current.getLivenessSnapshot().chats['mounted']?.phase).toBe('running');
-    expect(current.get('mounted')?.chat).toBe(session.chat);
+    expect(current.get('mounted')).toBe(session);
     expect(hostCommand).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(1);
     const releaseSidebar = current.observe('mounted', 'project');

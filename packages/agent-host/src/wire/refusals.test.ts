@@ -70,6 +70,13 @@ describe('the refusal registry (D11, I17)', () => {
     expect(refusalOf('RUN_ACTIVE_ON_ANOTHER_DEVICE')).toEqual({ owner: 'host', retry: 'wait' });
   });
 
+  /* A request the person took back before the turn was kept: nothing continues it. */
+  it('should register TURN_WITHDRAWN as a host code no resume continues', () => {
+    expect(refusalOf('TURN_WITHDRAWN')).toEqual({ owner: 'host', retry: 'never' });
+    expect(isResumableRunFailure({ code: 'TURN_WITHDRAWN', message: 'You took this request back.' })).toBe(false);
+    expect(resumableFailureCodes).not.toContain('TURN_WITHDRAWN');
+  });
+
   it('should end no run with a wait code: a wait code is never resumable', () => {
     const waits = Object.entries(refusals).filter(([, entry]) => entry.retry === 'wait');
     expect(waits.length).toBeGreaterThan(0);

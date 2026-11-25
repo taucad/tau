@@ -24,7 +24,7 @@ import { setup, types } from 'xstate';
 import { chatRunState, executionRefusal, reopens } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody, RunEntry } from '#log/chat-ledger.js';
 import type { JsonValue, RunFailureDetail, TurnPlacement } from '#log/event-types.js';
-import { isResumableRun } from '#log/resumable.js';
+import { isResumableRun, retainsTurn } from '#log/resumable.js';
 import { chatRunCommandSchemas } from '#host/chat-run-events.js';
 import type {
   ApprovalRequest,
@@ -120,6 +120,8 @@ type Ending = Readonly<{
   reason: 'ended' | 'cancel' | 'interrupt' | 'close' | 'refused';
   /** The cancel or interrupt the ending rows answer. */
   commandId?: string;
+  /** The cancel took the request back (`cancel.withdraw`): an unkept turn's row says so. */
+  withdraw?: true;
   interrupt?: Readonly<{ interruptId: string; kind: string; prompt: string; payload?: JsonValue }>;
   outcome?: DriverOutcome;
   failure?: RunFailureDetail;
@@ -327,6 +329,30 @@ const resolvedRow = (resolution: ApprovalResolution, extra: Readonly<Record<stri
   },
 });
 
+/**
+ * A cancel's `cancelled` row, at the ending and on a paused run alike: a Stop that keeps the turn (`retainsTurn`) is
+ * `USER_STOPPED`, which Resume continues; an unkept turn the person took back is `TURN_WITHDRAWN`; any other cancel
+ * (a steer's, a close's) says nothing more.
+ *
+ * @param entry - The run's ledger entry as the cancel finds it.
+ * @param withdraw - The cancel took the request back (`cancel.withdraw`).
+ * @param extra - The ending's own fields, such as `executed`.
+ * @returns The `cancelled` lifecycle row.
+ */
+const cancelledRow = (
+  entry: RunEntry | undefined,
+  withdraw: boolean,
+  extra: Readonly<{ executed?: boolean }> = {},
+): LogRowBody =>
+  lifecycle('cancelled', {
+    ...extra,
+    ...(retainsTurn(entry)
+      ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
+      : withdraw
+        ? { detail: { code: 'TURN_WITHDRAWN' satisfies RefusalCode, message: 'You took this request back.' } }
+        : {}),
+  });
+
 /** Every request an external run still holds, resolved `cancelled`: nothing will ever answer it once the run ends. */
 const cancelPending = (ledger: ChatLedger, runId: string, code?: string): LogRowBody[] =>
   Object.keys(ledger.runs[runId]?.pendingInterrupts ?? {}).map((interruptId) =>
@@ -349,17 +375,9 @@ const endingRows = (context: SlotContext): readonly ChatRunRow[] => {
       ? cancelPending(ledger, runId).filter((row) => row.type !== 'interrupt.recorded' || row.interruptId !== deciding)
       : [];
   if (ending.reason === 'cancel' && ending.outcome !== 'completed') {
-    const entry = ledger.runs[runId];
-    const retained = entry?.committed === true && (entry.kind === 'tau' || entry.externalPrompted === true);
-    return [
-      ...external,
-      lifecycle('cancelled', {
-        executed,
-        ...(retained
-          ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
-          : {}),
-      }),
-    ].map((body) => withCommand(body));
+    return [...external, cancelledRow(ledger.runs[runId], ending.withdraw === true, { executed })].map((body) =>
+      withCommand(body),
+    );
   }
   if (ending.reason === 'interrupt' && ending.outcome === 'aborted' && ending.interrupt !== undefined) {
     const { interrupt } = ending;
@@ -634,7 +652,12 @@ const launch = (enq: Enq, actions: Effects, context: SlotContext): AttemptStep =
       slot: {
         ...slot,
         held: slot.held.filter((command) => command !== cancel),
-        ending: { reason: 'cancel', commandId: cancel.commandId, outcome: 'aborted' },
+        ending: {
+          reason: 'cancel',
+          commandId: cancel.commandId,
+          outcome: 'aborted',
+          ...((cancel.payload as Readonly<{ withdraw?: true }>).withdraw === true ? { withdraw: true } : {}),
+        },
       },
     });
   }
@@ -1210,12 +1233,7 @@ export const chatRunMachine = setup({
                 key: next.key,
                 rows: [
                   ...cancelPending(context.ledger, runId),
-                  lifecycle(
-                    'cancelled',
-                    context.ledger.runs[runId]?.committed
-                      ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
-                      : {},
-                  ),
+                  cancelledRow(context.ledger.runs[runId], event.payload.withdraw === true),
                 ].map((body) => ({
                   runId,
                   body,
@@ -1699,7 +1717,14 @@ export const chatRunMachine = setup({
             target: '#stopping',
             context: {
               ...context,
-              slot: { ...context.slot, ending: { reason: 'cancel', commandId: event.commandId } },
+              slot: {
+                ...context.slot,
+                ending: {
+                  reason: 'cancel',
+                  commandId: event.commandId,
+                  ...(event.payload.withdraw === true ? { withdraw: true } : {}),
+                },
+              },
             },
           };
         }),

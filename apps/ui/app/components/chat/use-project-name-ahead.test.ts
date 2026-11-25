@@ -209,6 +209,19 @@ describe('createProjectNameAhead', () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
+  it('should give a submit past every name the default once the draft spent its requests', async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    for (const text of ['A wall bracket', 'A phone stand', 'A cable clip']) {
+      nameAhead.update(textDraft(text), true);
+    }
+    calls[2]?.reply.resolve('Cable Clip');
+    await vi.runAllTimersAsync();
+
+    await expect(nameAhead.take(textDraft('A cable clip for a desk edge, 3 mm thick'))).resolves.toBe('New Project');
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
   it('should clear a pending pause on dispose', () => {
     const { request } = namingFake();
     const nameAhead = createProjectNameAhead(request);

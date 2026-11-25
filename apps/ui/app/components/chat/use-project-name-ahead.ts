@@ -137,10 +137,16 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
       clearTimeout(timer);
       const text = draft.text.trim();
       const attachments = attachmentsKey(draft.attachments);
-      const spent = requests >= nameAheadRequestsPerDraft ? failed : undefined;
-      const entry = [latest, spent].find((named) => named !== undefined && covers(named, text, attachments));
-      /* The request for this text failed with the cap spent: today's fallback, not another request at creation. */
-      return entry === undefined ? undefined : nameOrDefault(entry);
+      const spent = requests >= nameAheadRequestsPerDraft;
+      const entry = [latest, spent ? failed : undefined].find(
+        (named) => named !== undefined && covers(named, text, attachments),
+      );
+      if (entry !== undefined) {
+        /* A request for this text, or one that failed with the cap spent: never another request at creation. */
+        return nameOrDefault(entry);
+      }
+      /* With the cap spent, the create asks for no fourth name: today's fallback. */
+      return spent && text !== '' ? Promise.resolve(defaultProjectName) : undefined;
     },
     replaceRequest(next) {
       request = next;

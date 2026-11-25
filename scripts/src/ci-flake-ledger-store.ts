@@ -39,7 +39,7 @@ export const branchStore = (github: Client, branch: string): StateStore => {
     async read() {
       try {
         const ref = await github.get<{ object: { sha: string } }>(
-          `/repos/${github.repository}/git/ref/heads/${encodeURIComponent(branch)}`,
+          `/repos/${github.repository}/git/ref/heads/${branch}`,
         );
         parent = ref.object.sha;
       } catch (error) {
@@ -78,7 +78,7 @@ export const branchStore = (github: Client, branch: string): StateStore => {
         parents: parent ? [parent] : [],
       });
       await (parent
-        ? github.send('PATCH', `${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+        ? github.send('PATCH', `${repo}/git/refs/heads/${branch}`, {
             sha: commit.sha,
             force: false,
           })

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:17:17.927Z",
+  "updatedAt": "2026-11-25T23:19:27.743Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2096,6 +2096,19 @@
       "rejected": 0
     },
     {
+      "run": 45719013710,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2856",
+      "sha": "1ab25cfd17c6ab3586814fd65c43c8a162083df3",
+      "at": "2026-11-25T23:19:11Z",
+      "conclusion": "success",
+      "artifacts": 5,
+      "counted": 73,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
       "run": 45719018542,
       "attempt": 1,
       "event": "merge_group",
@@ -3263,44 +3276,44 @@
       "lastSeen": "2026-11-25T23:09:16Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 20,
-      "tests": 300,
+      "executions": 21,
+      "tests": 315,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T23:08:04Z"
+      "lastSeen": "2026-11-25T23:19:11Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 22,
-      "tests": 66,
+      "executions": 23,
+      "tests": 69,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:08:04Z"
+      "lastSeen": "2026-11-25T23:19:11Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 22,
-      "tests": 220,
+      "executions": 23,
+      "tests": 230,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:08:04Z"
+      "lastSeen": "2026-11-25T23:19:11Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 24,
-      "tests": 1032,
+      "executions": 25,
+      "tests": 1075,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:09:16Z"
+      "lastSeen": "2026-11-25T23:19:11Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 49,
-      "tests": 49,
+      "executions": 51,
+      "tests": 51,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:09:16Z"
+      "lastSeen": "2026-11-25T23:19:11Z"
     },
     "ui-kit:test": {
       "executions": 4,
@@ -3577,27 +3590,27 @@
     },
     "ui-e2e › src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB": {
       "project": "ui-e2e",
-      "targetKey": "test:e2e:non-isolated",
+      "targetKey": "test:e2e:development",
       "file": "src/picovoxel-multi.spec.ts",
       "firstSeen": "2026-11-25T13:44:58Z",
-      "lastSeen": "2026-11-25T23:09:16Z",
-      "lastFailure": "2026-11-25T13:44:58Z",
-      "executions": 52,
+      "lastSeen": "2026-11-25T23:19:11Z",
+      "lastFailure": "2026-11-25T23:19:11Z",
+      "executions": 55,
       "failures": 0,
-      "retriedPasses": 1,
-      "passStreak": 51,
+      "retriedPasses": 2,
+      "passStreak": 1,
       "variants": {
         "linux-x64 browser=firefox": {
-          "executions": 18,
+          "executions": 19,
           "failures": 0,
-          "events": 1,
-          "lastSeen": "2026-11-25T23:09:16Z"
+          "events": 2,
+          "lastSeen": "2026-11-25T23:19:11Z"
         },
         "linux-x64 browser=chromium": {
-          "executions": 34,
+          "executions": 36,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-25T23:09:16Z"
+          "lastSeen": "2026-11-25T23:19:11Z"
         }
       },
       "events": [
@@ -3612,18 +3625,30 @@
           "hash": "17432310908498893304",
           "execution": 1,
           "error": "AssertionError: expected false to be true // Object.is equality"
+        },
+        {
+          "kind": "retry",
+          "at": "2026-11-25T23:19:11Z",
+          "run": 45719013710,
+          "attempt": 1,
+          "failedRun": 45719013710,
+          "failedAttempt": 1,
+          "variant": "linux-x64 browser=firefox",
+          "hash": "4035382258564959554",
+          "execution": 54,
+          "error": "AssertionError: expected false to be true // Object.is equality"
         }
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 6674942690776083250",
-        "linux-x64 browser=firefox 6674942690776083250",
-        "linux-x64 browser=chromium 11674921695289011866",
         "linux-x64 browser=chromium 14482816984979053031",
         "linux-x64 browser=firefox 14482816984979053031",
         "linux-x64 browser=chromium 6334531171323546616",
         "linux-x64 browser=firefox 6334531171323546616",
-        "linux-x64 browser=chromium 3004314035661728782"
+        "linux-x64 browser=chromium 3004314035661728782",
+        "linux-x64 browser=chromium 4035382258564959554",
+        "linux-x64 browser=firefox 4035382258564959554",
+        "linux-x64 browser=chromium 11222852610061883834"
       ],
       "failureShas": [],
       "aliases": []

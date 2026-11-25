@@ -6,13 +6,15 @@
  * cache replay restores the original run's rows. A change to how every config reports is one change here.
  *
  * The outcome recorder is imported through the package's own subpath, not a `#` alias, because the configs that
- * import this module are type-checked under other projects' compiler options, some with a `#*` path alias.
+ * import this module are type-checked under other projects' compiler options, some with a `#*` path alias. The list
+ * is typed with the recorder's own class, not Vitest's `Reporter`: a project whose Vitest resolves to another peer
+ * variant (another `@types/node`) has a `Reporter` whose private members make the two types unrelated.
  */
 import process from 'node:process';
 
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import type { OutcomeEnvironment } from '@taucad/vitest-ci/outcome-reporter';
-import type { BuiltinReporters, Reporter } from 'vitest/node';
+import type { BuiltinReporters } from 'vitest/node';
 
 /**
  * The reporter list for a Tau Vitest config: the config's console reporter, `github-actions` on GitHub Actions,
@@ -34,7 +36,7 @@ import type { BuiltinReporters, Reporter } from 'vitest/node';
 export const testReporters = (
   base: BuiltinReporters = 'default',
   env: OutcomeEnvironment = process.env,
-): Array<BuiltinReporters | Reporter> => [
+): Array<BuiltinReporters | OutcomeReporter> => [
   base,
   ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
   new OutcomeReporter(),

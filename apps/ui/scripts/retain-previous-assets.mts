@@ -61,7 +61,8 @@
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
  *   TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE
  *                            `1` ships without retention, with a warning, when the live deploy cannot be reached
- *                            after the retries (staging, whose tabs reload into the new build). Any other failure
+ *                            after the retries, or will not serve an asset its index lists (staging, whose tabs
+ *                            reload into the new build). A malformed index or an asset that fails its integrity
  *                            still fails the deploy. Production leaves it unset.
  *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
  *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
@@ -501,6 +502,10 @@ const hashConcurrency = 16;
 /**
  * Map `items` through `task`, at most `limit` at a time, keeping the input order.
  *
+ * After the first failure no further task starts, and the tasks already in flight are awaited, so nothing still
+ * writes once this settles and no failure goes unseen: one failure is thrown as itself, several as an
+ * `AggregateError` holding every one.
+ *
  * @param items - The inputs.
  * @param limit - Tasks in flight at most.
  * @param task - The work for one input.
@@ -512,14 +517,25 @@ export const mapWithConcurrency = async <T, R>(
   task: (item: T) => Promise<R>,
 ): Promise<R[]> => {
   const results: R[] = Array.from({ length: items.length });
+  const failures: unknown[] = [];
   let next = 0;
   const worker = async (): Promise<void> => {
-    for (let index = next++; index < items.length; index = next++) {
-      // oxlint-disable-next-line no-await-in-loop -- Each worker runs one task at a time.
-      results[index] = await task(items[index] as T);
+    for (let index = next++; index < items.length && failures.length === 0; index = next++) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Each worker runs one task at a time.
+        results[index] = await task(items[index] as T);
+      } catch (error) {
+        failures.push(error);
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `${String(failures.length)} tasks failed`);
+  }
   return results;
 };
 
@@ -639,6 +655,16 @@ export class LiveIndexUnreachableError extends Error {
   public override readonly name = 'LiveIndexUnreachableError';
 }
 
+/**
+ * The live deploy would not serve an asset its own index lists: the request failed, or kept failing, or answered
+ * something other than 200 (Netlify has answered GitHub's runners 403 for assets that load everywhere else). Like
+ * {@link LiveIndexUnreachableError}, only this may be shipped past on staging; bytes that answer but fail their
+ * integrity always fail the deploy.
+ */
+export class LiveAssetUnavailableError extends Error {
+  public override readonly name = 'LiveAssetUnavailableError';
+}
+
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
 const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
   new Error(
@@ -740,9 +766,16 @@ const downloadAsset = async (
     await writeFile(destination, stored);
     return { bytes: stored.byteLength, fromStore: true };
   }
-  const response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
+  let response: Fetched;
+  try {
+    response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
+  } catch (error) {
+    throw new LiveAssetUnavailableError(`${asset.path} could not be fetched from ${origin}: ${String(error)}`, {
+      cause: error,
+    });
+  }
   if (response.status !== 200) {
-    throw new Error(
+    throw new LiveAssetUnavailableError(
       `${asset.path} answered ${String(response.status)} on ${origin}; the live deploy lost an asset its index lists.`,
     );
   }
@@ -1000,6 +1033,18 @@ export const stampRetainedBuildFloor = async (buildDirectory: string, floor: num
   return stamped;
 };
 
+/** Whether a failure is only the live deploy being unavailable: every part of it, when several downloads failed. */
+const isUnavailable = (error: unknown): error is Error =>
+  error instanceof LiveIndexUnreachableError ||
+  error instanceof LiveAssetUnavailableError ||
+  (error instanceof AggregateError && error.errors.length > 0 && error.errors.every(isUnavailable));
+
+/** Every file under `directory`, as absolute paths. */
+const listFiles = async (directory: string): Promise<Set<string>> => {
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
+  return new Set(entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name)));
+};
+
 /**
  * Retain the previous assets, or, when the live deploy cannot be reached and the caller allows it, ship with none.
  *
@@ -1011,12 +1056,18 @@ export const retainOrShipWithout = async (
   options: Parameters<typeof retainPreviousAssets>[0],
   fallback: { readonly shipIfUnreachable: boolean; readonly warn: (message: string) => void },
 ): ReturnType<typeof retainPreviousAssets> => {
+  const shippable = fallback.shipIfUnreachable && options.skip !== true;
+  // The build's own files, so a fallback can remove what the failed pass wrote before the pass that keeps nothing
+  // lists the directory: a retained file left there would be indexed as this build's own.
+  const own = shippable ? await listFiles(options.clientDirectory) : undefined;
   try {
     return await retainPreviousAssets(options);
   } catch (error) {
-    if (!fallback.shipIfUnreachable || !(error instanceof LiveIndexUnreachableError) || options.skip === true) {
+    if (own === undefined || !isUnavailable(error)) {
       throw error;
     }
+    const written = [...(await listFiles(options.clientDirectory))].filter((file) => !own.has(file));
+    await Promise.all(written.map(async (file) => rm(file, { force: true })));
     fallback.warn(
       `::warning::${error.message} ${shipIfUnreachableVariable}=1: this deploy ships with NO previous assets. Pages ` +
         'open across it reload into the new build when a lazy import fails.',

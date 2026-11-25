@@ -61,7 +61,8 @@
  *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
  *   TAU_RETAIN_ASSETS_SHIP_IF_UNREACHABLE
  *                            `1` ships without retention, with a warning, when the live deploy cannot be reached
- *                            after the retries (staging, whose tabs reload into the new build). Any other failure
+ *                            after the retries, or will not serve an asset its index lists (staging, whose tabs
+ *                            reload into the new build). A malformed index or an asset that fails its integrity
  *                            still fails the deploy. Production leaves it unset.
  *   TAU_RETAIN_ASSETS_STORE  Directory of runtime bundle files kept between deploys, by integrity. Unset or empty:
  *                            every retained file is downloaded. It is a cache: a missing or changed file is fetched.
@@ -639,6 +640,16 @@ export class LiveIndexUnreachableError extends Error {
   public override readonly name = 'LiveIndexUnreachableError';
 }
 
+/**
+ * The live deploy would not serve an asset its own index lists: the request failed, or kept failing, or answered
+ * something other than 200 (Netlify has answered GitHub's runners 403 for assets that load everywhere else). Like
+ * {@link LiveIndexUnreachableError}, only this may be shipped past on staging; bytes that answer but fail their
+ * integrity always fail the deploy.
+ */
+export class LiveAssetUnavailableError extends Error {
+  public override readonly name = 'LiveAssetUnavailableError';
+}
+
 /** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
 const unreadableIndex = (origin: string, fileName: string, reason: string): Error =>
   new Error(
@@ -740,9 +751,16 @@ const downloadAsset = async (
     await writeFile(destination, stored);
     return { bytes: stored.byteLength, fromStore: true };
   }
-  const response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
+  let response: Fetched;
+  try {
+    response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
+  } catch (error) {
+    throw new LiveAssetUnavailableError(`${asset.path} could not be fetched from ${origin}: ${String(error)}`, {
+      cause: error,
+    });
+  }
   if (response.status !== 200) {
-    throw new Error(
+    throw new LiveAssetUnavailableError(
       `${asset.path} answered ${String(response.status)} on ${origin}; the live deploy lost an asset its index lists.`,
     );
   }
@@ -1014,7 +1032,11 @@ export const retainOrShipWithout = async (
   try {
     return await retainPreviousAssets(options);
   } catch (error) {
-    if (!fallback.shipIfUnreachable || !(error instanceof LiveIndexUnreachableError) || options.skip === true) {
+    if (
+      !fallback.shipIfUnreachable ||
+      !(error instanceof LiveIndexUnreachableError || error instanceof LiveAssetUnavailableError) ||
+      options.skip === true
+    ) {
       throw error;
     }
     fallback.warn(

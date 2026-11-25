@@ -14,6 +14,7 @@ import {
   planBuildRetention,
   planRetention,
   readOwnBuildId,
+  LiveAssetUnavailableError,
   LiveIndexUnreachableError,
   retainOrShipWithout,
   retainPreviousAssets,
@@ -484,6 +485,43 @@ describe('retainPreviousAssets', () => {
       expect(warnings).toHaveLength(1);
     });
 
+    it('should ship past a live deploy that refuses an asset its index lists (Netlify answering runners 403)', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1' },
+        indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toStrictEqual([expect.stringMatching(/route-OLD1\.js answered 403/u)]);
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should still fail the deploy on a refused asset when shipping is not allowed', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1' },
+        indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+      await expect(
+        retainOrShipWithout(
+          { clientDirectory: client, origin: live.origin, wait: noWait },
+          { shipIfUnreachable: false, warn: () => undefined },
+        ),
+      ).rejects.toBeInstanceOf(LiveAssetUnavailableError);
+    });
+
     it('should still fail the deploy when the live deploy cannot be reached and shipping is not allowed', async () => {
       const { origin } = await startLiveDeploy({}, undefined);
       await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
@@ -671,7 +709,7 @@ describe('retainPreviousAssets', () => {
         requestTimeout: 50,
         wait: async () => undefined,
       }),
-    ).rejects.toMatchObject({ name: 'TimeoutError' });
+    ).rejects.toMatchObject({ name: 'LiveAssetUnavailableError', cause: { name: 'TimeoutError' } });
   });
 
   it('should fail when the new build has no asset directory to publish', async () => {

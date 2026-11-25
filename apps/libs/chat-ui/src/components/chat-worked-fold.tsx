@@ -11,6 +11,8 @@ type ChatWorkedFoldProps = {
   readonly children: React.ReactNode;
   /** How long the turn worked, formatted ("5m 32s"); absent when its run has not recorded an end. */
   readonly elapsed?: string;
+  /** What did not go through ("2 failed"), stated ahead of the summary so a line cut short still shows it. */
+  readonly shortfall?: string;
 };
 
 /**
@@ -22,7 +24,7 @@ type ChatWorkedFoldProps = {
  * @param properties - The fold's summary, the time worked and the narrative it holds.
  * @returns The fold's line and, once opened, the narrative.
  */
-export function ChatWorkedFold({ summary, children, elapsed }: ChatWorkedFoldProps): React.JSX.Element {
+export function ChatWorkedFold({ summary, children, elapsed, shortfall }: ChatWorkedFoldProps): React.JSX.Element {
   const detail = summary === '' ? '' : ` · ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
   return (
     <Collapsible data-slot='worked-fold'>
@@ -33,9 +35,13 @@ export function ChatWorkedFold({ summary, children, elapsed }: ChatWorkedFoldPro
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent pointer-coarse:min-h-8'
         >
           <ListCollapse aria-hidden='true' className='size-3 shrink-0' />
-          <span className='min-w-0 truncate'>
-            <span className='font-medium'>{elapsed === undefined ? 'Worked' : `Worked for ${elapsed}`}</span>
-            {detail}
+          {/* The time and the shortfall never truncate; the summary gives way first. */}
+          <span className='flex min-w-0 whitespace-pre'>
+            <span className='shrink-0 font-medium'>{elapsed === undefined ? 'Worked' : `Worked for ${elapsed}`}</span>
+            {shortfall === undefined || shortfall === '' ? undefined : (
+              <span className='shrink-0'>{` · ${shortfall}`}</span>
+            )}
+            <span className='min-w-0 truncate'>{detail}</span>
           </span>
           <ChevronRight
             aria-hidden='true'

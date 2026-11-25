@@ -984,6 +984,9 @@ export const endedChunk = (endedAt: number): UIMessageChunk => ({
   messageMetadata: { endedAt },
 });
 
+/** The metadata chunk that takes an answer's end back when its stopped run resumes: chunks only append, so it states no end. */
+export const reopenedChunk: UIMessageChunk = { type: 'message-metadata', messageMetadata: { endedAt: null } };
+
 const lifecycleChunks = (
   event: Extract<PresentationEvent, { readonly type: 'run.lifecycle' }>,
   streamedBlocks: AgentHostLiveBlocks | undefined,

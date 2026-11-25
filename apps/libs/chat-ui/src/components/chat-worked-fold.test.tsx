@@ -41,4 +41,16 @@ describe('ChatWorkedFold', () => {
 
     expect(screen.getByRole('button', { name: 'Worked for 5m 32s · read files' })).toBeInTheDocument();
   });
+
+  it('states what did not go through ahead of the summary, which truncates first', () => {
+    render(
+      <ChatWorkedFold summary='Ran commands, read files' elapsed='27s' shortfall='2 failed'>
+        <p>Reading the model first.</p>
+      </ChatWorkedFold>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Worked for 27s · 2 failed · ran commands, read files' })).toBeVisible();
+    expect(screen.getByText('· 2 failed')).toHaveClass('shrink-0');
+    expect(screen.getByText('· ran commands, read files')).toHaveClass('truncate');
+  });
 });

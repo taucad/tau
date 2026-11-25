@@ -811,18 +811,19 @@ function AssistantParts({
       focusedRef.current = undefined;
     }
   };
+  const wasFolded = useRef(false);
   useLayoutEffect(() => {
+    const folding = fold !== undefined && !wasFolded.current;
+    wasFolded.current = fold !== undefined;
     const focused = focusedRef.current;
-    const active = document.activeElement;
-    if (
-      fold === undefined ||
-      focused === undefined ||
-      focused.isConnected ||
-      (active !== null && active !== document.body)
-    ) {
+    if (focused === undefined || focused.isConnected) {
       return;
     }
     focusedRef.current = undefined;
+    const active = document.activeElement;
+    if (!folding || (active !== null && active !== document.body)) {
+      return;
+    }
     containerRef.current
       ?.querySelector<HTMLElement>('[data-slot="worked-fold"] button')
       ?.focus({ preventScroll: true });
@@ -854,7 +855,8 @@ function AssistantParts({
       {fold === undefined
         ? groups.map((group) => renderGroup(group))
         : [
-            <ChatWorkedFold key='worked-fold' summary={fold.summary} elapsed={elapsed}>
+            ...fold.leading.map((group) => renderGroup(group)),
+            <ChatWorkedFold key='worked-fold' summary={fold.summary} elapsed={elapsed} shortfall={fold.shortfall}>
               {fold.narrative.map((group) => renderGroup(group))}
             </ChatWorkedFold>,
             ...fold.kept.map((group) => renderGroup(group)),
@@ -1140,7 +1142,7 @@ export const ChatMessage = memo(function ({
                   messageId={displayMessage.id}
                   isPastTurn={isPastTurn}
                   createdAt={displayMessage.metadata?.createdAt}
-                  endedAt={displayMessage.metadata?.endedAt}
+                  endedAt={displayMessage.metadata?.endedAt ?? undefined}
                 />
               )}
             </ChatMessageSurface>

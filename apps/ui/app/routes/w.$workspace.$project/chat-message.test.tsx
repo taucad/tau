@@ -665,7 +665,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
-    const line = screen.getByRole('button', { name: /^Worked · commands failed, read files$/u });
+    const line = screen.getByRole('button', { name: /^Worked · 1 failed · ran commands, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -709,7 +709,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · commands failed, read files$/u });
+    const line = screen.getByRole('button', { name: /^Worked for 5m 32s · 1 failed · ran commands, read files$/u });
     expect(line).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('The nut is 8 mm across flats.')).toBeVisible();
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
@@ -720,7 +720,9 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} isPastTurn />);
 
-    expect(screen.getByRole('button', { name: /^Worked for 7s · commands failed, read files$/u })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /^Worked for 7s · 1 failed · ran commands, read files$/u }),
+    ).toBeVisible();
   });
 
   it('waits for the next request when the reader opened a line while the turn ran, even if the list remounts it', () => {
@@ -758,7 +760,47 @@ describe('ChatMessage older turn fold', () => {
     expect(screen.getByRole('button', { name: /^Worked for 7s/u })).toHaveFocus();
   });
 
-  it('keeps the answer in view when the turn ends on ticking off its task list', () => {
+  it('leaves focus where the reader moved it, and never pulls it back into an older turn', () => {
+    const left: MyUIMessage = { ...narrated, id: 'msg-focus-left' };
+    setMessages([left]);
+    const { rerender } = render(
+      <>
+        <ChatMessage messageId={left.id} />
+        <input aria-label='Composer' />
+      </>,
+    );
+    const [firstLine] = screen.getAllByRole('button', { expanded: false });
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => {
+      firstLine!.focus();
+      // A click on empty transcript space, then into the composer.
+      firstLine!.blur();
+      composer.focus();
+    });
+
+    setMessages([finished(left, 7532)]);
+    rerender(
+      <>
+        <ChatMessage messageId={left.id} footer={null} />
+        <input aria-label='Composer' />
+      </>,
+    );
+    expect(composer).toHaveFocus();
+
+    // Sending swaps the composer's button, dropping focus to the page, as the next request arrives.
+    act(() => {
+      composer.blur();
+    });
+    rerender(
+      <>
+        <ChatMessage isPastTurn messageId={left.id} footer={null} />
+        <input aria-label='Composer' />
+      </>,
+    );
+    expect(document.body).toHaveFocus();
+  });
+
+  it('keeps the answer in view, and folds the tick after it, when the turn ends on ticking off its task list', () => {
     const ticked: MyUIMessage = finished(
       {
         id: 'msg-ticked',
@@ -783,8 +825,9 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={ticked.id} />);
 
-    expect(screen.getByRole('button', { name: /^Worked for 12s · read files$/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Worked for 12s · read files, updated tasks$/u })).toBeVisible();
     expect(screen.getByText('Done. The bracket is now 4 mm thick.')).toBeVisible();
+    expect(screen.queryAllByTestId('chat-activity-group')).toHaveLength(0);
     expect(screen.queryByText('Reading the model first.')).not.toBeInTheDocument();
   });
 
@@ -806,7 +849,7 @@ describe('ChatMessage older turn fold', () => {
 
     render(<ChatMessage messageId={narrated.id} />);
 
-    expect(screen.getByRole('button', { name: /^Worked · commands failed, read files$/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Worked · 1 failed · ran commands, read files$/u })).toBeVisible();
   });
 
   it('leaves a turn whose narrative is one line alone', () => {

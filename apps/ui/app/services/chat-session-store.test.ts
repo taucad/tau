@@ -1831,6 +1831,21 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     /* Nothing will fold the run from an unreadable log: the composer is not left busy until a reload. */
     store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
     expect(store.getChatStatus(chatId)).toBe('ready');
+    /* The refusal let go of the Start for good: a later readable reattach that still lacks its run does not revive it. */
+    store.receiveHostReadAnswer(chatId, {
+      status: 'batch',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+      cursor: 0,
+      nextCursor: 0,
+      endCursor: 0,
+      events: [],
+    });
+    await settle();
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    /* Nothing holds the session once its view goes. */
+    store.release(chatId);
+    await settle();
+    expect(store.get(chatId)).toBeUndefined();
     unpublish();
   });
 

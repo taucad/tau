@@ -1721,7 +1721,7 @@ export class ChatSessionStore {
       if (answer.reason === 'unreadable' && session !== undefined) {
         // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
         this.#latchUnreadTranscript(session);
-        this.#refreshStatus(session);
+        this.#releaseRefusedRun(session);
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -2892,7 +2892,7 @@ export class ChatSessionStore {
           if (event.type === 'attachment.refused') {
             if (session !== undefined) {
               this.#latchUnreadTranscript(session);
-              this.#refreshStatus(session);
+              this.#releaseRefusedRun(session);
             }
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
@@ -4604,8 +4604,6 @@ export class ChatSessionStore {
     return (
       session.commandInFlight ||
       (command?.type === 'start' &&
-        /* A refused read folds nothing more, so the run it waits for would never arrive. */
-        this.#observed.get(session.chatId)?.status !== 'refused' &&
         this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId] === undefined)
     );
   }
@@ -4617,6 +4615,19 @@ export class ChatSessionStore {
       session.status = status;
       this.#chatTopics.get(session.chatId)?.emit();
     }
+  }
+
+  /**
+   * Let go of the run a command holds once the chat's log read is refused for good: that log folds nothing more, so
+   * the run would never arrive, and the held session could never be disposed (a later reattach must not revive it).
+   */
+  #releaseRefusedRun(session: InternalSession): void {
+    session.watchedRunId = undefined;
+    if (!session.commandInFlight) {
+      session.activeCommand = undefined;
+    }
+    this.#refreshStatus(session);
+    this.#scheduleRunReleaseIfTerminal(session);
   }
 
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {

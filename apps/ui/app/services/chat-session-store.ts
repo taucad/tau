@@ -117,7 +117,7 @@ import type {
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
 import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
-import type { RowKey } from '@taucad/agent-host';
+import type { AgentLiveEvent, RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
@@ -1886,6 +1886,11 @@ export class ChatSessionStore {
       this.#unreadTopic.emit();
     }
     this.startPendingSeed(chatId);
+  }
+
+  /** Fold one live model event as the host attachment does; the ingress for deterministic readers. @internal */
+  public receiveHostLiveEvent(chatId: string, event: AgentLiveEvent): void {
+    this.#projectionOf(chatId).send({ type: 'live', event });
   }
 
   /** The current read-only host attachment's verified state, never a run lifecycle. @public */

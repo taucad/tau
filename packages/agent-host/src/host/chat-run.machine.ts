@@ -24,7 +24,7 @@ import { setup, types } from 'xstate';
 import { chatRunState, executionRefusal, reopens } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody, RunEntry } from '#log/chat-ledger.js';
 import type { JsonValue, RunFailureDetail, TurnPlacement } from '#log/event-types.js';
-import { isResumableRun, retainsTurn } from '#log/resumable.js';
+import { isResumableRun, retainsTurn, turnWithdrawnCode } from '#log/resumable.js';
 import { chatRunCommandSchemas } from '#host/chat-run-events.js';
 import type {
   ApprovalRequest,
@@ -349,7 +349,7 @@ const cancelledRow = (
     ...(retainsTurn(entry)
       ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
       : withdraw
-        ? { detail: { code: 'TURN_WITHDRAWN' satisfies RefusalCode, message: 'You took this request back.' } }
+        ? { detail: { code: turnWithdrawnCode, message: 'You took this request back.' } }
         : {}),
   });
 
@@ -642,6 +642,10 @@ const record = (enq: Enq, actions: Effects, context: SlotContext): AttemptStep =
   };
 };
 
+/** Whether a held cancel takes its request back (`cancel.withdraw`); a held command keeps its payload as JSON. */
+const takesTurnBack = (command: HeldCommand): boolean =>
+  isRecord(command.payload) && command.payload['withdraw'] === true;
+
 /** Start the driver, unless a held cancel or a close ends the attempt first (the attempt then never executed). */
 const launch = (enq: Enq, actions: Effects, context: SlotContext): AttemptStep => {
   const { slot } = context;
@@ -656,7 +660,7 @@ const launch = (enq: Enq, actions: Effects, context: SlotContext): AttemptStep =
           reason: 'cancel',
           commandId: cancel.commandId,
           outcome: 'aborted',
-          ...((cancel.payload as Readonly<{ withdraw?: true }>).withdraw === true ? { withdraw: true } : {}),
+          ...(takesTurnBack(cancel) ? { withdraw: true } : {}),
         },
       },
     });

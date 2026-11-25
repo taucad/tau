@@ -72,6 +72,16 @@ export const isResumableRunFailure = (
 };
 
 /**
+ * A `cancelled` row's detail code: the person took the request back (`cancel.withdraw`) before the turn was kept, so
+ * nothing continues it and every page leaves the request out of the thread. A Stop that keeps the turn is
+ * `USER_STOPPED` instead; a cancel that neither keeps nor withdraws the turn (a steer, a project close) carries no
+ * detail. A lifecycle detail, not a refusal.
+ *
+ * @public
+ */
+export const turnWithdrawnCode = 'TURN_WITHDRAWN';
+
+/**
  * Whether a cancel now keeps the run's turn for continuation: the turn is durable and, for an external agent, its
  * prompt was issued. The host's one rule for writing `USER_STOPPED` rather than leaving the request unkept
  * (`TURN_WITHDRAWN` when the person took it back), and the guard `isUserStoppedRun` reads back.

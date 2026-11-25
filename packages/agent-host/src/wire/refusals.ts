@@ -65,12 +65,6 @@ export const refusals = {
   /** This chat admitted no run. */
   NO_RUN_ADMITTED: { owner: 'host', retry: 'never' },
   /**
-   * A `cancelled` row's detail: the person took the request back (`cancel.withdraw`) before the turn was kept, so
-   * nothing continues it. A Stop that keeps the turn is `USER_STOPPED` instead; a cancel that neither keeps nor
-   * withdraws the turn (a steer, a project close) carries no detail.
-   */
-  TURN_WITHDRAWN: { owner: 'host', retry: 'never' },
-  /**
    * A Stop for this chat arrived while this command still waited on its checks: the Stop is applied at once, and the
    * commands that were waiting are not run. Send it again if it is still wanted.
    */

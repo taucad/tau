@@ -1,14 +1,13 @@
 /**
- * Lane B probe: the `globalThis.__laneB` seam the loader hook patches call into.
+ * Lane B probe: the `globalThis.__laneB` delegates the loader hook's module seams call into (hook-impl.mjs).
  * Import this module BEFORE any runtime/kernel module.
  *
  * Replicad is measured at the live tier's own seams: the operation cache it installs through the library
- * facade (`liveTierLibrary`), the counters it reports on the `replicad.run-main` span, and the kernel's
+ * facade (`setOperationCache`), the counters it reports on the `replicad.run-main` span, and the kernel's
  * `computeReuse` option for the off arm.
  */
 export type Counter = { calls: number; ms: number; bytes: number };
 export type ProbeState = {
-  semanticDisabled: boolean;
   /**
    * Fault injection (W0 red-first): when set, the live tier's operation cache answers
    * every poisonable operation with a shape restored from these BRep bytes, so the
@@ -31,7 +30,6 @@ export type ProbeState = {
 };
 
 const state: ProbeState = {
-  semanticDisabled: false,
   poisonBytes: undefined,
   poisonedLookups: 0,
   captureRecordedBrep: false,
@@ -136,11 +134,16 @@ const isShape = (value: unknown): value is { serialize(): string } =>
 /** The poison arm answers operations that keep their receiver or consume it and return a value, never a builder. */
 const poisonable = (request: { effect?: string; returnsBuilder?: boolean }): boolean =>
   (request.effect === 'pure' || request.effect === 'consumes') && request.returnsBuilder !== true;
-/** The request with its `compute` timed as `native.solve`: every native computation the cache lets through. */
-const timedCompute = <R extends { compute(): unknown }>(request: R): R =>
-  Object.create(request, {
-    compute: { value: () => time('native.solve', () => request.compute()) },
-  }) as R;
+/**
+ * The request with its `compute` timed as `native.solve`: every native computation the cache lets through. The library
+ * hands every call a request of its own, which the kernel's operation meter also rewrites in place
+ * (`meterOperations`), so `compute` is replaced in place and stays writable.
+ */
+const timedCompute = <R extends { compute(): unknown }>(request: R): R => {
+  const { compute } = request;
+  request.compute = () => time('native.solve', () => compute());
+  return request;
+};
 
 /**
  * Wrap the operation cache the live tier installs (`installOperationTier` calls `setOperationCache` on the
@@ -178,23 +181,18 @@ const instrumentCache = (cache: OperationCacheLike, library: LiveTierLibrary): O
 };
 
 /**
- * The kernel's library facade, with `setOperationCache` instrumented. The live tier installs its cache through
- * this facade for each build and restores the previous one (none) when the build ends; with compute reuse off
- * the kernel builds no tier and never calls it.
+ * The `replicad` module's `setOperationCache` as the kernel sees it (hook-impl.mjs seam): the live tier installs its
+ * cache through the kernel's library facade for each build and restores the previous one (none) when the build ends;
+ * with compute reuse off the kernel builds no tier and never calls it.
  */
-const liveTierLibrary = <T extends object>(facade: T): T => {
-  const library = facade as unknown as LiveTierLibrary;
-  const install = library.setOperationCache;
-  if (typeof install !== 'function') return facade;
-  library.setOperationCache = (cache) => install(cache === undefined ? undefined : instrumentCache(cache, library));
-  return facade;
-};
-
-const build123dCompute = (input: { compute: unknown }) => (state.semanticDisabled ? {} : input);
+const setOperationCache = (
+  cache: OperationCacheLike | undefined,
+  library: LiveTierLibrary,
+): OperationCacheLike | undefined =>
+  library.setOperationCache(cache === undefined ? undefined : instrumentCache(cache, library));
 
 /** Optional identity tracer installed by run-arm (`--trace identity`); identity function otherwise. */
 let libraryWrapper: <T extends object>(library: T) => T = (library) => library;
-const wrapLibrary = <T extends object>(library: T): T => libraryWrapper(library);
 let resultUnwrapper: (value: unknown) => unknown = (value) => value;
 const setLibraryWrapper = (
   wrapper: <T extends object>(library: T) => T,
@@ -213,23 +211,29 @@ const unwrapResult = (value: unknown): unknown => {
   return raw;
 };
 
+type LibraryTraceHandle = { unwrap<T>(value: T): T };
+/**
+ * The kernel's `createKernelLibraryTracer` (hook-impl.mjs seam): the library it traces is the one user code is handed,
+ * so the identity tracer wraps it here, and every value the kernel unwraps from user code passes the result observer.
+ */
+const createKernelLibraryTracer = <Options extends { library: object }, Handle extends LibraryTraceHandle>(
+  options: Options,
+  create: (options: Options) => Handle,
+): Handle => {
+  const handle = create({ ...options, library: libraryWrapper(options.library) });
+  return { ...handle, unwrap: <T,>(value: T): T => unwrapResult(handle.unwrap(value)) as T };
+};
+
 export const probe = {
   state,
   note,
   time,
   wrapFilesystem,
-  liveTierLibrary,
-  build123dCompute,
-  wrapLibrary,
+  setOperationCache,
+  createKernelLibraryTracer,
   setLibraryWrapper,
   setResultObserver,
   unwrapResult,
-  get semanticDisabled() {
-    return state.semanticDisabled;
-  },
-  set semanticDisabled(value: boolean) {
-    state.semanticDisabled = value;
-  },
   get poisonBytes() {
     return state.poisonBytes;
   },

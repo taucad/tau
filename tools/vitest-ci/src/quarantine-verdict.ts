@@ -318,20 +318,13 @@ export class QuarantineVerdict implements Reporter {
     if (reason === 'interrupted') {
       run.otherFailures.push('the run was interrupted');
     }
-    let recorded: Set<string> | undefined;
-    let recordRead = false;
+    const recorded = quarantine.length > 0 ? recordedFailures(recording) : undefined;
     const verdict = decideVerdict({
       ...run,
       entries: quarantine,
       os: process.platform,
       target: normalizeTarget(recording.target),
-      recorded: (test) => {
-        if (!recordRead) {
-          recorded = recordedFailures(recording);
-          recordRead = true;
-        }
-        return recorded?.has(identity(test)) ?? false;
-      },
+      recorded: (test) => recorded?.has(identity(test)) ?? false,
     });
     if (verdict.excused.length > 0 && this.#coverageHidesThresholds) {
       verdict.pass = false;

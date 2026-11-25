@@ -70,6 +70,11 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     'ui-e2e:test:e2e:filesystem-scenarios',
     'ui-e2e:test:e2e:non-isolated',
   ];
+  /**
+   * Suites admitted after the first batch, each on five consecutive green nightlies. The adaptive web tier ran as its
+   * own nightly job, not a matrix row, so its admission deleted that job (global review 2026-11-24, ruling 11).
+   */
+  const laterAdmissions = ['ui:test:e2e:attachment-image-engines', 'ui-e2e:test:e2e:adaptive'];
 
   it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
     expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
@@ -170,7 +175,15 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
         ratcheted.push(`${project.name}:${String(dependency)}`);
       }
     }
-    expect(ratcheted).toEqual(expect.arrayContaining(firstBatch));
+    expect(ratcheted).toEqual(expect.arrayContaining([...firstBatch, ...laterAdmissions]));
+  });
+
+  it('should run the adaptive web tier only in the merge queue, as a suite that opens no chat (ruling 11)', () => {
+    expect(Object.keys(nightly.jobs)).not.toContain('adaptive-web');
+    const runs = Object.values(nightly.jobs).flatMap((job) => (job.steps ?? []).map((entry) => entry.run ?? ''));
+    expect(runs.filter((run) => run.includes('test:e2e:adaptive'))).toEqual([]);
+    // It captures no chat log, so the row skips the chat log validation the empty-capture rule would fail.
+    expect(JSON.parse(lane?.env?.['SUITES_WITHOUT_CHAT'] ?? '[]')).toContain('test:e2e:adaptive');
   });
 
   it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
@@ -41,7 +42,7 @@ export default defineConfig({
       'src/graphics/three/utils/section-stencil-caps.browser.test.ts',
     ],
     fileParallelism: false,
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
     testTimeout: 120_000,
     browser: {
       enabled: true,

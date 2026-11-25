@@ -120,7 +120,8 @@ export type RunContext = {
   readonly attemptTimeout: number;
 };
 
-const killGroup = (child: ChildProcess): void => {
+/** Kill a detached child's whole process group. */
+export const killGroup = (child: ChildProcess): void => {
   if (child.pid !== undefined) {
     try {
       process.kill(-child.pid, 'SIGKILL');
@@ -353,7 +354,8 @@ export const reproduce = async (
 // ---------------------------------------------------------------------------------------------------------------
 // Resolving the target.
 
-const pnpm = (args: readonly string[], cwd: string, capture: boolean): string => {
+/** Run `pnpm` with the Nx daemon off; returns its stdout when `capture`. Throws on a non-zero exit. */
+export const pnpm = (args: readonly string[], cwd: string, capture: boolean): string => {
   const result = spawnSync('pnpm', args, {
     cwd,
     encoding: 'utf8',
@@ -368,10 +370,10 @@ const pnpm = (args: readonly string[], cwd: string, capture: boolean): string =>
 };
 
 /** The JSON object in a command's output, skipping lines a dotenv loader printed before it. */
-const jsonFrom = (text: string): unknown => JSON.parse(text.slice(text.search(/^[{[]/mu)));
+export const jsonFrom = (text: string): unknown => JSON.parse(text.slice(text.search(/^[{[]/mu)));
 
 /** The environment Nx gives the target: dotenv files of the project, then the workspace, never over the process's. */
-const targetEnvironment = ({
+export const targetEnvironment = ({
   root,
   projectRoot,
   target,
@@ -397,18 +399,20 @@ const targetEnvironment = ({
 };
 
 /** Build the target's task dependencies and run its non-Vitest commands once, before any attempt. */
-const prepare = ({
+export const prepare = ({
   root,
   identity,
   launcher,
   env,
+  graphPath = resolve(root, 'out/flake-repro/task-graph.json'),
 }: {
   root: string;
-  identity: Identity;
+  identity: Pick<Identity, 'project' | 'target'>;
   launcher: Launcher;
   env: Record<string, string | undefined>;
+  /** Where `nx run --graph` writes the target's task graph. */
+  graphPath?: string;
 }): void => {
-  const graphPath = resolve(root, 'out/flake-repro/task-graph.json');
   pnpm(['nx', 'run', `${identity.project}:${identity.target}`, `--graph=${graphPath}`], root, true);
   const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as {
     tasks?: { dependencies?: Record<string, string[]> };

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -39,6 +40,6 @@ export default defineConfig({
     // One Electron app, one API, one exclusive port pair.
     fileParallelism: false,
     pool: 'forks',
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['default', 'github-actions'] : ['default'],
+    reporters: testReporters('default'),
   },
 });

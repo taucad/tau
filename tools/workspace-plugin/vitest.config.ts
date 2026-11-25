@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -6,6 +7,6 @@ export default defineConfig({
       reportsDirectory: '../../out/reports/coverage/tools/workspace-plugin',
     },
     environment: 'node',
-    reporters: process.env.GITHUB_ACTIONS === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
   },
 });

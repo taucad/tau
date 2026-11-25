@@ -399,6 +399,10 @@ const config: KnipConfig = {
       // Generated declarations are catalog data read from disk by extraction tools.
       ignore: ['src/generated/**'],
     },
+    'tools/vitest-ci': {
+      // A child Vitest run by `src/outcome-reporter.test.ts`: the test spawns this config, nothing imports it.
+      ignore: ['fixtures/**'],
+    },
     'libs/oxlint': {
       // RuleTester inputs: the tests read and lint these files, nothing imports them.
       ignore: ['src/rules/fixtures/**'],

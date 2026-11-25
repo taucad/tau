@@ -72,8 +72,11 @@ describe('ui:test shards', () => {
       // The inferred `test` takes `dependsOn` from nx.json's targetDefaults and `inputs` from this file.
       expect(targets[name]?.dependsOn).toEqual(['copy-assets', '^copy-assets']);
       expect(targets[name]?.inputs).toEqual(targets['test']?.inputs);
-      // No coverage output: a shard never measures coverage (see the thresholds test below).
-      expect(targets[name]?.outputs).toBeUndefined();
+      // Only its own outcome rows (FQ-1, `@taucad/vitest-ci`), so shards never share a cached file; no coverage
+      // output, since a shard never measures coverage (see the thresholds test below).
+      expect(targets[name]?.outputs).toEqual([
+        `{workspaceRoot}/out/test-results/{projectName}/${name.replace(':', '-')}.outcomes.jsonl`,
+      ]);
     }
   });
 

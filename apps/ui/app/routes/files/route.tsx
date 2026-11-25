@@ -316,6 +316,7 @@ function ColumnShell({
   isLoading,
   isDisabled,
   emptyHint,
+  errorMessage,
   unsupportedHint,
   treeActionHandlers,
   topRight,
@@ -330,6 +331,8 @@ function ColumnShell({
   readonly isLoading: boolean;
   readonly isDisabled: boolean;
   readonly emptyHint?: string;
+  /** Why the column's root could not be listed; shown instead of the empty hint, never as an empty column. */
+  readonly errorMessage?: string;
   readonly unsupportedHint?: string;
   readonly treeActionHandlers: TreeActionHandlers;
   readonly topRight?: React.ReactNode;
@@ -388,14 +391,24 @@ function ColumnShell({
             <div className='flex h-32 items-center justify-center'>
               <Loader className='size-6' />
             </div>
-          ) : fileTree.length === 0 ? (
-            <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>
-              {emptyHint ?? 'No files found'}
-            </div>
+          ) : errorMessage === undefined ? (
+            fileTree.length === 0 ? (
+              <div className='flex h-32 items-center justify-center text-sm text-muted-foreground'>
+                {emptyHint ?? 'No files found'}
+              </div>
+            ) : (
+              <Tree elements={fileTree} onExpand={onExpand}>
+                {renderTree(fileTree, treeActionHandlers)}
+              </Tree>
+            )
           ) : (
-            <Tree elements={fileTree} onExpand={onExpand}>
-              {renderTree(fileTree, treeActionHandlers)}
-            </Tree>
+            <div role='alert' className='flex h-32 flex-col items-center justify-center gap-1 p-4 text-center text-sm'>
+              <span className='flex items-center gap-2 font-medium'>
+                <AlertCircle className='size-4 shrink-0 text-warning' aria-hidden='true' />
+                Couldn’t list this folder
+              </span>
+              <span className='line-clamp-3 text-xs break-all text-muted-foreground'>{errorMessage}</span>
+            </div>
           )}
         </div>
       )}
@@ -490,6 +503,8 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
   // Per-cache-key (backend | webaccess:<workspaceId>) loaded directories
   const [loadedDirectories, setLoadedDirectories] = useState<Record<string, Map<string, FileTreeNode[]>>>({});
   const [rootLoading, setRootLoading] = useState<Record<string, boolean>>({});
+  /* Why a column's root could not be listed: shown in the column, never as an empty one (R2). */
+  const [rootErrors, setRootErrors] = useState<Record<string, string | undefined>>({});
   const inflightRef = useRef<Set<string>>(new Set());
 
   const [grantedColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
@@ -581,7 +596,17 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           directories.set(directoryPath, nodes);
           return { ...previous, [cacheKey]: directories };
         });
-      } catch {
+        if (directoryPath === '/') {
+          setRootErrors((previous) => ({ ...previous, [cacheKey]: undefined }));
+        }
+      } catch (error) {
+        console.warn(`[files] could not list ${cacheKey}:${directoryPath}`, error);
+        if (directoryPath === '/') {
+          setRootErrors((previous) => ({
+            ...previous,
+            [cacheKey]: error instanceof Error ? error.message : String(error),
+          }));
+        }
         setLoadedDirectories((previous) => {
           const directories = new Map(previous[cacheKey] ?? []);
           directories.set(directoryPath, []);
@@ -881,6 +906,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
           subtitle={homeColumn.description}
           fileTree={projectTreeForKey(makeBackendKey(homeBackend))}
           isLoading={rootLoading[makeBackendKey(homeBackend)] ?? false}
+          errorMessage={rootErrors[makeBackendKey(homeBackend)]}
           isDisabled={false}
           treeActionHandlers={buildTreeActionHandlers(homeBackend)}
           onRefresh={() => {
@@ -920,6 +946,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
                     subtitle='On your disk'
                     fileTree={projectTreeForKey(cacheKey)}
                     isLoading={rootLoading[cacheKey] ?? false}
+                    errorMessage={rootErrors[cacheKey]}
                     isDisabled={column.status !== 'connected'}
                     emptyHint='No projects yet'
                     treeActionHandlers={buildTreeActionHandlers('webaccess', column.workspace.workspaceId)}

@@ -69,7 +69,11 @@
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"]
+      "inputs": ["default", "^production", "serviceEnvironment"],
+      "outputs": [
+        "{workspaceRoot}/out/reports/coverage/{projectRoot}",
+        "{workspaceRoot}/out/test-results/{projectName}/test.outcomes.jsonl"
+      ]
     },
     "build": {
       "inputs": ["production", "^production"]

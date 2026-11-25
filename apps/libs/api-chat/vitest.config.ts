@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -24,7 +25,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['default', 'github-actions'] : ['default'],
+    reporters: testReporters('default'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/apps/libs/api-chat',

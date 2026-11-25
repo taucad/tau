@@ -7,6 +7,7 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
+import { ChatSignInReturn } from '#routes/w.$workspace.$project/chat-sign-in-return.js';
 import { ENV } from '#environment.config.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
@@ -112,6 +113,8 @@ export function ChatInterfaceSessionGate({
           bodyless body factory, which every consumer of `useCadChatClient`
           used to write over each other. */}
       <ChatTurnHost />
+      {/* The chat's one owner of a return from sign-in: the card that sends the person there only arms it. */}
+      <ChatSignInReturn />
       {ENV.TAU_DEBUG ? (
         <Suspense fallback={null}>
           <DebugProbes />

@@ -146,7 +146,7 @@ export const useCadChatClient = (): CadChatClient => {
           support: resolved.model?.support,
         });
         if (blocked !== undefined) {
-          surfaceDispatchFailure(new Error(blocked));
+          surfaceDispatchFailure(new Error(blocked), 'send');
           return;
         }
       }

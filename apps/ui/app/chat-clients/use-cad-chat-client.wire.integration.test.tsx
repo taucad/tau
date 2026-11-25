@@ -64,6 +64,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
     get: () => undefined,
     getProjection: () => undefined,
+    getAttachmentStatus: () => 'unknown',
     requestTurn: vi.fn(),
     startPendingSeed: vi.fn(),
     refreshMessageQueue: vi.fn(),

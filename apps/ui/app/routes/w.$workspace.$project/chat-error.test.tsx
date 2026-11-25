@@ -1428,8 +1428,7 @@ describe('ChatError', () => {
         message: 'Insufficient Tau credit for this model request.',
         code: 'INSUFFICIENT_CREDIT',
       },
-      context,
-      () => 'gesture-1',
+      { kind: 'send', projection: context, createId: () => 'gesture-1' },
     );
     machine.waiting = undefined;
     vi.mocked(useChatSelector).mockImplementation((selector) =>

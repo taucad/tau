@@ -71,31 +71,40 @@ const refusedAtKey = 'refusedAt';
 /** A refusal recorded before the log was read: no later run can be told from an earlier one. */
 const unreadLog = 'unread';
 
+/** The detail a refusal of a gesture records the gesture's kind under. */
+const refusedGestureKey = 'refusedGesture';
+
+/** What the person asked for when the page refused to start a turn. @public */
+export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue';
+
 /**
  * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume), as the chat keeps it.
  *
  * Nothing ran, so the host log holds no trace of it, and the chat's saved error is its only record. It is a fact
  * about that gesture at that moment: it carries the gesture's own identity, and where the log stood when it was
  * refused, so a reader can tell it from a run that began afterwards, on this page or another. Without both it was
- * indistinguishable from a legacy chat-wide error, and was hidden as one on every healthy chat.
+ * indistinguishable from a legacy chat-wide error, and was hidden as one on every healthy chat. It also names the
+ * gesture, because the run under it is not the gesture's: only a refused Resume leaves that run as what to resume.
  *
  * @param error - The parsed refusal.
- * @param projection - The chat's projection when the gesture was refused.
- * @param createId - A source of unique ids.
+ * @param gesture - What the person asked for, the chat's projection when it was refused (`undefined` until the log
+ *   has been read), and a source of unique ids.
  * @returns The refusal to persist.
  * @public
  */
 export const refusalOfGesture = (
   error: NormalizedChatError,
-  projection: ChatProjection | undefined,
-  createId: () => string,
+  gesture: Readonly<{ kind: RefusedGesture; projection: ChatProjection | undefined; createId: () => string }>,
 ): NormalizedChatError => ({
   ...error,
-  requestId: error.requestId ?? `gesture:${createId()}`,
+  requestId: error.requestId ?? `gesture:${gesture.createId()}`,
   details: {
     ...error.details,
     [refusedAtKey]:
-      projection !== undefined && selectCaughtUp(projection) ? logPositionOf(selectCurrentRun(projection)) : unreadLog,
+      gesture.projection !== undefined && selectCaughtUp(gesture.projection)
+        ? logPositionOf(selectCurrentRun(gesture.projection))
+        : unreadLog,
+    [refusedGestureKey]: gesture.kind,
   },
 });
 
@@ -176,6 +185,25 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
  */
 export const selectRunResumable = (projection: ChatProjection | undefined): boolean =>
   projection !== undefined && selectCaughtUp(projection) && isResumableRun(selectCurrentRun(projection));
+
+/**
+ * Whether Resume answers the chat's visible failure: the run is one the turn host will continue, and the failure is
+ * that run's own or a refusal of a Resume of it. A refused send, edit or retry sits over a run it never touched, so
+ * a card for it may not promise that run, and nothing resumes that run on the refusal's account.
+ *
+ * @param state - The chat's projection, attachment and errors.
+ * @returns `true` where the visible failure's card may say Resume.
+ * @public
+ */
+export const selectVisibleFailureResumable = (state: VisibleFailureSource): boolean => {
+  const error = selectVisibleChatErrorEntry(state)?.error;
+  if (error === undefined || !selectRunResumable(state.projection)) {
+    return false;
+  }
+  const refusedGesture =
+    typeof error.details?.[refusedAtKey] === 'string' ? error.details[refusedGestureKey] : 'continue';
+  return refusedGesture === 'continue';
+};
 
 /** The failed run attempt a failure resumes on its own. @public */
 export type AutoResumeTarget = Readonly<{ runId: string; attempt: number }>;
@@ -268,7 +296,7 @@ export function autoResumePlanOf(
 ): AutoResumePlan | undefined {
   const error = selectVisibleChatErrorEntry(state)?.error;
   const target = selectAutoResumeTarget(state.projection);
-  if (error === undefined || target === undefined || !selectRunResumable(state.projection)) {
+  if (error === undefined || target === undefined || !selectVisibleFailureResumable(state)) {
     return undefined;
   }
   const { code } = error;

@@ -342,6 +342,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
     captureMessageQueueIntent: vi.fn(() => ({})),
     setTurnPlacement: vi.fn(),
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
+    getAttachmentStatus: () => 'attached',
     getProjection: () => {
       const runId = browserHostHarness.run?.runId ?? browserHostHarness.hostRunId;
       if (runId === undefined) {

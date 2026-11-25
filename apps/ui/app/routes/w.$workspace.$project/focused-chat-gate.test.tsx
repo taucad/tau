@@ -79,6 +79,7 @@ vi.mock('@xstate/react', () => ({
 /* The chat's turn host owns the agent-host binding and the bodyless body
  * factory; it reaches the whole project subtree to compose them. This gate's
  * contract is only that exactly one of them is mounted inside the provider. */
+vi.mock('#routes/w.$workspace.$project/chat-sign-in-return.js', () => ({ ChatSignInReturn: () => null }));
 vi.mock('#chat-clients/chat-turn-host.js', () => ({
   ChatTurnHost: () => <div data-testid='chat-turn-host' />,
 }));

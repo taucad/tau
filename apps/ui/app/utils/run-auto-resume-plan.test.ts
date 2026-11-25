@@ -20,6 +20,7 @@ import {
   autoResumeStillAnswers,
   refusalOfGesture,
   selectVisibleChatErrorEntry,
+  selectVisibleFailureResumable,
 } from '#utils/run-auto-resume-plan.js';
 import type { VisibleFailureSource } from '#utils/run-auto-resume-plan.js';
 
@@ -232,11 +233,11 @@ const gestureId = (): string => {
 describe('a refusal the page makes at admission (launch audit N-1, A-10)', () => {
   it('should show the credit refusal of a first turn on a healthy, attached chat', () => {
     const projection = caughtUpEmptyProjection();
-    const persistedError = refusalOfGesture(
-      parseAdmissionFailureForPersistence(creditRefusal()),
+    const persistedError = refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+      kind: 'send',
       projection,
-      gestureId,
-    );
+      createId: gestureId,
+    });
 
     const visible = selectVisibleChatErrorEntry({ projection, attachmentStatus: 'attached', persistedError });
 
@@ -247,11 +248,11 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
   it('should show a refusal with no code of its own, and a new identity for each gesture', () => {
     const projection = caughtUpEmptyProjection();
     const refusal = (): ChatErrorPayload =>
-      refusalOfGesture(
-        parseAdmissionFailureForPersistence(new Error('This chat has nothing to continue from yet.')),
+      refusalOfGesture(parseAdmissionFailureForPersistence(new Error('This chat has nothing to continue from yet.')), {
+        kind: 'send',
         projection,
-        gestureId,
-      );
+        createId: gestureId,
+      });
     const first = selectVisibleChatErrorEntry({ projection, attachmentStatus: 'attached', persistedError: refusal() });
     const second = selectVisibleChatErrorEntry({ projection, attachmentStatus: 'attached', persistedError: refusal() });
 
@@ -261,21 +262,21 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
 
   it('should show the refusal of a follow-up turn over the failure of the run before it', () => {
     const failed = failedRun(rateLimited());
-    const persistedError = refusalOfGesture(
-      parseAdmissionFailureForPersistence(creditRefusal()),
-      failed.projection,
-      gestureId,
-    );
+    const persistedError = refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+      kind: 'send',
+      projection: failed.projection,
+      createId: gestureId,
+    });
 
     expect(selectVisibleChatErrorEntry({ ...failed, persistedError })?.error.code).toBe('INSUFFICIENT_CREDIT');
   });
 
   it('should retire the refusal once the log holds a run that began after it', () => {
-    const persistedError = refusalOfGesture(
-      parseAdmissionFailureForPersistence(creditRefusal()),
-      caughtUpEmptyProjection(),
-      gestureId,
-    );
+    const persistedError = refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+      kind: 'send',
+      projection: caughtUpEmptyProjection(),
+      createId: gestureId,
+    });
     const later = failedRun(rateLimited());
 
     /* Another page ran the chat since: its run, not this page's old refusal, is what the chat shows. */
@@ -283,6 +284,22 @@ describe('a refusal the page makes at admission (launch audit N-1, A-10)', () =>
     expect(selectVisibleChatErrorEntry({ ...later, attachmentStatus: 'lost', persistedError })?.error.code).toBe(
       'RATE_LIMITED',
     );
+  });
+
+  /* The run under a refusal is not the refused gesture's: a card for a refused send may not offer to resume it. */
+  it('should call the run resumable for its own failure and for a refused Resume, not for a refused send', () => {
+    const failed = failedRun(rateLimited());
+    const refused = (gesture: 'send' | 'continue'): ChatErrorPayload =>
+      refusalOfGesture(parseAdmissionFailureForPersistence(creditRefusal()), {
+        kind: gesture,
+        projection: failed.projection,
+        createId: gestureId,
+      });
+
+    expect(selectVisibleFailureResumable(failed)).toBe(true);
+    expect(selectVisibleFailureResumable({ ...failed, persistedError: refused('continue') })).toBe(true);
+    expect(selectVisibleFailureResumable({ ...failed, persistedError: refused('send') })).toBe(false);
+    expect(autoResumePlanOf({ ...failed, persistedError: refused('send') }, 0)).toBeUndefined();
   });
 
   it('should still retire a legacy chat-wide error that carries no identity', () => {

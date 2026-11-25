@@ -122,7 +122,9 @@ describe('useProjectNameClient', () => {
   });
 
   it('should reject with a NameGeneratorRequestError carrying the status code and body when the response is non-2xx', async () => {
-    fetchMock.mockResolvedValue(new Response('insufficient credits', { status: 402, statusText: 'Payment Required' }));
+    fetchMock.mockResolvedValue(
+      new Response('upstream unavailable', { status: 503, statusText: 'Service Unavailable' }),
+    );
 
     const { result } = renderHook(() => useProjectNameClient());
 
@@ -133,10 +135,23 @@ describe('useProjectNameClient', () => {
       expect.fail('should have thrown');
     } catch (error) {
       expect((error as Error).name).toBe('NameGeneratorRequestError');
-      expect((error as Error).message).toContain('402');
-      expect((error as Error).message).toContain('insufficient credits');
-      expect((error as NameGeneratorRequestError).status).toBe(402);
+      expect((error as Error).message).toContain('503');
+      expect((error as Error).message).toContain('upstream unavailable');
+      expect((error as NameGeneratorRequestError).status).toBe(503);
     }
+  });
+
+  it('should resolve with no name when the account is refused for credit (402)', async () => {
+    fetchMock.mockResolvedValue(new Response('insufficient credits', { status: 402, statusText: 'Payment Required' }));
+
+    const { result } = renderHook(() => useProjectNameClient());
+
+    let resolved: string | undefined;
+    await act(async () => {
+      resolved = await result.current.generate({ projectId: 'proj_test', text: 'Hi' });
+    });
+
+    expect(resolved).toBe('');
   });
 
   it('should retain the helper funded-limit code without failing the primary chat', async () => {

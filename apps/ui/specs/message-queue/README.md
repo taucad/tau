@@ -105,3 +105,5 @@ UI layering W2 re-pinned the drift after `chat-session-store.ts` began importing
 UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; no action changed.
 
 The launch audit's first fixes re-pinned the drift after `chat-session-store.ts` began comparing the composer's draft with a sent message in the composed form, `use-turn-admission.ts` began refusing a signed-out person's turn on the existing refused-admission path and recording the refused gesture on the saved error, and `chat-turn-host.tsx` and `use-cad-chat-client.ts` began passing that gesture's kind; no action changed.
+
+The launch audit's review fixes re-pinned the drift after `use-cad-chat-client.ts` began naming a refused attachment send or edit by its own gesture kind; no action changed.

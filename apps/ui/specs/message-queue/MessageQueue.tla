@@ -189,6 +189,9 @@
 \* signed-out person's turn on the existing refused-admission path and records the refused gesture's identity and kind
 \* on the saved error; `chat-turn-host.tsx` and `use-cad-chat-client.ts` pass that kind. Delivery, persistence and the
 \* queue barrier are unchanged. No action or verdict changes.
+\* Launch audit review fixes (2026-11-25): `use-cad-chat-client.ts` names a refused attachment send or edit by its own
+\* gesture kind instead of always `send`. Delivery, persistence and the queue barrier are unchanged. No action or
+\* verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

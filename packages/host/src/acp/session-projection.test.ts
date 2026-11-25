@@ -2559,7 +2559,7 @@ it('should record a vendor call with empty names, ids and paths as rows the log 
   ).toBe(true);
 });
 
-it('should pair a vendor result with one call when two open calls share an empty id (E-3)', async () => {
+it('should give neither call a result when two open calls share an empty id (E-3)', async () => {
   const appended: ExternalAgentLogEvent[] = [];
   const projection = createTurnProjection({ agentId: 'codex', createId: randomUUID, turn: stubTurn(appended) });
 
@@ -2572,25 +2572,61 @@ it('should pair a vendor result with one call when two open calls share an empty
       status: 'pending',
     } as SessionUpdate);
   }
+  /* Either call may have finished first: the updates cannot say which. */
+  for (const rawOutput of ['done', 'again']) {
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: '',
+      status: 'completed',
+      rawOutput,
+    } as SessionUpdate);
+  }
+  /* A third call that arrives finished carries its own result in the same notification. */
   projection.update({
-    sessionUpdate: 'tool_call_update',
+    sessionUpdate: 'tool_call',
     toolCallId: '',
+    title: 'third',
+    kind: 'execute',
     status: 'completed',
-    rawOutput: 'done',
-  } as SessionUpdate);
-  projection.update({
-    sessionUpdate: 'tool_call_update',
-    toolCallId: '',
-    status: 'completed',
-    rawOutput: 'again',
+    rawOutput: 'own',
   } as SessionUpdate);
   await projection.flush();
 
   const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
   const inputs = messages.filter((message): message is MessageOf<'tool-input'> => message.role === 'tool-input');
   const outputs = messages.filter((message): message is MessageOf<'tool-output'> => message.role === 'tool-output');
-  expect(inputs.map((input) => input.toolName)).toEqual(['first', 'second']);
-  /* One result, on the newer call; the earlier call keeps no result rather than another call's. */
-  expect(outputs).toHaveLength(1);
-  expect(outputs[0]?.toolCallId).toBe(inputs[1]?.toolCallId);
+  expect(inputs.map((input) => input.toolName)).toEqual(['first', 'second', 'third']);
+  expect(outputs.map((output) => [output.toolCallId, output.content])).toEqual([[inputs[2]?.toolCallId, 'own']]);
+});
+
+it('should describe a permission request under a shared id by the request alone (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const approvals: unknown[] = [];
+  const projection = createTurnProjection({
+    agentId: 'codex',
+    createId: randomUUID,
+    turn: {
+      ...stubTurn(appended),
+      approve: async (approval) => {
+        approvals.push(approval);
+        return { interruptId: 'interrupt', outcome: 'approved', optionId: 'allow_once' };
+      },
+    },
+  });
+
+  for (const command of ['ls', 'rm -rf build']) {
+    projection.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: '',
+      title: 'Run',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { command },
+    } as SessionUpdate);
+  }
+  const request = { prompt: 'Allow Run?', payload: { toolCall: { toolCallId: '', title: 'Run' } } };
+  await projection.approve(request);
+  await projection.flush();
+
+  expect(approvals).toEqual([request]);
 });

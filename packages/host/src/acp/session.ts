@@ -1634,6 +1634,12 @@ export const createTurnProjection = (options: {
       rawOutput?: unknown;
     }
   >();
+  /**
+   * Vendor ids the agent gave a second call while an earlier one was open (two calls with no id share one). A later
+   * update under such an id cannot say which call it means, so for the rest of the turn none is attributed to a call
+   * and no stored input describes a permission request.
+   */
+  const ambiguousToolCalls = new Set<string>();
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: options.agentId } };
   const tauMcpMetadata = {
     tauInternal: { ...externalMetadata.tauInternal, presentation: 'tau-mcp' },
@@ -1997,6 +2003,19 @@ export const createTurnProjection = (options: {
     openToolCalls.delete(update.toolCallId);
   };
 
+  /** Ends an open call without a result, keeping the fullest facts seen, as a turn's end does. */
+  const closeAsItStands = async (open: {
+    readonly facts: NonNullable<ToolInputProviderMessage['call']>;
+    readonly inputMessage: ToolInputProviderMessage;
+  }): Promise<void> =>
+    append([
+      {
+        type: 'message.envelope-replaced',
+        messageId: open.inputMessage.id,
+        replacement: { ...open.inputMessage, call: open.facts },
+      },
+    ]);
+
   const projectToolCall = async (update: Extract<SessionUpdate, { sessionUpdate: 'tool_call' }>): Promise<void> => {
     await flushBoundary();
     const callId = options.createId();
@@ -2016,19 +2035,17 @@ export const createTurnProjection = (options: {
       content: input,
       metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
     };
-    const reused = openToolCalls.get(update.toolCallId);
+    const earlier = openToolCalls.get(update.toolCallId);
+    /* The agent named a call it has not finished (two calls with no id share one): no later update can say which call
+     * it means. Both calls close as they stand, as a turn's end closes an open call, rather than either showing the
+     * other's result; only this notification's own facts are the newer call's. */
+    const ambiguous = earlier !== undefined || ambiguousToolCalls.has(update.toolCallId);
+    if (ambiguous) {
+      ambiguousToolCalls.add(update.toolCallId);
+    }
     openToolCalls.set(update.toolCallId, { toolName: callToolName, callId, facts, tauMcp, input, inputMessage });
-    /* The agent named a call it has not finished (two calls with no id share one): its later updates cannot say which
-     * call they mean, so they go to the newer one, and the earlier call closes as it stands, as a turn's end closes an
-     * open call. Its row is not given the newer call's result. */
-    if (reused !== undefined) {
-      await append([
-        {
-          type: 'message.envelope-replaced',
-          messageId: reused.inputMessage.id,
-          replacement: { ...reused.inputMessage, call: reused.facts },
-        },
-      ]);
+    if (earlier !== undefined) {
+      await closeAsItStands(earlier);
     }
     await append([
       {
@@ -2040,6 +2057,11 @@ export const createTurnProjection = (options: {
      * `tool-input` row with no `tool-output` is a part that hangs until the next
      * user message demotes it to an interruption the user never caused. */
     await projectToolResult(update);
+    const unfinished = openToolCalls.get(update.toolCallId);
+    if (ambiguous && unfinished !== undefined) {
+      openToolCalls.delete(update.toolCallId);
+      await closeAsItStands(unfinished);
+    }
   };
 
   // oxlint-disable-next-line eslint/complexity -- one branch per `session/update` variant is the point (V13): every variant carries an explicit ruling here, and a `default` would turn the next protocol addition into a silent drop.
@@ -2307,7 +2329,7 @@ export const createTurnProjection = (options: {
       const toolCallId = requestedCall?.['toolCallId'];
       const open = typeof toolCallId === 'string' ? openToolCalls.get(toolCallId) : undefined;
       if (typeof toolCallId === 'string') {
-        if (requestedPermissionCalls.has(toolCallId)) {
+        if (requestedPermissionCalls.has(toolCallId) || ambiguousToolCalls.has(toolCallId)) {
           ambiguousPermissionCalls.add(toolCallId);
         }
         requestedPermissionCalls.add(toolCallId);
@@ -2392,13 +2414,7 @@ export const createTurnProjection = (options: {
       for (const open of openToolCalls.values()) {
         // Preserve undecided media if cancellation or transport loss prevents a terminal result.
         // oxlint-disable-next-line no-await-in-loop -- durable call order is retained.
-        await append([
-          {
-            type: 'message.envelope-replaced',
-            messageId: open.inputMessage.id,
-            replacement: { ...open.inputMessage, call: open.facts },
-          },
-        ]);
+        await closeAsItStands(open);
       }
       openToolCalls.clear();
       const open = [...assistantBlocks.values()].filter((block) => block.text !== '' && !block.finalCommitted);

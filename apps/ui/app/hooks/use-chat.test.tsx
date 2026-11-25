@@ -14,9 +14,16 @@ import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import {
+  lifecycleRow,
+  logRow,
+  publishLogRows,
+  runningRows,
+  writerOwnedCatchUp,
+} from '#machines/chat-projection.fixture.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import { presentMessages } from '#services/chat-session-store.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
 
@@ -617,67 +624,68 @@ describe('hooks resolution rules', () => {
     expect(result.current.status).toBe('ready');
   });
 
-  it('does not hide same-sized message order and map replacements', async () => {
-    const { result } = renderHook(
-      () =>
-        useChatSelector((state) => ({
-          order: state.messageOrder,
-          messagesById: state.messagesById,
-        })),
-      { wrapper: createWrapper('chat_selector_structure') },
-    );
-    await waitFor(() => {
-      expect(getFake('chat_selector_structure')).toBeDefined();
-    });
-    const fake = getFake('chat_selector_structure');
+  /* T2: the displayed transcript is the fold of the log, so its index is re-homed from the SDK chat's
+   * replaced messages to the store's pure index and to the log rows that replace a message. */
+  it('does not hide same-sized message order and map replacements', () => {
+    const first = presentMessages([
+      makeAssistantMessage('assistant_1', 'ready'),
+      makeAssistantMessage('assistant_2', 'ready'),
+      makeAssistantMessage('assistant_3', 'ready'),
+    ]);
+    expect(first.order).toEqual(['assistant_1', 'assistant_2', 'assistant_3']);
 
-    act(() => {
-      fake.messages = [
-        makeAssistantMessage('assistant_1', 'ready'),
-        makeAssistantMessage('assistant_2', 'ready'),
-        makeAssistantMessage('assistant_3', 'ready'),
-      ];
-      fake.emitMessages();
-    });
-    expect(result.current.order).toEqual(['assistant_1', 'assistant_2', 'assistant_3']);
-
-    act(() => {
-      fake.messages = [
+    const next = presentMessages(
+      [
         makeAssistantMessage('assistant_1', 'ready'),
         makeAssistantMessage('assistant_changed', 'ready'),
         makeAssistantMessage('assistant_3', 'ready'),
-      ];
-      fake.emitMessages();
-    });
-    expect(result.current.order).toEqual(['assistant_1', 'assistant_changed', 'assistant_3']);
-    expect(result.current.messagesById.has('assistant_changed')).toBe(true);
-    expect(result.current.messagesById.has('assistant_2')).toBe(false);
+      ],
+      first,
+    );
+    expect(next.order).toEqual(['assistant_1', 'assistant_changed', 'assistant_3']);
+    expect(next.messagesById.has('assistant_changed')).toBe(true);
+    expect(next.messagesById.has('assistant_2')).toBe(false);
   });
 
-  it('refreshes the middle-message index when actions replace a transcript without changing its ends', () => {
+  it('refreshes the middle-message index when the log replaces a message without changing its ends', async () => {
     const { result } = renderHook(
       () => ({
-        actions: useChatActions(),
+        store: useChatSessionStore(),
         order: useChatSelector((state) => state.messageOrder),
         messagesById: useChatSelector((state) => state.messagesById),
       }),
       { wrapper: createWrapper('chat_middle_replace') },
     );
-    const first = makeUserMessage('first', 'first');
-    const last = makeAssistantMessage('last', 'last');
-    act(() => {
-      result.current.actions.setMessages([first, makeAssistantMessage('middle-old', 'old'), last]);
-      getFake('chat_middle_replace').emitMessages();
+    await waitFor(() => {
+      expect(getFake('chat_middle_replace')).toBeDefined();
     });
-    expect(result.current.order).toEqual(['first', 'middle-old', 'last']);
+    const assistant = (text: string) => ({ id: 'step-1', role: 'assistant', content: [{ type: 'text', text }] });
+    act(() => {
+      publishLogRows(result.current.store, 'chat_middle_replace', [
+        ...runningRows(),
+        logRow(2, { type: 'message.appended', message: { id: 'first', role: 'user', content: 'first' } }),
+        logRow(3, { type: 'message.appended', message: assistant('old') }),
+        lifecycleRow(4, 'completed'),
+        lifecycleRow(5, 'admitted', 'run_2'),
+        lifecycleRow(6, 'running', 'run_2'),
+        logRow(7, { runId: 'run_2', type: 'message.appended', message: { id: 'last', role: 'user', content: 'last' } }),
+      ]);
+    });
+    await waitFor(() => {
+      expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
+    });
+    expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'old' });
 
     act(() => {
-      result.current.actions.setMessages([first, makeAssistantMessage('middle-new', 'new'), last]);
-      getFake('chat_middle_replace').emitMessages();
+      publishLogRows(
+        result.current.store,
+        'chat_middle_replace',
+        [logRow(8, { type: 'message.envelope-replaced', messageId: 'step-1', replacement: assistant('new') })],
+        8,
+      );
     });
-    expect(result.current.order).toEqual(['first', 'middle-new', 'last']);
-    expect(result.current.messagesById.has('middle-old')).toBe(false);
-    expect(result.current.messagesById.get('middle-new')?.parts[0]).toMatchObject({ text: 'new' });
+    expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
+    expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
   });
 
   // =========================================================================

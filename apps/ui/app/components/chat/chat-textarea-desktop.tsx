@@ -50,6 +50,7 @@ import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
+import { noteBrowserComposerFocused } from '#services/agent-host-client.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
 import type { CadReference } from '@taucad/chat/references';
 import {
@@ -820,6 +821,12 @@ export const ChatTextareaDesktop = memo(function ({
     editor.setEditable(!isSubmitting, false);
   }, [editor, isSubmitting]);
 
+  const handleComposerFocus = useCallback((): void => {
+    handleTextareaFocus?.();
+    /* C7: a send may follow, so an open project host refreshes its deployment answer before admission needs it. */
+    void noteBrowserComposerFocused();
+  }, [handleTextareaFocus]);
+
   const focusEditor = useCallback(() => {
     editorRef.current?.commands.focus('end');
   }, []);
@@ -914,7 +921,7 @@ export const ChatTextareaDesktop = memo(function ({
         data-collapsed={isCollapsed ? '' : undefined}
         data-queued-send={isQueuedSendShown ? '' : undefined}
         onKeyDownCapture={cancelQueuedSubmitOnEscape}
-        onFocus={handleTextareaFocus}
+        onFocus={handleComposerFocus}
         onBlur={handleTextareaBlur}
         {...boxDropHandlers}
       >

@@ -109,3 +109,5 @@ The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began s
 The launch audit's first fixes re-pinned the drift after `chat-session-store.ts` began comparing the composer's draft with a sent message in the composed form, `use-turn-admission.ts` began refusing a signed-out person's turn on the existing refused-admission path and recording the refused gesture on the saved error, and `chat-turn-host.tsx` and `use-cad-chat-client.ts` began passing that gesture's kind; no action changed.
 
 The launch audit's review fixes re-pinned the drift after `use-cad-chat-client.ts` began naming a refused attachment send or edit by its own gesture kind; no action changed.
+
+use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.

@@ -68,8 +68,10 @@ export type OriginAnswerResolver<A> = Readonly<{
    * Resolve the answer for the origin of `url`. Rejects with a `TypeError` only when `url` has no origin.
    *
    * @param url - An origin or any URL on it; only its origin is used.
+   * @param options - `ahead`: milliseconds; a cached answer that expires within them is not reused, so a caller
+   *   refreshing early starts the request before the answer expires. The stale fallback keeps its own bound.
    */
-  resolve(url: string): Promise<OriginAnswer<A>>;
+  resolve(url: string, options?: Readonly<{ ahead?: number }>): Promise<OriginAnswer<A>>;
 }>;
 
 /** Resolver defaults. @public */
@@ -273,13 +275,13 @@ export const createOriginAnswerResolver = <A>(input: OriginAnswerResolverInput<A
   };
 
   return {
-    resolve: async (url) => {
+    resolve: async (url, options) => {
       const { origin } = new URL(url);
       if (origin === 'null') {
         throw new TypeError(`No origin in ${url}`);
       }
       const cached = storeOf(origin).read();
-      if (isAnswerFresh(cached, now())) {
+      if (isAnswerFresh(cached, now() + (options?.ahead ?? 0))) {
         return { state: 'known', answer: cached.answer, source: 'cache' };
       }
       const pending = inFlight.get(origin);

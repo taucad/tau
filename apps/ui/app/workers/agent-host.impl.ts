@@ -41,6 +41,7 @@ import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
+import type { DeploymentModeResolver } from '@taucad/utils/deployment-mode';
 import { createGatewayModelTransport, followChat } from '@taucad/agent-host';
 import type { ChatLedger, StorageDurabilityClass, ToolRegistry } from '@taucad/agent-host';
 import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -113,6 +114,8 @@ export type ResidentWorkerContext = Readonly<{
   /** `arrange_workbench` set these leaves in a view: the page, which holds the device's storage, records them (BD7). */
   viewFieldsSet?: (set: Readonly<{ projectId: string; viewId: string; fields: ViewFieldsSet }>) => void;
   visibility: NonNullable<BrowserChatStoreOptions['visibility']>;
+  /** A composer took focus, a fact that precedes a send (C7); absent in tests that have no page. */
+  composerFocus?: Readonly<{ subscribe: (listener: () => void) => () => void }>;
   /** M1's timers; the worker leaves the defaults, and the browser tier shortens idle eviction (RH-A15). */
   delays?: AgentLauncherOptions['delays'];
 }>;
@@ -158,6 +161,37 @@ const runsEnded =
  * scope has one, else memory.
  */
 const deployment = createDeploymentModeResolver({ storage: () => globalThis.localStorage });
+
+/**
+ * Keep the deployment answer for `url` fresh while a project host is open (C7): refreshed ahead of its expiry, and on
+ * the facts that precede a send (the page shown again, a composer taking focus), since a timer does not fire across
+ * sleep or in a throttled tab. An admission then reads the answer fresh, or awaits only the request already in flight.
+ *
+ * @param resolver - The worker's deployment resolver.
+ * @param url - The host's API origin.
+ * @param facts - The page facts the worker relays.
+ * @returns Stops the refreshing.
+ */
+export const keepDeploymentFresh = (
+  resolver: Pick<DeploymentModeResolver, 'keepFresh' | 'refresh'>,
+  url: string,
+  facts: Pick<ResidentWorkerContext, 'visibility' | 'composerFocus'>,
+): (() => void) => {
+  const stopTimer = resolver.keepFresh(url);
+  const stopVisible = facts.visibility.subscribe((visible) => {
+    if (visible) {
+      resolver.refresh(url);
+    }
+  });
+  const stopFocus = facts.composerFocus?.subscribe(() => {
+    resolver.refresh(url);
+  });
+  return () => {
+    stopTimer();
+    stopVisible();
+    stopFocus?.();
+  };
+};
 
 /** How often the worker's agent channel sends `lk`, so the page's liveness bound can tell slow from dead (T9 E3). */
 const keepaliveInterval = 1000;
@@ -1129,6 +1163,8 @@ const composeProjectHost = async (
     });
     opened(() => evidence?.close());
   }
+  const stopDeploymentRefresh = keepDeploymentFresh(deployment, provide.gatewayBaseUrl, worker);
+  opened(stopDeploymentRefresh);
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
 
   return {
@@ -1241,6 +1277,7 @@ const composeProjectHost = async (
     },
     close: async () => {
       diagnose('host.closed');
+      stopDeploymentRefresh();
       evidence?.close();
       for (const channel of channels) {
         channel.dispose('project host closed');

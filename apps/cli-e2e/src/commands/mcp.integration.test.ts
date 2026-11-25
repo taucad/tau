@@ -35,6 +35,8 @@ import { connectMachineChannel } from '@taucad/runtime/machine';
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
 import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-testing';
 
+import { removeInBackground } from '#process-teardown.test-utils.js';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
 const binPath = resolvePath(
@@ -2117,7 +2119,8 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
     await writeFile(join(project, 'main.cs'), egressCheckedCsharp(canary.port));
     await writeFile(join(project, 'main.ts'), files.block['main.ts']);
     store = await mkdtemp(join(tmpdir(), 'mcp-native-darwin-store-'));
-    disposers.push(async () => rm(store, { recursive: true, force: true }));
+    /* Off the hook: Build123d and PicoGK prepared are about 1 GB, whose removal can outlast the 10 s hook timeout. */
+    disposers.push(async () => removeInBackground(store));
     served = launch(project, undefined, { env: darwinEnvironment('') });
     disposers.push(stopIfRunning(served));
     disposers.push(async () => {

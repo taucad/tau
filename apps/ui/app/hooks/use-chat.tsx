@@ -615,7 +615,7 @@ export function useChatActions(chatId?: string): ChatActions {
 
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {
         const session = resolveSession();
-        const resolved = originalMessage ?? session?.chat.messages.find((m) => m.id === messageId);
+        const resolved = originalMessage ?? session?.messages.find((m) => m.id === messageId);
         draftActorRef.send({ type: 'startEditingMessage', messageId, originalMessage: resolved });
       },
 
@@ -625,7 +625,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        if (!session.chat.messages.some((m) => m.id === messageId)) {
+        if (!session.messages.some((m) => m.id === messageId)) {
           return;
         }
         void store.requestTurn(resolvedChatId, {

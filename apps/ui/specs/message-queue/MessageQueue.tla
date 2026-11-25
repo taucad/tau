@@ -196,6 +196,9 @@
 \* Launch audit review fixes (2026-11-25): `use-cad-chat-client.ts` names a refused attachment send or edit by its own
 \* gesture kind instead of always `send`. Delivery, persistence and the queue barrier are unchanged. No action or
 \* verdict changes.
+\* use_skill startup latency T2 (2026-11-26): the transcript `chat-session-store.ts`, `chat-turn-host.tsx`,
+\* `use-cad-chat-client.ts` and `use-chat.tsx` read is the fold of the projection, with a durably accepted gesture shown
+\* until its run folds; delivery, persistence, acknowledgement and the queue are untouched. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

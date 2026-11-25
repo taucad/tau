@@ -113,6 +113,11 @@ const visibility: ResidentWorkerContext['visibility'] = {
   visible: () => visible,
   subscribe: (listener) => visibilityTopic.subscribe(listener),
 };
+/* A composer took focus: each project host refreshes its deployment answer before a send needs it (C7). */
+const composerFocusTopic = new Topic<undefined>();
+const composerFocus: ResidentWorkerContext['composerFocus'] = {
+  subscribe: (listener) => composerFocusTopic.subscribe(listener),
+};
 
 let tabId: string | undefined;
 let requestRebridge: ResidentWorkerContext['requestRebridge'];
@@ -134,6 +139,7 @@ const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
   return loaded.openBrowserProjectHost(args, {
     tabId: requireTab(),
     visibility,
+    composerFocus,
     requestRebridge,
     forwardTelemetry: (entry) => forwardTelemetry?.(entry),
     viewFieldsSet: (set) => forwardViewFieldsSet?.(set),
@@ -206,6 +212,10 @@ workerScope.addEventListener('message', (event) => {
         case 'visibility': {
           visible = (args as Calls['visibility']['args']).visible;
           visibilityTopic.emit(visible);
+          return undefined;
+        }
+        case 'composerFocus': {
+          composerFocusTopic.emit(undefined);
           return undefined;
         }
         default: {

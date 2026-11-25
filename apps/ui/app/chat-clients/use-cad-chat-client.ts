@@ -130,7 +130,7 @@ export const useCadChatClient = (): CadChatClient => {
   useEffect(() => {
     resolveModelRef.current = resolveModel;
   }, [resolveModel]);
-  const messages = Array.isArray(chat.messages) ? chat.messages : [];
+  const messages = useChatSelector((state) => state.messages);
 
   /**
    * Refuse a draft the turn's model cannot read (D20), and copy the rest into

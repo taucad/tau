@@ -873,6 +873,14 @@
       "owner": "W9"
     },
     {
+      "id": "D-UI-10",
+      "bound": "Chat subscriber wake throttle, leading and trailing at most every 50 ms while the fold changes (the AI SDK throttled it before T2)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "session.announceTimer = setTimeout",
+      "class": "Presentation",
+      "owner": "use_skill startup latency T2"
+    },
+    {
       "id": "D17b",
       "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
       "site": "apps/ui/app/services/chat-session-store.ts",

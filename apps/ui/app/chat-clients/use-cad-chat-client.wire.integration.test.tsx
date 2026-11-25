@@ -60,9 +60,11 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: vi.fn(),
   useActiveChatSession: () => ({ activeChatId: 'chat_integration' }),
 }));
+/** The store's displayed transcript, which the turn host and `useChatSelector` read (T2). */
+const displayed = vi.hoisted(() => ({ messages: [] as readonly MyUIMessage[] }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
-    get: () => undefined,
+    get: () => ({ messages: displayed.messages }),
     getProjection: () => undefined,
     getAttachmentStatus: () => 'unknown',
     requestTurn: vi.fn(),
@@ -143,6 +145,7 @@ const installActions = (actions: ActionsMock): void => {
 };
 
 beforeEach(() => {
+  displayed.messages = [];
   resetChatTurnServices();
   vi.clearAllMocks();
   vi.mocked(useChatComposer).mockReturnValue({
@@ -170,9 +173,12 @@ beforeEach(() => {
     session: undefined,
   } as unknown as ChatComposerContextValue);
   vi.mocked(useChatSelector).mockImplementation((selector) =>
-    selector({ draftMode: 'agent', draftToolChoice: 'auto', status: 'ready' } as unknown as Parameters<
-      typeof selector
-    >[0]),
+    selector({
+      draftMode: 'agent',
+      draftToolChoice: 'auto',
+      status: 'ready',
+      messages: displayed.messages,
+    } as unknown as Parameters<typeof selector>[0]),
   );
   vi.mocked(useCookie).mockReturnValue([true, noop, noop] as unknown as ReturnType<typeof useCookie>);
   vi.mocked(useChatSnapshot).mockReturnValue(undefined);
@@ -182,7 +188,7 @@ beforeEach(() => {
 describe('useCadChatClient host admission integration', () => {
   it('should produce a host Start payload accepted by the wire schema', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    chat.messages = [...defaultMessages];
+    displayed.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -208,7 +214,7 @@ describe('useCadChatClient host admission integration', () => {
     contextPayloadMock.mockReturnValue(contextPayload);
 
     const chat = mock<Chat<MyUIMessage>>();
-    chat.messages = [...defaultMessages];
+    displayed.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -226,7 +232,7 @@ describe('useCadChatClient host admission integration', () => {
 
   it('should reject a Start payload without its user message', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    chat.messages = [...defaultMessages];
+    displayed.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);

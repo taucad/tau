@@ -71,7 +71,8 @@ export type ProjectManagerContextType = {
   restoreProject: (projectId: string) => Promise<boolean>;
   /** @returns whether a library row was actually trashed — a vanished row is not a success (DF3). */
   deleteProject: (projectId: string) => Promise<boolean>;
-  permanentlyDeleteProject: (projectId: string) => Promise<void>;
+  /** Delete one exact directory for good: `locator`'s copy, or else the one the route binds (blueprint W0). */
+  permanentlyDeleteProject: (projectId: string, locator?: ProjectLocator) => Promise<void>;
   /** Refuse a delete while a stored chat's history is not caught up or work is running (row L7). */
   verifyProjectQuiescent: (projectId: string) => Promise<void>;
   /**

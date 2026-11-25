@@ -103,3 +103,5 @@ PL7 staging defects FP9 re-pinned the drift after `chat-textarea.tsx` began load
 UI layering W2 re-pinned the drift after `chat-session-store.ts` began importing `run-auto-resume` from `@taucad/chat-ui`, where it moved unchanged from `@taucad/ui-core`; no action changed.
 
 UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing the `CommitCancelledDraftRestoreInput` type from `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; no action changed.
+
+The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began showing an agent host load failure that the chat's host read met before a seed's command could; the seed stays held until a host read answers, and no action changed.

@@ -191,7 +191,7 @@ jobs:
           packages: xvfb
           playwright-browsers: chromium
       - name: Install Chromium
-        run: pnpm exec playwright install chromium
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Deal this shard's fixtures
         id: deal
         env:
@@ -218,6 +218,17 @@ jobs:
           path: ${{ env.PARITY_VIEWER_OUT }}
           if-no-files-found: error
           retention-days: 14
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-viewer-parity-${{ matrix.shard }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Every fixture of the manifest, against the eight shards' references merged: the gate runs once, unsharded.
   gate:
@@ -258,7 +269,7 @@ jobs:
       - name: Install Chromium and select lavapipe
         run: |
           echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
-          pnpm exec playwright install chromium
+          ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Download the viewer references
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -293,3 +304,14 @@ jobs:
           name: viewer-parity-results
           path: ${{ env.PARITY_OUT }}
           retention-days: 14
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-viewer-parity-gate
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

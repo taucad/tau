@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import { resolve } from 'node:path';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import {
   reactCaptureTargetDiagnostics,
@@ -18,6 +19,7 @@ import { reactE2ETargets } from './support/targets.ts';
 export default defineConfig({
   root: import.meta.dirname,
   test: {
+    reporters: testReporters('default'),
     attachmentsDir: resolve(import.meta.dirname, '../../out/test-results/vitest-browser/apps/react-e2e/attachments'),
     coverage: {
       reportsDirectory: '../../out/reports/coverage/apps/react-e2e',

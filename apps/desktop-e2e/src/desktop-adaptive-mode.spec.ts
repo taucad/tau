@@ -26,6 +26,7 @@ import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } 
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { composerOf, expectSignedIn, expectVisible } from '#support/scenario.js';
+import { connectTauCloud, openBackupChooser } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauBillingAccountArgs, tauTestAccount } from '#support/tau-account.js';
 
 const execFileAsync = promisify(execFile);
@@ -57,13 +58,18 @@ type DeploymentProxy = {
   asked: number;
   /** Every Tau Cloud read the shell made through the proxy (`/v1/projects`, billing, cloud agents), by path. */
   readonly cloudReads: string[];
+  /**
+   * Tau's API unreachable for the shell, main and renderer alike: every connection is reset before it is read, as an
+   * unreachable network answers (W9 R1). The machine itself still reports online, which is the harder case.
+   */
+  offline: boolean;
   payments: PaymentStubs | undefined;
   readonly close: () => Promise<void>;
 };
 
 const paymentActionPath = '/v1/billing/payment-actions';
-/** The API paths that read the account's Tau Cloud: its projects, its billing and its cloud agents (W9 R5). */
-const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud)(?:\/|$)/u;
+/** The API paths that read the account's Tau Cloud: its projects, its billing, its cloud agents and its Git (W9 R5). */
+const tauCloudReadPath = /^\/v1\/(?:projects|billing|agents\/cloud|git)(?:\/|$)/u;
 
 /** A manual top-up as the API reports it: opened in the browser, or fulfilled with its receipt. */
 const paymentAction = (stubs: PaymentStubs, state: 'redirect_required' | 'fulfilled'): string =>
@@ -114,6 +120,7 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     route: 'pass',
     asked: 0,
     cloudReads: [],
+    offline: false,
     payments: undefined,
     close: async () => undefined,
   };
@@ -216,6 +223,10 @@ const startDeploymentProxy = async (): Promise<DeploymentProxy> => {
     return false;
   };
   const server: Server = createServer((incoming, outgoing) => {
+    if (proxy.offline) {
+      incoming.socket.destroy();
+      return;
+    }
     const requestUrl = new URL(incoming.url ?? '/', 'http://proxy');
     if (tauCloudReadPath.test(requestUrl.pathname) && incoming.method !== 'OPTIONS') {
       proxy.cloudReads.push(requestUrl.pathname);
@@ -371,6 +382,7 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       proxy.route = 'pass';
       proxy.asked = 0;
       proxy.cloudReads.length = 0;
+      proxy.offline = false;
       proxy.payments = undefined;
     }
   });
@@ -482,49 +494,40 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     await first.close();
     session = undefined;
 
+    /* A real offline launch: Tau's API is unreachable from the first request, for main and the renderer alike. The
+     * machine still reports online, so nothing here relies on `navigator.onLine`. */
+    proxy.offline = true;
     const { session: second } = await launch({
       relaunch: { profileRoot, token: token! },
     });
-    const setOffline = async (offline: boolean): Promise<void> => {
-      await second.application.evaluate(async ({ session: electronSession }, isOffline) => {
-        electronSession.defaultSession.enableNetworkEmulation({
-          offline: isOffline,
-        });
-      }, offline);
-      await second.application.context().setOffline(offline);
-    };
-    await setOffline(true);
-    try {
-      await second.page.reload({ waitUntil: 'load' });
-      expect(await second.page.evaluate(() => navigator.onLine)).toBe(false);
 
-      /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
-      const footer = footerOf(second);
-      await expectVisible(footer, launchTimeout);
-      await expectVisible(composerOf(second.page), launchTimeout);
-      await footer.click();
-      const menu = second.page.getByRole('menu');
-      await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
-      expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
-      await second.page.evaluate(() => {
-        (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
-      });
+    /* Offline: the footer names the person, never "Account", and the menu never offers "Sign in". */
+    const footer = footerOf(second);
+    await expectVisible(footer, launchTimeout);
+    await expectVisible(composerOf(second.page), launchTimeout);
+    await footer.click();
+    const menu = second.page.getByRole('menu');
+    await expectVisible(menu.getByText('Can’t reach Tau'), 30_000);
+    expect(await menu.getByRole('menuitem', { name: 'Sign in' }).count()).toBe(0);
+    await second.page.evaluate(() => {
+      (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded = true;
+    });
 
-      /* The network returns: within A3's 10 s, with no reload, the session verifies and Billing appears. */
-      await setOffline(false);
-      await expect
-        .poll(async () => menu.getByText('Can’t reach Tau').count(), {
-          timeout: 10_000,
-        })
-        .toBe(0);
-      await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)$/u }), 10_000);
-      await expectVisible(footer, 10_000);
-      expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
-        true,
-      );
-    } finally {
-      await setOffline(false);
-    }
+    /* The network returns: within A3's 10 s, with no reload and no event from the machine, the session verifies and
+     * Billing appears. */
+    proxy.offline = false;
+    await expect
+      .poll(async () => menu.getByText('Can’t reach Tau').count(), {
+        timeout: 10_000,
+      })
+      .toBe(0);
+    await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)\b/u }), 10_000);
+    /* The open menu makes the rest of the page inert; close it to read the footer again. */
+    await second.page.keyboard.press('Escape');
+    await expectVisible(footer, 10_000);
+    expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
+      true,
+    );
   });
 
   it('shows the funded surfaces against a funded API, and /usage with the balance', async () => {
@@ -570,6 +573,56 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
     /* The failed load goes to the stale-build recovery; once it settles the shell still answers. */
     await expectVisible(composerOf(current.page), launchTimeout);
     expect(current.application.windows().some((page) => page.url().endsWith('/recovery/index.html'))).toBe(false);
+  });
+
+  /* W9 R5 (Principal ruling): revision sync is a Tau Cloud read too. A project backed up to Tau Cloud, opened in safe
+   * mode, makes no Tau Git request and says Tau Cloud is off. */
+  it('makes no Tau revision request for a Tau Cloud project opened in safe mode (W9 R5)', async () => {
+    const { session: first, token } = await launch({ preserveProfile: true });
+    await expectSignedIn(first.page);
+    await first.page.goto('app://tau/projects/new', { waitUntil: 'domcontentloaded' });
+    await first.page.getByLabel('Project Name *').fill(`Safe mode sync ${String(Date.now())}`);
+    await first.page
+      .getByRole('button', { name: /^Create Project/u })
+      .first()
+      .click();
+    await first.page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
+    const projectUrl = first.page.url();
+    const openHistory = async (page: DesktopSession['page']): Promise<void> => {
+      await page
+        .getByRole('button', { name: /^Open History\./u })
+        .first()
+        .click({ timeout: 120_000 });
+    };
+    await openHistory(first.page);
+    await openBackupChooser(first.page);
+    await connectTauCloud(first.page);
+    await expectVisible(
+      first.page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Cloud' }),
+      180_000,
+    );
+
+    const firstProcess = first.application.process();
+    await first.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => firstProcess.exitCode ?? firstProcess.signalCode, { timeout: 60_000 }).not.toBeNull();
+    const { profileRoot } = first;
+    await first.close();
+    session = undefined;
+    proxy.cloudReads.length = 0;
+
+    const { session: safe } = await launch({ relaunch: { profileRoot, token: token! }, args: ['--safe-mode'] });
+    await expectVisible(safe.page.locator('[data-slot="safe-mode-bar"]'), launchTimeout);
+    await safe.page.goto(projectUrl, { waitUntil: 'load' });
+    await openHistory(safe.page);
+    await expectVisible(safe.page.getByText('Tau Cloud is off in safe mode', { exact: false }).first(), launchTimeout);
+    /* Long enough for an open pull, a push of the queue and one backoff to have asked, had any been allowed. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10_000);
+    });
+    expect(proxy.cloudReads.filter((path) => path.startsWith('/v1/git/'))).toEqual([]);
+    expect(proxy.cloudReads).toEqual([]);
   });
 
   it('shows no Cloud surface in safe mode, and never asks the route or reads Tau Cloud (D10, W9 R5)', async () => {

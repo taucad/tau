@@ -1,5 +1,5 @@
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
@@ -457,7 +457,11 @@ export function ParametersPanelBody(): React.JSX.Element {
   const parametersAnchor = useTourAnchor('parameters');
   return (
     <div ref={parametersAnchor} className='flex size-full min-h-0 flex-col'>
-      {availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />}
+      {availability === 'ready' ? (
+        <ProjectParametersPane />
+      ) : (
+        <ProjectWaitSkeleton state={availability} shape='fields' label='Parameters' />
+      )}
     </div>
   );
 }

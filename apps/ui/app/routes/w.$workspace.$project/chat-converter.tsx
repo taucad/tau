@@ -1,5 +1,5 @@
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
@@ -662,7 +662,7 @@ export function ConverterPanelBody(
   return availability === 'ready' ? (
     <ConverterPanelBodyContent {...props} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='fields' label='Converter' />
   );
 }
 

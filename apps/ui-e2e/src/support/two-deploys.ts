@@ -73,6 +73,31 @@ export const readBuildId = (html: string): number => {
   return Number(match[1]);
 };
 
+/**
+ * A build id as the build can print it: in a document or worker as its decimal digits, and in the server bundle as the
+ * numeric literal the `tauBuildId` define compiles to, which Oxc prints in its shortest form. A build id that falls on
+ * a whole second (one build in a thousand) then reads `1795564944e3`, not `1795564944000`.
+ */
+const buildIdPattern = (buildId: number): RegExp => {
+  const digits = String(buildId);
+  const mantissa = digits.replace(/0+$/u, '');
+  const zeros = digits.length - mantissa.length;
+  // The exponent form only as a whole literal: `1795564944e3` is not the start of `1795564944e30`.
+  const exponent = zeros >= 3 ? `|(?<![\\w.])${mantissa}e${String(zeros)}(?![\\w.])` : '';
+  return new RegExp(`${digits}${exponent}`, 'gu');
+};
+
+/**
+ * Write the next build id over the previous one, in whichever form the text carries it.
+ *
+ * @param text - A file of the previous deploy.
+ * @param previousBuildId - The id to replace.
+ * @param nextBuildId - The id to write, as decimal digits (a valid numeric literal too).
+ * @returns The text under the next build id.
+ */
+const rewriteBuildId = (text: string, previousBuildId: number, nextBuildId: number): string =>
+  text.replaceAll(buildIdPattern(previousBuildId), String(nextBuildId));
+
 /** Each deploy's project shell: each client output's prerendered file, under its deploy's build id. */
 export const readShells = async (
   previousBuildId: number,
@@ -84,7 +109,7 @@ export const readShells = async (
     throw new Error('The prerendered project shell carries another build id than the server bundle it was built with.');
   }
   const next = await readFile(join(roots.next, projectShellUrl.slice(1)), 'utf8');
-  return { previous, next: next.replaceAll(String(previousBuildId), String(nextBuildId)) };
+  return { previous, next: rewriteBuildId(next, previousBuildId, nextBuildId) };
 };
 
 /** `{"revision":"<hex>","url":"<path>"}`, a revisioned entry of the precache list `injectManifest` wrote. */
@@ -146,12 +171,13 @@ const createNextDeploy = async ({
     scripts.map(async (name) => {
       const path = join(nextServerRoot, name);
       const source = await readFile(path, 'utf8');
-      const written = rename(source.replaceAll(String(previousBuildId), String(nextBuildId)));
+      const carried = rewriteBuildId(source, previousBuildId, nextBuildId);
+      const written = rename(carried);
       if (written === source) {
         return false;
       }
       await writeFile(path, written);
-      return source.includes(String(previousBuildId));
+      return carried !== source;
     }),
   );
   if (!replaced.includes(true)) {
@@ -255,8 +281,7 @@ const createRenamedClient = async ({
   await Promise.all(
     files.map(async (file) => {
       const text = texts.get(file);
-      const written =
-        text === undefined ? undefined : rename(text.replaceAll(String(previousBuildId), String(nextBuildId)));
+      const written = text === undefined ? undefined : rename(rewriteBuildId(text, previousBuildId, nextBuildId));
       await (written === undefined || written === text
         ? link(join(clientRoot, file), targetOf(file))
         : writeFile(targetOf(file), written));
@@ -670,7 +695,7 @@ export const prepareDeploys = async (name: string, options: Readonly<{ rename?: 
   const shells = await readShells(previousBuildId, nextBuildId, clientRoots);
   const workers = await readWorkers(shells, rename, clientRoots);
   // The worker carries its deploy's build id (`build-service-worker.ts`, FP3): the next deploy's is the next build's.
-  workers.scripts.next = workers.scripts.next.replaceAll(String(previousBuildId), String(nextBuildId));
+  workers.scripts.next = rewriteBuildId(workers.scripts.next, previousBuildId, nextBuildId);
   return {
     builds: { previous: previousBuild, next: await importServerBuild(nextServerRoot) },
     shells,

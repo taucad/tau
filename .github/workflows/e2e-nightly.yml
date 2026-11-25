@@ -47,7 +47,7 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
   # End-to-end suites that open no chat, so capture no chat log for the empty-capture rule to find.
-  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios"]'
+  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:service-worker", "test:e2e:filesystem-scenarios", "test:e2e:adaptive"]'
 
 jobs:
   # Picks the commit and lists every suite. Selectors are target names, so a new e2e
@@ -82,6 +82,9 @@ jobs:
           # `tail -1` keeps the JSON array and drops Nx's log lines. A target splits into
           # `metadata.shards` jobs when it declares that count; each job passes
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
+          # An aggregate that declares `metadata.jobPerDependency` runs as one job per
+          # `dependsOn` target of its project (each with its own shards), so a suite that
+          # times out cannot use up the step budget of the suites after it (viewer, #2279).
           suites='[]'
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
           # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
@@ -105,8 +108,21 @@ jobs:
               if jq -e --arg suite "$project:$target" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
                 continue
               fi
-              shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
-              add_suite "$project" "$target" "$shards"
+              jobs=$(pnpm nx show project "$project" --json | tail -1 | jq -c --arg project "$project" --arg target "$target" '
+                .targets as $targets
+                | if $targets[$target].metadata.jobPerDependency == true
+                  then $targets[$target].dependsOn // []
+                    | if length == 0 then error("\($project):\($target) runs a job per dependency but depends on nothing") else . end
+                  else [$target] end
+                | map(if type == "string" and $targets[.] != null
+                    then {target: ., shards: ($targets[.].metadata.shards // 1)}
+                    else error("\($project):\($target) runs a job per dependency, but \(tojson) is not a target of \($project)") end)')
+              for job in $(jq -r '.[] | "\(.target)=\(.shards)"' <<< "$jobs"); do
+                if jq -e --arg suite "$project:${job%=*}" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
+                  continue
+                fi
+                add_suite "$project" "${job%=*}" "${job##*=}"
+              done
             done
           done
           echo "End-to-end suites: $suites"
@@ -162,14 +178,15 @@ jobs:
         with:
           playwright-browsers: chromium firefox webkit
       - name: Install browsers for Vitest Browser
-        run: pnpm exec playwright install chromium firefox webkit
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium firefox webkit
 
       # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
       # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
       - name: Install Pandoc for reference conversion
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
-          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          ./.tau-ci/.github/actions/apt-install/download.sh pandoc-download \
+            https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb \
+            "$RUNNER_TEMP/pandoc.deb" sha256:91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
       # Sandboxed native kernel workers, and uv for desktop-e2e's build123d wheels.
@@ -342,7 +359,7 @@ jobs:
         with:
           playwright-browsers: chromium
       - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install chromium
+        run: ./.tau-ci/.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
 
       - name: Run the cloud-build load tier
         timeout-minutes: 45
@@ -357,56 +374,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vitest-browser-diagnostics-cloud-load
-          path: out/test-results/vitest-browser
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # The adaptive web tier (adaptive app deployment mode W7): the adaptive UI build served with the cloud
-  # stand-ins and a deployment answer per row (funded, unfunded, held), the Cloud chunk blocked and stalled,
-  # hydration over a remembered answer, and a payment return landing while the mode is unknown. No API,
-  # database or secret.
-  adaptive-web:
-    name: Adaptive web tier
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [plan]
-    permissions:
-      contents: 'read'
-      actions: 'read'
-    steps:
-      - *checkout
-      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
-      # workflow's own commit (scripts/src/apt-resilience.test.ts).
-      - name: Check out this workflow's apt installer
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.sha }}
-          path: .tau-ci
-          sparse-checkout: .github/actions/apt-install
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - *setup-nx
-
-      - name: Install Chromium for Vitest Browser (system dependencies)
-        uses: ./.tau-ci/.github/actions/apt-install
-        with:
-          playwright-browsers: chromium
-      - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install chromium
-
-      - name: Run the adaptive web tier
-        timeout-minutes: 45
-        env:
-          TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:adaptive --parallel=1 --outputStyle=stream
-
-      - *root-hygiene
-
-      - name: Upload Vitest Browser diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vitest-browser-diagnostics-adaptive-web
           path: out/test-results/vitest-browser
           if-no-files-found: ignore
           retention-days: 7
@@ -455,8 +422,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
 
       - name: Prepare current installed GeoSpec consumer
         run: |

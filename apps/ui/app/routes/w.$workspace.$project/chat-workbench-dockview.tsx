@@ -6,7 +6,7 @@ import {
   useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
@@ -1749,7 +1749,7 @@ export const FileEditor = memo(function ({
     }
     case 'orphaned': {
       if (absence !== 'ready') {
-        body = <ProjectSyncPlaceholder state={absence} />;
+        body = <ProjectWaitSkeleton state={absence} shape='code' label={filePath.split('/').pop() ?? filePath} />;
         break;
       }
       body = (
@@ -1911,7 +1911,7 @@ export const FileEditor = memo(function ({
     return <EditorPanePlaceholder label={`Waiting for ${name}`} />;
   }
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='code' label={name} />;
   }
 
   /* Every branch renders through one component type, so the pane (its header and its wait slot) stays the same node

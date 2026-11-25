@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { fetchVerified } from '#fetch-verified.js';
+import { fetchVerified, unattendedFetchRetry } from '#fetch-verified.js';
 
 const payload = new TextEncoder().encode('payload bytes');
 const integrity = `sha256-${createHash('sha256').update(payload).digest('base64')}`;
@@ -26,6 +26,13 @@ const scriptedFetch = (...routes: Route[]) => {
 };
 
 const ok = (): Response => new Response(payload);
+
+/** A failed name resolution as undici's `fetch` reports it (merge-queue job 138868659888). */
+const unresolved = (): never => {
+  throw new TypeError('fetch failed', {
+    cause: Object.assign(new Error('getaddrinfo ENOTFOUND github.com'), { code: 'ENOTFOUND' }),
+  });
+};
 
 /**
  * A body that sends `payload` one byte every `byteIntervalMilliseconds` (or nothing when it is undefined) and errors when
@@ -288,6 +295,135 @@ describe('fetchVerified', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('unattended retry schedule', () => {
+    it('should wait 2, 4, 8, 16, 30, 30 and 30 s between eight attempts', async () => {
+      vi.useFakeTimers();
+      try {
+        const calls: number[] = [];
+        const start = Date.now();
+        const transport = vi.fn<typeof fetch>(async () => {
+          calls.push(Date.now() - start);
+          return unresolved();
+        });
+
+        const outcome = fetchVerified({
+          url,
+          integrity,
+          fetch: transport,
+          retry: unattendedFetchRetry,
+          signal: new AbortController().signal,
+        });
+        const settled = expect(outcome).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED' });
+        await vi.advanceTimersByTimeAsync(200_000);
+        await settled;
+
+        expect(calls).toEqual([0, 2000, 6000, 14_000, 30_000, 60_000, 90_000, 120_000]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should outlast a minute and a half of failed name resolution, then return the verified bytes', async () => {
+      vi.useFakeTimers();
+      try {
+        const { transport } = scriptedFetch(
+          unresolved,
+          unresolved,
+          unresolved,
+          unresolved,
+          unresolved,
+          unresolved,
+          unresolved,
+          ok,
+        );
+
+        const outcome = fetchVerified({
+          url,
+          integrity,
+          byteLength: payload.byteLength,
+          fetch: transport,
+          retry: unattendedFetchRetry,
+          signal: new AbortController().signal,
+        });
+        await vi.advanceTimersByTimeAsync(120_000);
+
+        expect(new TextDecoder().decode(await outcome)).toBe('payload bytes');
+        expect(transport).toHaveBeenCalledTimes(8);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should still fail when name resolution never recovers, after its last attempt and not before', async () => {
+      vi.useFakeTimers();
+      try {
+        const transport = vi.fn<typeof fetch>(async () => unresolved());
+        const outcome = fetchVerified({
+          url,
+          integrity,
+          fetch: transport,
+          retry: unattendedFetchRetry,
+          signal: new AbortController().signal,
+        });
+        const settled = expect(outcome).rejects.toMatchObject({
+          code: 'DOWNLOAD_FAILED',
+          reason: 'transport',
+          detail: 'Transport attempt 8/8; codes: ENOTFOUND',
+        });
+        // Seven attempts in the first two minutes: the last one, and the failure, come only after the final wait.
+        await vi.advanceTimersByTimeAsync(119_999);
+        expect(transport).toHaveBeenCalledTimes(7);
+        await vi.advanceTimersByTimeAsync(1);
+
+        await settled;
+        expect(transport).toHaveBeenCalledTimes(8);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should end a wait between attempts as soon as the signal aborts', async () => {
+      vi.useFakeTimers();
+      try {
+        const controller = new AbortController();
+        const transport = vi.fn<typeof fetch>(async () => unresolved());
+
+        const outcome = fetchVerified({
+          url,
+          integrity,
+          fetch: transport,
+          retry: unattendedFetchRetry,
+          signal: controller.signal,
+        });
+        const settled = expect(outcome).rejects.toThrow('cancelled by caller');
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(transport).toHaveBeenCalledTimes(2);
+        controller.abort(new Error('cancelled by caller'));
+
+        await settled;
+        expect(transport).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it('should refuse a retry policy without a positive whole number of attempts', async () => {
+    const { transport } = scriptedFetch();
+    for (const retry of [
+      { attempts: 0, initialDelayMilliseconds: 0, maximumDelayMilliseconds: 0 },
+      { attempts: 1.5, initialDelayMilliseconds: 0, maximumDelayMilliseconds: 0 },
+      { attempts: 2, initialDelayMilliseconds: -1, maximumDelayMilliseconds: 0 },
+      { attempts: 2, initialDelayMilliseconds: 0, maximumDelayMilliseconds: Number.NaN },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- each policy is refused in turn
+      await expect(
+        fetchVerified({ url, integrity, fetch: transport, retry, signal: new AbortController().signal }),
+      ).rejects.toThrow(TypeError);
+    }
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('should reject with the signal reason when aborted', async () => {

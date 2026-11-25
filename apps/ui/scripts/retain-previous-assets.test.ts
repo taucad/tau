@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import type { Server, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isServableAssetPath,
   isServableRuntimePath,
@@ -14,6 +14,9 @@ import {
   planBuildRetention,
   planRetention,
   readOwnBuildId,
+  LiveAssetUnavailableError,
+  LiveIndexUnreachableError,
+  retainOrShipWithout,
   retainPreviousAssets,
   retainedGenerationsCap,
   retentionWindow,
@@ -54,6 +57,26 @@ const createClient = async (files: Readonly<Record<string, string>>): Promise<st
   return directory;
 };
 
+/** Resolves once `file` exists, so a test can hold an answer until a download has been written. */
+const untilFile = async (file: string): Promise<void> => {
+  try {
+    await access(file);
+  } catch {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2);
+    });
+    await untilFile(file);
+  }
+};
+
+/** Every message in a failure, an `AggregateError`'s included. */
+const messagesOf = (error: unknown): string[] =>
+  error instanceof AggregateError
+    ? error.errors.flatMap(messagesOf)
+    : error instanceof Error
+      ? [error.message]
+      : [String(error)];
+
 /** The live deploy: serves `files` by path and its index, and counts requests. */
 const startLiveDeploy = async (
   files: Readonly<Record<string, string>>,
@@ -61,9 +84,21 @@ const startLiveDeploy = async (
   misbehave: (
     path: string,
     attempt: number,
-  ) => 'hang' | 'unavailable' | { readonly status: number; readonly retryAfter?: string } | undefined = () => undefined,
+  ) =>
+    | 'hang'
+    | 'unavailable'
+    | {
+        readonly status: number;
+        readonly retryAfter?: string;
+        readonly after?: Promise<unknown>;
+        readonly onAnswered?: () => void;
+      }
+    | { readonly after: Promise<unknown> }
+    | undefined = () => undefined,
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
+  // The answers held back by `after`, tracked rather than fired and forgotten.
+  const held = new Set<Promise<void>>();
   const server: Server = createServer((request, response) => {
     const path = decodeURIComponent((request.url ?? '/').slice(1));
     requests.push(path);
@@ -75,10 +110,29 @@ const startLiveDeploy = async (
       response.writeHead(503).end();
       return;
     }
-    if (typeof fault === 'object') {
-      response.writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter }).end();
+    // `after` holds the answer until an event the test names, and `onAnswered` reports one, so a test can order
+    // the answers it races.
+    const answer = (): void => {
+      if (typeof fault === 'object' && 'status' in fault) {
+        response
+          .writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter })
+          .end(fault.onAnswered);
+        return;
+      }
+      serve(path, response);
+    };
+    if (typeof fault === 'object' && fault.after !== undefined) {
+      const gate = fault.after;
+      const answerAfterGate = async (): Promise<void> => {
+        await gate;
+        answer();
+      };
+      held.add(answerAfterGate());
       return;
     }
+    answer();
+  });
+  function serve(path: string, response: ServerResponse): void {
     if (path === servedRuntimesIndexFileName && files[path] !== undefined) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(files[path]);
       return;
@@ -94,7 +148,7 @@ const startLiveDeploy = async (
     }
     // A file named like the index but not served as one is an HTML page, as an app's catch-all answers.
     response.writeHead(200, path === servedAssetsIndexFileName ? { 'content-type': 'text/html' } : {}).end(body);
-  });
+  }
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve);
   });
@@ -108,6 +162,28 @@ const startLiveDeploy = async (
       }),
   );
   return { origin: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`, requests };
+};
+
+/**
+ * Make `fetch` throw the error a saturated runner's connect timeout gives (undici's happy-eyeballs
+ * `ETIMEDOUT`) for the first `failures` requests of `path`; every other request reaches the server.
+ */
+const failConnectsTo = (path: string, failures: number): void => {
+  const realFetch = globalThis.fetch;
+  let attempts = 0;
+  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (new URL(url).pathname === `/${path}` && attempts < failures) {
+      attempts += 1;
+      throw new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      });
+    }
+    return realFetch(input, init);
+  });
+  cleanups.push(async () => {
+    spy.mockRestore();
+  });
 };
 
 const readIndex = async (clientDirectory: string): Promise<ServedAssetsIndex> =>
@@ -133,6 +209,26 @@ describe('mapWithConcurrency', () => {
 
     expect(peak).toBe(3);
     expect(results).toStrictEqual(Array.from({ length: 20 }, (_, index) => index * 2));
+  });
+
+  it('should start nothing after a failure, await the tasks in flight and report every failure', async () => {
+    const started: number[] = [];
+    let finished = 0;
+    const run = mapWithConcurrency([0, 1, 2, 3, 4, 5], 2, async (value) => {
+      started.push(value);
+      if (value === 0) {
+        throw new Error('fast');
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      finished += 1;
+      throw new Error('slow');
+    });
+
+    await expect(run).rejects.toMatchObject({ errors: [{ message: 'fast' }, { message: 'slow' }] });
+    expect(started).toStrictEqual([0, 1]);
+    expect(finished).toBe(1);
   });
 });
 
@@ -422,6 +518,185 @@ describe('retainPreviousAssets', () => {
     ).rejects.toThrow(/could not read the live asset index/u);
   });
 
+  describe('retainOrShipWithout', () => {
+    const noWait = async (): Promise<void> => undefined;
+    const shipping = (warnings: string[]) => ({
+      shipIfUnreachable: true,
+      warn: (message: string) => {
+        warnings.push(message);
+      },
+    });
+
+    it('should ship with no previous assets, and warn, when the live deploy cannot be reached', async () => {
+      const { origin } = await startLiveDeploy({}, undefined);
+      await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout({ clientDirectory: client, origin, wait: noWait }, shipping(warnings));
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toStrictEqual([expect.stringMatching(/^::warning::.*NO previous assets/u)]);
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should ship past a live index that keeps failing with a server error', async () => {
+      const live = await startLiveDeploy({}, indexOf([]), () => 'unavailable');
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toHaveLength(1);
+    });
+
+    it('should ship past a live deploy that refuses an asset its index lists (Netlify answering runners 403)', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1' },
+        indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      expect(warnings).toStrictEqual([expect.stringMatching(/route-OLD1\.js answered 403/u)]);
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should still fail the deploy when a later download fails its integrity after a fast 403', async () => {
+      const forbidden = Promise.withResolvers<void>();
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'tampered' },
+        indexOf([
+          { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+          { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
+        ]),
+        // The tampered bytes are held until the 403 has been sent, so the fallback would already be chosen.
+        (path) =>
+          path === 'assets/route-OLD1.js'
+            ? { status: 403, onAnswered: forbidden.resolve }
+            : path === 'assets/route-OLD2.js'
+              ? { after: forbidden.promise }
+              : undefined,
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      let failure: unknown;
+      try {
+        await retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings));
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(messagesOf(failure)).toContainEqual(expect.stringMatching(/route-OLD2\.js does not match its integrity/u));
+      expect(warnings).toStrictEqual([]);
+    });
+
+    it('should drop what the failed pass retained before shipping without retention', async () => {
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
+        indexOf([
+          { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+          { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
+        ]),
+        // OLD2's 403 is held until OLD1 is on disk, so the failed pass has retained a file when the fallback starts.
+        (path) =>
+          path === 'assets/route-OLD2.js'
+            ? { status: 403, after: untilFile(join(client, 'assets/route-OLD1.js')) }
+            : undefined,
+      );
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      await expect(readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).rejects.toThrow('ENOENT');
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should still fail the deploy on a refused asset when shipping is not allowed', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1' },
+        indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+      await expect(
+        retainOrShipWithout(
+          { clientDirectory: client, origin: live.origin, wait: noWait },
+          { shipIfUnreachable: false, warn: () => undefined },
+        ),
+      ).rejects.toBeInstanceOf(LiveAssetUnavailableError);
+    });
+
+    it('should still fail the deploy when the live deploy cannot be reached and shipping is not allowed', async () => {
+      const { origin } = await startLiveDeploy({}, undefined);
+      await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+      await expect(
+        retainOrShipWithout(
+          { clientDirectory: client, origin, wait: noWait },
+          { shipIfUnreachable: false, warn: () => undefined },
+        ),
+      ).rejects.toBeInstanceOf(LiveIndexUnreachableError);
+    });
+
+    it.each<{
+      readonly label: string;
+      readonly files: Record<string, string>;
+      readonly index?: ServedAssetsIndex;
+      readonly fault?: { readonly status: number };
+    }>([
+      {
+        label: 'answers an HTML page where the index should be',
+        files: { [servedAssetsIndexFileName]: '<!DOCTYPE html>' },
+      },
+      {
+        label: 'serves an asset that fails its integrity',
+        files: { 'assets/route-OLD1.js': 'tampered' },
+        index: indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      },
+      { label: 'refuses the index request', files: {}, index: indexOf([]), fault: { status: 403 } },
+    ])(
+      'should still fail the deploy, even when shipping is allowed, when the live deploy $label',
+      async ({ files, index, fault }) => {
+        const live = await startLiveDeploy(files, index, (path) =>
+          path === servedAssetsIndexFileName ? fault : undefined,
+        );
+        const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+        const warnings: string[] = [];
+
+        await expect(
+          retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings)),
+        ).rejects.toThrow();
+        expect(warnings).toStrictEqual([]);
+      },
+    );
+  });
+
   it('should publish an index of its own assets, asking nothing, when retention is skipped on purpose', async () => {
     const live = await startLiveDeploy({}, indexOf([]), () => 'unavailable');
     const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
@@ -505,6 +780,49 @@ describe('retainPreviousAssets', () => {
     expect(waits).toStrictEqual([1000, 2000]);
   });
 
+  it('should outlast a stretch of connect timeouts longer than the HTTP backoff', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+    );
+    // Four attempts: every attempt the 1 s, 2 s, 4 s backoff allows.
+    failConnectsTo('assets/route-OLD1.js', 4);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    });
+
+    expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
+    expect(waits).toStrictEqual([1000, 2000, 4000, 8000]);
+  });
+
+  it('should give up on connect timeouts only after waiting about a minute', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+    );
+    failConnectsTo('assets/route-OLD1.js', Number.POSITIVE_INFINITY);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await expect(
+      retainPreviousAssets({
+        clientDirectory: client,
+        origin: live.origin,
+        wait: async (milliseconds) => {
+          waits.push(milliseconds);
+        },
+      }),
+    ).rejects.toThrow('fetch failed');
+    expect(waits.reduce((total, wait) => total + wait, 0)).toBeGreaterThanOrEqual(60_000);
+  });
+
   it('should give up on an asset the live deploy never finishes sending', async () => {
     const live = await startLiveDeploy(
       {},
@@ -520,7 +838,7 @@ describe('retainPreviousAssets', () => {
         requestTimeout: 50,
         wait: async () => undefined,
       }),
-    ).rejects.toMatchObject({ name: 'TimeoutError' });
+    ).rejects.toMatchObject({ name: 'LiveAssetUnavailableError', cause: { name: 'TimeoutError' } });
   });
 
   it('should fail when the new build has no asset directory to publish', async () => {

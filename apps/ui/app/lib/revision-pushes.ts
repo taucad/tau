@@ -9,8 +9,6 @@
 
 import { createRevisionPushStore } from '@taucad/revisions-ui/lib/revision-pushes';
 import { ENV } from '#environment.config.js';
-import { isSafeModeRequested } from '#lib/boot-signals.js';
-import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
 
 /* Read when it is used, so a module mock or a stubbed `window.ENV` is seen as it stands then. */
 const revisionPushStore = createRevisionPushStore({ apiBaseUrl: () => ENV.TAU_API_URL });
@@ -23,12 +21,15 @@ const revisionPushStore = createRevisionPushStore({ apiBaseUrl: () => ENV.TAU_AP
 export const { holdRevisionGraph } = revisionPushStore;
 
 /* Safe mode is fixed for the page load, as the app runtime records it: read once, on first use (D0). */
+/* Read inline, not through `#lib/boot-signals.js` or `#lib/desktop-safe-mode.js`: this module is on Home's critical
+ * path, and importing either adds requests to it (`ui:check-critical-budget`). The same two signals the app runtime
+ * reads: the web's `?safe=1` and the desktop shell's `tau.safeMode`. */
 let isPageSafeMode: boolean | undefined;
 const pageSafeMode = (): boolean => {
   isPageSafeMode ??=
     // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- no `location` during a server render.
-    (globalThis.location !== undefined && isSafeModeRequested(globalThis.location.search)) ||
-    desktopSafeMode() !== undefined;
+    (globalThis.location !== undefined && new URLSearchParams(globalThis.location.search).get('safe') === '1') ||
+    (globalThis as { tau?: { safeMode?: unknown } }).tau?.safeMode !== undefined;
   return isPageSafeMode;
 };
 

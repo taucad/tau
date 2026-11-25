@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
 import type { Remote, RevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
@@ -44,7 +45,7 @@ const open = async (remote: Remote) => {
     listRemotes: async () => [remote],
     listRemoteRefs: async () => {
       reached.push('listRemoteRefs');
-      return [{ name: 'refs/heads/main', head: 'remote-head' as never }];
+      return [{ name: 'refs/heads/main', head: revisionId('0'.repeat(40)) }];
     },
     fetch: async () => {
       reached.push('fetch');

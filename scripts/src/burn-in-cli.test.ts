@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { collected, runBurnIn } from '#burn-in-cli.js';
+import { collected, parseUnits, runBurnIn } from '#burn-in-cli.js';
 import type { ReadyUnit } from '#burn-in-cli.js';
 import { burnIn, runSeed } from '#burn-in.js';
 import { seededDraw } from '#fixtures/flake-repro/seeded-draw.js';
@@ -152,4 +152,23 @@ describe('burn-in plan command', () => {
       'burn-in=true\nburn-in-units=[{"project":"core","target":"test","files":["packages/core/src/index.test.ts"]}]\n',
     );
   });
+});
+
+describe('burn-in units', () => {
+  it('admits a React Router route file, whose directory carries `$`', () => {
+    const units = [
+      { project: 'ui', target: 'test', files: ['apps/ui/app/routes/w.$workspace.$project/chat-viewer.test.tsx'] },
+    ];
+
+    expect(parseUnits(JSON.stringify(units))).toStrictEqual(units);
+  });
+
+  it.each(['apps/ui/a test.ts', 'apps/ui/$(id).test.ts', '../outside.test.ts', 'apps/ui/a;b.test.ts'])(
+    'refuses a file name a path does not need: %s',
+    (file) => {
+      expect(() => parseUnits(JSON.stringify([{ project: 'ui', target: 'test', files: [file] }]))).toThrow(
+        /outside \[A-Za-z0-9_@.:\/\$-\]/u,
+      );
+    },
+  );
 });

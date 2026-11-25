@@ -86,7 +86,9 @@ const modesOf = (text: string | undefined) => {
 
 const nonEmpty = (value: string | undefined): string | undefined => (value === '' ? undefined : value);
 
-const safeName = /^[\w@.:/-]+$/u;
+// `$` is a path character: React Router route directories (`w.$workspace.$project`) carry it. Names reach Vitest
+// and Nx as arguments, never through a shell.
+const safeName = /^[\w@.:/$-]+$/u;
 
 const integer = (
   value: string | undefined,
@@ -482,7 +484,7 @@ const resolveTarget = (
   };
   for (const name of ['project', 'target', 'file'] as const) {
     if (!safeName.test(identity[name]) || identity[name].includes('..')) {
-      throw new UsageError(`--${name} has characters outside [A-Za-z0-9_@.:/-]: ${identity[name]}`);
+      throw new UsageError(`--${name} has characters outside [A-Za-z0-9_@.:/$-]: ${identity[name]}`);
     }
   }
   const file = resolve(root, identity.file);

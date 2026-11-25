@@ -297,7 +297,14 @@ const planCommand = async (values: Record<string, string | undefined>): Promise<
   return 0;
 };
 
-const parseUnits = (text: string | undefined): BurnInUnit[] => {
+/**
+ * The burn-in units the plan wrote. Names are limited to path characters; `$` is one, since React Router route
+ * directories (`w.$workspace.$project`) carry it and every name reaches Vitest as an argument, never through a shell.
+ *
+ * @param text - The plan's `burn-in-units` JSON.
+ * @returns The units.
+ */
+export const parseUnits = (text: string | undefined): BurnInUnit[] => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text ?? '');
@@ -305,11 +312,11 @@ const parseUnits = (text: string | undefined): BurnInUnit[] => {
     throw new UsageError('--units must be the JSON the plan wrote');
   }
   const units = Array.isArray(parsed) ? (parsed as BurnInUnit[]) : [];
-  const safe = /^[\w@.:/-]+$/u;
+  const safe = /^[\w@.:/$-]+$/u;
   for (const unit of units) {
     for (const value of [unit.project, unit.target, ...unit.files]) {
       if (typeof value !== 'string' || !safe.test(value) || value.includes('..')) {
-        throw new UsageError(`--units names ${JSON.stringify(value)}, outside [A-Za-z0-9_@.:/-]`);
+        throw new UsageError(`--units names ${JSON.stringify(value)}, outside [A-Za-z0-9_@.:/$-]`);
       }
     }
   }

@@ -603,6 +603,81 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     }
   });
 
+  it.each(['same host', 'changed host'] as const)(
+    'decides a placement move only once a still-connecting attachment knows its placement (#2297): %s',
+    async (scenario) => {
+      const store = createStore();
+      const chatId = 'chat_connecting';
+      const projectId = 'project_connecting';
+      const deps = createStubDeps();
+      let row = chatRow(chatId, projectId, {
+        activeExecution: { kind: 'tau', model: 'model-a', hostId: 'host-a' },
+      });
+      deps.getChat.mockImplementation(async (id) => ({ ...row, id }));
+      deps.patchChat.mockImplementation(async (_id, key, value) => {
+        if (key === 'activeExecution') {
+          row = { ...row, activeExecution: value as ChatEntity['activeExecution'] };
+        }
+      });
+      store.setDependencies(deps);
+      const firstConnect = Promise.withResolvers<void>();
+      const unsubscribes: Array<ReturnType<typeof vi.fn>> = [];
+      const connect = vi.fn(async (id: string) => {
+        /* The first connect read where the chat ran before the change; it answers only after the change is saved. */
+        const hostId = row.activeExecution?.hostId;
+        if (id === chatId && connect.mock.calls.filter(([candidate]) => candidate === chatId).length === 1) {
+          await firstConnect.promise;
+        }
+        const unsubscribe = vi.fn();
+        unsubscribes.push(unsubscribe);
+        return {
+          placement: { hostId },
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn<AgentHostClient['read']>(),
+          subscribe: vi.fn((..._args: Parameters<AgentHostClient['subscribe']>) => unsubscribe),
+          hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+          close: vi.fn(async () => undefined),
+        };
+      });
+      const unpublish = store.publishProjectHostConnector(projectId, connect);
+      const unobserve = store.observe(chatId, projectId);
+      const session = store.acquire(chatId, projectId);
+      try {
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        session.persistenceActorRef.send({
+          type: 'setActiveExecution',
+          execution: { kind: 'tau', model: 'model-b', hostId: scenario === 'same host' ? 'host-a' : 'host-b' },
+        });
+        await vi.waitFor(() => {
+          expect(deps.patchChat).toHaveBeenCalled();
+        });
+        await settle();
+        /* The attachment has not answered: the move waits rather than restart a reader it cannot yet compare. */
+        expect(connect.mock.calls.filter(([id]) => id === chatId)).toHaveLength(1);
+        firstConnect.resolve();
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().matches({ activeExecutionPersistence: 'idle' })).toBe(true);
+        });
+        await settle();
+        if (scenario === 'same host') {
+          expect(connect.mock.calls.filter(([id]) => id === chatId)).toHaveLength(1);
+          expect(unsubscribes[0]).not.toHaveBeenCalled();
+        } else {
+          await vi.waitFor(() => {
+            expect(connect.mock.calls.filter(([id]) => id === chatId)).toHaveLength(2);
+          });
+        }
+      } finally {
+        firstConnect.resolve();
+        unpublish();
+        unobserve();
+        store.release(chatId);
+      }
+    },
+  );
+
   it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
     const store = createStore();
     const chatId = 'chat_external_approval';

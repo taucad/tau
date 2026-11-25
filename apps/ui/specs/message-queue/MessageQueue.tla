@@ -188,6 +188,12 @@
 \* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
 \* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
 \* changes.
+\* Connecting attachment placement (2026-11-25, #2297): `chat-session-store.ts` no longer reads an attachment still
+\* connecting as observing another host. A placement change waits for that connect's answer and rebinds the log
+\* reader only when the answered placement differs, which is the `Observe` guard of `QueuePlacement.tla`
+\* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
+\* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

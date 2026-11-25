@@ -588,6 +588,8 @@ type InternalSession = ChatSession & {
   activeCommand: HostCommand | undefined;
   commandAbort: AbortController | undefined;
   watchedRunId: string | undefined;
+  /** The attempt a dispatched Resume continues: its run awaits a later one, or this one running again. */
+  resumedAttempt: number | undefined;
   /**
    * The displayed source (T2): this device's views and overlay as of the last projection caught up with its read
    * answered, and other devices' views as of their last completed scan. Each advances on its own authority.
@@ -3318,6 +3320,7 @@ export class ChatSessionStore {
     session.runHeld = true;
     session.activeCommand = command;
     session.watchedRunId = command.payload.runId;
+    session.resumedAttempt = this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId]?.attempt;
     session.commandInFlight = true;
     session.stopRequested = false;
     this.#refreshStatus(session);
@@ -3392,8 +3395,7 @@ export class ChatSessionStore {
         return;
       }
       if (command.type === 'resume') {
-        // The accepted command can answer before the follower folds its new running row.
-        session.watchedRunId = undefined;
+        // The accepted command can answer before the follower folds its new running row: its run stays held.
         this.#syncProjection(session.chatId, 'none');
         return;
       }
@@ -4537,6 +4539,7 @@ export class ChatSessionStore {
       activeCommand: undefined,
       commandAbort: undefined,
       watchedRunId: undefined,
+      resumedAttempt: undefined,
       displayedOwn: undefined,
       displayedRemote: undefined,
       displayedFold: noMessages,
@@ -4598,13 +4601,27 @@ export class ChatSessionStore {
     return session;
   }
 
-  /** A command this page sent that its log does not show as a run yet: in flight, or a Start whose run is unfolded. */
+  /**
+   * A command this page sent that its log does not show as a run yet: in flight, a Start whose run is unfolded, or a
+   * Resume whose run has not reopened (a later attempt, or its attempt running again after a native pause).
+   */
   #awaitsRun(session: InternalSession): boolean {
     const command = session.activeCommand;
+    if (session.commandInFlight) {
+      return true;
+    }
+    if (command?.type !== 'start' && command?.type !== 'resume') {
+      return false;
+    }
+    const run = this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId];
+    if (command.type === 'start') {
+      return run === undefined;
+    }
     return (
-      session.commandInFlight ||
-      (command?.type === 'start' &&
-        this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId] === undefined)
+      run !== undefined &&
+      run.attempt === session.resumedAttempt &&
+      run.lifecycle !== 'admitted' &&
+      run.lifecycle !== 'running'
     );
   }
 

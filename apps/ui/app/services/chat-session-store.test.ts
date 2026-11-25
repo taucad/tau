@@ -1985,7 +1985,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   );
 
   for (const runningBeforeAck of [false, true]) {
-    it(`should show a resumed attempt streaming only once its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
+    it(`should hold a resumed attempt submitted until its running row folds, then show it streaming (${runningBeforeAck ? 'already folded' : 'arrives later'})`, async () => {
       const store = createStore();
       const chatId = `chat_retry_watch_${runningBeforeAck}`;
       const projectId = `project_retry_watch_${runningBeforeAck}`;
@@ -2030,7 +2030,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         await new Promise<void>((resolve) => {
           setTimeout(resolve, 0);
         });
-        expect(store.getChatStatus(chatId)).toBe('ready');
+        /* Accepted, its run not reopened yet: still submitted, so the Resume gate stays shut. */
+        expect(store.getChatStatus(chatId)).toBe('submitted');
         publishLogRows(store, chatId, [reopened], 3);
       }
       expect(store.getChatStatus(chatId)).toBe('streaming');

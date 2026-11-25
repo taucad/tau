@@ -1179,7 +1179,8 @@ jobs:
   burn-in:
     name: Burn-in (changed tests)
     needs: plan
-    if: github.event_name == 'pull_request' && needs.plan.outputs.burn-in == 'true'
+    # The plan sets `burn-in` on pull requests only.
+    if: needs.plan.outputs.burn-in == 'true'
     runs-on: ubuntu-latest
     # Setup, the targets' dependencies and the 5-minute cap on the runs.
     timeout-minutes: 25

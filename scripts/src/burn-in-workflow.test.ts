@@ -49,7 +49,8 @@ describe('ci.yml burn-in (FQ-10)', () => {
 
   it('adds no job without a changed test file, and never runs in the merge queue or on a push', () => {
     expect(job?.needs).toBe('plan');
-    expect(job?.if).toBe("github.event_name == 'pull_request' && needs.plan.outputs.burn-in == 'true'");
+    // The plan step that sets `burn-in` runs on pull requests only (above).
+    expect(job?.if).toBe("needs.plan.outputs.burn-in == 'true'");
   });
 
   it('runs the planned files ten times with shuffle, capped at five minutes, with a recorded seed', () => {

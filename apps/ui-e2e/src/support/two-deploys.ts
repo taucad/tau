@@ -281,8 +281,7 @@ const createRenamedClient = async ({
   await Promise.all(
     files.map(async (file) => {
       const text = texts.get(file);
-      const written =
-        text === undefined ? undefined : rename(rewriteBuildId(text, previousBuildId, nextBuildId));
+      const written = text === undefined ? undefined : rename(rewriteBuildId(text, previousBuildId, nextBuildId));
       await (written === undefined || written === text
         ? link(join(clientRoot, file), targetOf(file))
         : writeFile(targetOf(file), written));

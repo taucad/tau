@@ -166,12 +166,21 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
   const suffix = randomUUID();
   const environment = 'development';
   const authUserId = `invocation-${suffix}`;
-  const meterContractId = 'model-meter-v1:openai-gpt-5.6-luna';
-  const sku = 'model:openai-gpt-5.6-luna';
-  /* A tiered route funds one meter contract per pinned tariff, so a body whose proved input bound
-   * reaches the premium threshold resolves the `:long-context` sibling instead of the base sku. */
-  const longContextMeterContractId = `${meterContractId}:long-context`;
-  const longContextSku = `${sku}:long-context`;
+  /* The gateway routes and the name generator bill different models, so the fixture funds both. A tiered
+   * route funds one meter contract per pinned tariff, so a body whose proved input bound reaches the
+   * premium threshold resolves the `:long-context` sibling instead of the base sku. */
+  const fundedModels = ['openai-gpt-5.6-luna', 'openai-gpt-6-luna'].map((model) => ({
+    model,
+    meterContractId: `model-meter-v1:${model}`,
+    sku: `model:${model}`,
+    longContextMeterContractId: `model-meter-v1:${model}:long-context`,
+    longContextSku: `model:${model}:long-context`,
+  }));
+  const longContextMeterContractIds = new Set(fundedModels.map((funded) => funded.longContextMeterContractId));
+  const meterContractIds = fundedModels.flatMap((funded) => [
+    funded.meterContractId,
+    funded.longContextMeterContractId,
+  ]);
   const promotionProgramId = `invocation-promotion-${suffix}`;
   const promotionBudgetId = `invocation-promotion-budget-${suffix}`;
   const promotionFundingId = `invocation-promotion-funding-${suffix}`;
@@ -202,7 +211,7 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
       approvedCap: 50n,
     });
   }
-  for (const contractId of [meterContractId, longContextMeterContractId]) {
+  for (const contractId of meterContractIds) {
     qualifiedMeterContracts.set(contractId, new Set(['uncached_input:', 'cache_read:', 'cache_write:30m', 'output:']));
   }
   const tokenUnit = 'token';
@@ -222,7 +231,7 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
     retailOverride: {
       // The premium sibling is dearer only where a test needs the two tiers to be distinguishable.
       numeratorCreditAtoms:
-        options.longContextPremium === true && contractId === longContextMeterContractId ? '2' : '1',
+        options.longContextPremium === true && longContextMeterContractIds.has(contractId) ? '2' : '1',
       denominatorUnits: '1',
     },
   });
@@ -232,30 +241,30 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
     rate(contractId, 'cache_write', '30m'),
     rate(contractId, 'output', null),
   ];
-  const rates = [...tariff(meterContractId), ...tariff(longContextMeterContractId)];
+  const rates = meterContractIds.flatMap((contractId) => tariff(contractId));
   const validated = validateCommercialPolicy({
     schemaVersion: 1,
     environment,
     policyVersion: suffix,
     markupBps: 0,
-    fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId, longContextMeterContractId] },
+    fleet: { minimumSchemaVersion: 1, meterContractIds },
     rates,
-    routes: [
+    routes: fundedModels.flatMap((funded) => [
       {
-        routeId: `route-${suffix}`,
-        sku,
-        meterContractId,
-        rateIds: tariff(meterContractId).map(({ rateId }) => rateId),
+        routeId: `route-${funded.model}-${suffix}`,
+        sku: funded.sku,
+        meterContractId: funded.meterContractId,
+        rateIds: tariff(funded.meterContractId).map(({ rateId }) => rateId),
         enabled: true,
       },
       {
-        routeId: `route-long-context-${suffix}`,
-        sku: longContextSku,
-        meterContractId: longContextMeterContractId,
-        rateIds: tariff(longContextMeterContractId).map(({ rateId }) => rateId),
+        routeId: `route-long-context-${funded.model}-${suffix}`,
+        sku: funded.longContextSku,
+        meterContractId: funded.longContextMeterContractId,
+        rateIds: tariff(funded.longContextMeterContractId).map(({ rateId }) => rateId),
         enabled: true,
       },
-    ],
+    ]),
     offers: [
       {
         offerId: `pro-${suffix}`,

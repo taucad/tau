@@ -12,6 +12,7 @@
   "exports": {
     ".": "./src/test-reporters.ts",
     "./outcome-reporter": "./src/outcome-reporter.ts",
+    "./retry-policy": "./src/retry-policy.ts",
     "./package.json": "./package.json"
   }
 }

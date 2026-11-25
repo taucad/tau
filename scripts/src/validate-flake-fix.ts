@@ -23,7 +23,8 @@
  *   literal (`expect(true)`); a raised `retry` (an unevaluable new value counts); a raised test, hook or Playwright
  *   project timeout, each test compared with itself, without a `Timeout-budget:` line naming the measured p99 as a
  *   duration (`Timeout-budget: p99 21.4 s over 300 runs`, or `… 1200 ms (p99)`) in the pull-request body or a commit
- *   message; an added fixed sleep (`sleep`, `delay`, `setTimeout`, `waitForTimeout`, `wait(<n>)`).
+ *   message; an added fixed sleep (`sleep`, `delay`, `setTimeout`, `setInterval`, `waitForTimeout`, `wait(<n>)`),
+ *   judged per added line as well as by count, so a replaced or moved timer is not cancelled by the one it replaced.
  * - tolerance: a raised test timeout that carries its `Timeout-budget:` line; a raised bound on an existing
  *   condition wait (an added wait does not hide it); a raised timeout constant; a raised tolerance, epsilon or
  *   threshold; fewer digits on an existing `toBeCloseTo`; an added `setTimeout` inside a declaration that installs
@@ -180,8 +181,14 @@ const numberPattern = /^(?:0[xXbBoO][\da-fA-F_]+|(?:\d[\d_]*)?\.?\d[\d_]*(?:[eE]
  * ponytail: a lexer, not a parser. It is exact on the things the rules read (calls, member chains, property values)
  * and approximate on `/` after `}`; a misread there shifts one token, not the comparison.
  */
-export const tokenize = (source: string): Token[] => {
+export const tokenize = (source: string): Token[] => lex(source).tokens;
+
+/** The tokens of a source and the 1-based line each starts on. */
+export const lex = (source: string): { tokens: Token[]; lines: number[] } => {
   const tokens: Token[] = [];
+  const lines: number[] = [];
+  let line = 1;
+  let counted = 0;
   const braces: Array<'brace' | 'template'> = [];
   let index = 0;
 
@@ -239,6 +246,9 @@ export const tokenize = (source: string): Token[] => {
     punctuators.find((candidate) => source.startsWith(candidate, position)) ?? source[position]!;
 
   while (index < source.length) {
+    for (; counted < index; counted += 1) {
+      line += source[counted] === '\n' ? 1 : 0;
+    }
     const char = source[index]!;
     const next = source[index + 1];
     if (/\s/u.test(char)) {
@@ -314,9 +324,12 @@ export const tokenize = (source: string): Token[] => {
       tokens.push({ type: 'punct', value });
       index += value.length;
     }
+    while (lines.length < tokens.length) {
+      lines.push(line);
+    }
   }
 
-  return tokens;
+  return { tokens, lines };
 };
 
 // --- Facts -----------------------------------------------------------------------------------------------------
@@ -331,6 +344,8 @@ export type Call = {
   readonly receiver?: string;
   /** The test, suite and hook declarations the call stands in, outermost first. */
   readonly blocks: readonly Block[];
+  /** The 1-based line its argument list opens on, when the caller passed the lines. */
+  readonly line?: number;
 };
 
 /** A test, suite or hook declaration that encloses code: where it opens, and its string name if it has one. */
@@ -466,7 +481,7 @@ const closers: Readonly<Record<string, string>> = {
 };
 
 /** The calls and numeric bindings in a token stream. */
-export const facts = (tokens: readonly Token[]): Facts => {
+export const facts = (tokens: readonly Token[], lines: readonly number[] = []): Facts => {
   const calls: Call[] = [];
   const bindings: Binding[] = [];
   const stack: Array<Frame & { readonly open: string }> = [];
@@ -624,6 +639,7 @@ export const facts = (tokens: readonly Token[]): Facts => {
           args: args.length === 1 && args[0]!.length === 0 ? [] : args,
           ...(frame.curriedFrom === undefined ? {} : { curriedFrom: frame.curriedFrom }),
           ...(frame.receiver === undefined ? {} : { receiver: frame.receiver }),
+          ...(lines[frame.start] === undefined ? {} : { line: lines[frame.start] }),
           blocks: frame.blocks,
         });
         lastCall = { end: index, callee: frame.callee };
@@ -722,6 +738,7 @@ const looseMatchers = new Set([
   'toThrow',
 ]);
 const sleepNames = new Set(['sleep', 'delay', 'pause', 'waitForTimeout', 'setTimeout']);
+const timerNames = new Set([...sleepNames, 'setInterval']);
 /** Calls that install a fake clock, and calls that advance one. */
 const fakeClockInstall = new Set(['useFakeTimers', 'install']);
 const fakeClockAdvance = new Set([
@@ -786,6 +803,8 @@ export type Measures = {
   readonly closeTo: readonly Binding[];
   /** `skip`, `only`, `todo` or `fails` keys of an options object passed to a test or suite declaration. */
   readonly optionDisablers: number;
+  /** Each timer or sleep call: its line, and whether a fake clock installed and advanced around it may excuse it. */
+  readonly timers: ReadonlyArray<{ readonly line: number; readonly controlled: boolean }>;
 };
 
 /** The disabling keys (`skip`, `only`, `todo`, `fails`, set to anything but `false`) of an options-object argument. */
@@ -842,7 +861,8 @@ const bump = (tally: Record<string, number>, key: string): void => {
 };
 
 export const measure = (source: string): Measures => {
-  const { calls, bindings } = facts(tokenize(source));
+  const { tokens, lines } = lex(source);
+  const { calls, bindings } = facts(tokens, lines);
   const disabled: Record<string, number> = {};
   const disabledIds: Record<string, number> = {};
   const byPath: Record<keyof Measures['byPath'], Record<string, number>> = {
@@ -859,6 +879,7 @@ export const measure = (source: string): Measures => {
   const waitTimeouts: Binding[] = [];
   const closeTo: Binding[] = [];
   let optionDisablers = 0;
+  const timers: Array<{ line: number; controlled: boolean }> = [];
 
   // A fake clock runs `setTimeout` callbacks without waiting only where it is both installed and advanced: in the
   // declaration that does so (a hook's suite or test), and in the code nested inside it.
@@ -878,7 +899,7 @@ export const measure = (source: string): Measures => {
     return scopes.some((scope) => installed.has(scope)) && scopes.some((scope) => advanced.has(scope));
   };
 
-  for (const { callee, args, curriedFrom, receiver, blocks } of calls) {
+  for (const { callee, args, curriedFrom, receiver, blocks, line } of calls) {
     const chain = members(callee);
     const base = chain[0]!;
     const last = chain.at(-1)!;
@@ -932,14 +953,17 @@ export const measure = (source: string): Measures => {
       }
     }
 
+    const numericWait =
+      (last === 'wait' || callee === 'scheduler.wait') && args[0] !== undefined && evaluate(args[0]) !== undefined;
+    const timer = timerNames.has(last) || numericWait;
+    if (timer && line !== undefined) {
+      timers.push({ line, controlled: controlled(blocks) });
+    }
     const excused = last === 'setTimeout' && controlled(blocks);
     if (excused) {
       bump(byPath.fakeClockTimers, path);
     }
-    if (
-      (sleepNames.has(last) && !excused) ||
-      ((last === 'wait' || callee === 'scheduler.wait') && args[0] !== undefined && evaluate(args[0]) !== undefined)
-    ) {
+    if ((sleepNames.has(last) && !excused) || numericWait) {
       bump(byPath.sleeps, path);
     }
 
@@ -1030,6 +1054,7 @@ export const measure = (source: string): Measures => {
     tolerances,
     closeTo,
     optionDisablers,
+    timers,
   };
 };
 
@@ -1125,6 +1150,26 @@ export const hasTimeoutBudget = (message: string): boolean => timeoutBudgetLine.
 
 const describeValues = (bindings: readonly Binding[]): string =>
   bindings.map((binding) => `${binding.key === '' ? '' : `${binding.key}: `}${binding.text}`).join(', ');
+
+/** The 1-based line numbers of `after` whose text (trimmed) is not matched by a line of `before`, as a multiset. */
+export const addedLines = (before: string, after: string): Set<number> => {
+  const remaining = new Map<string, number>();
+  for (const line of before.split('\n')) {
+    const key = line.trim();
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const added = new Set<number>();
+  for (const [index, line] of after.split('\n').entries()) {
+    const key = line.trim();
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) {
+      remaining.set(key, count - 1);
+    } else {
+      added.add(index + 1);
+    }
+  }
+  return added;
+};
 
 /** The findings for one test-scope code file. */
 export const codeFindings = ({
@@ -1226,12 +1271,27 @@ export const codeFindings = ({
   }
   // Proving that a fake clock still governs the timer (no `useRealTimers()` in between, no real await on it) needs
   // flow analysis, so an excused timer is not test-only: it goes to the operator.
-  const clockTimers = grew(was.byPath.fakeClockTimers, is.byPath.fakeClockTimers);
+  // Counts cancel when a timer is replaced or moved, so every added line that calls a timer or sleep is judged on its
+  // own: a fixed sleep, or for review when a fake clock may govern it.
+  const added = addedLines(before, after);
+  const addedTimers = is.timers.filter((timer) => added.has(timer.line));
+  const realTimers = addedTimers.filter((timer) => !timer.controlled).map((timer) => timer.line);
+  if (realTimers.length > 0 && !findings.some((finding) => finding.rule === 'fixed-sleep')) {
+    add(
+      'fixed-sleep',
+      'forbidden',
+      `adds a timer or sleep on line(s) ${realTimers.join(', ')}: await the condition, not the clock`,
+    );
+  }
+  const clockTimers = [
+    ...grew(was.byPath.fakeClockTimers, is.byPath.fakeClockTimers).map((key) => key || 'the file'),
+    ...addedTimers.filter((timer) => timer.controlled).map((timer) => `line ${timer.line}`),
+  ];
   if (clockTimers.length > 0) {
     add(
       'fake-clock-timer',
       'tolerance',
-      `adds a \`setTimeout\` under a fake clock in ${clockTimers.map((key) => key || 'the file').join('; ')}: confirm the clock, not the wall time, runs it`,
+      `adds a timer under a fake clock (${clockTimers.join('; ')}): confirm the clock, not the wall time, runs it`,
     );
   }
   const loosened = grew(is.byPath.strict, was.byPath.strict).filter(

@@ -365,6 +365,8 @@ beforeEach(() => {
   // natively, so identity pass-through is the faithful stand-in.
   vi.stubGlobal('structuredClone', (value: unknown) => value);
   stubStorage(undefined);
+  /* `loadStore` replaces the factory, but a case that imports the store itself would read the last case's database. */
+  globalThis.indexedDB = new IDBFactory();
 });
 
 afterEach(() => {

@@ -352,6 +352,8 @@ beforeEach(() => {
   /* Module-level bridge hooks outlive the test that set them; reset them so shuffled order cannot leak one. */
   readFileForBridge = undefined;
   readyForBridge = undefined;
+  /* `clearAllMocks` keeps implementations: a project bound to a webaccess folder must not outlive its case. */
+  mockGetProjectFileSystemConfig.mockReset().mockResolvedValue(undefined);
   testRuntime = newTestRuntime();
 });
 

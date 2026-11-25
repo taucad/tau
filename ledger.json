@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T08:32:18.123Z",
+  "updatedAt": "2026-11-25T08:41:06.553Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1171,8 +1171,1675 @@
       "counted": 0,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45531928386,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "914e58791e85d58e6c9eddc3a32659ba61fae168",
+      "at": "2026-11-25T02:35:10Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45533500544,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2377",
+      "sha": "00952fe279cd5abde35fc9a42043ef7d1393e011",
+      "at": "2026-11-25T02:41:47Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45534842763,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "00952fe279cd5abde35fc9a42043ef7d1393e011",
+      "at": "2026-11-25T02:56:56Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45535506282,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2818",
+      "sha": "8a9caba7b262f548524834f72ad9d06d9496aa54",
+      "at": "2026-11-25T03:01:57Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45537157386,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "8a9caba7b262f548524834f72ad9d06d9496aa54",
+      "at": "2026-11-25T03:07:34Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45538177200,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2819",
+      "sha": "ae256fa8e037ea437cfd3f16b36966cc9b015941",
+      "at": "2026-11-25T03:22:14Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45539533823,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "ae256fa8e037ea437cfd3f16b36966cc9b015941",
+      "at": "2026-11-25T03:27:49Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45550541990,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2822",
+      "sha": "325f4b79906fc661a725a7d5b94de11cbb524169",
+      "at": "2026-11-25T05:05:47Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45551242767,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "325f4b79906fc661a725a7d5b94de11cbb524169",
+      "at": "2026-11-25T05:12:34Z",
+      "conclusion": "failure",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45551648508,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2804",
+      "sha": "263a76c12b2f4bd9725ff5701fa412737cb92ed5",
+      "at": "2026-11-25T05:21:40Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45551971117,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2823",
+      "sha": "d30d2fa5cb6daf5666517e18be467bd448b0e18d",
+      "at": "2026-11-25T05:24:39Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45553079155,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "263a76c12b2f4bd9725ff5701fa412737cb92ed5",
+      "at": "2026-11-25T05:39:33Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45553432086,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "d30d2fa5cb6daf5666517e18be467bd448b0e18d",
+      "at": "2026-11-25T05:30:28Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45553577911,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2826",
+      "sha": "2ed82da22a00b54e642596ff44386b46d934767f",
+      "at": "2026-11-25T05:37:52Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45554677375,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2825",
+      "sha": "bfd3ec8e3a5406e837d69a86cf3a3021beee78eb",
+      "at": "2026-11-25T05:53:29Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45554927108,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "2ed82da22a00b54e642596ff44386b46d934767f",
+      "at": "2026-11-25T05:42:42Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45556706263,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "bfd3ec8e3a5406e837d69a86cf3a3021beee78eb",
+      "at": "2026-11-25T06:09:40Z",
+      "conclusion": "success",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45557859623,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2824",
+      "sha": "425b9beee8e71b0ff57756f5f143665dde132e0b",
+      "at": "2026-11-25T06:23:35Z",
+      "conclusion": "success",
+      "artifacts": 31,
+      "counted": 52788,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45560313022,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "425b9beee8e71b0ff57756f5f143665dde132e0b",
+      "at": "2026-11-25T06:40:19Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45563672457,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2827",
+      "sha": "50afbaf06a3012c5cd2c6451cbe044d9c0e32549",
+      "at": "2026-11-25T06:56:54Z",
+      "conclusion": "success",
+      "artifacts": 2,
+      "counted": 1160,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45564423092,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "50afbaf06a3012c5cd2c6451cbe044d9c0e32549",
+      "at": "2026-11-25T07:13:23Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45567694736,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2828",
+      "sha": "97fc6c16c7e7151195204c79514234c2ff8533f0",
+      "at": "2026-11-25T07:28:57Z",
+      "conclusion": "success",
+      "artifacts": 2,
+      "counted": 1188,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45568531166,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "97fc6c16c7e7151195204c79514234c2ff8533f0",
+      "at": "2026-11-25T07:34:46Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45573837038,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2821",
+      "sha": "1f18426ae0623dabef9c01b2dd4a510401281c38",
+      "at": "2026-11-25T08:32:01Z",
+      "conclusion": "success",
+      "artifacts": 28,
+      "counted": 41681,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45574568962,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2829",
+      "sha": "881c19d610f2acf183af9ff1f1189ff2a14cde6a",
+      "at": "2026-11-25T08:23:55Z",
+      "conclusion": "success",
+      "artifacts": 7,
+      "counted": 1261,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 45577184179,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "881c19d610f2acf183af9ff1f1189ff2a14cde6a",
+      "at": "2026-11-25T08:40:48Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
-  "tasks": {},
+  "tasks": {
+    "agent-host-ui:test": {
+      "executions": 2,
+      "tests": 60,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "agent-host:test": {
+      "executions": 1,
+      "tests": 2062,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "agent-host:test:e2e": {
+      "executions": 1,
+      "tests": 31,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "agent-observability:test": {
+      "executions": 1,
+      "tests": 209,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "agent-observability:test:e2e": {
+      "executions": 1,
+      "tests": 108,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "agent-plugin:test": {
+      "executions": 2,
+      "tests": 376,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "agent-plugin:test:e2e": {
+      "executions": 2,
+      "tests": 54,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "agent-tools:test": {
+      "executions": 2,
+      "tests": 1232,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-agent-observability:test": {
+      "executions": 4,
+      "tests": 562,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-auth:test": {
+      "executions": 2,
+      "tests": 266,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-billing:test": {
+      "executions": 4,
+      "tests": 922,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-chat:test": {
+      "executions": 4,
+      "tests": 277,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-contracts:test": {
+      "executions": 2,
+      "tests": 4,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-core:test": {
+      "executions": 2,
+      "tests": 44,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-database:test": {
+      "executions": 2,
+      "tests": 52,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-e2e:test:git": {
+      "executions": 2,
+      "tests": 48,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-e2e:test:server-modes": {
+      "executions": 2,
+      "tests": 4,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-email:test": {
+      "executions": 2,
+      "tests": 189,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-extractor:test": {
+      "executions": 2,
+      "tests": 836,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-git-core:test": {
+      "executions": 4,
+      "tests": 980,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-git-mirror:test": {
+      "executions": 4,
+      "tests": 384,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-hosts:test": {
+      "executions": 2,
+      "tests": 28,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-lifecycle:test": {
+      "executions": 2,
+      "tests": 32,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-llm-gateway:test": {
+      "executions": 4,
+      "tests": 702,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-object-storage:test": {
+      "executions": 4,
+      "tests": 258,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-observability:test": {
+      "executions": 2,
+      "tests": 98,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-projects:test": {
+      "executions": 4,
+      "tests": 650,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api-redis:test": {
+      "executions": 2,
+      "tests": 14,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api-testing:test": {
+      "executions": 1,
+      "tests": 7,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "api:test": {
+      "executions": 4,
+      "tests": 2474,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "api:test:models": {
+      "executions": 2,
+      "tests": 10,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "apps-runtime-e2e:vitest": {
+      "executions": 4,
+      "tests": 4,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:40:19Z",
+      "lastSeen": "2026-11-25T08:40:48Z"
+    },
+    "archive-core:test": {
+      "executions": 1,
+      "tests": 121,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "assimp:test": {
+      "executions": 2,
+      "tests": 132,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "bambu:test": {
+      "executions": 2,
+      "tests": 438,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "billing-e2e:test": {
+      "executions": 2,
+      "tests": 102,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "billing-ui:test": {
+      "executions": 2,
+      "tests": 419,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "billing:test": {
+      "executions": 1,
+      "tests": 152,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "brep:test": {
+      "executions": 2,
+      "tests": 26,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "build123d:test": {
+      "executions": 6,
+      "tests": 570,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "build123d:test:native-darwin": {
+      "executions": 2,
+      "tests": 28,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "bundler-core:test": {
+      "executions": 2,
+      "tests": 192,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "cache-core:test": {
+      "executions": 1,
+      "tests": 66,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "cadmpeg:test": {
+      "executions": 2,
+      "tests": 94,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "camera:test": {
+      "executions": 1,
+      "tests": 368,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "carvera:test": {
+      "executions": 2,
+      "tests": 100,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "chat-surfaces:test": {
+      "executions": 2,
+      "tests": 126,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "chat-ui:test": {
+      "executions": 2,
+      "tests": 1488,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "chat:test": {
+      "executions": 4,
+      "tests": 1816,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "cli-e2e:test:native-darwin": {
+      "executions": 2,
+      "tests": 20,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "cli-e2e:test:scenarios": {
+      "executions": 4,
+      "tests": 164,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "cli:test": {
+      "executions": 2,
+      "tests": 904,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "consent:test": {
+      "executions": 1,
+      "tests": 4,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "converter:test": {
+      "executions": 2,
+      "tests": 8,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "csharp-language:test": {
+      "executions": 2,
+      "tests": 42,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "desktop-services-host:test": {
+      "executions": 2,
+      "tests": 460,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "desktop-services-host:test:terminal-conformance": {
+      "executions": 2,
+      "tests": 28,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "desktop-terminal:test": {
+      "executions": 1,
+      "tests": 40,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "desktop-terminal:test:terminal-conformance": {
+      "executions": 1,
+      "tests": 14,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "desktop:test": {
+      "executions": 2,
+      "tests": 2222,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "docs:test": {
+      "executions": 2,
+      "tests": 2326,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "dotnet-kernel-core:test": {
+      "executions": 2,
+      "tests": 70,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "editor-ui:test": {
+      "executions": 2,
+      "tests": 1419,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "esbuild:test": {
+      "executions": 2,
+      "tests": 122,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "events:test": {
+      "executions": 1,
+      "tests": 15,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "file-links:test": {
+      "executions": 1,
+      "tests": 86,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "files-ui:test": {
+      "executions": 2,
+      "tests": 784,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "files:test": {
+      "executions": 2,
+      "tests": 95,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "filesystem:test": {
+      "executions": 1,
+      "tests": 2056,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "formal:test": {
+      "executions": 1,
+      "tests": 97,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "fs-bridge:test": {
+      "executions": 1,
+      "tests": 407,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "fs-client:test": {
+      "executions": 1,
+      "tests": 436,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "geometry-core:test": {
+      "executions": 2,
+      "tests": 878,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "gltf:test": {
+      "executions": 2,
+      "tests": 82,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "grammars:test": {
+      "executions": 1,
+      "tests": 288,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "grbl:test": {
+      "executions": 2,
+      "tests": 90,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "heif:test": {
+      "executions": 2,
+      "tests": 48,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "host:test": {
+      "executions": 2,
+      "tests": 2744,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "host:test:shell-conformance": {
+      "executions": 2,
+      "tests": 6,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "host:test:shell-qualification": {
+      "executions": 2,
+      "tests": 78,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "image:test": {
+      "executions": 2,
+      "tests": 406,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "jobs-solvers:test": {
+      "executions": 2,
+      "tests": 36,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "jobs:test": {
+      "executions": 2,
+      "tests": 28,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "jscad:test": {
+      "executions": 2,
+      "tests": 290,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "json-schema:test": {
+      "executions": 1,
+      "tests": 5,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "kinematics:test": {
+      "executions": 1,
+      "tests": 246,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "lsp-fs:test": {
+      "executions": 1,
+      "tests": 51,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "lsp:test": {
+      "executions": 2,
+      "tests": 42,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "lsp:verify-browser": {
+      "executions": 2,
+      "tests": 2,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "manifold:test": {
+      "executions": 2,
+      "tests": 110,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "mcp:test": {
+      "executions": 2,
+      "tests": 146,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "memory:test": {
+      "executions": 1,
+      "tests": 45,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "middleware:test": {
+      "executions": 2,
+      "tests": 230,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "native-process-core:test": {
+      "executions": 2,
+      "tests": 168,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "nx:test": {
+      "executions": 1,
+      "tests": 57,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "occt-core:test": {
+      "executions": 2,
+      "tests": 220,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "opencascade:test": {
+      "executions": 2,
+      "tests": 238,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "openrscad:test": {
+      "executions": 2,
+      "tests": 170,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "openscad-language:test": {
+      "executions": 2,
+      "tests": 56,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "oxlint:test": {
+      "executions": 1,
+      "tests": 180,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "parameters:test": {
+      "executions": 1,
+      "tests": 249,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "picogk:test": {
+      "executions": 2,
+      "tests": 604,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "picogk:test:native-darwin": {
+      "executions": 2,
+      "tests": 46,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "picogk:test:native-linux": {
+      "executions": 2,
+      "tests": 46,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "picovoxel:test": {
+      "executions": 2,
+      "tests": 560,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "planetary-gearbox:test": {
+      "executions": 1,
+      "tests": 11,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "preferences:test": {
+      "executions": 2,
+      "tests": 116,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "project-core:test": {
+      "executions": 1,
+      "tests": 53,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "project-library:test": {
+      "executions": 2,
+      "tests": 414,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "project-workspace:test": {
+      "executions": 2,
+      "tests": 162,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "publish-ui:test": {
+      "executions": 2,
+      "tests": 488,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "python-kernel-core:test": {
+      "executions": 2,
+      "tests": 104,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "r2-audit:test": {
+      "executions": 2,
+      "tests": 49,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "react-e2e:test:e2e": {
+      "executions": 16,
+      "tests": 26,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "react-e2e:test:e2e:development": {
+      "executions": 8,
+      "tests": 8,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "react:test": {
+      "executions": 2,
+      "tests": 24,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "replicad:test": {
+      "executions": 2,
+      "tests": 800,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "revisions-ui:test": {
+      "executions": 2,
+      "tests": 220,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "revisions:test": {
+      "executions": 6,
+      "tests": 4898,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "rolldown:test": {
+      "executions": 2,
+      "tests": 54,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "rpc:test": {
+      "executions": 1,
+      "tests": 338,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "runtime-e2e:compute-qualify-ci": {
+      "executions": 2,
+      "tests": 82,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "runtime-testing:test": {
+      "executions": 2,
+      "tests": 122,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "runtime:test": {
+      "executions": 2,
+      "tests": 5415,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "sandbox:test": {
+      "executions": 1,
+      "tests": 250,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "sandbox:test:shell-conformance": {
+      "executions": 2,
+      "tests": 43,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "scripts:test": {
+      "executions": 5,
+      "tests": 5572,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "scripts:test:e2e": {
+      "executions": 5,
+      "tests": 290,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "settings-ui:test": {
+      "executions": 2,
+      "tests": 104,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "share:test": {
+      "executions": 1,
+      "tests": 47,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "shell-service:test": {
+      "executions": 1,
+      "tests": 155,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "shell-service:test:shell-conformance": {
+      "executions": 1,
+      "tests": 7,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "skills:test": {
+      "executions": 2,
+      "tests": 24,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "slicer:test": {
+      "executions": 2,
+      "tests": 402,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "smlib:test": {
+      "executions": 2,
+      "tests": 326,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "smlibpy:test": {
+      "executions": 2,
+      "tests": 178,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "spatial:test": {
+      "executions": 1,
+      "tests": 11,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "tau-examples:test": {
+      "executions": 2,
+      "tests": 200,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "taucad-ui:test": {
+      "executions": 1,
+      "tests": 650,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "telemetry:test": {
+      "executions": 1,
+      "tests": 354,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "three:test": {
+      "executions": 2,
+      "tests": 189,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "tscircuit:test": {
+      "executions": 2,
+      "tests": 516,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "types:test": {
+      "executions": 1,
+      "tests": 205,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "ui-core:test": {
+      "executions": 2,
+      "tests": 1340,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui-e2e:test:e2e:adaptive": {
+      "executions": 1,
+      "tests": 15,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T08:23:55Z",
+      "lastSeen": "2026-11-25T08:23:55Z"
+    },
+    "ui-e2e:test:e2e:daemon-host": {
+      "executions": 3,
+      "tests": 9,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui-e2e:test:e2e:development": {
+      "executions": 3,
+      "tests": 30,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui-e2e:test:e2e:filesystem-scenarios": {
+      "executions": 3,
+      "tests": 129,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui-e2e:test:e2e:non-isolated": {
+      "executions": 6,
+      "tests": 6,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui-kit:test": {
+      "executions": 1,
+      "tests": 70,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "ui:test": {
+      "executions": 12,
+      "tests": 23818,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui:test:e2e:attachment-image-engines": {
+      "executions": 4,
+      "tests": 244,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "ui:verify-browser": {
+      "executions": 2,
+      "tests": 264,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "units:test": {
+      "executions": 1,
+      "tests": 125,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "utils:test": {
+      "executions": 1,
+      "tests": 342,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "viewer:test": {
+      "executions": 2,
+      "tests": 5432,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "vite:test": {
+      "executions": 1,
+      "tests": 19,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "vitest-ci:test": {
+      "executions": 1,
+      "tests": 15,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "warehouse:test": {
+      "executions": 2,
+      "tests": 20,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "workbench-panes:test": {
+      "executions": 2,
+      "tests": 716,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "workbench:test": {
+      "executions": 2,
+      "tests": 120,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    },
+    "workspace-plugin:test": {
+      "executions": 1,
+      "tests": 59,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "www:test": {
+      "executions": 1,
+      "tests": 102,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "www:test-download-browser": {
+      "executions": 1,
+      "tests": 15,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "xstate-testing:test": {
+      "executions": 1,
+      "tests": 27,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T06:23:35Z"
+    },
+    "zoo:test": {
+      "executions": 2,
+      "tests": 2779,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T08:32:01Z"
+    }
+  },
   "identities": {}
 }

@@ -392,6 +392,8 @@ describe('pathKind', () => {
     ['tools/vitest-ci/src/index.ts', 'protected'],
     ['tools/vitest-ci/package.json', 'protected'],
     ['scripts/src/ci-flake-ledger-store.ts', 'protected'],
+    ['scripts/src/ci-shadow-rows.ts', 'protected'],
+    ['scripts/src/ci-shadow-rows-promote-cli.ts', 'protected'],
     ['scripts/src/flake-repro-cli.ts', 'protected'],
     ['scripts/src/burn-in.ts', 'protected'],
     ['scripts/src/burn-in-cli.test.ts', 'protected'],

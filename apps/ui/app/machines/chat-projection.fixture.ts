@@ -98,3 +98,79 @@ export const compactRow = (input: unknown): ProjectionFact => {
     effect,
   });
 };
+
+const checkpoint = { tauInternal: { streamState: 'checkpoint' } } as const;
+
+const skillCall = (id: string, name: string): Record<string, unknown> => ({
+  type: 'toolCall',
+  id,
+  name: 'use_skill',
+  arguments: { name },
+});
+
+const skillInput = (id: string, name: string): Record<string, unknown> => ({
+  id: `input-${id}`,
+  role: 'tool-input',
+  toolCallId: id,
+  toolName: 'use_skill',
+  content: { name },
+});
+
+/**
+ * Run D of the use_skill startup latency investigation (Finding 2), in the order its host wrote it: the model streams
+ * two `use_skill` calls in one message; the host prestarts each, which appends its `tool-input` and replaces the
+ * assistant envelope as the second call arrives; `message_end` and `tool_execution_start` replace the envelopes again;
+ * both outputs commit; then the next step's text streams and settles.
+ *
+ * @param runId - The run.
+ * @returns The rows, sequences from 0.
+ */
+export const prestartedSkillPairRows = (runId = 'run_1'): Array<Record<string, unknown>> => {
+  const one = [skillCall('skill-a', 'cad-replicad')];
+  const both = [...one, skillCall('skill-b', 'geospec-authoring')];
+  const rows: Array<Readonly<Record<string, unknown>>> = [
+    { type: 'run.lifecycle', state: 'admitted', attempt: 1 },
+    { type: 'run.lifecycle', state: 'running', attempt: 1 },
+    { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Build a washer.' } },
+    { type: 'message.appended', message: { id: 'step-1', role: 'assistant', content: one, metadata: checkpoint } },
+    { type: 'message.appended', message: skillInput('skill-a', 'cad-replicad') },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'step-1',
+      replacement: { id: 'step-1', role: 'assistant', content: both, metadata: checkpoint },
+    },
+    { type: 'message.appended', message: skillInput('skill-b', 'geospec-authoring') },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'step-1',
+      replacement: { id: 'step-1', role: 'assistant', content: both },
+    },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'input-skill-a',
+      replacement: skillInput('skill-a', 'cad-replicad'),
+    },
+    ...['skill-a', 'skill-b'].map((id) => ({
+      type: 'message.appended',
+      message: {
+        id: `output-${id}`,
+        role: 'tool-output',
+        toolCallId: id,
+        toolName: 'use_skill',
+        content: `${id} instructions`,
+        isError: false,
+      },
+    })),
+    {
+      type: 'message.appended',
+      message: { id: 'step-2', role: 'assistant', content: [{ type: 'text', text: 'Building' }], metadata: checkpoint },
+    },
+    {
+      type: 'message.envelope-replaced',
+      messageId: 'step-2',
+      replacement: { id: 'step-2', role: 'assistant', content: [{ type: 'text', text: 'Building the washer.' }] },
+    },
+    { type: 'run.lifecycle', state: 'completed', attempt: 1 },
+  ];
+  return rows.map((fields, sequence) => logRow(sequence, { runId, ...fields }));
+};

@@ -37,14 +37,14 @@ import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logi
 
 /** The chat's visible failure, if any. */
 export function selectVisibleChatError(
-  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): NormalizedChatError | undefined {
   return selectVisibleChatErrorEntry(state)?.error;
 }
 
 /** The visible failure's durable identity (`run:…`, `refusal:…`), which the phone sheet acknowledges by (I5). */
 export function selectVisibleChatErrorId(
-  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): string | undefined {
   return selectVisibleChatErrorEntry(state)?.id;
 }

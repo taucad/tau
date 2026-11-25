@@ -107,3 +107,5 @@ UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing
 The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began showing an agent host load failure that the chat's host read met before a seed's command could; the seed stays held until a host read answers, and no action changed.
 
 use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.
+
+use_skill startup latency T3 re-pins the drift after `chat-session-store.ts`, `use-chat.tsx` and `use-cad-chat-client.ts` began reading the chat's status from the run phase and the command in flight, with no SDK stream armed; no action changed.

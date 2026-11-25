@@ -38,6 +38,7 @@
  *   on missing sessions to keep cross-chat dispatch safe.
  */
 
+import type { ChatStatus } from 'ai';
 import type { ChatView } from '#services/deferred-chat.js';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
@@ -56,7 +57,6 @@ import { noComposerTrays } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type {
   DraftAttachment,
@@ -163,8 +163,8 @@ export type CombinedChatState = {
   transcript: ChatTranscriptState;
   /** The composer trays whose height the lane reserves while their reads are pending (U10). */
   rememberedComposerTrays: readonly ComposerTray[];
-  status: ChatInstance['status'];
-  error: Error | undefined;
+  /** The run phase, else the command in flight (T3). */
+  status: ChatStatus;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
   /** Durable host facts and the current read-only attachment, not SDK stream state. */
@@ -249,10 +249,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   );
   const getSnapshot = useCallback((): T => {
     const session = store.get(activeChatId);
-    const chat = session?.chat;
     const messages = session?.messages ?? emptyMessages;
     const projection = store.getProjection(activeChatId);
-    const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
+    const status = store.getChatStatus(activeChatId);
     const draftContext = draftActorRef.getSnapshot().context;
     const persistenceContext = persistenceActorRef?.getSnapshot().context;
     const state: CombinedChatState = {
@@ -272,7 +271,6 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       transcript: selectChatTranscript(session),
       rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
       status,
-      error: chat?.error,
       persistedError: persistenceContext?.persistedError,
       projection,
       attachmentStatus: store.getAttachmentStatus(activeChatId),

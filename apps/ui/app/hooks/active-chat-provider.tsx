@@ -845,13 +845,16 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
   );
   const readStop = useCallback(() => store.isStopping(session.chatId), [session.chatId, store]);
   const stopping = useSyncExternalStore(subscribeStop, readStop, readStop);
+  /* A send leaving for its own turn is work the person can stop before the machine has admitted it. */
+  const readSending = useCallback(() => store.departingSendOf(session.chatId) !== undefined, [session.chatId, store]);
+  const sending = useSyncExternalStore(subscribeStop, readSending, readSending);
   if (approvalRequired) {
     return 'approval-required';
   }
   if (stopping) {
     return 'stopping';
   }
-  return working ? 'working' : 'ready';
+  return working || sending ? 'working' : 'ready';
 }
 
 /**

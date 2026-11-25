@@ -117,6 +117,24 @@ describe('RevisionOutcomes', () => {
     expect(getByTestId('latest')).toHaveTextContent('failed:turn-1');
   });
 
+  /* Chat UX F2: a Stop is an ordinary end. A turn let go before it changed anything lost nothing, so it is silent. */
+  it('says nothing when a turn is let go before it changed anything', () => {
+    const { getByTestId } = renderTurnOutcomes();
+
+    publish({
+      type: 'turn.failed',
+      turnId: 'turn-stopped',
+      runId: 'run-stopped',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      reason: 'The turn ended before it recorded a revision.',
+      code: 'TURN_RELEASED',
+    });
+
+    expect(errors).toEqual([]);
+    expect(getByTestId('latest')).toHaveTextContent('none');
+  });
+
   /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name
    * a checkout — Rule 1's first banned word. The code is what crosses; the
    * table is what a person reads; the diagnostic goes to the console. */

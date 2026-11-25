@@ -5472,6 +5472,139 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    describe('a send with nothing running (chat UX F1, F2)', () => {
+      const pending = <T>() => {
+        let resolve!: (value: T) => void;
+        const promise = new Promise<T>((_resolve) => {
+          resolve = _resolve;
+        });
+        return { promise, resolve };
+      };
+
+      it('should show a send in the thread, not the queue, while the host has not answered', async () => {
+        const chatId = 'departing_send';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          expect(store.departingSendOf(chatId)).toBe('first');
+          expect(session.messages.at(-1)?.id).toBe('first');
+          expect(session.transcript).toBe('loaded');
+          answer.resolve({ commandId: 'req_first', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(session.messages.filter((message) => message.id === 'first')).toHaveLength(1);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a send queued, and out of the thread, while a run is live', async () => {
+        const chatId = 'departing_behind_live';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          session.stateActorRef.send({ type: 'runLifecycle', phase: 'running', runId: 'live' });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          const queuedIds = (): string[] => session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id);
+          await vi.waitFor(() => {
+            expect(queuedIds()).toEqual(['behind']);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messages.some((message) => message.id === 'behind')).toBe(false);
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should put a send stopped during admission back in the composer, with nothing sent or left behind', async () => {
+        const chatId = 'departing_withdrawn';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('withdrawn'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          expect(session.messages.at(-1)?.id).toBe('withdrawn');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+
+          store.stopRun(chatId, 'stop-button');
+
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messages.some((message) => message.id === 'withdrawn')).toBe(false);
+          expect(store.isStopping(chatId)).toBe(false);
+          expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('withdrawn');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should return a refused send to the composer instead of holding it as undelivered', async () => {
+        const chatId = 'departing_refused';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const unadmit = publishChatTurnAdmission(chatId, async () => {
+          throw new Error('You have no credits left.');
+        });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused'));
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('refused');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should not send a cancel, or stay stopping, when Stop finds no live run', async () => {
+        const chatId = 'stop_without_run';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+    });
+
     it('should retain a streaming follow-up without cancelling the active run', async () => {
       const { store, session, hostCommand, unpublish } = await open('chat_queue', 'project_queue');
       try {
@@ -5543,6 +5676,10 @@ describe('ChatSessionStore', () => {
         );
       });
       expect(store.getProjection(chatId)?.views[runId]?.user?.id).toBe('msg_projected_cancel');
+      /* The message is in one place: back in the composer, and out of the thread (chat UX F2). */
+      await vi.waitFor(() => {
+        expect(session.messages.some((message) => message.id === 'msg_projected_cancel')).toBe(false);
+      });
       expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
       expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
       store.release(chatId);

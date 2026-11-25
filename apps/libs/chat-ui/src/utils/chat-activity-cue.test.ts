@@ -9,7 +9,7 @@ describe('selectChatActivityCue', () => {
     },
   );
   it.each([
-    ['queued', 'Queued…'],
+    ['queued', 'Planning next moves…'],
     ['working', 'Planning next moves…'],
     ['tool', 'Planning next moves…'],
     ['approval', 'Waiting for approval'],
@@ -23,6 +23,27 @@ describe('selectChatActivityCue', () => {
       'Planning next moves…',
     );
     expect(selectChatActivityCue({ runState: undefined, chatStatus: 'ready' })).toBeUndefined();
+  });
+  it('should never present a send that starts a turn as queued', () => {
+    // Chat UX F1: a turn being admitted, or a send leaving for one, reads like the turn it starts.
+    expect(selectChatActivityCue({ runState: 'queued', chatStatus: 'ready' })?.sentence).not.toMatch(/queued/iu);
+    expect(selectChatActivityCue({ runState: 'done', chatStatus: 'ready', sending: true })?.sentence).toBe(
+      'Planning next moves…',
+    );
+    expect(selectChatActivityCue({ runState: undefined, chatStatus: 'ready', sending: true })?.sentence).toBe(
+      'Planning next moves…',
+    );
+  });
+  it('should not describe the previous turn’s parts while a new turn starts', () => {
+    expect(
+      selectChatActivityCue({
+        runState: 'queued',
+        chatStatus: 'ready',
+        parts: [
+          { type: 'text', text: 'Earlier commentary', providerMetadata: { common: { messagePhase: 'commentary' } } },
+        ],
+      })?.sentence,
+    ).toBe('Planning next moves…');
   });
   it('should show a newly submitted request before the previous terminal host state catches up', () => {
     expect(selectChatActivityCue({ runState: 'done', chatStatus: 'submitted' })?.sentence).toBe('Planning next moves…');

@@ -170,6 +170,11 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'requestTurn'; readonly gesture: ChatTurnGesture }
   /** `admitTurn`'s answer: the request is composed; the host places it (W8 TS-S5). */
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
+  /**
+   * The person stopped a queued send before it was dispatched: abandon its admission. Nothing was placed, because the
+   * host places only a dispatched turn (V4), so the chat holds nothing afterwards.
+   */
+  | { readonly type: 'withdrawTurn'; readonly queueId: string }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
   | { readonly type: 'adoptRun'; readonly runId: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
@@ -399,6 +404,7 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  * The (state, event) pairs this machine ignores (MC-R17).
  *
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
+ * - `withdrawTurn` outside `queued.admitting`: a Stop that found no admission of its send in flight.
  * - `adoptRun` in the states that hold a turn or a live run.
  * - `autoResumeWithdrawn` with no wait in hand.
  * - `requestTurn` in `autoResume.resuming`: the store's own resume, or a gesture over it; the run region owns both.
@@ -417,7 +423,7 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
       runStates.failed,
       runStates.stopped,
     ],
-    ['turnAdmitted'],
+    ['turnAdmitted', 'withdrawTurn'],
   ),
   ...pairs([runStates.queued, runStates.running], ['adoptRun']),
   ['autoResume.idle', 'autoResumeWithdrawn'],
@@ -457,7 +463,7 @@ export const chatSessionMachine = setup({
   },
 }).createMachine({
   id: 'chat-session',
-  version: '4',
+  version: '5',
   /* A fault no transition modelled is recorded and the chat keeps answering, so a render never throws (MC-R12). */
   onError: ({ event }) => ({ context: { fault: failureMessage(event.error, 'chat-session fault') } }),
   context: ({ input }) => ({
@@ -538,6 +544,18 @@ export const chatSessionMachine = setup({
                 },
               },
               on: {
+                /* Leaving the state stops `admitTurn`; its late answer is ignored outside `admitting`. */
+                withdrawTurn: ({ context, event }, enq) => {
+                  const gesture = context.pendingGesture;
+                  if (gesture?.kind !== 'send' || (gesture.queueId ?? gesture.message.id) !== event.queueId) {
+                    return {};
+                  }
+                  announce(context, enq);
+                  return {
+                    target: '#chat-session.run.idle',
+                    context: { pendingGesture: undefined, turn: undefined, ...clearRunDetail },
+                  };
+                },
                 turnAdmitted: ({ context, event }, enq) => {
                   enq.emit({ type: 'startTurnRequest', chatId: context.chatId, request: event.turn.request });
                   announce(context, enq);

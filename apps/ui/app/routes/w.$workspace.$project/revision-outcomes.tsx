@@ -5,6 +5,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
@@ -56,6 +57,21 @@ export const useTurnOutcomes = (projectId: string): readonly TurnOutcomeNotice[]
     () => noOutcomes,
   );
 
+/**
+ * Whether a turn ended the ordinary way a person ends one: let go before it changed anything (`TURN_RELEASED`) — a
+ * Stop, a send withdrawn before it ran, a reload. Nothing is lost, so nothing is said; the composer already holds the
+ * request again when it never ran. A release after the run recorded a change to the project still says so.
+ *
+ * @param event - The revision event.
+ * @param changed - Whether the chat's log shows that run changed the project; `undefined` when unknown.
+ * @returns `true` when the release is silent.
+ */
+const isOrdinaryRelease = (
+  event: WorkerRevisionEvent,
+  changed: (chatId: string, runId: string) => boolean | undefined,
+): boolean =>
+  event.type === 'turn.failed' && event.code === 'TURN_RELEASED' && changed(event.chatId, event.runId) !== true;
+
 const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
   if (event.type === 'turn.finalized' || event.type === 'chats.projected' || event.type === 'checkout.changed') {
     return undefined;
@@ -86,6 +102,7 @@ export function RevisionOutcomes(): undefined {
   const client = useRevisionClient();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
+  const sessions = useOptionalChatSessionStore();
   const workspace = useProjectWorkspace({ enableNoContext: true });
   const openHistory = (): void => {
     workspace?.openPanel('revisions');
@@ -108,6 +125,14 @@ export function RevisionOutcomes(): undefined {
         for (const chatId of event.chatIds) {
           void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
         }
+        return;
+      }
+      if (
+        isOrdinaryRelease(event, (chatId, runId) => {
+          const changes = sessions?.getProjection(chatId)?.ledger.runs[runId]?.changes;
+          return changes === undefined ? undefined : Object.keys(changes).length > 0;
+        })
+      ) {
         return;
       }
       const notice = noticeOf(projectId, event);
@@ -137,7 +162,7 @@ export function RevisionOutcomes(): undefined {
       const copy = describeRevisionFailure('turn', notice.code);
       toast.error(copy.title, { description: copy.description });
     });
-  }, [client, projectId, queryClient]);
+  }, [client, projectId, queryClient, sessions]);
 
   return undefined;
 }

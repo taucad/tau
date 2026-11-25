@@ -184,6 +184,11 @@
 \* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
 \* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
 \* moved. No action or verdict changes.
+\* Chat UX F1/F2 (2026-11-25): a send made with nothing running is shown in the thread while it is admitted,
+\* not as a queue row. Stop during that admission, or a host refusal of it, withdraws the entry (Withdraw): an
+\* unprepared, unsteered, never-accepted entry leaves the queue and the submitted set and returns to the composer,
+\* and the session machine's `withdrawTurn` abandons the admission. The person may submit it again.
+\* The store waits for a withdrawal's removal before it re-reads the outbox, so no delivery reads it half-written.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -307,6 +312,14 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                      !.counts[s.prepared] = 0,
                      !.target = IF s.steerItem = s.prepared THEN None ELSE @,
                      !.steerItem = IF s.steerItem = s.prepared THEN None ELSE @]
+\* Withdrawing a send that was never prepared or accepted returns it to the composer; the
+\* person may submit it again, so it leaves the submitted set with its per-message facts.
+Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
+                  /\ m # s.prepared /\ m # s.steerItem /\ m \notin Accepted
+                  /\ s' = [s EXCEPT !.queue = Remove(@, m),
+                       !.saved = IF Durable THEN Remove(@, m) ELSE @,
+                       !.submitted = @ \ {m}, !.counts[m] = 0,
+                       !.capturedTerminal[m] = None, !.afterTerminal[m] = None]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
 \* The finite crash scenario begins only after a queue save has answered.
@@ -319,7 +332,7 @@ Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
              \/ Acknowledge(t) \/ LoseAck(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
-             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m)
+             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))
 Spec == Init /\ [][Next]_vars

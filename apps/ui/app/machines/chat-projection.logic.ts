@@ -1448,12 +1448,66 @@ export const selectRunElsewhereRecheckDelay = (projection: ChatProjection, now: 
   return changesAt === undefined ? undefined : Math.min(Math.max(0, changesAt - now), longestTimerMilliseconds);
 };
 
-/** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
+/** Framing that can exist even when no assistant content reached the person. */
+const nonOutputChunkTypes: ReadonlySet<string> = new Set([
+  'start',
+  'start-step',
+  'finish-step',
+  'finish',
+  'abort',
+  'message-metadata',
+  'data-acp-session',
+  'data-acp-activity',
+]);
+
+/**
+ * Whether a run's own stream carried anything the person could read: text, reasoning, a tool or data beyond framing.
+ *
+ * @param view - The run's projected view.
+ * @returns `true` once any output chunk is present.
+ * @public
+ */
+export const runViewHasOutput = (view: RunView): boolean =>
+  [...chunksSince(view.chunks)].some((chunk) => !nonOutputChunkTypes.has(chunk.type)) ||
+  (view.segments?.length ?? 0) > 0;
+
+/**
+ * Whether a run is withdrawn from the transcript: the person stopped it before anything came back and before the
+ * agent kept its turn. The host records a Stop that keeps the turn as `USER_STOPPED` (a committed Tau turn, or an
+ * external prompt already issued); any other cancellation released the turn, so its message went back to the
+ * composer and the thread shows it no more. A run that produced output keeps its place, and so does a failure.
+ *
+ * @param run - The run's ledger entry, when this log has one.
+ * @param view - The run's projected view.
+ * @returns `true` when the run's request is not shown.
+ * @public
+ */
+export const isRetractedRun = (
+  run: Readonly<{ lifecycle?: string; failure?: Readonly<{ code?: string }> }> | undefined,
+  view: RunView,
+): boolean =>
+  run?.lifecycle === 'cancelled' &&
+  run.failure?.code !== 'USER_STOPPED' &&
+  view.user !== undefined &&
+  view.steering === undefined &&
+  !runViewHasOutput(view);
+
+/**
+ * Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. A retracted run
+ * ({@link isRetractedRun}) is left out unless `withRetracted` asks for every request the log holds.
+ *
+ * @public
+ */
 export const selectTranscriptSource = (
   projection: ChatProjection,
+  { withRetracted = false }: Readonly<{ withRetracted?: boolean }> = {},
 ): ReadonlyArray<RunView & { readonly runId: string }> =>
   Object.entries({ ...projection.remote?.views, ...projection.views })
-    .filter(([, view]) => view.retired !== true)
+    .filter(
+      ([runId, view]) =>
+        view.retired !== true &&
+        (withRetracted || !(projection.views[runId] === view && isRetractedRun(projection.ledger.runs[runId], view))),
+    )
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
 

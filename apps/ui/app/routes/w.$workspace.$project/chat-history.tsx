@@ -25,6 +25,7 @@ import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
@@ -291,7 +292,7 @@ const ExpandedChatHistory = memo(function ({
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChatRecords(projectId);
-  const { activeChatId, persistenceActorRef } = useChatContext();
+  const { activeChatId } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
   const agentInvocations = useChatSelector((state) => state.agentInvocations);
   const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
@@ -321,17 +322,12 @@ const ExpandedChatHistory = memo(function ({
     }
   }, [location.state]);
 
-  // Empty-cancel: the persistence machine has lifted the cancelled user
-  // message back into the composer draft (via the store's
-  // `restoreCancelledDraft` listener), so refocus the composer in the next
-  // animation frame so Tiptap/HTMLTextArea can finish reflowing the restored
-  // draft text before the cursor lands.
+  // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
+  // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.
+  const sessionStore = useChatSessionStore();
   useEffect(() => {
-    if (!persistenceActorRef) {
-      return;
-    }
     let frame: number | undefined;
-    const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
+    const unsubscribe = sessionStore.subscribeDraftReturned(activeChatId, () => {
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
@@ -344,9 +340,9 @@ const ExpandedChatHistory = memo(function ({
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [persistenceActorRef]);
+  }, [activeChatId, sessionStore]);
 
   // The turn host owns request configuration; the client exposes action verbs.
   // Memoising the call site avoids re-rendering tooltip-heavy children.

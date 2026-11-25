@@ -6,6 +6,7 @@ import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-
 import type { Api, AssistantMessage, Model, Models, Usage, UserMessage } from '@earendil-works/pi-ai';
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
 import type { SessionLogEvent, SessionRecord } from '#harness/session-record.js';
+import { isPersonsMetadata } from '#log/event-types.js';
 import type { CompactionTrace, ProviderMessage } from '#log/event-types.js';
 import { util as zodUtility } from 'zod';
 
@@ -330,10 +331,12 @@ const userText = (message: AgentMessage): string => {
 const tagsOf = (text: string): readonly string[] => text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? [];
 
 /**
- * Whether a message of the model's context is one the person wrote: a user row that is not a compaction summary, not
- * one of Tau's own rows (`tauInternal`: a safeguard nudge, an interrupt note, the chat-state note) and not a
- * `<system-reminder>`. It is `isPersonsMessage` of `#log/event-types.js` for the context the model is sent, where a
- * summary and a reminder are user rows too.
+ * Whether a message of the model's context is one the person wrote: a user row that is not a compaction summary and
+ * whose metadata `isPersonsMetadata` reads as the person's (so not a safeguard nudge, an interrupt note or the
+ * chat-state note). It is `isPersonsMessage` of `#log/event-types.js` for the context the model is sent, where a
+ * summary and a reminder are user rows too. Provenance decides: a person's message that quotes `<system-reminder>` is
+ * still theirs. Only a row that reached the context with no metadata at all is read by its form, and then only a row
+ * that is wholly a reminder is Tau's.
  *
  * Compaction keeps the newest such message whole, and the safeguards count the agent's tool calls from it, so the two
  * read "the person last spoke here" from this one definition.
@@ -343,11 +346,16 @@ const tagsOf = (text: string): readonly string[] => text.match(/<[a-z][\w:-]*(?:
  * @param identities - The session's message identities, which carry each row's durable metadata.
  * @returns `true` for the person's own message.
  */
-export const isPersonsContextMessage = (message: AgentMessage, identities: SessionRecord['messages']): boolean =>
-  message.role === 'user' &&
-  summaryText(message) === undefined &&
-  identities.metadata(message)?.tauInternal === undefined &&
-  !tagsOf(userText(message)).some((tag) => tag.toLowerCase().includes('system-reminder'));
+export const isPersonsContextMessage = (message: AgentMessage, identities: SessionRecord['messages']): boolean => {
+  if (message.role !== 'user' || summaryText(message) !== undefined) {
+    return false;
+  }
+  const metadata = identities.metadata(message);
+  if (metadata !== undefined) {
+    return isPersonsMetadata(metadata);
+  }
+  return !/^\s*<system-reminder>/iu.test(userText(message));
+};
 
 const lastUserText = (messages: readonly AgentMessage[]): string => {
   for (let index = messages.length - 1; index >= 0; index--) {

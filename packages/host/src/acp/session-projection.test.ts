@@ -2558,3 +2558,39 @@ it('should record a vendor call with empty names, ids and paths as rows the log 
     messages.some((message) => message.role === 'assistant' && JSON.stringify(message.content).includes('after')),
   ).toBe(true);
 });
+
+it('should pair a vendor result with one call when two open calls share an empty id (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({ agentId: 'codex', createId: randomUUID, turn: stubTurn(appended) });
+
+  for (const title of ['first', 'second']) {
+    projection.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: '',
+      title,
+      kind: 'execute',
+      status: 'pending',
+    } as SessionUpdate);
+  }
+  projection.update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: '',
+    status: 'completed',
+    rawOutput: 'done',
+  } as SessionUpdate);
+  projection.update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: '',
+    status: 'completed',
+    rawOutput: 'again',
+  } as SessionUpdate);
+  await projection.flush();
+
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  const inputs = messages.filter((message): message is MessageOf<'tool-input'> => message.role === 'tool-input');
+  const outputs = messages.filter((message): message is MessageOf<'tool-output'> => message.role === 'tool-output');
+  expect(inputs.map((input) => input.toolName)).toEqual(['first', 'second']);
+  /* One result, on the newer call; the earlier call keeps no result rather than another call's. */
+  expect(outputs).toHaveLength(1);
+  expect(outputs[0]?.toolCallId).toBe(inputs[1]?.toolCallId);
+});

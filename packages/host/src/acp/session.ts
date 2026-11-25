@@ -2016,7 +2016,20 @@ export const createTurnProjection = (options: {
       content: input,
       metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
     };
+    const reused = openToolCalls.get(update.toolCallId);
     openToolCalls.set(update.toolCallId, { toolName: callToolName, callId, facts, tauMcp, input, inputMessage });
+    /* The agent named a call it has not finished (two calls with no id share one): its later updates cannot say which
+     * call they mean, so they go to the newer one, and the earlier call closes as it stands, as a turn's end closes an
+     * open call. Its row is not given the newer call's result. */
+    if (reused !== undefined) {
+      await append([
+        {
+          type: 'message.envelope-replaced',
+          messageId: reused.inputMessage.id,
+          replacement: { ...reused.inputMessage, call: reused.facts },
+        },
+      ]);
+    }
     await append([
       {
         type: 'message.appended',

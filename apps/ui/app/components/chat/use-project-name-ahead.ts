@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { useSession } from '@better-auth-ui/react';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -30,6 +30,8 @@ export type ProjectNameAhead = Readonly<{
    * returned unawaited so the create overlaps it; `undefined` if no request covers the draft.
    */
   take: (draft: NameAheadDraft) => Promise<string> | undefined;
+  /** Ask through `next` from now on, keeping the draft's state and its cap. */
+  replaceRequest: (next: NameAheadRequest) => void;
   dispose: () => void;
 }>;
 
@@ -59,10 +61,11 @@ const covers = (named: Named, text: string, attachments: string): boolean =>
  * held. One request in flight, a newer one aborting it, at most three per draft; the answer is kept with the text it
  * named. A draft cleared to empty starts a new draft.
  *
- * @param request - Asks for one name.
+ * @param initialRequest - Asks for one name, until `replaceRequest` swaps it.
  * @returns The draft's name-ahead state.
  */
-export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAhead => {
+export const createProjectNameAhead = (initialRequest: NameAheadRequest): ProjectNameAhead => {
+  let request = initialRequest;
   let latest: (Named & { readonly controller: AbortController }) | undefined;
   /* The last request that failed: a submit it covers takes the fallback rather than asking a fourth time. */
   let failed: Named | undefined;
@@ -136,12 +139,32 @@ export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAh
       /* The request for this text failed: today's fallback, not another request at creation. */
       return entry === undefined ? undefined : nameOrDefault(entry);
     },
+    replaceRequest(next) {
+      request = next;
+    },
     dispose() {
       clearTimeout(timer);
       latest?.controller.abort();
     },
   };
 };
+
+type NamingSources = Readonly<{
+  generate: ReturnType<typeof useProjectNameClient>['generate'];
+  recordFiles: ReturnType<typeof useFileManager>['recordFiles'];
+  attachmentSource: ReturnType<typeof useChatComposer>['attachmentSource'];
+}>;
+
+/** A name request through the composer's naming sources. */
+const requestThrough =
+  ({ generate, recordFiles, attachmentSource }: NamingSources): NameAheadRequest =>
+  async (draft, { projectId, signal }) =>
+    generate({
+      projectId,
+      signal,
+      text: draft.text,
+      imageUrls: await namingImageUrls(recordFiles, { attachments: draft.attachments, attachmentSource }),
+    });
 
 /**
  * Name ahead for the composer's draft (C1). Signed out, nothing is asked: the request is a funded `title` operation
@@ -160,18 +183,13 @@ export function useProjectNameAhead(): Readonly<{
   const { generate } = useProjectNameClient();
   const text = useSelector(draftActorRef, (state) => state.context.draftText);
   const attachments = useSelector(draftActorRef, (state) => state.context.draftAttachments);
-  const nameAhead = useMemo(
-    () =>
-      createProjectNameAhead(async (draft, { projectId, signal }) =>
-        generate({
-          projectId,
-          signal,
-          text: draft.text,
-          imageUrls: await namingImageUrls(recordFiles, { attachments: draft.attachments, attachmentSource }),
-        }),
-      ),
-    [attachmentSource, generate, recordFiles],
+  /* One per mounted composer: a dependency changing identity swaps the request, so the draft keeps its cap. */
+  const [nameAhead] = useState(() =>
+    createProjectNameAhead(requestThrough({ generate, recordFiles, attachmentSource })),
   );
+  useEffect(() => {
+    nameAhead.replaceRequest(requestThrough({ generate, recordFiles, attachmentSource }));
+  }, [attachmentSource, generate, nameAhead, recordFiles]);
   useEffect(
     () => () => {
       nameAhead.dispose();
@@ -179,9 +197,17 @@ export function useProjectNameAhead(): Readonly<{
     [nameAhead],
   );
   const pasted = useRef(false);
+  /* A draft restored on mount was not written here: it is asked about only once the person changes it. */
+  const restored = useRef<string | undefined>(text);
   useEffect(() => {
     const isPaste = pasted.current;
     pasted.current = false;
+    if (restored.current !== undefined) {
+      if (text === restored.current) {
+        return;
+      }
+      restored.current = undefined;
+    }
     if (isSignedIn) {
       nameAhead.update({ text, attachments }, isPaste);
     }

@@ -220,6 +220,34 @@ describe('useProjectNameAhead', () => {
     await expect(result.current.take(textDraft('A wall bracket for a pipe'))).resolves.toBe('Pipe Wall Bracket');
   });
 
+  it('should not ask for a draft restored on mount until the person changes it', async () => {
+    draft.type('A wall bracket for a pipe');
+    const { rerender } = renderHook(() => useProjectNameAhead());
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+    rerender();
+    expect(mockGenerate).not.toHaveBeenCalled();
+
+    act(() => {
+      draft.type('A wall bracket for a pipe, 32 mm');
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('should keep the per-draft cap when the name client changes identity', async () => {
+    const { rerender } = renderHook(() => useProjectNameAhead());
+    for (const text of ['A wall bracket', 'A phone stand', 'A cable clip', 'A pen holder']) {
+      act(() => {
+        draft.type(text);
+      });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each pause must elapse before the next change
+      await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
+      fileManager.recordFiles = {};
+      rerender();
+    }
+    expect(mockGenerate).toHaveBeenCalledTimes(3);
+  });
+
   it('should cancel a superseded request through the signal it passes to the name client', async () => {
     renderHook(() => useProjectNameAhead());
 

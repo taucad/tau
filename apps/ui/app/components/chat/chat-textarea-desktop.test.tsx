@@ -772,6 +772,128 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
   });
 
+  /* One editor serves every chat, so its undo history has to end where the draft it edits ends. */
+  describe('undo after the composer moves to another chat', () => {
+    const editorOf = (container: HTMLElement): Editor => {
+      const editor = container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor).toBeDefined();
+      return editor!;
+    };
+    const settle = async (): Promise<void> => {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    };
+    /* The history plugin groups steps made within 500 ms; a chat switch comes long after the last keystroke. */
+    const later = (): void => {
+      vi.setSystemTime(Date.now() + 2000);
+    };
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      draftOwner.current = { chat: 'one' };
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      draftOwner.current = undefined;
+    });
+
+    it("should not bring the previous chat's draft back over this chat's", async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The other chat draft.');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it("should not bring the previous chat's draft into an empty chat", async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it('should not bring back text the person deleted in the previous chat when both drafts are empty', async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      later();
+      act(() => {
+        editor.commands.clearContent(true);
+      });
+      view.rerenderWith(codexSession, '');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it('should still undo an edit made in the chat the composer moved to', async () => {
+      const view = renderComposer('', codexSession);
+      const editor = editorOf(view.container);
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.focus('end');
+        editor.commands.insertContent(' More.');
+      });
+      expect(editor.getText()).toBe('The other chat draft. More.');
+
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The other chat draft.');
+    });
+  });
+
   it('should not draw a focus outline when the native input was not focused', () => {
     renderComposer('', codexSession, {
       earlyInput: {

@@ -56,6 +56,7 @@ import {
   buildEditorContentJson,
   cadReferencesOfChips,
   extractContent,
+  forgetEditorHistory,
   useChatEditor,
 } from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
@@ -501,10 +502,28 @@ export const ChatTextareaDesktop = memo(function ({
   /* A painted draft goes into the editor as plain text (Home's `initialText`, or the handover below): when the draft
    * delivers that text, its tokens are built into chips once, as a restored draft's are. */
   const paintedTextRef = useRef(earlyInput?.prefilled === true ? earlyInput.text : undefined);
+  /* The draft whose edits the editor's undo history holds, and whether that history is still a previous draft's. */
+  const historyOwnerRef = useRef(draftActorRef);
+  const isHistoryStaleRef = useRef(false);
   useEffect(() => {
     if (!editor) {
       return undefined;
     }
+    /* Another chat's draft in the same mounted editor (the composer is not remounted on a chat switch): the history
+     * is the previous draft's, and so are the texts the editor reported but the store had not confirmed. The history
+     * is dropped once this draft's content is in, whichever branch below puts it there; the flag outlives a run of
+     * this effect that is superseded before its content lands. */
+    if (historyOwnerRef.current !== draftActorRef) {
+      historyOwnerRef.current = draftActorRef;
+      isHistoryStaleRef.current = true;
+      unconfirmedTextsRef.current = [];
+    }
+    const forgetStaleHistory = (): void => {
+      if (isHistoryStaleRef.current) {
+        isHistoryStaleRef.current = false;
+        forgetEditorHistory(editor);
+      }
+    };
     const current = extractContent(editor);
     /* This render's text can trail the editor by keystrokes it already holds: when tokens or the tree
      * arrive mid-typing, the effect re-runs with an older text the editor itself reported, and writing
@@ -524,6 +543,7 @@ export const ChatTextareaDesktop = memo(function ({
       if (current.text !== '') {
         editor.commands.clearContent(false);
       }
+      forgetStaleHistory();
       return undefined;
     }
     const lazyTree: Map<string, FileEntry> = treeService?.getTreeSnapshot() ?? new Map<string, FileEntry>();
@@ -536,6 +556,7 @@ export const ChatTextareaDesktop = memo(function ({
      * late (catalog, agent commands) now resolve to more chips — a restored draft rehydrates. */
     const chipCount = segments.filter((segment) => segment.type === 'chip').length;
     if (inputText === current.text && (!(tokensChanged || isPaintedText) || chipCount <= current.contextChips.length)) {
+      forgetStaleHistory();
       return undefined;
     }
     /* F20: each chip's node view calls `flushSync`, which React refuses inside
@@ -552,11 +573,12 @@ export const ChatTextareaDesktop = memo(function ({
           emitUpdate: false,
         });
       }
+      forgetStaleHistory();
     });
     return () => {
       isCurrent = false;
     };
-  }, [inputText, editor, treeService, chats, knownTokens]);
+  }, [inputText, editor, treeService, chats, knownTokens, draftActorRef]);
 
   // Expose focus function to parent via mutable ref
   useEffect(() => {

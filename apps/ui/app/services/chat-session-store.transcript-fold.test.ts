@@ -12,7 +12,18 @@ import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import * as Projection from '#machines/chat-projection.logic.js';
-import { logRow, prestartedSkillPairRows, publishLogPage, publishLogRows } from '#machines/chat-projection.fixture.js';
+import { mock } from 'vitest-mock-extended';
+import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
+import {
+  logRow,
+  prestartedSkillPairRows,
+  publishLogPage,
+  publishLogRows,
+  writerOwnedCatchUp,
+} from '#machines/chat-projection.fixture.js';
+import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
+import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
@@ -535,6 +546,177 @@ describe('displayed transcript replay cases (T2)', () => {
     } finally {
       reader.dispose();
     }
+  });
+
+  it('should never regress shown content across four rewrites in consecutive batches', async () => {
+    const reader = await openReader();
+    const call = { type: 'toolCall', id: 'skill-a', name: 'use_skill', arguments: { name: 'cad-replicad' } };
+    const checkpoint = { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } };
+    const step = (text: string) => ({ id: 'step-1', role: 'assistant', content: [{ type: 'text', text }, call] });
+    const rows = [
+      { type: 'run.lifecycle', state: 'admitted', attempt: 1 },
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Build it.' } },
+      { type: 'message.appended', message: { ...step('Draft'), metadata: checkpoint } },
+      {
+        type: 'message.appended',
+        message: { id: 'input-a', role: 'tool-input', toolCallId: 'skill-a', toolName: 'use_skill', content: {} },
+      },
+      {
+        type: 'message.appended',
+        message: {
+          id: 'output-a',
+          role: 'tool-output',
+          toolCallId: 'skill-a',
+          toolName: 'use_skill',
+          content: 'instructions',
+          isError: false,
+        },
+      },
+      ...['Draft 1', 'Draft 1 2', 'Draft 1 2 3', 'Draft 1 2 3 4'].map((text) => ({
+        type: 'message.envelope-replaced',
+        messageId: 'step-1',
+        replacement: { ...step(text), metadata: checkpoint },
+      })),
+    ].map((row, sequence) => logRow(sequence, row));
+    try {
+      await reader.run([{ rows: rows.slice(0, 6) }, ...rowsOf([6, 7, 8, 9], rows)]);
+
+      expectNoRegression(reader.seen);
+      expect(textOf(reader.session.messages)).toBe('Draft 1 2 3 4');
+      expect(toolsOf(reader.session.messages)).toEqual({
+        'skill-a': { state: 'output-available', output: 'instructions' },
+      });
+    } finally {
+      reader.dispose();
+    }
+  });
+
+  it('should keep the transcript through a reread from cursor 0 mid-run', async () => {
+    const reader = await openReader();
+    try {
+      await reader.run(rowsOf([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], runD));
+      const shown = reader.session.messages;
+      expect(toolsOf(shown)).toEqual({
+        'skill-a': { state: 'output-available', output: 'skill-a instructions' },
+        'skill-b': { state: 'output-available', output: 'skill-b instructions' },
+      });
+
+      reader.store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'identity-mismatch' });
+      await settle();
+      expect(reader.store.getProjection(chatId)?.ledger.position.cursor).toBe(0);
+      expect(reader.session.messages).toBe(shown);
+
+      publishLogPage(reader.store, chatId, runD.slice(0, 4), { cursor: 0, endCursor: runD.length });
+      await settle();
+      expect(reader.session.messages).toBe(shown);
+      publishLogPage(reader.store, chatId, runD.slice(4), { cursor: 4, endCursor: runD.length });
+      await settle();
+
+      expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      expectNoRegression([...reader.seen, reader.session.messages]);
+    } finally {
+      reader.dispose();
+    }
+  });
+
+  /** Two logged turns, then one gesture the host answers `durable` (or refuses) before its run's first row folds. */
+  const acceptGesture = async (
+    gesture: Extract<ChatTurnGesture, { kind: 'edit' | 'regenerate' }>,
+    answer: 'durable' | 'refused',
+  ): Promise<Readonly<{ logged: readonly MyUIMessage[]; shown: readonly MyUIMessage[] }>> => {
+    const reader = await openReader();
+    const hostCommand = vi.fn(async (command: HostCommand): Promise<CommandAnswer> => {
+      if (answer === 'refused') {
+        throw new Error('The host refused the turn.');
+      }
+      return {
+        commandId: command.commandId,
+        generation: 0,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 1,
+      };
+    });
+    const unpublishConnector = reader.store.publishProjectHostConnector('project', async () =>
+      mock<AgentHostClient>({
+        catchUp: writerOwnedCatchUp,
+        hostCommand,
+        subscribe: vi.fn(() => vi.fn()),
+        close: vi.fn(async () => undefined),
+      }),
+    );
+    const unpublishAdmission = publishChatTurnAdmission(chatId, async (admitted) => {
+      const runId = 'run_gesture';
+      const command: HostCommand = {
+        type: 'start',
+        commandId: runId,
+        payload: {
+          chatId,
+          runId,
+          message: { id: 'user-2', role: 'user', content: 'Make it red.' },
+          trigger: admitted.kind === 'edit' ? 'edit' : 'submit',
+        },
+      };
+      const request: ChatRequest =
+        admitted.kind === 'edit'
+          ? { kind: 'edit', messageId: admitted.messageId, content: admitted.text, command }
+          : { kind: 'regenerate', command };
+      return { runId, leaseTurnId: undefined, request };
+    });
+    const rows = [
+      { type: 'run.lifecycle', state: 'admitted', attempt: 1 },
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Build it.' } },
+      { type: 'message.appended', message: { id: 'step-1', role: 'assistant', content: 'Built.' } },
+      { type: 'run.lifecycle', state: 'completed', attempt: 1 },
+      { runId: 'run_2', type: 'run.lifecycle', state: 'admitted', attempt: 1 },
+      { runId: 'run_2', type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { runId: 'run_2', type: 'message.appended', message: { id: 'user-2', role: 'user', content: 'Make it blue.' } },
+      { runId: 'run_2', type: 'message.appended', message: { id: 'step-2', role: 'assistant', content: 'Blue.' } },
+      { runId: 'run_2', type: 'run.lifecycle', state: 'completed', attempt: 1 },
+    ].map((row, sequence) => logRow(sequence, row));
+    try {
+      await reader.run([{ rows }]);
+      const logged = reader.session.messages;
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await reader.store.requestTurn(chatId, gesture);
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledOnce();
+      });
+      await settle();
+      return { logged, shown: reader.session.messages };
+    } finally {
+      unpublishAdmission();
+      unpublishConnector();
+      reader.dispose();
+    }
+  };
+
+  const idsOf = (messages: readonly MyUIMessage[]): string[] => messages.map((message) => message.id);
+
+  it('should truncate after the last user message once the host accepts a regenerate', async () => {
+    const { logged, shown } = await acceptGesture({ kind: 'regenerate' }, 'durable');
+
+    expect(idsOf(logged)).toEqual(['user-1', 'run_1', 'user-2', 'run_2']);
+    expect(shown).toEqual(logged.slice(0, 3));
+  });
+
+  it('should truncate at the edited message and show its text once the host accepts an edit', async () => {
+    const { logged, shown } = await acceptGesture(
+      { kind: 'edit', messageId: 'user-2', text: 'Make it red.' },
+      'durable',
+    );
+
+    expect(idsOf(shown)).toEqual(['user-1', 'run_1', 'user-2']);
+    expect(shown.slice(0, 2)).toEqual(logged.slice(0, 2));
+    expect(shown.at(-1)?.parts).toContainEqual(expect.objectContaining({ type: 'text', text: 'Make it red.' }));
+  });
+
+  it('should keep the logged transcript when the host refuses a gesture', async () => {
+    const { logged, shown } = await acceptGesture({ kind: 'regenerate' }, 'refused');
+
+    expect(shown).toEqual(logged);
   });
 
   it('should show the transcript when the SDK cannot reconstruct the run', async () => {

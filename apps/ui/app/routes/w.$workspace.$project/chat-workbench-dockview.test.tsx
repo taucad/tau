@@ -67,9 +67,8 @@ vi.mock('@taucad/editor-ui/components/code/code-editor-view.client', () => {
 vi.mock('@taucad/editor-ui/lib/editor-syntax', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
-vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ProjectSyncPlaceholder: ({ state }: { readonly state: string }) => <div data-testid={`sync-placeholder-${state}`} />,
+vi.mock('#routes/w.$workspace.$project/project-wait-skeleton.js', () => ({
+  ProjectWaitSkeleton: ({ state }: { readonly state: string }) => <div data-testid={`project-wait-${state}`} />,
 }));
 /* What each surface shows; a surface not named here is ready. */
 const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));
@@ -769,7 +768,7 @@ describe('FileEditor routing', () => {
 
     now.mockReturnValue(20_000);
     // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(document.activeElement).not.toBe(document.body);
@@ -819,7 +818,7 @@ describe('FileEditor routing', () => {
     expect(slot).not.toHaveAttribute('role');
 
     now.mockReturnValue(10_100);
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
@@ -1108,7 +1107,7 @@ describe('FileEditor routing', () => {
     try {
       render(<FileEditor paneId='other-pane' filePath='lib/gone.ts' panelApi={mockPanelApi} />);
       expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
-      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.getByTestId('project-wait-preparing')).toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();
       landedState.paths.clear();
@@ -1124,7 +1123,7 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('partial') });
     try {
       render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
-      expect(screen.getByTestId('sync-placeholder-failed')).toBeInTheDocument();
+      expect(screen.getByTestId('project-wait-failed')).toBeInTheDocument();
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();

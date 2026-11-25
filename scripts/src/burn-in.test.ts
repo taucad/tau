@@ -120,13 +120,21 @@ describe('file → target mapping', () => {
       workspace,
     );
     expect(plan.units).toEqual([]);
-    expect(Object.fromEntries(plan.skipped.map(({ file, reason }) => [file, reason]))).toEqual({
-      'apps/api/src/a.test.ts': expect.stringContaining('API suite'),
-      'apps/runtime-e2e/src/a.test.ts': expect.stringContaining('ci:quarantined'),
-      'libs/untested/src/a.test.ts': '`untested` has no `test` target',
-      'apps/react-e2e/src/a.test.ts': expect.stringContaining('only nx:run-commands Vitest targets'),
-      'apps/ui-e2e/src/journey.test.ts': '`listed:test` names its files, and not this one',
-    });
+    const reasons = new Map(plan.skipped.map(({ file, reason }) => [file, reason]));
+    expect([...reasons.keys()].toSorted()).toEqual(
+      [
+        'apps/api/src/a.test.ts',
+        'apps/react-e2e/src/a.test.ts',
+        'apps/runtime-e2e/src/a.test.ts',
+        'apps/ui-e2e/src/journey.test.ts',
+        'libs/untested/src/a.test.ts',
+      ].toSorted(),
+    );
+    expect(reasons.get('apps/api/src/a.test.ts')).toContain('API suite');
+    expect(reasons.get('apps/runtime-e2e/src/a.test.ts')).toContain('ci:quarantined');
+    expect(reasons.get('libs/untested/src/a.test.ts')).toBe('`untested` has no `test` target');
+    expect(reasons.get('apps/react-e2e/src/a.test.ts')).toContain('only nx:run-commands Vitest targets');
+    expect(reasons.get('apps/ui-e2e/src/journey.test.ts')).toBe('`listed:test` names its files, and not this one');
   });
 
   it('plans nothing for a pull request that changes no test file, so it adds no job', () => {
@@ -144,7 +152,9 @@ describe('the cap', () => {
     expect(order).toEqual(['a0', 'b0', 'c0', 'a1', 'b1', 'c1', 'a2', 'b2', 'c2']);
     // Cut after any prefix: the per-unit counts differ by at most one.
     for (let cut = 0; cut <= order.length; cut++) {
-      const counts = ['a', 'b', 'c'].map((unit) => order.slice(0, cut).filter((entry) => entry.startsWith(unit)).length);
+      const counts = ['a', 'b', 'c'].map(
+        (unit) => order.slice(0, cut).filter((entry) => entry.startsWith(unit)).length,
+      );
       expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
     }
   });
@@ -171,9 +181,9 @@ describe('the cap', () => {
       firstFailure: 'boom',
       cutShort: true,
     });
-    expect(
-      summarizeFile({ project: 'p', target: 't', file: 'f' }, [{ outcome: 'passed', seed: 1 }], 1).cutShort,
-    ).toBe(false);
+    expect(summarizeFile({ project: 'p', target: 't', file: 'f' }, [{ outcome: 'passed', seed: 1 }], 1).cutShort).toBe(
+      false,
+    );
   });
 
   it('gives each run its own seed, the same for every unit', () => {
@@ -209,7 +219,9 @@ describe('run outcomes', () => {
       'b.test.ts': { outcome: 'passed' },
     });
     const suite = runOutcomes(['a.test.ts'], {
-      report: { testResults: [{ name: '/w/a.test.ts', status: 'failed', message: 'Cannot find module', assertionResults: [] }] },
+      report: {
+        testResults: [{ name: '/w/a.test.ts', status: 'failed', message: 'Cannot find module', assertionResults: [] }],
+      },
       exitCode: 1,
       cut: false,
       absolute,
@@ -223,8 +235,7 @@ describe('run outcomes', () => {
       message: 'Vitest exited 137 with no report',
     });
     expect(
-      runOutcomes(files, { report: { testResults: [] }, exitCode: 0, cut: false, absolute }).get('b.test.ts')
-        ?.outcome,
+      runOutcomes(files, { report: { testResults: [] }, exitCode: 0, cut: false, absolute }).get('b.test.ts')?.outcome,
     ).toBe('error');
     const unhandled = runOutcomes(files, {
       report: {

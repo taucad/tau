@@ -27,6 +27,7 @@ import { closeSync, openSync, readFileSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
+import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -75,10 +76,21 @@ export type ReadyUnit = {
   readonly files: ReadonlyArray<{ readonly file: string; readonly absolute: string }>;
 };
 
-/** Spawn one process in its own group, log to `log`, kill it at `timeoutMs`. Resolves its exit code. */
+/** Spawn one process in its own group, log to `log`, kill it after `killAfter` milliseconds. Resolves its exit code. */
 const runLogged = async (
   argv: readonly string[],
-  { cwd, env, log, timeoutMs }: { cwd: string; env: Record<string, string | undefined>; log: string; timeoutMs: number },
+  {
+    cwd,
+    env,
+    log,
+    killAfter,
+  }: {
+    cwd: string;
+    env: Record<string, string | undefined>;
+    log: string;
+    /** Milliseconds. */
+    killAfter: number;
+  },
 ): Promise<{ readonly exitCode: number | undefined; readonly timedOut: boolean }> => {
   const descriptor = openSync(log, 'w');
   const [command = '', ...rest] = argv;
@@ -90,7 +102,7 @@ const runLogged = async (
       timedOut = true;
       killGroup(child);
     },
-    Math.max(0, timeoutMs),
+    Math.max(0, killAfter),
   );
   child.on('error', () => {
     settle(undefined);
@@ -143,8 +155,9 @@ export const runBurnIn = async (
     const remaining = options.deadline - Date.now();
     let result: { exitCode: number | undefined; timedOut: boolean } = { exitCode: undefined, timedOut: true };
     if (remaining > 0) {
-      await rm(reportPath, { force: true });
       // oxlint-disable-next-line no-await-in-loop -- runs are sequential: concurrent runs would contend and change what is measured
+      await rm(reportPath, { force: true });
+      // oxlint-disable-next-line no-await-in-loop -- as above
       result = await runLogged(
         [
           options.vitest,
@@ -167,7 +180,7 @@ export const runBurnIn = async (
             TAU_FLAKE_REPRO_SEED: String(seed),
           },
           log: resolve(options.out, 'runs', `${name}.log`),
-          timeoutMs: remaining,
+          killAfter: remaining,
         },
       );
     }
@@ -209,16 +222,24 @@ export const runBurnIn = async (
 /** The files of `files` (absolute) that `vitest list` collects under the launcher's configuration. */
 export const collected = (
   launcher: Launcher,
-  { vitest, files, env, out }: { vitest: string; files: readonly string[]; env: Record<string, string | undefined>; out: string },
+  {
+    vitest,
+    files,
+    env,
+    out,
+  }: { vitest: string; files: readonly string[]; env: Record<string, string | undefined>; out: string },
 ): Set<string> => {
   const listPath = resolve(out, 'list.json');
-  const result = spawnSync(
-    vitest,
-    ['list', ...launcher.args, '--filesOnly', `--json=${listPath}`, ...files],
-    { cwd: launcher.cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  const result = spawnSync(vitest, ['list', ...launcher.args, '--filesOnly', `--json=${listPath}`, ...files], {
+    cwd: launcher.cwd,
+    env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   if (result.status !== 0) {
-    throw new Error(`vitest list exited ${result.status ?? result.signal ?? 'abnormally'}: ${result.stderr.slice(-2000)}`);
+    throw new Error(
+      `vitest list exited ${result.status ?? result.signal ?? 'abnormally'}: ${result.stderr.slice(-2000)}`,
+    );
   }
   const listed = JSON.parse(readFileSync(listPath, 'utf8')) as ReadonlyArray<{ readonly file: string }>;
   return new Set(listed.map((entry) => entry.file));
@@ -226,14 +247,6 @@ export const collected = (
 
 // ---------------------------------------------------------------------------------------------------------------
 // Commands.
-
-const readStdin = async (): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-};
 
 const output = async (lines: readonly string[]): Promise<void> => {
   const text = lines.map((line) => `${line}\n`).join('');
@@ -251,7 +264,11 @@ const planCommand = async (values: Record<string, string | undefined>): Promise<
     throw new UsageError('--graph is required');
   }
   const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as { graph: { nodes: GraphNodes } };
-  const files = (await readStdin()).split('\n').map((line) => line.trim()).filter(Boolean);
+  const input = await text(process.stdin);
+  const files = input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
   const { units, skipped } = planBurnIn(files, graph.graph.nodes, process.cwd());
   for (const unit of units) {
     console.log(`Burn-in ${unit.project}:${unit.target}: ${unit.files.join(', ')}`);
@@ -265,7 +282,15 @@ const planCommand = async (values: Record<string, string | undefined>): Promise<
   if (values['summary'] && skipped.length > 0) {
     await appendFile(
       values['summary'],
-      ['### Burn-in plan', '', 'Changed test files not burned in:', '', ...skipped.map(({ file, reason }) => `- \`${file}\`: ${reason}`), '', ''].join('\n'),
+      [
+        '### Burn-in plan',
+        '',
+        'Changed test files not burned in:',
+        '',
+        ...skipped.map(({ file, reason }) => `- \`${file}\`: ${reason}`),
+        '',
+        '',
+      ].join('\n'),
     );
   }
   await output([`burn-in=${units.length > 0}`, `burn-in-units=${JSON.stringify(units)}`]);
@@ -321,7 +346,10 @@ const runCommand = async (values: Record<string, string | undefined>): Promise<n
     const listed = collected(launcher, { vitest, files: files.map(({ absolute }) => absolute), env, out });
     for (const { file, absolute } of files) {
       if (!listed.has(absolute)) {
-        notCollected.push({ file, reason: `\`${unit.project}:${unit.target}\`'s Vitest configuration does not collect it` });
+        notCollected.push({
+          file,
+          reason: `\`${unit.project}:${unit.target}\`'s Vitest configuration does not collect it`,
+        });
       }
     }
     const kept = files.filter(({ absolute }) => listed.has(absolute));
@@ -377,7 +405,9 @@ const main = async (): Promise<number> => {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     options: Object.fromEntries(
-      ['graph', 'summary', 'units', 'runs', 'minutes', 'seed', 'out'].map((name) => [name, { type: 'string' }] as const),
+      ['graph', 'summary', 'units', 'runs', 'minutes', 'seed', 'out'].map(
+        (name) => [name, { type: 'string' }] as const,
+      ),
     ),
   });
   const [command] = positionals;

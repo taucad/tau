@@ -50,14 +50,17 @@ describe('burn-in against seeded fixtures', () => {
       (value) => seededDraw(value) < rate,
     );
     expect(expected.length).toBeGreaterThan(0);
-    const { rows, truncated } = await runBurnIn([unit(['seeded-flake.fixture.ts'], { FLAKE_FIXTURE_RATE: String(rate) })], {
-      vitest,
-      out: join(out, 'seeded'),
-      runs: burnIn.runs,
-      seed,
-      deadline: Date.now() + burnIn.minutes * 60_000,
-      log: quiet,
-    });
+    const { rows, truncated } = await runBurnIn(
+      [unit(['seeded-flake.fixture.ts'], { FLAKE_FIXTURE_RATE: String(rate) })],
+      {
+        vitest,
+        out: join(out, 'seeded'),
+        runs: burnIn.runs,
+        seed,
+        deadline: Date.now() + burnIn.minutes * 60_000,
+        log: quiet,
+      },
+    );
     expect(truncated).toBe(false);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ runs: 10, planned: 10, failures: expected.length, cutShort: false });
@@ -65,31 +68,39 @@ describe('burn-in against seeded fixtures', () => {
     expect(rows[0]?.firstFailure).toContain('passes unless its seed draws under the rate');
   });
 
-  it('passes a file that never fails, and catches an order dependence through shuffle', { timeout: 180_000 }, async () => {
-    const { rows } = await runBurnIn(
-      [unit(['seeded-flake.fixture.ts', 'polluter.fixture.ts'], { FLAKE_FIXTURE_RATE: '0' })],
-      { vitest, out: join(out, 'order'), runs: burnIn.runs, seed: 1, deadline: Date.now() + 5 * 60_000, log: quiet },
-    );
-    const byFile = Object.fromEntries(rows.map((row) => [row.file.split('/').at(-1), row]));
-    expect(byFile['seeded-flake.fixture.ts']).toMatchObject({ runs: 10, failures: 0 });
-    expect(byFile['polluter.fixture.ts']?.runs).toBe(10);
-    expect(byFile['polluter.fixture.ts']?.failures).toBeGreaterThan(0);
-    expect(byFile['polluter.fixture.ts']?.failures).toBeLessThan(10);
-  });
+  it(
+    'passes a file that never fails, and catches an order dependence through shuffle',
+    { timeout: 180_000 },
+    async () => {
+      const { rows } = await runBurnIn(
+        [unit(['seeded-flake.fixture.ts', 'polluter.fixture.ts'], { FLAKE_FIXTURE_RATE: '0' })],
+        { vitest, out: join(out, 'order'), runs: burnIn.runs, seed: 1, deadline: Date.now() + 5 * 60_000, log: quiet },
+      );
+      const byFile = Object.fromEntries(rows.map((row) => [row.file.split('/').at(-1) ?? row.file, row]));
+      expect(byFile['seeded-flake.fixture.ts']).toMatchObject({ runs: 10, failures: 0 });
+      expect(byFile['polluter.fixture.ts']?.runs).toBe(10);
+      expect(byFile['polluter.fixture.ts']?.failures).toBeGreaterThan(0);
+      expect(byFile['polluter.fixture.ts']?.failures).toBeLessThan(10);
+    },
+  );
 
-  it('stops at the cap, counts no cut run as a failure and reports the files cut short', { timeout: 60_000 }, async () => {
-    const { rows, truncated } = await runBurnIn([unit(['seeded-flake.fixture.ts'], { FLAKE_FIXTURE_RATE: '1' })], {
-      vitest,
-      out: join(out, 'cap'),
-      runs: burnIn.runs,
-      seed: 1,
-      // Shorter than one Vitest start: the first run is killed and no other starts.
-      deadline: Date.now() + 50,
-      log: quiet,
-    });
-    expect(truncated).toBe(true);
-    expect(rows[0]).toMatchObject({ runs: 0, planned: 10, failures: 0, cutShort: true });
-  });
+  it(
+    'stops at the cap, counts no cut run as a failure and reports the files cut short',
+    { timeout: 60_000 },
+    async () => {
+      const { rows, truncated } = await runBurnIn([unit(['seeded-flake.fixture.ts'], { FLAKE_FIXTURE_RATE: '1' })], {
+        vitest,
+        out: join(out, 'cap'),
+        runs: burnIn.runs,
+        seed: 1,
+        // Shorter than one Vitest start: the first run is killed and no other starts.
+        deadline: Date.now() + 50,
+        log: quiet,
+      });
+      expect(truncated).toBe(true);
+      expect(rows[0]).toMatchObject({ runs: 0, planned: 10, failures: 0, cutShort: true });
+    },
+  );
 
   it('lists only the files the target’s configuration collects', { timeout: 60_000 }, () => {
     const { launcher, env } = unit([]);
@@ -118,12 +129,16 @@ describe('burn-in plan command', () => {
   const plan = (files: readonly string[]): string => {
     const output = join(out, `output-${files.length}`);
     writeFileSync(output, '');
-    const result = spawnSync(process.execPath, [resolve(import.meta.dirname, 'burn-in-cli.ts'), 'plan', '--graph', graph], {
-      cwd: root,
-      input: files.map((file) => `${file}\n`).join(''),
-      encoding: 'utf8',
-      env: { ...cleanEnv, GITHUB_OUTPUT: output },
-    });
+    const result = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, 'burn-in-cli.ts'), 'plan', '--graph', graph],
+      {
+        cwd: root,
+        input: files.map((file) => `${file}\n`).join(''),
+        encoding: 'utf8',
+        env: { ...cleanEnv, GITHUB_OUTPUT: output },
+      },
+    );
     expect(result.status, result.stderr).toBe(0);
     return readFileSync(output, 'utf8');
   };

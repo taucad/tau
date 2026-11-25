@@ -30,9 +30,7 @@ const ci = load(readFileSync(resolve(import.meta.dirname, '../../.github/workflo
   readonly jobs: Record<string, Job>;
 };
 const expression = (body: string): string => ['$', '{{ ', body, ' }}'].join('');
-const job = ci.jobs['burn-in'];
-const plan = ci.jobs['plan'];
-const gate = ci.jobs['affected'];
+const { 'burn-in': job, plan, affected: gate } = ci.jobs;
 
 describe('ci.yml burn-in (FQ-10)', () => {
   it('plans the burn-in from the pull request’s own added and modified files, on pull requests only', () => {
@@ -70,8 +68,6 @@ describe('ci.yml burn-in (FQ-10)', () => {
     const check = gate?.steps?.[0];
     expect(check?.env?.['BURN_IN_REQUIRED']).toBe(expression('needs.plan.outputs.burn-in'));
     expect(check?.env?.['BURN_IN_RESULT']).toBe(expression('needs.burn-in.result'));
-    expect(check?.run).toContain(
-      'if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi',
-    );
+    expect(check?.run).toContain('if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi');
   });
 });

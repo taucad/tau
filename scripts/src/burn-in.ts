@@ -111,7 +111,10 @@ export const planBurnIn = (files: readonly string[], nodes: GraphNodes, workspac
       continue;
     }
     // Vitest's file filters match as substrings of the file's path.
-    if (filters.length > 0 && !filters.some((filter) => resolve(workspace, file).includes(filter.replace(/^\.\//u, '')))) {
+    if (
+      filters.length > 0 &&
+      !filters.some((filter) => resolve(workspace, file).includes(filter.replace(/^\.\//u, '')))
+    ) {
       skipped.push({ file, reason: `\`${project}:${burnInTarget}\` names its files, and not this one` });
       continue;
     }
@@ -146,7 +149,8 @@ export type VitestFileReport = {
     readonly assertionResults?: ReadonlyArray<{
       readonly fullName: string;
       readonly status: string;
-      readonly failureMessages?: readonly string[] | null;
+      /** `null` in Vitest's output when there is none; read only through optional chaining. */
+      readonly failureMessages?: readonly string[];
     }>;
   }>;
 };
@@ -160,6 +164,22 @@ export type VitestFileReport = {
 export type RunOutcome = 'passed' | 'failed' | 'error' | 'cut';
 
 export type FileRun = { readonly outcome: RunOutcome; readonly message?: string };
+
+/** One file's outcome in a run's report (absolute path, as Vitest names it). */
+const fileOutcome = (report: VitestFileReport, absolute: string): FileRun => {
+  const entry = report.testResults?.find((candidate) => candidate.name === absolute);
+  if (!entry) {
+    return { outcome: 'error', message: 'the report has no result for this file' };
+  }
+  const failed = entry.assertionResults?.find((test) => test.status === 'failed');
+  if (failed) {
+    return { outcome: 'failed', message: `${failed.fullName}: ${failed.failureMessages?.[0] ?? 'failed'}` };
+  }
+  if (entry.status === 'failed') {
+    return { outcome: 'failed', message: entry.message ?? 'the file failed outside its tests' };
+  }
+  return { outcome: 'passed' };
+};
 
 /** Each file's outcome in one run of its unit. */
 export const runOutcomes = (
@@ -180,25 +200,25 @@ export const runOutcomes = (
       outcomes.set(file, { outcome: 'cut' });
       continue;
     }
-    const entry = result.report?.testResults?.find((candidate) => candidate.name === result.absolute(file));
-    if (!result.report) {
-      outcomes.set(file, { outcome: 'error', message: `Vitest exited ${result.exitCode ?? 'abnormally'} with no report` });
-    } else if (!entry) {
-      outcomes.set(file, { outcome: 'error', message: 'the report has no result for this file' });
-    } else if (entry.status === 'failed' || entry.assertionResults?.some((test) => test.status === 'failed')) {
-      const failed = entry.assertionResults?.find((test) => test.status === 'failed');
-      const message = failed
-        ? `${failed.fullName}: ${failed.failureMessages?.[0] ?? 'failed'}`
-        : (entry.message ?? 'the file failed outside its tests');
-      outcomes.set(file, { outcome: 'failed', message });
-    } else {
-      outcomes.set(file, { outcome: 'passed' });
-    }
+    outcomes.set(
+      file,
+      result.report
+        ? fileOutcome(result.report, result.absolute(file))
+        : { outcome: 'error', message: `Vitest exited ${result.exitCode ?? 'abnormally'} with no report` },
+    );
   }
   // Vitest failed although no file did: an unhandled error, which cannot be attributed, so every file carries it.
-  if (!result.cut && result.report && (result.exitCode ?? 0) !== 0 && [...outcomes.values()].every((run) => run.outcome === 'passed')) {
+  if (
+    !result.cut &&
+    result.report &&
+    (result.exitCode ?? 0) !== 0 &&
+    [...outcomes.values()].every((run) => run.outcome === 'passed')
+  ) {
     for (const file of files) {
-      outcomes.set(file, { outcome: 'error', message: `Vitest exited ${result.exitCode ?? 'abnormally'} with every test passed (an unhandled error)` });
+      outcomes.set(file, {
+        outcome: 'error',
+        message: `Vitest exited ${result.exitCode ?? 'abnormally'} with every test passed (an unhandled error)`,
+      });
     }
   }
   return outcomes;
@@ -289,7 +309,12 @@ export const renderSummary = (report: BurnInReport, skipped: readonly Skipped[] 
   }
   const unrun = [...report.notCollected, ...skipped];
   if (unrun.length > 0) {
-    lines.push('Changed test files not burned in:', '', ...unrun.map(({ file, reason }) => `- \`${file}\`: ${reason}`), '');
+    lines.push(
+      'Changed test files not burned in:',
+      '',
+      ...unrun.map(({ file, reason }) => `- \`${file}\`: ${reason}`),
+      '',
+    );
   }
   return `${lines.join('\n')}\n`;
 };

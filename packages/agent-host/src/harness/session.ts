@@ -2127,7 +2127,20 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
   });
-  const continueWithoutPreparation = agent.continue.bind(agent);
+  let abortRequested = false;
+  /* Read through a call: an abort lands while the turn awaits, which narrowing cannot see. */
+  const wasAbortRequested = (): boolean => abortRequested;
+  const startLoop = agent.continue.bind(agent);
+  /* Pi runs its loop under an abort controller it makes when the loop starts, so a Stop that landed before then has
+   * nothing of pi's to abort: the loop would start regardless, send its request and run every tool the model called
+   * (launch audit C-3). Every start of the loop passes this one check, in the tick pi registers its run; a Stop after
+   * it reaches pi's controller. */
+  const continueWithoutPreparation = async (): Promise<void> => {
+    if (wasAbortRequested()) {
+      return;
+    }
+    await startLoop();
+  };
   /* A nudge the safeguards append joins the run's live context, not only the one request that first carried it:
    * the next request then reproduces this one byte for byte (I1) without waiting for the between-turn projection
    * to read the nudge back from the log, and pi's own state agrees with that log. */
@@ -2156,9 +2169,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
 
   let state: RunLifecycleState = 'admitted';
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
-  let abortRequested = false;
-  /* Read through a call: an abort lands while the turn awaits, which narrowing cannot see. */
-  const wasAbortRequested = (): boolean => abortRequested;
   let ran = false;
   let lastFinal: AgentMessage | undefined;
   const runAbortController = new AbortController();

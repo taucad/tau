@@ -907,7 +907,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         driverlessRetry * Math.min(2 ** (entry.asks - 1), driverlessRetryCeiling),
       ); // Bound: driverlessRetryMilliseconds, doubled per ask up to driverlessRetryCeiling.
       /* A wait never keeps a daemon's process open at shutdown (Node's timers). */
-      (entry.waiting as unknown as { unref?: () => void }).unref?.();
+      (entry.waiting as { unref?: () => void } | undefined)?.unref?.();
       driverless.set(chatId, entry);
     } else if (!always) {
       return false;

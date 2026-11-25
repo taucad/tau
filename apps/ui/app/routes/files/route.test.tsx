@@ -19,6 +19,7 @@ const {
   mockAssertWorkspaceMutationAllowed,
   mockDisconnectWorkspace,
   mockGetWorkspace,
+  mockReadShallowDirectory,
   mockRefreshWorkspaceCatalog,
   mockRestoreWorkspaceHandle,
   mockToastSuccess,
@@ -37,6 +38,9 @@ const {
     mockAssertWorkspaceMutationAllowed: vi.fn(),
     mockDisconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
     mockGetWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
+    mockReadShallowDirectory: vi.fn<(path: string, options: { scope: { backend: string } }) => Promise<unknown[]>>(
+      async () => [],
+    ),
     mockRefreshWorkspaceCatalog: vi.fn(),
     mockRestoreWorkspaceHandle: vi.fn<(workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>>(),
     mockToastSuccess: vi.fn<(message: string, options?: ToastSuccessOptions) => void>(),
@@ -70,6 +74,11 @@ vi.mock('#hooks/use-file-manager.js', () => {
       getZippedDirectory: vi.fn(),
       readFile: vi.fn(),
       readShallowDirectory: vi.fn(async () => []),
+    },
+    scopedStorage: {
+      readShallowDirectory: mockReadShallowDirectory,
+      readFile: vi.fn(),
+      getZippedDirectory: vi.fn(),
     },
     workspace: {
       disconnectWorkspace: mockDisconnectWorkspace,
@@ -311,5 +320,48 @@ describe('FilesRoute folders that are not found', () => {
     expect(group).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Scratch')).toBeInTheDocument();
     expect(screen.getByText('Archive')).toBeInTheDocument();
+  });
+});
+
+describe('FilesRoute listing failures (R2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    connectionState.connected = true;
+    workspaceConnectionState.current = { phase: 'idle' };
+    catalogState.extraWorkspaces = [];
+    mockReadShallowDirectory.mockImplementation(async () => []);
+  });
+
+  it('should show why a root could not be listed instead of an empty column', async () => {
+    mockReadShallowDirectory.mockImplementation(async (_path, { scope }) => {
+      if (scope.backend === 'indexeddb') {
+        throw new Error('Call result failed validation');
+      }
+      return [];
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Couldn’t list this folder');
+    expect(alert).toHaveTextContent('Call result failed validation');
+    expect(screen.queryByText('No files found')).not.toBeInTheDocument();
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it('should keep the empty hint for a root that lists nothing', async () => {
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('No files found')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

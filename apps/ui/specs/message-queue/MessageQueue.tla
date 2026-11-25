@@ -184,6 +184,10 @@
 \* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
 \* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
 \* moved. No action or verdict changes.
+\* FP10 held seed (2026-11-25): `chat-session-store.ts` shows the agent host's terminal code load failure, which the
+\* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
+\* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
+\* changes.
 \* Launch audit first fixes (2026-11-25): `chat-session-store.ts` compares the composer's draft with a sent message in
 \* the composed form before it clears the draft or returns the message to it. `use-turn-admission.ts` refuses a
 \* signed-out person's turn on the existing refused-admission path and records the refused gesture's identity and kind

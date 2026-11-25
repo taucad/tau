@@ -1,0 +1,80 @@
+# Flake ledger v2 ingestion (CI flake quarantine blueprint, FQ-2; Brain research/ci-flake-quarantine-blueprint.md,
+# D2 and D3).
+#
+# When a `ci.yml` run of the merge queue or of a push to `main` completes, this reads the `test-outcomes-*` artifacts
+# FQ-1's test lanes upload and counts every test execution into the ledger state: executions, failures, retried
+# passes and flake events per test identity and variant (a pass and a failure of one test on one Nx task hash, inside
+# one task or across runs; or on the next run of the same unchanged pull request). A row a cache replay restored
+# carries the ids of the run that executed it and is counted once.
+#
+# The state is `ledger.json` on the `flake-ledger` branch, which only this workflow writes, through the Git data API:
+# each ingestion is one commit on the state it read, and the ref moves fast-forward only. It is evidence for the
+# weekly report (`ci-queue-health.yml`) and, later, the quarantine entry rule; nothing gates on it. Renamed tests are
+# joined through `aliases` in `scripts/src/flake-ledger.json` on `main`.
+#
+# Each invocation catches up on every completed run of the last 72 hours it has not ingested, so a run the
+# concurrency group dropped (a pending run is replaced by a newer one) is ingested by the next, and the daily schedule
+# covers a quiet day. It posts nothing, uses no environment and no secret: `actions: read` lists runs and downloads
+# artifacts, `contents: write` writes the state branch (the `main` ruleset keeps `main` out of its reach). Outcome
+# rows come from pull-request code in the queue: they are parsed as data, field by field, and never executed.
+name: Flake ledger
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: CI run ids to ingest, space-separated; empty catches up on the last 72 hours
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  ingest:
+    name: Ingest test outcomes
+    # Only the merge queue and `main` feed the ledger; a pull request's run is skipped before a runner starts.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.event == 'merge_group' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    # On the job, not the workflow: a pull request's run, skipped by the condition above, then never takes the place
+    # of a pending ingestion in the group.
+    concurrency:
+      group: flake-ledger
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout the ledger scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/package.json
+            scripts/src/ci-flake-ledger.ts
+            scripts/src/ci-flake-ledger-state.ts
+            scripts/src/ci-flake-ledger-ingest-cli.ts
+            scripts/src/ci-flake-ledger-store.ts
+            scripts/src/ci-github-client.ts
+            scripts/src/ci-queue-health.ts
+            scripts/src/flake-ledger.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26.13.1'
+
+      - name: Ingest test outcomes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs || '' }}
+        run: node scripts/src/ci-flake-ledger-ingest-cli.ts --runs "$RUNS" --lookback-hours 72 --max-runs 30

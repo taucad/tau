@@ -1,14 +1,16 @@
 /**
- * Safe mode makes no Tau Cloud read or write (W9 report R5, operator and Principal rulings). The revisions worker learns
- * safe mode once, when it is created, and wraps each project's port with this gate: every network leg that addresses
+ * Safe mode makes no Tau Cloud read or write (W9 report R5, operator and Principal rulings). A host learns safe mode
+ * once, when it is created (the browser's revisions worker, the desktop's native project host), and wraps each
+ * project's port with this gate: every network leg that addresses
  * the project's Tau Cloud remote is refused before any request, with a code the sync machine treats as terminal (no
  * retry) and states as "Tau Cloud is off in safe mode". Other Git remotes and local history are untouched.
  */
-import { RevisionPortError, tauRemoteName } from '@taucad/revisions';
-import type { RevisionPort, RevisionRemoteAddress } from '@taucad/revisions';
+import { RevisionPortError } from '#revision-port.js';
+import type { RevisionPort, RevisionRemoteAddress } from '#revision-port.js';
+import { tauRemoteName } from '#remotes.js';
 
-/** The sentence the refusal carries, which the Sync region shows. @public */
-export const tauCloudOffInSafeMode = 'Tau Cloud is off in safe mode.';
+/** The sentence the refusal carries, which the Sync region shows. */
+const tauCloudOffInSafeMode = 'Tau Cloud is off in safe mode.';
 
 /**
  * The refusal every Tau Cloud leg gets in safe mode.

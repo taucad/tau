@@ -31,6 +31,9 @@ export const workspaceTests = [
   'src/desktop-split-graph.test.ts',
   'src/docs-links-workflow.test.ts',
   'src/end-to-end-ratchet.test.ts',
+  'src/burn-in-cli.test.ts',
+  'src/flake-repro-cli.test.ts',
+  'src/flake-repro-workflow.test.ts',
   'src/formal-plugin-target.test.ts',
   'src/nx-cache-inputs.test.ts',
   'src/paseo-absence.test.ts',
@@ -43,6 +46,7 @@ export const workspaceTests = [
   'src/telemetry-runtime-vocabulary.test.ts',
   'src/telemetry-usage-coverage.test.ts',
   'src/telemetry-vocabulary-contract.test.ts',
+  'src/test-outcome-outputs.test.ts',
   'src/test-shard-dealer.test.ts',
   'src/timing-budgets-workflow.test.ts',
   'src/tsgo-plugin-target.test.ts',
@@ -52,4 +56,5 @@ export const workspaceTests = [
   'src/validate-workflows.test.ts',
   'src/viewer-parity-graph.test.ts',
   'src/vitest-browser-ownership.test.ts',
+  'src/vitest-webstorage.test.ts',
 ];

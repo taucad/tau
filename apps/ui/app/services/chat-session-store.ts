@@ -44,6 +44,7 @@ import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
+import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -802,6 +803,11 @@ type ObservedChat = {
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
+  /**
+   * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
+   * stays failed for the page's life, so the chat shows it whenever its session can ({@link ChatSessionStore}).
+   */
+  hostLoadFailure?: unknown;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -2090,6 +2096,12 @@ export class ChatSessionStore {
     if (session?.pendingSeedGesture === undefined) {
       return;
     }
+    const observed = this.#observed.get(chatId);
+    if (observed?.status === 'lost' && observed.hostLoadFailure !== undefined) {
+      /* The read this seed waits for met an agent host this page can never load, before this session could say so. */
+      void this.#showHostLoadFailure(session, observed.hostLoadFailure);
+      return;
+    }
     const projection = this.#projectionContext(chatId);
     if (
       session.seedRemoteReadVersion !== this.#remoteReadVersions.get(chatId) ||
@@ -2953,6 +2965,32 @@ export class ChatSessionStore {
     observed.status = 'unknown';
   }
 
+  /**
+   * FP10: the host this chat reads from cannot load its code in this page, and the page has stopped replacing its
+   * worker (the resident worker reports `WORKER_LOAD_FAILED` only past its bound). A held turn waits for that very read
+   * (a seed starts only after one, {@link ChatSessionStore.startPendingSeed}), so it would wait unseen whenever the read
+   * met the failure before the turn's own command did, or before the chat had loaded and could hold an error. The chat
+   * shows the failure as a command's would be shown, once its load is done: its card offers Reload, never Try again.
+   *
+   * @param session - The chat whose host attachment met the failure.
+   * @param error - The failure, with its code.
+   */
+  async #showHostLoadFailure(session: InternalSession, error: unknown): Promise<void> {
+    /* A chat still loading takes no error, and its load sets the chat's own: the failure goes once the load is done. */
+    await waitUnlessGone(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat);
+    if (
+      this.#sessions.get(session.chatId) !== session ||
+      session.persistenceActorRef.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED'
+    ) {
+      return;
+    }
+    const failure =
+      error instanceof Error
+        ? error
+        : Object.assign(new Error('The agent host worker did not load.'), { code: 'WORKER_LOAD_FAILED' });
+    session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+  }
+
   #startObservedAttachment(chatId: string, observed: ObservedChat): void {
     const connector = this.#projectHostConnectors.get(observed.projectId);
     if (connector === undefined) {
@@ -2998,10 +3036,17 @@ export class ChatSessionStore {
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
+            observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
           }
           const session = this.#sessions.get(chatId);
+          if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
+            observed.hostLoadFailure = event.error;
+            if (session !== undefined) {
+              void this.#showHostLoadFailure(session, event.error);
+            }
+          }
           if (session?.watchedRunId !== undefined) {
             session.watch?.stop();
             session.watch = undefined;

@@ -20,12 +20,31 @@ const revisionPushStore = createRevisionPushStore({ apiBaseUrl: () => ENV.TAU_AP
  */
 export const { holdRevisionGraph } = revisionPushStore;
 
+/* Safe mode is fixed for the page load, as the app runtime records it: read once, on first use (D0). */
+/* Read inline, not through `#lib/boot-signals.js` or `#lib/desktop-safe-mode.js`: this module is on Home's critical
+ * path, and importing either adds requests to it (`ui:check-critical-budget`). The same two signals the app runtime
+ * reads: the web's `?safe=1` and the desktop shell's `tau.safeMode`. */
+let isPageSafeMode: boolean | undefined;
+const pageSafeMode = (): boolean => {
+  isPageSafeMode ??=
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- no `location` during a server render.
+    (globalThis.location !== undefined && new URLSearchParams(globalThis.location.search).get('safe') === '1') ||
+    (globalThis as { tau?: { safeMode?: unknown } }).tau?.safeMode !== undefined;
+  return isPageSafeMode;
+};
+
 /**
- * Read the push records that follow the ones held, at one of the page's refresh points.
+ * Read the push records that follow the ones held, at one of the page's refresh points. Safe mode makes no Tau Cloud
+ * read (W9 R5), so there it reads nothing.
  *
+ * @param input - The refresh point's project and account, as the store takes them.
  * @public
  */
-export const { refreshPushRecords } = revisionPushStore;
+export const refreshPushRecords: typeof revisionPushStore.refreshPushRecords = (input) => {
+  if (!pageSafeMode()) {
+    revisionPushStore.refreshPushRecords(input);
+  }
+};
 
 /**
  * Subscribe to every change of the push store.

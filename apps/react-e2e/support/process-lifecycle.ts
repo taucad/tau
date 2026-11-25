@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- Readiness polling is intentionally sequential. */
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { createConnection } from 'node:net';
 import process from 'node:process';
 
 const delay = async (milliseconds: number): Promise<void> =>
@@ -49,6 +50,36 @@ export const stopProcess = async (child: ChildProcess): Promise<void> => {
   }
   if (!(await exitBefore(child, 5000)) && send('SIGKILL')) {
     await exitBefore(child, 5000);
+  }
+};
+
+/**
+ * Rejects when something already accepts connections at `url`'s host and port.
+ *
+ * A launch must own its endpoint. Readiness polling cannot tell our process
+ * from an earlier one on the same port, so without this check a second launch
+ * adopts the first server and passes or fails on which process exits first.
+ */
+export const assertEndpointFree = async (url: string): Promise<void> => {
+  const { hostname, port } = new URL(url);
+  const listening = await new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host: hostname, port: Number(port) });
+    const settle = (value: boolean): void => {
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(1000, () => {
+      settle(false);
+    });
+    socket.once('connect', () => {
+      settle(true);
+    });
+    socket.once('error', () => {
+      settle(false);
+    });
+  });
+  if (listening) {
+    throw new Error(`${url} already accepts connections before launch; another process owns the port.`);
   }
 };
 

@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** Layout acceptance uses the actual pane engines and browser rendering pipeline. */
@@ -14,6 +15,7 @@ export default defineConfig({
   },
   optimizeDeps: { entries: ['app/components/panes/editor-layout.browser.test.tsx'] },
   test: {
+    reporters: testReporters('default'),
     include: ['app/components/panes/editor-layout.browser.test.tsx'],
     fileParallelism: false,
     browser: {

@@ -53,6 +53,7 @@
     "vscode-uri": "catalog:"
   },
   "devDependencies": {
+    "@taucad/archive-core": "workspace:*",
     "@taucad/fs-client": "workspace:*",
     "zod": "catalog:"
   }

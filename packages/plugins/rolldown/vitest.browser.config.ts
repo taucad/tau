@@ -1,4 +1,5 @@
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -10,6 +11,7 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
     include: ['src/rolldown-module-vm.browser.test.ts'],
     testTimeout: 120_000,
     fileParallelism: false,

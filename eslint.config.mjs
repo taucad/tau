@@ -368,8 +368,11 @@ const moduleBoundaryOptions = {
    * The Quick Look extensions are a nested app project (`desktop-quick-look`,
    * `apps/desktop/macos`) that owns its format manifest. The desktop shell reads
    * that one JSON contract; nothing else crosses the app-to-app boundary.
+   *
+   * `@taucad/vitest-ci` is the reporter list every project's Vitest config imports (`testReporters`). It is
+   * test tooling read only by configs, so it crosses every tag boundary, including the sandbox's empty one.
    */
-  allow: ['#macos/quick-look-formats.json'],
+  allow: ['#macos/quick-look-formats.json', '@taucad/vitest-ci'],
   /*
    * Libraries that are deliberately lazy-loaded in one consumer and
    * statically imported in another: the UI keeps the runtime and the

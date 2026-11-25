@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const testEntries = [
@@ -23,6 +24,7 @@ export default defineConfig({
   /* Pre-bundled up front so the first test is not reloaded when Vite discovers the renderer. */
   optimizeDeps: { entries: testEntries, include: ['@aurigax-ai/ghostty-web'] },
   test: {
+    reporters: testReporters('default'),
     include: testEntries,
     fileParallelism: false,
     browser: {

@@ -127,7 +127,7 @@ describe('useTurnAdmission', () => {
 
     harness.cloudOpenPending = false;
     notify(harness.intentListeners);
-    await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as string });
     expect(listening()).toBe(0);
   });
 
@@ -200,7 +200,7 @@ describe('useTurnAdmission', () => {
 
   it('should admit a Tau turn once the awaited catalog offers its model', async () => {
     harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
-    await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as string });
     expect(harness.creditPreflight).toHaveBeenCalledWith('anthropic-claude-opus-4.8', 'anthropic-claude-opus-4.8');
   });
 
@@ -258,7 +258,7 @@ describe('useTurnAdmission', () => {
       async (state) => {
         publishIdentityState(state);
 
-        await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+        await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as string });
         expect(harness.creditPreflight).toHaveBeenCalledTimes(1);
       },
     );

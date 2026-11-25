@@ -10,6 +10,7 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import type { RefusedGesture } from '#utils/run-auto-resume-plan.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
@@ -138,7 +139,11 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
+    async (
+      gesture: Extract<RefusedGesture, 'send' | 'edit'>,
+      attachments: readonly StoredAttachmentRef[],
+      send: () => void | Promise<void>,
+    ): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -146,7 +151,7 @@ export const useCadChatClient = (): CadChatClient => {
           support: resolved.model?.support,
         });
         if (blocked !== undefined) {
-          surfaceDispatchFailure(new Error(blocked), 'send');
+          surfaceDispatchFailure(new Error(blocked), gesture);
           return;
         }
       }
@@ -176,7 +181,7 @@ export const useCadChatClient = (): CadChatClient => {
     async (input: CadChatSubmitInput): Promise<void> => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
       const userMessage = buildUserMessage(input);
-      await withAttachments(input.attachments ?? [], async () =>
+      await withAttachments('send', input.attachments ?? [], async () =>
         actions.sendMessage(userMessage, {
           execution: agent.execution,
           queueIntent,
@@ -190,7 +195,7 @@ export const useCadChatClient = (): CadChatClient => {
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
-      void withAttachments(input.attachments ?? [], () => {
+      void withAttachments('edit', input.attachments ?? [], () => {
         actions.editMessage(messageId, input.text, {
           ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
           ...(input.references === undefined ? {} : { references: input.references }),

@@ -515,7 +515,10 @@ describe('WorkspaceConnections', () => {
     await waitFor(() => {
       expect(state.syncMarker).toHaveBeenCalledOnce();
     });
-    expect(state.syncMarker.mock.calls[0]![0]).toMatchObject({ workspaceId: workspace.workspaceId });
+    expect(state.syncMarker).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: workspace.workspaceId }),
+      expect.anything(),
+    );
     unmount();
     render(<WorkspaceConnections />);
     await screen.findByRole('button', { name: 'Disconnect workspace' });

@@ -1148,6 +1148,14 @@
       "owner": "filesystem-projection-performance-charter / N2 N3"
     },
     {
+      "id": "RH-DRIVERLESS-RETRY",
+      "bound": "Wait before the launcher asks again for the claim of a chat whose log still shows a run no driver holds: 1 s, doubling to at most 32 s (driverlessRetryMilliseconds, driverlessRetryCeiling); its end wakes the chat's parked reads, whose next pass asks; cleared when the run has a driver or an ending, and on close; unref'd",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "entry.waiting = setTimeout(",
+      "class": "Backoff",
+      "owner": "chat launch audit H-2 H-3"
+    },
+    {
       "id": "D26",
       "bound": "Viewer page long poll: a held app_sync answers unchanged after 20 s",
       "site": "packages/host/src/mcp-viewer-sessions.ts",

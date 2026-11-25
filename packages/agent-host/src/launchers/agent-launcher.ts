@@ -92,6 +92,12 @@ export type AgentLauncherOptions = Readonly<{
   turnPlacement?: CreateTauAgentHostOptions['placement'];
   /** The host's timers (M1's idle eviction and bounds); the defaults when absent. */
   delays?: CreateTauAgentHostOptions['delays'];
+  /**
+   * How long, in milliseconds, before this launcher asks again for the claim of a chat whose log still shows a run no
+   * driver holds; each further ask waits twice as long, up to {@link driverlessRetryCeiling} times this.
+   * {@link driverlessRetryMilliseconds} when absent.
+   */
+  driverlessRetry?: number | undefined;
   /** The clock every incarnation runs on; the process's timers when absent. */
   clock?: CreateTauAgentHostOptions['clock'];
   /**
@@ -273,6 +279,17 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
   };
 };
 
+/**
+ * How long the launcher waits before it asks again for the claim of a chat whose log still shows a run no driver
+ * holds, in milliseconds. The first ask is made at once.
+ *
+ * @internal
+ */
+export const driverlessRetryMilliseconds = 1000;
+
+/** The longest wait between two such asks, as a multiple of {@link driverlessRetryMilliseconds}. @internal */
+export const driverlessRetryCeiling = 32;
+
 const refused = (commandId: string, code: RefusalCode | string, message: string): CommandAnswer => ({
   commandId,
   generation: 0,
@@ -391,8 +408,14 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
    * parking past it. An entry lives only while a pass does.
    */
   const passes = new Map<string, { count: number; wakes: number; sourceWakes: number }>();
-  /** Chats some verb has named: the first one checks for a run with no driver (RH-R1, RH-R15). */
-  const named = new Set<string>();
+  /**
+   * Chats whose log shows a run no driver here holds, whose claim this launcher has asked for (RH-R1, RH-R15): how
+   * often, and the wait before the next ask while one runs. A claim that cannot end the run leaves the log as it was
+   * (storage still refuses the row, another process holds the writer), so the ask is repeated for as long as something
+   * reads the chat, each time after twice the wait.
+   */
+  const driverless = new Map<string, { asks: number; waiting: ReturnType<typeof setTimeout> | undefined }>();
+  const driverlessRetry = options.driverlessRetry ?? driverlessRetryMilliseconds;
   const stopped = new AbortController();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -850,15 +873,43 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     })();
   }
 
-  /** RH-R1: the first verb naming a chat, and any attach, that finds a run no driver here holds asks for a claim. */
+  /** The chat's run has a driver, or has ended: nothing is owed an ask, and the next orphan starts its waits anew. */
+  const driven = (chatId: string): void => {
+    clearTimeout(driverless.get(chatId)?.waiting);
+    driverless.delete(chatId);
+  };
+
+  /**
+   * RH-R1: a verb that finds a run no driver here holds asks for the chat's claim, which abandons the run once it holds
+   * the chat's lock and writes nothing while another tab leads. Every pass over the bytes asks, not only the first to
+   * name the chat: a run that began after it loses its driver too, when its leader tab dies while this one watches, or
+   * when its log refuses a write for a reason that is not a fence and its incarnation closes. An ask the wait since the
+   * last one has not passed is skipped unless `always` (an attach); the wait's end wakes the chat's parked reads, whose
+   * next pass asks again.
+   */
   const checkDriver = (chatId: string, ledger: ChatLedger, always: boolean): boolean => {
-    const first = !named.has(chatId);
-    named.add(chatId);
-    if (!first && !always) {
-      return false;
-    }
     /* M1's own predicate (RH-R9): a paused external run and its pending interrupts are orphans too. */
     if (!isOrphaned(ledger) || writers.has(chatId)) {
+      driven(chatId);
+      return false;
+    }
+    const asked = driverless.get(chatId);
+    if (asked?.waiting === undefined && !closed) {
+      const entry: { asks: number; waiting: ReturnType<typeof setTimeout> | undefined } = {
+        asks: (asked?.asks ?? 0) + 1,
+        waiting: undefined,
+      };
+      entry.waiting = setTimeout(
+        () => {
+          entry.waiting = undefined;
+          wakeReads(chatId, 'source');
+        },
+        driverlessRetry * Math.min(2 ** (entry.asks - 1), driverlessRetryCeiling),
+      ); // Bound: driverlessRetryMilliseconds, doubled per ask up to driverlessRetryCeiling.
+      /* A wait never keeps a daemon's process open at shutdown (Node's timers). */
+      (entry.waiting as unknown as { unref?: () => void }).unref?.();
+      driverless.set(chatId, entry);
+    } else if (!always) {
       return false;
     }
     port.reconcile(chatId, { wait: true });
@@ -925,7 +976,6 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         'This Tau host is not paired with your account, so it cannot start a Tau run. Pair it (the `tau serve` terminal shows a code), then send the message again. Reading chats and external agents keep working.',
       );
     }
-    named.add(chatId);
     return port.execute(chatId, command, async (epoch) => {
       if (typeof epoch === 'number') {
         host.assumeLeadership(chatId, epoch);
@@ -1381,6 +1431,10 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           clearTimeout(timer);
         }
         retirements.clear();
+        for (const { waiting } of driverless.values()) {
+          clearTimeout(waiting);
+        }
+        driverless.clear();
         for (const observation of observations.values()) {
           observation.close();
         }

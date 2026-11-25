@@ -159,6 +159,26 @@ describe('mapWithConcurrency', () => {
     expect(peak).toBe(3);
     expect(results).toStrictEqual(Array.from({ length: 20 }, (_, index) => index * 2));
   });
+
+  it('should start nothing after a failure, await the tasks in flight and report every failure', async () => {
+    const started: number[] = [];
+    let finished = 0;
+    const run = mapWithConcurrency([0, 1, 2, 3, 4, 5], 2, async (value) => {
+      started.push(value);
+      if (value === 0) {
+        throw new Error('fast');
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      finished += 1;
+      throw new Error('slow');
+    });
+
+    await expect(run).rejects.toMatchObject({ errors: [{ message: 'fast' }, { message: 'slow' }] });
+    expect(started).toStrictEqual([0, 1]);
+    expect(finished).toBe(1);
+  });
 });
 
 describe('planRetention', () => {
@@ -501,6 +521,48 @@ describe('retainPreviousAssets', () => {
 
       expect(result.retained).toBe(0);
       expect(warnings).toStrictEqual([expect.stringMatching(/route-OLD1\.js answered 403/u)]);
+      expect(await readIndex(client)).toStrictEqual(
+        indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+      );
+    });
+
+    it('should still fail the deploy when a later download fails its integrity after a fast 403', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'tampered' },
+        indexOf([
+          { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+          { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
+        ]),
+        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      await expect(
+        retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings)),
+      ).rejects.toThrow();
+      expect(warnings).toStrictEqual([]);
+    });
+
+    it('should drop what the failed pass retained before shipping without retention', async () => {
+      const live = await startLiveDeploy(
+        { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
+        indexOf([
+          { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+          { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
+        ]),
+        (path) => (path === 'assets/route-OLD2.js' ? { status: 403 } : undefined),
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+      const warnings: string[] = [];
+
+      const result = await retainOrShipWithout(
+        { clientDirectory: client, origin: live.origin, wait: noWait },
+        shipping(warnings),
+      );
+
+      expect(result.retained).toBe(0);
+      await expect(readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).rejects.toThrow('ENOENT');
       expect(await readIndex(client)).toStrictEqual(
         indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
       );

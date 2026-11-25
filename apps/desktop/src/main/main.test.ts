@@ -168,6 +168,7 @@ vi.mock('#main/error-reporting.js', () => ({
   reportDesktopSignal: state.reportSignal,
   flushDesktopErrorReporting: state.flushReports,
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
+  noteRendererGone: vi.fn(),
 }));
 
 vi.mock('@taucad/desktop-services-host/native-preparation', () => ({
@@ -3133,6 +3134,81 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(app.exit).not.toHaveBeenCalled();
       expect(fakeWindow.reload).not.toHaveBeenCalled();
       expect(fakeWindow.close).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  /*
+   * A renderer death as Electron delivers it: the diagnostics forwarder's recovery first, then every other listener
+   * main put on the app window's web contents, as they stood before the death.
+   */
+  type RendererWatch = {
+    readonly recover: (reason: string) => void;
+    readonly hangRule: { readonly endHungPage: () => void; readonly restartInSafeMode: () => void };
+  };
+  const rendererWatch = async (): Promise<RendererWatch> => {
+    const { forwardRendererDiagnostics, watchRendererHangs } = await import('#main/diagnostics.js');
+    const forwarded = vi.mocked(forwardRendererDiagnostics).mock.calls[0]![2] as { recover: (reason: string) => void };
+    const watched = vi.mocked(watchRendererHangs).mock.calls[0]![2] as { hangRule: RendererWatch['hangRule'] };
+    return { recover: forwarded.recover, hangRule: watched.hangRule };
+  };
+  const rendererDies = (watch: RendererWatch, reason: string): void => {
+    const listeners = fakeWindow.webContents.on.mock.calls
+      .filter(([name]) => name === 'render-process-gone')
+      .map(([, listener]) => listener);
+    watch.recover(reason);
+    for (const listener of listeners) {
+      listener({}, { reason, exitCode: 1 });
+    }
+  };
+  const contents = fakeWindow.webContents as typeof fakeWindow.webContents & {
+    reload?: () => void;
+    forcefullyCrashRenderer?: () => void;
+  };
+
+  it(
+    'should leave a renderer death before the first load to the watchdog alone: recovery opens and nothing reloads',
+    async () => {
+      const reload = vi.fn();
+      contents.reload = reload;
+      try {
+        await booted();
+        rendererDies(await rendererWatch(), 'crashed');
+        await vi.waitFor(() => {
+          expect(signals('desktop-recovery-shown')).toEqual([
+            expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),
+          ]);
+        });
+        expect(reload).not.toHaveBeenCalled();
+        expect(signals('desktop-renderer-reload-policy')).toEqual([]);
+      } finally {
+        delete contents.reload;
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should not open recovery when the hang rule's Restart in Safe Mode ends a page stuck in its first load (N1)",
+    async () => {
+      contents.reload = vi.fn();
+      try {
+        await booted();
+        const watch = await rendererWatch();
+        contents.forcefullyCrashRenderer = () => {
+          rendererDies(watch, 'killed');
+        };
+        watch.hangRule.endHungPage();
+        watch.hangRule.restartInSafeMode();
+        await vi.waitFor(() => {
+          expect(app.quit).toHaveBeenCalled();
+        });
+        expect(signals('desktop-recovery-shown')).toEqual([]);
+        expect(fakeWindow.loadFile).not.toHaveBeenCalled();
+      } finally {
+        delete contents.reload;
+        delete contents.forcefullyCrashRenderer;
+      }
     },
     bootMilliseconds,
   );

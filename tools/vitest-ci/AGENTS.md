@@ -7,7 +7,7 @@ Shared Vitest reporter list and the CI test outcome recorder for every Tau test 
 - Nx project: `vitest-ci`
 - Project root: `tools/vitest-ci`
 - Placement: `tools`
-- Build mode: tsdown ESM build enabled
+- Build mode: none; consumers import the TypeScript source through `exports` (like `tools/nx`), so no test target waits on a build and no third-party declarations are bundled
 - React mode: disabled with Node test environment
 - Tags: `scope:shared, type:tool`
 
@@ -26,8 +26,6 @@ Run from the workspace root. These are available project targets; generation doe
 pnpm nx lint vitest-ci
 pnpm nx test vitest-ci --watch=false
 pnpm nx typecheck vitest-ci
-pnpm nx build vitest-ci
-pnpm nx size vitest-ci
 ```
 
 ## Local maintenance

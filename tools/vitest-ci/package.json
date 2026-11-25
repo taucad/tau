@@ -1,60 +1,17 @@
 {
   "name": "@taucad/vitest-ci",
-  "version": "0.1.0-beta.0",
+  "version": "0.0.1",
   "description": "Shared Vitest reporter list and the CI test outcome recorder for every Tau test target",
   "type": "module",
-  "sideEffects": false,
   "private": true,
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/taucad/tau.git",
-    "directory": "tools/vitest-ci"
-  },
-  "homepage": "https://github.com/taucad/tau/tree/main/tools/vitest-ci#readme",
-  "bugs": {
-    "url": "https://github.com/taucad/tau/issues"
-  },
-  "main": "./dist/test-reporters.mjs",
-  "types": "./dist/test-reporters.d.mts",
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "keywords": [
-    "vitest",
-    "testing",
-    "ci"
-  ],
-  "author": "Richard Fontein",
   "license": "Apache-2.0",
-  "engines": {
-    "node": ">=24.0.0"
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
   },
   "exports": {
     ".": "./src/test-reporters.ts",
     "./outcome-reporter": "./src/outcome-reporter.ts",
     "./package.json": "./package.json"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/test-reporters.d.mts",
-        "import": "./dist/test-reporters.mjs",
-        "default": "./dist/test-reporters.mjs"
-      },
-      "./outcome-reporter": {
-        "types": "./dist/outcome-reporter.d.mts",
-        "import": "./dist/outcome-reporter.mjs",
-        "default": "./dist/outcome-reporter.mjs"
-      },
-      "./package.json": "./package.json"
-    },
-    "imports": {}
-  },
-  "imports": {
-    "#*.js": "./src/*.ts",
-    "#*": "./src/*"
   }
 }

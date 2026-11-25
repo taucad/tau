@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  annotation,
   evaluate,
   hasTimeoutBudget,
   measure,
@@ -217,6 +218,34 @@ const cases: ReadonlyArray<{
   { name: 'isolate-state', classification: 'test-only', rules: [] },
   { name: 'comment-mentions', classification: 'test-only', rules: [] },
   { name: 'new-test-file', classification: 'test-only', rules: [] },
+  {
+    name: 'raised-retry-variable',
+    classification: 'forbidden',
+    rules: ['test-config', 'raised-retry'],
+  },
+  { name: 'fake-clock', classification: 'test-only', rules: [] },
+  { name: 'fake-clock-no-advance', classification: 'forbidden', rules: ['fixed-sleep'] },
+  {
+    name: 'raised-project-timeout',
+    classification: 'forbidden',
+    rules: ['test-config', 'raised-timeout'],
+  },
+  {
+    name: 'raised-project-timeout',
+    classification: 'tolerance',
+    rules: ['test-config', 'raised-timeout'],
+    message: budget,
+  },
+  { name: 'swapped-test-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
+  { name: 'swapped-option-timeouts', classification: 'forbidden', rules: ['raised-timeout'] },
+  { name: 'product-option-skip', classification: 'test-only', rules: [] },
+  { name: 'option-skip-quoted', classification: 'forbidden', rules: ['disabled-test'] },
+  { name: 'option-skip-each', classification: 'forbidden', rules: ['disabled-test'] },
+  { name: 'widened-wait-added-wait', classification: 'tolerance', rules: ['widened-wait'] },
+  { name: 'added-wait', classification: 'test-only', rules: [] },
+  { name: 'added-close-to', classification: 'test-only', rules: [] },
+  { name: 'close-to-digits-moved', classification: 'tolerance', rules: ['widened-tolerance'] },
+  { name: 'of-division', classification: 'forbidden', rules: ['deleted-assertion'] },
 ];
 
 describe('validateFlakeFix', () => {
@@ -267,6 +296,30 @@ describe('validateFlakeFix', () => {
       '',
     );
     expect(verdict.findings.map((finding) => finding.rule)).toEqual(['protected-path']);
+  });
+
+  it.each([
+    ['apps/ui/src/boot-check.ts', 'product'],
+    ['apps/ui/src/test/boot.ts', 'test'],
+    ['apps/ui/src/boot.snap', 'snapshot'],
+  ])('should fail a test file renamed to %s (%s) as a deleted test', (path, kind) => {
+    const source = "it('a', () => { expect(boot()).toBe(1); });";
+    const verdict = validateFlakeFix(
+      [{ path, previousPath: 'apps/ui/src/boot.test.ts', before: source, after: source }],
+      '',
+    );
+    expect(verdict.files).toEqual([{ path, kind }]);
+    expect(verdict.classification).toBe('forbidden');
+    expect(verdict.findings.map((finding) => finding.rule)).toEqual(['deleted-test']);
+  });
+
+  it('should let a test file renamed to another test file through', () => {
+    const source = "it('a', () => { expect(boot()).toBe(1); });";
+    const verdict = validateFlakeFix(
+      [{ path: 'apps/ui/src/boot.spec.ts', previousPath: 'apps/ui/src/boot.test.ts', before: source, after: source }],
+      '',
+    );
+    expect(verdict.classification).toBe('test-only');
   });
 
   it('should let a new snapshot and a deleted test helper through', () => {
@@ -387,6 +440,15 @@ describe('measure', () => {
 });
 
 describe('tokenize and evaluate', () => {
+  it.each([
+    ['const q = of / 2; expect(r).toBe(q);', 'punct'],
+    ['const q = a.return / 2; expect(r).toBe(q);', 'punct'],
+    ['return /x/u.test(s);', 'regex'],
+    ['for (const line of /x/u.exec(s)) {}', 'regex'],
+  ])('should read the slash in %j as %s', (source, type) => {
+    expect(tokenize(source).find((token) => token.value.startsWith('/'))?.type).toBe(type);
+  });
+
   it('should keep an unterminated literal from swallowing the file silently', () => {
     expect(tokenize("const a = 'open\nconst b = 1;").at(-2)).toEqual({
       type: 'number',
@@ -424,9 +486,28 @@ describe('hasTimeoutBudget', () => {
     ['- timeout-budget: measured p99 = 12000 ms', true],
     ['Timeout-budget: generous', false],
     ['The Timeout-budget: p99 is unknown', false],
+    ['Timeout-budget: 125 ms (p99)', true],
+    ['Timeout-budget: p99: 1,5 s', true],
+    ['Timeout-budget: p99 not measured; see issue 42', false],
+    ['Timeout-budget: p99 over 300 runs', false],
     ['', false],
   ])('should read %j as %s', (message, expected) => {
     expect(hasTimeoutBudget(message)).toBe(expected);
+  });
+});
+
+describe('annotation', () => {
+  it('should escape the path as a property and the message as data', () => {
+    expect(
+      annotation({
+        rule: 'deleted-test',
+        severity: 'forbidden',
+        path: 'apps/ui/src/boot,slow:1%.test.ts',
+        message: 'line one\n::error::injected 100%',
+      }),
+    ).toBe(
+      '::error file=apps/ui/src/boot%2Cslow%3A1%25.test.ts,title=validate-flake-fix deleted-test::line one%0A::error::injected 100%25',
+    );
   });
 });
 
@@ -511,6 +592,14 @@ describe('readChanges and the CLI', () => {
   run('checkout', '--quiet', '-b', 'flake/2788', 'flake/2787');
   write('apps/ui/src/boot.test.ts', `${legit!.after!}\nit.skip('later', () => {});\n`);
   run('commit', '--quiet', '-am', 'skip it');
+  const [timeout] = fixture('raised-test-timeout');
+  run('checkout', '--quiet', '-b', 'flake/2789', 'main');
+  write(timeout!.path, timeout!.before!);
+  run('add', '.');
+  run('commit', '--quiet', '-m', 'test(ui): Add the boot test');
+  run('checkout', '--quiet', '-b', 'flake/2790');
+  write(timeout!.path, timeout!.after!);
+  run('commit', '--quiet', '-am', 'test(ui): Give the boot test more time');
 
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
@@ -553,8 +642,26 @@ describe('readChanges and the CLI', () => {
     expect(result.stdout).toContain('::error file=apps/ui/src/boot.test.ts,title=validate-flake-fix disabled-test::');
   });
 
-  it('should exit 2 on bad usage or an unreadable diff', () => {
+  it('should take the timeout budget from the pull-request body alone', () => {
+    const body = join(root, '..', `${root.split('/').at(-1)!}-budget`);
+    writeFileSync(body, 'Timeout-budget: p99 21.4 s over 300 runs');
+    const withoutBody = cli('--base', 'flake/2789', '--head', 'flake/2790');
+    const withBody = cli('--base', 'flake/2789', '--head', 'flake/2790', '--message-file', body);
+    rmSync(body);
+    expect(withoutBody.status).toBe(1);
+    expect(withoutBody.output).toBe('classification=forbidden\nlabel=flake:needs-operator\n');
+    expect(withBody.status).toBe(0);
+    expect(withBody.output).toBe('classification=tolerance\nlabel=flake:needs-operator\n');
+    expect(withBody.stdout).toContain(
+      '::warning file=apps/ui/src/boot.test.ts,title=validate-flake-fix raised-timeout::',
+    );
+  });
+
+  it('should exit 2 on bad usage or an unreadable diff or message file', () => {
     expect(cli('--base', 'main').status).toBe(2);
     expect(cli('--base', 'main', '--head', 'no-such-ref').status).toBe(2);
+    expect(cli('--base', 'main', '--head', 'flake/2787', '--message-file').status).toBe(2);
+    expect(cli('--base', 'main', '--head', 'flake/2787', '--message-file', '--base').status).toBe(2);
+    expect(cli('--base', 'main', '--head', 'flake/2787', '--message-file', join(root, 'no-such-body')).status).toBe(2);
   });
 });

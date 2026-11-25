@@ -1,0 +1,12 @@
+--- a/apps/ui-e2e/playwright.config.ts
++++ b/apps/ui-e2e/playwright.config.ts
+@@
+ import { defineConfig } from '@playwright/test';
+
+ export default defineConfig({
+   expect: { timeout: 5000 },
+   projects: [
+-    { name: 'chromium', timeout: 1000 },
++    { name: 'chromium', timeout: 5000 },
+   ],
+ });

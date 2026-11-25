@@ -15,13 +15,16 @@
  * The rules compare each test file's code before and after, lexically (comments and string contents never match),
  * so moving code within a file is neutral and only a net change counts:
  * - forbidden: an added skip, `only`, `todo`, `fails`, `skipIf` or `runIf` (and `xit`/`fit`, `{ skip: true }`,
- *   `ctx.skip()`); fewer test declarations or a deleted test file; fewer assertions; an added assertion on a
- *   literal (`expect(true)`); a raised `retry`; a raised test or hook timeout without a `Timeout-budget:` line
- *   naming the measured p99 in the pull-request body or a commit message; an added fixed sleep (`sleep`, `delay`,
- *   `setTimeout`, `waitForTimeout`, `wait(<n>)`).
+ *   `ctx.skip()`, a `skip`/`only`/`todo`/`fails` key in a declaration's options); fewer test declarations, a deleted
+ *   test file or one renamed to a path the runner does not collect; fewer assertions; an added assertion on a
+ *   literal (`expect(true)`); a raised `retry` (an unevaluable new value counts); a raised test, hook or Playwright
+ *   project timeout, each test compared with itself, without a `Timeout-budget:` line naming the measured p99 as a
+ *   duration (`Timeout-budget: p99 21.4 s over 300 runs`, or `… 1200 ms (p99)`) in the pull-request body or a commit
+ *   message; an added fixed sleep (`sleep`, `delay`, `setTimeout` unless the file installs and advances a fake clock,
+ *   `waitForTimeout`, `wait(<n>)`).
  * - tolerance: a raised test timeout that carries its `Timeout-budget:` line; a raised bound on an existing
- *   condition wait; a raised timeout constant; a raised tolerance, epsilon or threshold; fewer `toBeCloseTo`
- *   digits; strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
+ *   condition wait (an added wait does not hide it); a raised timeout constant; a raised tolerance, epsilon or
+ *   threshold; fewer digits on an existing `toBeCloseTo`; strict matchers traded for loose ones (`toBe` for `toBeTruthy`, `toBeGreaterThan`, …).
  *
  * The classification is the most severe finding: forbidden, then tolerance, then product, else test-only. Only
  * test-only earns the `flake:test-only` label (the agent may auto-merge with its stress proof); every other class
@@ -143,7 +146,10 @@ const punctuators = [
   '**',
 ];
 
-/** Words after which a `/` starts a regular expression rather than a division. */
+/**
+ * Reserved words after which a `/` starts a regular expression rather than a division, unless the word is a property
+ * name (`a.return / 2`). `of` is contextual and handled apart.
+ */
 const regexPrefixWords = new Set([
   'return',
   'typeof',
@@ -151,7 +157,6 @@ const regexPrefixWords = new Set([
   'do',
   'else',
   'in',
-  'of',
   'new',
   'delete',
   'void',
@@ -209,7 +214,21 @@ export const tokenize = (source: string): Token[] => {
     if (previous.type === 'punct') {
       return ![')', ']', '}'].includes(previous.value);
     }
-    return previous.type === 'ident' && regexPrefixWords.has(previous.value);
+    if (previous.type !== 'ident') {
+      return false;
+    }
+    const before = tokens.at(-2);
+    if (before?.type === 'punct' && (before.value === '.' || before.value === '?.')) {
+      return false;
+    }
+    if (previous.value === 'of') {
+      // `of` is a keyword only after a for-of binding (`x of`, `] of`, `} of`); anywhere else it is an identifier.
+      return (
+        (before?.type === 'ident' && !regexPrefixWords.has(before.value)) ||
+        (before?.type === 'punct' && (before.value === ']' || before.value === '}'))
+      );
+    }
+    return regexPrefixWords.has(previous.value);
   };
 
   const punctuatorAt = (position: number): string =>
@@ -302,15 +321,27 @@ export const tokenize = (source: string): Token[] => {
 export type Call = {
   readonly callee: string;
   readonly args: ReadonlyArray<readonly Token[]>;
+  /** For a call on a call's result (`it.each(table)(…)`), the inner call's callee. */
+  readonly curriedFrom?: string;
 };
 
-/** A numeric value bound to a name: `key: value` in an object, or `name = value`. `context` says where. */
+/**
+ * A numeric value bound to a name: `key: value` in an object, or `name = value`. `context` says where. A retry or
+ * timeout key is kept whatever its value, so a change to a value the validator cannot evaluate still compares.
+ */
 export type Binding = {
   readonly key: string;
   readonly text: string;
   readonly value: number | undefined;
-  /** The callee the object is a direct argument of, `''` for any other object, `'='` for an assignment. */
+  /**
+   * The callee the object is a direct argument of, `'<key>[]'` for an object that is an element of an array bound to
+   * `<key>` (`projects: [{ … }]`), `''` for any other object, `'='` for an assignment.
+   */
   readonly context: string;
+  /** For an object argument, the call's first argument when it is a string (a test's name). */
+  readonly subject?: string;
+  /** The identity the before and after values are paired by, when there is one (a test's name). */
+  readonly id?: string;
 };
 
 export type Facts = {
@@ -390,11 +421,22 @@ type Frame =
   | {
       readonly kind: 'call';
       readonly callee: string;
+      readonly curriedFrom: string | undefined;
       readonly start: number;
       readonly commas: number[];
     }
-  | { readonly kind: 'object'; readonly argumentOf: string | undefined }
-  | { readonly kind: 'group' };
+  | {
+      readonly kind: 'object';
+      readonly argumentOf: string | undefined;
+      readonly elementOf: string | undefined;
+      readonly subject: string | undefined;
+    }
+  | { readonly kind: 'group'; readonly key?: string };
+
+/** Keys kept as bindings even when their value holds no number. */
+const alwaysBound = /^(?:retry|retries|timeout|testTimeout|hookTimeout|teardownTimeout)$/u;
+/** Type names, so `retry: number` in a type or a parameter is not read as a value. */
+const typeNames = new Set(['number', 'string', 'boolean', 'unknown', 'any', 'never', 'object', 'undefined']);
 
 const closers: Readonly<Record<string, string>> = {
   ')': '(',
@@ -407,6 +449,7 @@ export const facts = (tokens: readonly Token[]): Facts => {
   const calls: Call[] = [];
   const bindings: Binding[] = [];
   const stack: Array<Frame & { readonly open: string }> = [];
+  let lastCall: { readonly end: number; readonly callee: string } | undefined;
 
   const calleeAt = (index: number): string | undefined => {
     // `index` is the `(`; read the member chain that ends just before it.
@@ -465,16 +508,27 @@ export const facts = (tokens: readonly Token[]): Facts => {
     const top = stack.at(-1);
     if (value === '(') {
       const callee = calleeAt(index);
+      const curriedFrom = callee === '<call>' && lastCall?.end === index - 1 ? lastCall.callee : undefined;
       stack.push(
         callee === undefined
           ? { kind: 'group', open: '(' }
-          : { kind: 'call', callee, start: index, commas: [], open: '(' },
+          : { kind: 'call', callee, curriedFrom, start: index, commas: [], open: '(' },
       );
-    } else if (value === '{' || value === '[') {
+    } else if (value === '{') {
       const previous = tokens[index - 1]?.value;
-      const argumentOf =
-        value === '{' && top?.kind === 'call' && (previous === '(' || previous === ',') ? top.callee : undefined;
-      stack.push(value === '{' ? { kind: 'object', argumentOf, open: '{' } : { kind: 'group', open: '[' });
+      const isArgument = top?.kind === 'call' && (previous === '(' || previous === ',');
+      const argumentOf = isArgument ? top.callee : undefined;
+      const first = isArgument && top.commas.length > 0 ? tokens.slice(top.start + 1, top.commas[0]) : [];
+      const subject = first.length === 1 && first[0]!.type === 'string' ? first[0]!.value : undefined;
+      const elementOf =
+        top?.kind === 'group' && top.open === '[' && top.key !== undefined && (previous === '[' || previous === ',')
+          ? `${top.key}[]`
+          : undefined;
+      stack.push({ kind: 'object', argumentOf, elementOf, subject, open: '{' });
+    } else if (value === '[') {
+      const key = tokens[index - 2];
+      const bound = tokens[index - 1]?.value === ':' && (key?.type === 'ident' || key?.type === 'string');
+      stack.push(bound ? { kind: 'group', key: key.value, open: '[' } : { kind: 'group', open: '[' });
     } else if (value in closers) {
       // Unbalanced input (a lexer misread) pops until the matching opener rather than throwing.
       let frame = stack.pop();
@@ -487,7 +541,9 @@ export const facts = (tokens: readonly Token[]): Facts => {
         calls.push({
           callee: frame.callee,
           args: args.length === 1 && args[0]!.length === 0 ? [] : args,
+          ...(frame.curriedFrom === undefined ? {} : { curriedFrom: frame.curriedFrom }),
         });
+        lastCall = { end: index, callee: frame.callee };
       }
     } else if (value === ',' && top?.kind === 'call') {
       top.commas.push(index);
@@ -498,15 +554,21 @@ export const facts = (tokens: readonly Token[]): Facts => {
       }
       const end = valueEnd(index + 1);
       const valueTokens = tokens.slice(index + 1, end);
-      if (!valueTokens.some((entry) => entry.type === 'number') || valueTokens.length > 16) {
+      const kept =
+        alwaysBound.test(key.value) &&
+        valueTokens.length > 0 &&
+        !(valueTokens.length === 1 && typeNames.has(valueTokens[0]!.value));
+      if (!kept && (!valueTokens.some((entry) => entry.type === 'number') || valueTokens.length > 16)) {
         continue;
       }
-      const context = value === '=' ? '=' : top?.kind === 'object' ? (top.argumentOf ?? '') : '';
+      const context = value === '=' ? '=' : top?.kind === 'object' ? (top.argumentOf ?? top.elementOf ?? '') : '';
+      const subject = value === ':' && top?.kind === 'object' ? top.subject : undefined;
       bindings.push({
         key: key.value,
         text: valueTokens.map((entry) => entry.value).join(' '),
         value: evaluate(valueTokens),
         context,
+        ...(subject === undefined ? {} : { subject }),
       });
     }
   }
@@ -574,6 +636,23 @@ const looseMatchers = new Set([
   'toThrow',
 ]);
 const sleepNames = new Set(['sleep', 'delay', 'pause', 'waitForTimeout', 'setTimeout']);
+/** Calls that install a fake clock, and calls that advance one. */
+const fakeClockInstall = new Set(['useFakeTimers', 'install']);
+const fakeClockAdvance = new Set([
+  'advanceTimersByTime',
+  'advanceTimersByTimeAsync',
+  'advanceTimersToNextTimer',
+  'advanceTimersToNextTimerAsync',
+  'runAllTimers',
+  'runAllTimersAsync',
+  'runOnlyPendingTimers',
+  'runOnlyPendingTimersAsync',
+  'tick',
+  'tickAsync',
+  'runFor',
+  'fastForward',
+]);
+const optionDisablerKeys = new Set(['skip', 'only', 'todo', 'fails']);
 const waitName = /^(?:waitFor(?!Timeout$)\w*|waitUntil|poll|until)$/u;
 const toleranceKey = /^(?:tolerance|epsilon|eps|tol|delta|precision|threshold|maxDiff\w*|atol|rtol|margin|slack)$/iu;
 const toleranceConstant = /tolerance|epsilon|threshold/iu;
@@ -603,9 +682,37 @@ export type Measures = {
   readonly tolerances: readonly Binding[];
   /** `toBeCloseTo` digits, negated so that a looser (smaller) digit count reads as a raise. */
   readonly closeTo: readonly Binding[];
+  /** `skip`, `only`, `todo` or `fails` keys of an options object passed to a test or suite declaration. */
+  readonly optionDisablers: number;
 };
 
-const positional = (tokens: readonly Token[]): Binding | undefined => {
+/** Whether a test or suite declaration's argument is an options object with a disabling key not set to `false`. */
+const disablingOptions = (tokens: readonly Token[]): number => {
+  if (tokens[0]?.value !== '{') {
+    return 0;
+  }
+  let found = 0;
+  let depth = 0;
+  for (const [index, token] of tokens.entries()) {
+    if (token.type === 'punct' && ['(', '[', '{'].includes(token.value)) {
+      depth += 1;
+    } else if (token.type === 'punct' && [')', ']', '}'].includes(token.value)) {
+      depth -= 1;
+    } else if (
+      depth === 1 &&
+      (token.type === 'ident' || token.type === 'string') &&
+      optionDisablerKeys.has(token.value) &&
+      ['{', ','].includes(tokens[index - 1]?.value ?? '') &&
+      tokens[index + 1]?.value === ':' &&
+      tokens[index + 2]?.value !== 'false'
+    ) {
+      found += 1;
+    }
+  }
+  return found;
+};
+
+const positional = (tokens: readonly Token[], id?: string): Binding | undefined => {
   const value = evaluate(tokens);
   return value === undefined
     ? undefined
@@ -614,7 +721,25 @@ const positional = (tokens: readonly Token[]): Binding | undefined => {
         text: tokens.map((token) => token.value).join(' '),
         value,
         context: '',
+        ...(id === undefined ? {} : { id }),
       };
+};
+
+/** A declaration's identity: `test:<name>` for a test or suite named by a string, `<hook>` for a hook. */
+const declarationId = (base: string, name: string | undefined): string | undefined =>
+  hooks.has(base) ? base : name === undefined ? undefined : `${base === 'it' ? 'test' : base}:${name}`;
+
+/** Numbers repeated ids in order of appearance (`test:a#0`, `test:a#1`), so each pairs with its counterpart. */
+const numberIds = (bindings: readonly Binding[]): Binding[] => {
+  const seen = new Map<string, number>();
+  return bindings.map((binding) => {
+    if (binding.id === undefined) {
+      return binding;
+    }
+    const occurrence = seen.get(binding.id) ?? 0;
+    seen.set(binding.id, occurrence + 1);
+    return { ...binding, id: `${binding.id}#${occurrence}` };
+  });
 };
 
 export const measure = (source: string): Measures => {
@@ -633,8 +758,15 @@ export const measure = (source: string): Measures => {
   const testTimeouts: Binding[] = [];
   const waitTimeouts: Binding[] = [];
   const closeTo: Binding[] = [];
+  let optionDisablers = 0;
+  const callees = calls.map((call) => members(call.callee).at(-1)!);
+  // A fake clock that the file installs and advances runs `setTimeout` callbacks without waiting.
+  const fakeClock =
+    callees.some((name) => name === 'useFakeTimers') ||
+    calls.some(({ callee }) => members(callee).at(-2) === 'clock' && fakeClockInstall.has(members(callee).at(-1)!));
+  const controlledTimers = fakeClock && callees.some((name) => fakeClockAdvance.has(name));
 
-  for (const { callee, args } of calls) {
+  for (const { callee, args, curriedFrom } of calls) {
     const chain = members(callee);
     const base = chain[0]!;
     const last = chain.at(-1)!;
@@ -656,9 +788,17 @@ export const measure = (source: string): Measures => {
       count('skip');
     }
 
+    const declaration = testFamily.has(base) || (curriedFrom !== undefined && testFamily.has(members(curriedFrom)[0]!));
+    if (declaration) {
+      optionDisablers += args.slice(1).reduce((total, argument) => total + disablingOptions(argument), 0);
+    }
+
     const timeoutArgument = testFamily.has(base) ? 2 : hooks.has(base) ? 1 : -1;
+    const name = args[0]?.length === 1 && args[0][0]!.type === 'string' ? args[0][0]!.value : undefined;
     const budget =
-      timeoutArgument >= 0 && args.length > timeoutArgument ? positional(args[timeoutArgument]!) : undefined;
+      timeoutArgument >= 0 && args.length > timeoutArgument
+        ? positional(args[timeoutArgument]!, declarationId(base, name))
+        : undefined;
     if (budget !== undefined) {
       testTimeouts.push(budget);
     }
@@ -671,7 +811,7 @@ export const measure = (source: string): Measures => {
     }
 
     if (
-      sleepNames.has(last) ||
+      (sleepNames.has(last) && !(last === 'setTimeout' && controlledTimers)) ||
       ((last === 'wait' || callee === 'scheduler.wait') && args[0] !== undefined && evaluate(args[0]) !== undefined)
     ) {
       sleeps += 1;
@@ -708,6 +848,8 @@ export const measure = (source: string): Measures => {
         text: String(digits),
         value: digits === undefined ? undefined : -digits,
         context: '',
+        // Paired by the expected value, which a digits change leaves alone.
+        id: `toBeCloseTo:${(args[0] ?? []).map((token) => token.value).join(' ')}`,
       });
     }
   }
@@ -726,9 +868,11 @@ export const measure = (source: string): Measures => {
       key === 'timeout' &&
       (testFamily.has(contextBase) ||
         hooks.has(contextBase) ||
+        context === 'projects[]' ||
         /(?:setConfig|defineConfig|defineProject)$/u.test(context))
     ) {
-      testTimeouts.push(binding);
+      const id = declarationId(contextBase, binding.subject);
+      testTimeouts.push(id === undefined ? binding : { ...binding, id });
     } else if (key === 'timeout' && context !== '' && context !== '=') {
       waitTimeouts.push(binding);
     } else if (/timeout/iu.test(key)) {
@@ -748,23 +892,47 @@ export const measure = (source: string): Measures => {
     strict,
     loose,
     retries,
-    testTimeouts,
+    testTimeouts: numberIds(testTimeouts),
     waitTimeouts,
     timeoutConstants,
     tolerances,
-    closeTo,
+    closeTo: numberIds(closeTo),
+    optionDisablers,
   };
 };
 
+const isRaise = (from: Binding, to: Binding): boolean =>
+  to.text !== from.text && (to.value === undefined || from.value === undefined || to.value > from.value);
+
 /**
- * The values in `after` that exceed what `before` held. Identical expressions cancel first; the rest are compared
- * largest to largest, so a value that went up, or a new one, is a raise. An expression with no constant value that
- * did not stand before is a raise too (fail closed).
+ * The values in `after` that exceed what `before` held. Values with the same `id` (one test's timeout) pair first and
+ * compare directly. Of the rest, identical expressions cancel; what is left is compared largest to largest, so a
+ * value that went up is a raise. An expression with no constant value that did not stand before is a raise too (fail
+ * closed). A value with no counterpart left (a new one) is a raise unless `fresh` is `'ignore'`, for a new wait or a
+ * new matcher, which loosens nothing that stood before.
  */
-export const raised = (before: readonly Binding[], after: readonly Binding[]): Binding[] => {
-  const remaining = [...before];
-  const added: Binding[] = [];
+export const raised = (
+  before: readonly Binding[],
+  after: readonly Binding[],
+  fresh: 'raise' | 'ignore' = 'raise',
+): Binding[] => {
+  const result: Binding[] = [];
+  const unpaired = [...before];
+  const rest: Binding[] = [];
   for (const binding of after) {
+    const match = binding.id === undefined ? -1 : unpaired.findIndex((candidate) => candidate.id === binding.id);
+    if (match === -1) {
+      rest.push(binding);
+    } else {
+      if (isRaise(unpaired[match]!, binding)) {
+        result.push(binding);
+      }
+      unpaired.splice(match, 1);
+    }
+  }
+  const remaining = unpaired;
+  const added: Binding[] = [];
+  for (const binding of rest) {
     const match = remaining.findIndex((candidate) => candidate.text === binding.text);
     if (match === -1) {
       added.push(binding);
@@ -775,15 +943,28 @@ export const raised = (before: readonly Binding[], after: readonly Binding[]): B
   const unknown = added.filter((binding) => binding.value === undefined);
   const known = added.filter((binding) => binding.value !== undefined).sort((a, b) => b.value! - a.value!);
   const previous = remaining.filter((binding) => binding.value !== undefined).sort((a, b) => b.value! - a.value!);
+  const counterparts = fresh === 'raise' ? Number.POSITIVE_INFINITY : remaining.length;
   return [
-    ...unknown,
-    ...known.filter((binding, index) => index >= previous.length || binding.value! > previous[index]!.value!),
+    ...result,
+    ...unknown.slice(0, counterparts),
+    ...known.filter((binding, index) =>
+      index >= previous.length ? fresh === 'raise' : binding.value! > previous[index]!.value!,
+    ),
   ];
 };
 
-const timeoutBudgetLine = /^[ \t>*-]*Timeout-budget:[^\n]*\bp99\b[^\n]*\d/imu;
+/** A measured duration: a number and a time unit. */
+const duration = String.raw`\d+(?:[.,]\d+)?\s*(?:ms|milliseconds?|s|sec|seconds?|m|min|minutes?)\b`;
+/**
+ * A `Timeout-budget:` line whose p99 is a measured duration: `p99 21.4 s`, `p99: 1200 ms`, `measured p99 = 12 s`, or
+ * `21.4 s (p99)`, `21.4 s p99`.
+ */
+const timeoutBudgetLine = new RegExp(
+  String.raw`^[ \t>*-]*Timeout-budget:[^\n]*?(?:\bp99\s*(?:[:=]|is|of|was)?\s*~?${duration}|${duration}\s*\(?\s*p99\b)`,
+  'imu',
+);
 
-/** Whether `message` (the pull-request body and commit messages) carries a `Timeout-budget:` line with a p99. */
+/** Whether `message` (the pull-request body and commit messages) carries a `Timeout-budget:` line with a measured p99. */
 export const hasTimeoutBudget = (message: string): boolean => timeoutBudgetLine.test(message);
 
 const describeValues = (bindings: readonly Binding[]): string =>
@@ -818,9 +999,7 @@ export const codeFindings = ({
       );
     }
   }
-  const optionDisablers = /(?:^|[,{(]\s*)(?:skip|only|todo|fails)\s*:\s*true\b/gu;
-  const optionCount = (source: string): number => tokensText(source).match(optionDisablers)?.length ?? 0;
-  if (optionCount(after) > optionCount(before)) {
+  if (is.optionDisablers > was.optionDisablers) {
     add('disabled-test', 'forbidden', 'adds a `skip`, `only`, `todo` or `fails` test option');
   }
   if (is.tests < was.tests) {
@@ -857,8 +1036,9 @@ export const codeFindings = ({
         : `raises a test or hook timeout (${describeValues(testTimeouts)}) without a \`Timeout-budget:\` line giving the measured p99`,
     );
   }
-  const waitTimeouts = raised(was.waitTimeouts, is.waitTimeouts);
-  if (waitTimeouts.length > 0 && is.waits <= was.waits) {
+  // A new bounded wait has no counterpart and is no widening; a retained bound that went up is, whatever was added.
+  const waitTimeouts = raised(was.waitTimeouts, is.waitTimeouts, 'ignore');
+  if (waitTimeouts.length > 0) {
     add(
       'widened-wait',
       'tolerance',
@@ -873,7 +1053,7 @@ export const codeFindings = ({
   if (tolerances.length > 0) {
     add('widened-tolerance', 'tolerance', `widens a tolerance (${describeValues(tolerances)})`);
   }
-  if (raised(was.closeTo, is.closeTo).length > 0) {
+  if (raised(was.closeTo, is.closeTo, 'ignore').length > 0) {
     add('widened-tolerance', 'tolerance', 'lowers the digits of a `toBeCloseTo`');
   }
   if (is.strict < was.strict && is.loose > was.loose) {
@@ -882,12 +1062,6 @@ export const codeFindings = ({
 
   return findings;
 };
-
-/** The code with string contents and comments removed, for option-shape patterns. */
-const tokensText = (source: string): string =>
-  tokenize(source)
-    .map((token) => (token.type === 'string' ? '""' : token.value))
-    .join(' ');
 
 // --- Verdict ---------------------------------------------------------------------------------------------------
 
@@ -921,6 +1095,11 @@ export const validateFlakeFix = (changes: readonly Change[], message: string): V
         'forbidden',
         'a flake fix may not change the quarantine, the ledger, the reporter, the validators, a workflow or policy',
       );
+      continue;
+    }
+    if (previousPath !== undefined && testFile.test(previousPath) && !testFile.test(path)) {
+      // The runner no longer collects the file, so its tests are gone whatever the new path is.
+      add('deleted-test', 'forbidden', `renames the test file ${previousPath} to a path the runner does not collect`);
       continue;
     }
     if (kind === 'product') {
@@ -1054,18 +1233,56 @@ export const readChanges = (base: string, head: string): { changes: Change[]; me
   };
 };
 
-const option = (args: readonly string[], name: string): string | undefined => {
+const usage = 'Usage: node scripts/src/validate-flake-fix.ts --base <rev> --head <rev> [--message-file <path>]';
+
+/** An option's value, `undefined` when the option is absent, or `null` when it is present without a value. */
+const option = (args: readonly string[], name: string): string | null | undefined => {
   const index = args.indexOf(name);
-  return index === -1 ? undefined : args[index + 1];
+  if (index === -1) {
+    return undefined;
+  }
+  const value = args[index + 1];
+  return value === undefined || value === '' || value.startsWith('--') ? null : value;
+};
+
+/** Escapes an Actions workflow-command property value (the toolkit's `escapeProperty`). */
+const escapeProperty = (text: string): string =>
+  text
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+    .replaceAll(':', '%3A')
+    .replaceAll(',', '%2C');
+
+/** Escapes an Actions workflow-command message (the toolkit's `escapeData`). */
+const escapeData = (text: string): string =>
+  text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+
+/** One finding as an Actions annotation command. */
+export const annotation = (finding: Finding): string => {
+  const level = finding.severity === 'forbidden' ? 'error' : 'warning';
+  const file = finding.path === '' ? '' : ` file=${escapeProperty(finding.path)}`;
+  return `::${level}${file},title=${escapeProperty(`validate-flake-fix ${finding.rule}`)}::${escapeData(finding.message)}`;
 };
 
 const main = (args: readonly string[]): number => {
   const base = option(args, '--base');
   const head = option(args, '--head');
   const messageFile = option(args, '--message-file');
-  if (base === undefined || head === undefined) {
-    console.error('Usage: node scripts/src/validate-flake-fix.ts --base <rev> --head <rev> [--message-file <path>]');
+  if (typeof base !== 'string' || typeof head !== 'string' || messageFile === null) {
+    console.error(usage);
     return 2;
+  }
+  let body = '';
+  if (messageFile !== undefined) {
+    try {
+      body = readFileSync(messageFile, 'utf8');
+    } catch (error) {
+      console.error(
+        `validate-flake-fix: could not read --message-file: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return 2;
+    }
   }
 
   let read: { changes: Change[]; messages: string };
@@ -1077,13 +1294,10 @@ const main = (args: readonly string[]): number => {
     );
     return 2;
   }
-  const body = messageFile === undefined ? '' : readFileSync(messageFile, 'utf8');
   const verdict = validateFlakeFix(read.changes, `${body}\n${read.messages}`);
 
   for (const finding of verdict.findings) {
-    const level = finding.severity === 'forbidden' ? 'error' : 'warning';
-    const file = finding.path === '' ? '' : ` file=${finding.path}`;
-    console.log(`::${level}${file},title=validate-flake-fix ${finding.rule}::${finding.message}`);
+    console.log(annotation(finding));
   }
   console.log(`classification=${verdict.classification} label=${verdict.label} files=${verdict.files.length}`);
 

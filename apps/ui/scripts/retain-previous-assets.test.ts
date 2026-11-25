@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isServableAssetPath,
   isServableRuntimePath,
@@ -108,6 +108,28 @@ const startLiveDeploy = async (
       }),
   );
   return { origin: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`, requests };
+};
+
+/**
+ * Make `fetch` throw the error a saturated runner's connect timeout gives (undici's happy-eyeballs
+ * `ETIMEDOUT`) for the first `failures` requests of `path`; every other request reaches the server.
+ */
+const failConnectsTo = (path: string, failures: number): void => {
+  const realFetch = globalThis.fetch;
+  let attempts = 0;
+  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (new URL(url).pathname === `/${path}` && attempts < failures) {
+      attempts += 1;
+      throw new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      });
+    }
+    return realFetch(input, init);
+  });
+  cleanups.push(async () => {
+    spy.mockRestore();
+  });
 };
 
 const readIndex = async (clientDirectory: string): Promise<ServedAssetsIndex> =>
@@ -503,6 +525,49 @@ describe('retainPreviousAssets', () => {
     });
 
     expect(waits).toStrictEqual([1000, 2000]);
+  });
+
+  it('should outlast a stretch of connect timeouts longer than the HTTP backoff', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+    );
+    // Four attempts: every attempt the 1 s, 2 s, 4 s backoff allows.
+    failConnectsTo('assets/route-OLD1.js', 4);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    });
+
+    expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
+    expect(waits).toStrictEqual([1000, 2000, 4000, 8000]);
+  });
+
+  it('should give up on connect timeouts only after waiting about a minute', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+    );
+    failConnectsTo('assets/route-OLD1.js', Number.POSITIVE_INFINITY);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await expect(
+      retainPreviousAssets({
+        clientDirectory: client,
+        origin: live.origin,
+        wait: async (milliseconds) => {
+          waits.push(milliseconds);
+        },
+      }),
+    ).rejects.toThrow('fetch failed');
+    expect(waits.reduce((total, wait) => total + wait, 0)).toBeGreaterThanOrEqual(60_000);
   });
 
   it('should give up on an asset the live deploy never finishes sending', async () => {

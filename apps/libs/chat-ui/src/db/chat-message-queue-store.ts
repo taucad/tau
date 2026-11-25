@@ -26,6 +26,11 @@ export type QueuedChatMessage = Readonly<{
   command?: QueuedStartCommand;
   commandPlacement?: string;
   steer?: QueuedCancelCommand;
+  /**
+   * Held behind a send the person took back with Stop: like work queued behind a stopped run, it waits for Send now
+   * (a steer) rather than going out on its own.
+   */
+  held?: true;
 }>;
 export type ChatMessageQueueRecord = Readonly<{
   version: 1;
@@ -62,6 +67,7 @@ const itemSchema = z.strictObject({
   steer: z
     .strictObject({ type: z.literal('cancel'), commandId: z.string(), payload: commandPayloads.cancel })
     .optional(),
+  held: z.literal(true).optional(),
 });
 const recordSchema = z.strictObject({
   version: z.literal(1),

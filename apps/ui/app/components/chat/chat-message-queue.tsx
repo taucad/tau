@@ -2,6 +2,7 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { useChatContext } from '#hooks/use-chat.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { selectQueueStrip } from '#services/outbox-gate.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { ChatMessageQueueView } from '@taucad/chat-ui/components/chat-message-queue-view';
@@ -19,14 +20,7 @@ function ConnectedQueue({
   const subscribe = useCallback((listener: () => void) => store.subscribeChat(chatId, listener), [chatId, store]);
   const readDeparting = useCallback(() => store.departingSendOf(chatId), [chatId, store]);
   const departingId = useSyncExternalStore(subscribe, readDeparting, readDeparting);
-  const items = useMemo(
-    () => (departingId === undefined ? context.items : context.items.filter((item) => item.id !== departingId)),
-    [context.items, departingId],
-  );
-  /* Still delivering, though it is not drawn: the rows behind it stay in their order until it is handed over. */
-  const sendingId =
-    context.sendingId ??
-    (context.items.some((item) => item.id === departingId && item.command !== undefined) ? departingId : undefined);
+  const { items, sendingId } = useMemo(() => selectQueueStrip(context, departingId), [context, departingId]);
   return (
     <ChatMessageQueueView
       items={items}

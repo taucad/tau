@@ -162,6 +162,11 @@ export type RunView = Readonly<{
   /** Provider identities resolve rewind prefixes independently from context compaction. */
   providerIds?: readonly string[];
   retired?: true;
+  /**
+   * The run's cancelled row says the person took the request back before the turn was kept (`TURN_WITHDRAWN`), read
+   * from whichever log holds the run, so every page and device leaves its request out alike ({@link isRetractedRun}).
+   */
+  withdrawn?: true;
   /** Each history message the active segment appended and its chunk range, so a rewind removes exactly what it dropped. */
   messages?: readonly ProjectedMessageRange[];
 }>;
@@ -287,6 +292,14 @@ const applyToolRow = (open: Record<string, OpenToolCall>, row: unknown): Record<
   }
   return open;
 };
+
+/**
+ * The detail code a host writes on a run the person took back: their Stop asked to withdraw the request
+ * (`cancel.withdraw`) before the agent kept the turn. A kept turn is `USER_STOPPED` instead and offers Resume.
+ *
+ * @public
+ */
+export const turnWithdrawnCode = 'TURN_WITHDRAWN';
 
 /**
  * Keep what a `failed` row said about its run until that run's next lifecycle row.
@@ -810,8 +823,12 @@ const foldRunViews = (
         : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
-    const { terminal: _terminal, ...prior } = previous ?? {};
+    const { terminal: _terminal, withdrawn: _withdrawn, ...prior } = previous ?? {};
     const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
+    const withdrawn =
+      row.type === 'run.lifecycle'
+        ? terminal === 'cancelled' && row.detail?.code === turnWithdrawnCode
+        : previous?.withdrawn === true;
     const rewrittenPrefix = rewriteMessage ? [...chunksOf(initialChunks)] : undefined;
     const correctedInput =
       rewriteMessage && message.role === 'tool-input'
@@ -911,6 +928,7 @@ const foldRunViews = (
             providerIds: [...(steering === undefined ? (previous?.providerIds ?? []) : []), providerId],
           }),
       ...(finalState === undefined ? {} : { terminal: finalState }),
+      ...(withdrawn ? { withdrawn: true } : {}),
     };
   }
   for (const [runId, blocks] of blockMaps) {
@@ -1473,24 +1491,16 @@ export const runViewHasOutput = (view: RunView): boolean =>
 
 /**
  * Whether a run is withdrawn from the transcript: the person stopped it before anything came back and before the
- * agent kept its turn. The host records a Stop that keeps the turn as `USER_STOPPED` (a committed Tau turn, or an
- * external prompt already issued); any other cancellation released the turn, so its message went back to the
- * composer and the thread shows it no more. A run that produced output keeps its place, and so does a failure.
+ * agent kept its turn, and asked for the request back (`TURN_WITHDRAWN`, written by the host, so every page and
+ * device agrees). Any other cancellation (a steer, a closed project, a Stop of a kept turn) keeps the request where
+ * it is. A run that produced output keeps its place.
  *
- * @param run - The run's ledger entry, when this log has one.
  * @param view - The run's projected view.
  * @returns `true` when the run's request is not shown.
  * @public
  */
-export const isRetractedRun = (
-  run: Readonly<{ lifecycle?: string; failure?: Readonly<{ code?: string }> }> | undefined,
-  view: RunView,
-): boolean =>
-  run?.lifecycle === 'cancelled' &&
-  run.failure?.code !== 'USER_STOPPED' &&
-  view.user !== undefined &&
-  view.steering === undefined &&
-  !runViewHasOutput(view);
+export const isRetractedRun = (view: RunView): boolean =>
+  view.withdrawn === true && view.user !== undefined && view.steering === undefined && !runViewHasOutput(view);
 
 /**
  * Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. A retracted run
@@ -1503,11 +1513,7 @@ export const selectTranscriptSource = (
   { withRetracted = false }: Readonly<{ withRetracted?: boolean }> = {},
 ): ReadonlyArray<RunView & { readonly runId: string }> =>
   Object.entries({ ...projection.remote?.views, ...projection.views })
-    .filter(
-      ([runId, view]) =>
-        view.retired !== true &&
-        (withRetracted || !(projection.views[runId] === view && isRetractedRun(projection.ledger.runs[runId], view))),
-    )
+    .filter(([, view]) => view.retired !== true && (withRetracted || !isRetractedRun(view)))
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
 

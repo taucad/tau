@@ -6,6 +6,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { turnWithdrawnCode } from '#machines/chat-projection.logic.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
@@ -58,19 +59,21 @@ export const useTurnOutcomes = (projectId: string): readonly TurnOutcomeNotice[]
   );
 
 /**
- * Whether a turn ended the ordinary way a person ends one: let go before it changed anything (`TURN_RELEASED`) — a
- * Stop, a send withdrawn before it ran, a reload. Nothing is lost, so nothing is said; the composer already holds the
- * request again when it never ran. A release after the run recorded a change to the project still says so.
+ * Whether a turn ended the ordinary way a person ends one: let go before it recorded anything (`TURN_RELEASED`)
+ * because the person stopped it (`USER_STOPPED`) or took the request back (`TURN_WITHDRAWN`), with no change recorded
+ * to the project. The person saw that outcome happen, so nothing more is said. A release this page cannot place, or
+ * one after a recorded change, still says so.
  *
  * @param event - The revision event.
- * @param changed - Whether the chat's log shows that run changed the project; `undefined` when unknown.
+ * @param stoppedByPerson - Whether the chat's log shows the person stopped that run and it recorded no change; `false`
+ *   when this page does not know.
  * @returns `true` when the release is silent.
  */
-const isOrdinaryRelease = (
+export const isOrdinaryRelease = (
   event: WorkerRevisionEvent,
-  changed: (chatId: string, runId: string) => boolean | undefined,
+  stoppedByPerson: (chatId: string, runId: string) => boolean,
 ): boolean =>
-  event.type === 'turn.failed' && event.code === 'TURN_RELEASED' && changed(event.chatId, event.runId) !== true;
+  event.type === 'turn.failed' && event.code === 'TURN_RELEASED' && stoppedByPerson(event.chatId, event.runId);
 
 const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
   if (event.type === 'turn.finalized' || event.type === 'chats.projected' || event.type === 'checkout.changed') {
@@ -129,8 +132,13 @@ export function RevisionOutcomes(): undefined {
       }
       if (
         isOrdinaryRelease(event, (chatId, runId) => {
-          const changes = sessions?.getProjection(chatId)?.ledger.runs[runId]?.changes;
-          return changes === undefined ? undefined : Object.keys(changes).length > 0;
+          const run = sessions?.getProjection(chatId)?.ledger.runs[runId];
+          const code = run?.failure?.code;
+          return (
+            run?.lifecycle === 'cancelled' &&
+            (code === 'USER_STOPPED' || code === turnWithdrawnCode) &&
+            Object.keys(run.changes ?? {}).length === 0
+          );
         })
       ) {
         return;

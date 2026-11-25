@@ -239,6 +239,12 @@ type StubDeps = {
   >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
+/** The facts each `queue held` line logged, parsed from the JSON text the store writes. */
+const loggedHolds = (calls: ReadonlyArray<readonly unknown[]>): unknown[] =>
+  calls
+    .filter(([label]) => label === '[ChatSessionStore] queue held')
+    .map(([, facts]) => JSON.parse(String(facts)) as unknown);
+
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
 /**
@@ -2034,7 +2040,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
             expect(hostCommand).toHaveBeenCalledTimes(3);
           });
           expect(hostCommand).toHaveBeenLastCalledWith(
-            expect.objectContaining({ type: 'cancel', payload: { chatId, runId: secondCommand.payload.runId } }),
+            expect.objectContaining({
+              type: 'cancel',
+              payload: { chatId, runId: secondCommand.payload.runId, withdraw: true },
+            }),
           );
           expect(unsubscribeWatches).toEqual([]);
         } else {
@@ -5602,10 +5611,20 @@ describe('ChatSessionStore', () => {
           expect(session.transcript).toBe('loaded');
           answer.resolve({ commandId: 'req_first', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
           await vi.waitFor(() => {
-            expect(store.departingSendOf(chatId)).toBeUndefined();
             expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
           });
+          /* Handed over: still the thread's request, once, until its run's own rows take over. */
+          expect(store.departingSendOf(chatId)).toBe('first');
           expect(session.messages.filter((message) => message.id === 'first')).toHaveLength(1);
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'completed', 'req_first')],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
         } finally {
           unadmit();
           unpublish();
@@ -5629,10 +5648,12 @@ describe('ChatSessionStore', () => {
           expect(store.departingSendOf(chatId)).toBeUndefined();
           expect(session.messages.some((message) => message.id === 'behind')).toBe(false);
           // The wait names its gate once, so a queue held with nothing visibly running says why.
-          const holds = info.mock.calls.filter(([label]) => label === '[ChatSessionStore] queue held');
-          expect(holds.map(([, facts]) => JSON.parse(String(facts)) as unknown)).toContainEqual(
-            expect.objectContaining({ chatId, reason: 'run-not-ended', runId: 'live', phase: 'running' }),
-          );
+          await vi.waitFor(() => {
+            expect(loggedHolds(info.mock.calls)).toContainEqual(
+              expect.objectContaining({ chatId, reason: 'run-not-ended', runId: 'live', phase: 'running' }),
+            );
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
         } finally {
           info.mockRestore();
           unadmit();
@@ -5660,9 +5681,12 @@ describe('ChatSessionStore', () => {
 
           expect(store.departingSendOf(chatId)).toBeUndefined();
           expect(session.messages.some((message) => message.id === 'withdrawn')).toBe(false);
-          expect(store.isStopping(chatId)).toBe(false);
           expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+          /* Stop stays pressed until the removal is confirmed; only then is the message back in the composer. */
+          expect(store.isStopping(chatId)).toBe(true);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
           await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
             expect(session.draftActorRef.getSnapshot().context.draftText).toBe('withdrawn');
             expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
             expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
@@ -5763,11 +5787,153 @@ describe('ChatSessionStore', () => {
         try {
           await vi.waitFor(() => {
             expect(hostCommand).toHaveBeenCalledWith(
-              expect.objectContaining({ type: 'cancel', payload: { chatId, runId: 'live' } }),
+              expect.objectContaining({ type: 'cancel', payload: { chatId, runId: 'live', withdraw: true } }),
             );
           });
         } finally {
           reattach();
+          store.release(chatId);
+        }
+      });
+      it('should hold work queued behind a send taken back with Stop until Send now', async () => {
+        const chatId = 'departing_withdrawn_behind';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const admit = vi.fn(async () => admission.promise);
+        const unadmit = publishChatTurnAdmission(chatId, admit);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('first');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'behind', held: true }],
+            });
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          /* Like work behind a stopped run, it waits for the person: no second admission, nothing sent. */
+          expect(admit).toHaveBeenCalledOnce();
+          expect(hostCommand).not.toHaveBeenCalled();
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['behind']);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should let a send go out when its chat is closed, rather than take it back', async () => {
+        const chatId = 'departing_closed';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('closing'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          store.stopRun(chatId, 'close-chat');
+          expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['closing']);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a refused send in its place when others wait behind it', async () => {
+        const chatId = 'departing_refused_behind';
+        const projectId = 'departing_project';
+        const { store, session, deps, unpublish } = await open(chatId, projectId);
+        let refuse: (error: Error) => void = () => undefined;
+        const refusal = new Promise<never>((_resolve, reject) => {
+          refuse = reject;
+        });
+        const unadmit = publishChatTurnAdmission(chatId, async () => refusal);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          refuse(new Error('You have no credits left.'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toMatch(/wasn’t sent/u);
+          });
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: 'refused' }, { id: 'behind' }],
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should send a Stop once, however often the host attaches again', async () => {
+        const chatId = 'stop_once';
+        const projectId = 'departing_project';
+        const { store, hostCommand, unpublish } = await open(chatId, projectId);
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        publishLogRows(store, chatId, runningRows('live'));
+        store.stopRun(chatId, 'stop-button');
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledOnce();
+        });
+        unpublish();
+        const client = { hostCommand, close: vi.fn(async () => undefined) } as unknown as AgentHostClient;
+        const reattach = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(hostCommand).toHaveBeenCalledOnce();
+          expect(store.isStopping(chatId)).toBe(true);
+          answer.resolve({ commandId: 'cancel', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+        } finally {
+          reattach();
+          store.release(chatId);
+        }
+      });
+
+      it('should send a Stop again without `withdraw` to a host that cannot read it', async () => {
+        const chatId = 'stop_older_host';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementationOnce(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'COMMAND_UNREADABLE',
+          message: 'Unrecognized key: "withdraw"',
+        }));
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          const [first, second] = hostCommand.mock.calls.map(([command]) => command);
+          expect(first).toMatchObject({ type: 'cancel', payload: { chatId, runId: 'live', withdraw: true } });
+          expect(second).toEqual({ ...first, payload: { chatId, runId: 'live' } });
+          expect(store.isStopping(chatId)).toBe(true);
+        } finally {
+          unpublish();
           store.release(chatId);
         }
       });
@@ -5823,16 +5989,29 @@ describe('ChatSessionStore', () => {
       });
       const cancel = hostCommand.mock.calls[0]?.[0];
       expect(cancel?.type).toBe('cancel');
-      /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
+      /* The person's own Stop asks to take the request back; only this line says which gesture sent it. */
       // As JSON text: the desktop log flattens an object argument to `[object Object]`.
       expect(info).toHaveBeenCalledWith(
         '[ChatSessionStore] host cancel',
-        JSON.stringify({ chatId, runId, commandId: cancel?.commandId, origin: 'stop-button' }),
+        JSON.stringify({ chatId, runId, withdraw: true, commandId: cancel?.commandId, origin: 'stop-button' }),
       );
       info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
-      publishLogRows(store, chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
+      publishLogRows(
+        store,
+        chatId,
+        [
+          logRow(3, {
+            runId,
+            type: 'run.lifecycle',
+            state: 'cancelled',
+            attempt: 1,
+            detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+          }),
+        ],
+        3,
+      );
       expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('cancelled');
       await vi.waitFor(() => {
         expect(session.draftActorRef.getSnapshot().context).toMatchObject({

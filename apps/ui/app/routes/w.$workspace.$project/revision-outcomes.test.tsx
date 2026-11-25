@@ -13,6 +13,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import {
   clearTurnOutcome,
+  isOrdinaryRelease,
   RevisionOutcomes,
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
@@ -117,8 +118,35 @@ describe('RevisionOutcomes', () => {
     expect(getByTestId('latest')).toHaveTextContent('failed:turn-1');
   });
 
-  /* Chat UX F2: a Stop is an ordinary end. A turn let go before it changed anything lost nothing, so it is silent. */
-  it('says nothing when a turn is let go before it changed anything', () => {
+  /* Chat UX F2: the person's own Stop is an ordinary end, silent when the log shows it; anything else is said. */
+  it.each([
+    { code: 'TURN_RELEASED', stoppedByPerson: true, silent: true },
+    { code: 'TURN_RELEASED', stoppedByPerson: false, silent: false },
+    { code: 'BASE_CUT_FAILED', stoppedByPerson: true, silent: false },
+  ])(
+    'should treat $code as silent: $silent when the person stopped it: $stoppedByPerson',
+    ({ code, stoppedByPerson, silent }) => {
+      const event: WorkerRevisionEvent = {
+        type: 'turn.failed',
+        turnId: 'turn-stopped',
+        runId: 'run-stopped',
+        chatId: 'chat-1',
+        checkoutId: 'live',
+        reason: 'The turn ended before it recorded a revision.',
+        code,
+      };
+      const asked: string[] = [];
+      expect(
+        isOrdinaryRelease(event, (chatId, runId) => {
+          asked.push(`${chatId}:${runId}`);
+          return stoppedByPerson;
+        }),
+      ).toBe(silent);
+      expect(asked).toEqual(code === 'TURN_RELEASED' ? ['chat-1:run-stopped'] : []);
+    },
+  );
+
+  it('still says a release this page cannot place, with no chat log to read', () => {
     const { getByTestId } = renderTurnOutcomes();
 
     publish({
@@ -131,8 +159,8 @@ describe('RevisionOutcomes', () => {
       code: 'TURN_RELEASED',
     });
 
-    expect(errors).toEqual([]);
-    expect(getByTestId('latest')).toHaveTextContent('none');
+    expect(errors).toHaveLength(1);
+    expect(getByTestId('latest')).toHaveTextContent('failed:turn-stopped');
   });
 
   /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name

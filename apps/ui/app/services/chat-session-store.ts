@@ -110,7 +110,7 @@ import {
   selectToolsInFlight,
   materializeTranscript,
   chunksSince,
-  isRetractedRun,
+  runViewHasOutput,
 } from '#machines/chat-projection.logic.js';
 import type {
   ChatProjection,
@@ -132,11 +132,14 @@ import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays'
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type {
   ChatMessageQueueIntent,
+  ChatMessageQueueRecord,
   ChatMessageQueueStore,
   QueuedChatMessage,
   QueueLock,
 } from '@taucad/chat-ui/db/chat-message-queue-store';
 import { createChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
+import { isAfterRunUnseen, selectDepartingSend, selectOutboxGate } from '#services/outbox-gate.js';
+import type { OutboxGate, OutboxReadiness } from '#services/outbox-gate.js';
 import type { ChatMessageQueueActor, QueueAdvanceResult } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 import {
@@ -175,8 +178,9 @@ export const isDocumentActive = (): boolean =>
   typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
 
 /**
- * What asked a chat's run to stop. The host records every renderer cancel as `USER_STOPPED`, so the origin is
- * logged beside the cancel's command id: the one way to tell which gesture a ledger's stop row came from.
+ * What asked a chat's run to stop. The host records a cancel as `USER_STOPPED` when the turn was kept, and as
+ * `TURN_WITHDRAWN` when the person's own Stop took back a turn not kept yet; the origin is logged beside the cancel's
+ * command id, the one way to tell which gesture a ledger's stop row came from.
  *
  * @public
  */
@@ -573,13 +577,25 @@ type InternalSession = ChatSession & {
   departingView:
     | Readonly<{ base: readonly MyUIMessage[]; message: MyUIMessage; messages: readonly MyUIMessage[] }>
     | undefined;
-  /** Sends the person stopped before dispatch, each with the removal of its outbox entry. */
-  readonly withdrawals: Map<string, Promise<void>>;
   /**
-   * A departing send the host accepted, shown until the SDK transcript holds it: the outbox lets go of the entry on
-   * acceptance, and the thread must not drop the request for the frames in between.
+   * The departing send a Stop is taking back: nothing delivers it while its removal waits for the delivery lock, and
+   * the composer gets it back only once the removal is confirmed.
    */
-  handedOff: MyUIMessage | undefined;
+  withdrawing: string | undefined;
+  /** The outbox's record as this page last read it: the gate reads its handover receipt. */
+  outboxRecord: ChatMessageQueueRecord | undefined;
+  /**
+   * The run a Stop must cancel once the log has it: a send already prepared or handed over when Stop was pressed. The
+   * Stop stays pressed until that run is cancelled or ends.
+   */
+  stopTarget: string | undefined;
+  /** The run whose cancel this Stop has sent, so a reattach or a log update never sends it twice. */
+  cancelSent: string | undefined;
+  /**
+   * A departing send the host accepted, shown until the SDK transcript holds it or its run ends: the outbox lets go of
+   * the entry on acceptance, and the thread must not drop the request for the frames in between.
+   */
+  handedOff: Readonly<{ message: MyUIMessage; runId: string }> | undefined;
   dispatchTask: Promise<void> | undefined;
   /** One SDK stream slot per chat; an armed watch cannot belong to a different chat. */
   readonly transport: BrowserPlacementChatTransport<MyUIMessage>;
@@ -736,72 +752,6 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
-
-/** What decides whether the outbox's next entry is leaving now or waiting behind work. @public */
-export type DepartingSendFacts = Readonly<{
-  /** The outbox as its actor last read it. */
-  queue: Readonly<{ items: readonly QueuedChatMessage[]; sendingId: string | undefined; error: string | undefined }>;
-  /** This chat's machine holds a turn or is taking one. */
-  live: boolean;
-  /** The log is read to its end, so its current run is known. */
-  caughtUp: boolean;
-  /** The log's current run, when there is one. */
-  run: Readonly<{ runId: string; phase: ProjectedRunPhase }> | undefined;
-}>;
-
-/**
- * The outbox entry that is leaving for a turn of its own, if any (send/queue/stop lifecycle, chat UX F1).
- *
- * Every send is saved to the outbox first, but only a send that waits behind work is *queued*: one made while nothing
- * runs goes straight to the thread. So the entry being delivered, or the head of an outbox nothing is ahead of, is
- * shown as the thread's newest request and not as a queued row. Delivery itself still decides when it goes (the
- * MessageQueue model's `Ready`); this only says which entry is presented as sent. A failed delivery is not leaving: it
- * stays in the strip with its error and Retry. An entry steering a live run waits for that run's end like any other.
- * Older work held behind a stopped or failed run keeps waiting, exactly as delivery holds it.
- *
- * @param facts - The outbox, the chat's machine and the log's current run.
- * @returns The entry, or `undefined` when every entry is queued behind work.
- * @public
- */
-export const selectDepartingSend = ({
-  queue,
-  live,
-  caughtUp,
-  run,
-}: DepartingSendFacts): QueuedChatMessage | undefined => {
-  if (queue.error !== undefined) {
-    return undefined;
-  }
-  const head = queue.items.find((item) => item.command !== undefined || item.steer !== undefined) ?? queue.items[0];
-  if (head === undefined) {
-    return undefined;
-  }
-  if (head.id === queue.sendingId) {
-    return head;
-  }
-  if (head.steer !== undefined || !caughtUp) {
-    return undefined;
-  }
-  if (head.command !== undefined) {
-    /* Prepared for its own run: its replay waits only behind an unrelated live run. */
-    return run !== undefined && run.runId !== head.command.payload.runId && retainsLiveRun(run.phase)
-      ? undefined
-      : head;
-  }
-  if (live) {
-    return undefined;
-  }
-  if (run === undefined) {
-    return head;
-  }
-  if (retainsLiveRun(run.phase)) {
-    return undefined;
-  }
-  const permitted =
-    run.phase === 'completed' ||
-    ((run.phase === 'cancelled' || run.phase === 'failed') && head.afterTerminalRunId === run.runId);
-  return permitted ? head : undefined;
-};
 
 /* The `revision` region's three facts, as the project's route last reported them. */
 const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): void => {
@@ -1327,8 +1277,8 @@ export class ChatSessionStore {
     for (const session of this.#sessions.values()) {
       if (session.projectId === projectId) {
         this.startPendingSeed(session.chatId);
-        /* A Stop pressed while no host was attached owes its cancel. */
-        if (session.stopRequested && !session.commandInFlight) {
+        /* A Stop pressed while no host was attached owes its cancel; one already sent is not sent again. */
+        if (session.stopRequested && !session.commandInFlight && session.cancelSent === undefined) {
           void this.#cancelSessionRun(session);
         }
       }
@@ -2063,14 +2013,16 @@ export class ChatSessionStore {
       ...(afterTerminalRunId === undefined ? {} : { afterTerminalRunId }),
       ...(execution === undefined ? {} : { execution }),
     };
-    await session.messageQueueStore.update((record) => {
+    const record = await session.messageQueueStore.update((current) => {
       if (this.#sessions.get(chatId) !== session || session.messageQueueRef.getSnapshot().status !== 'active') {
         throw new Error('This chat is no longer open. Your message has not been sent.');
       }
-      return record.items.some((entry) => entry.id === item.id)
-        ? record
-        : { ...record, items: [...record.items, item] };
+      return current.items.some((entry) => entry.id === item.id)
+        ? current
+        : { ...current, items: [...current.items, item] };
     });
+    /* The thread or the strip shows it from the write on, even while a delivery elsewhere holds the outbox. */
+    this.#loadOutbox(session, record);
     const draft = session.draftActorRef.getSnapshot().context;
     if (draft.draftText === '' || draft.draftText === composedText(gesture.message)) {
       session.draftActorRef.send({ type: 'clearDraft' });
@@ -2326,26 +2278,17 @@ export class ChatSessionStore {
   }
 
   /**
-   * Stop this chat's run, through the one dispatcher that owns it (P63).
-   *
-   * *Stop* in the sidebar and *Stop* in the composer use the same projected run
-   * identity and send a keyed host cancel. The host log confirms its outcome;
-   * stopping a local SDK watch alone never settles the run.
-   *
-   * @param chatId - The chat whose run should stop.
-   * @param origin - The gesture that asked, logged with the cancel.
-   * @public
-   */
-  /**
    * The id of the send the thread shows as leaving for its own turn, which the queue strip leaves out
-   * ({@link selectDepartingSend}). Changes notify {@link ChatSessionStore.subscribeChat}.
+   * ({@link selectDepartingSend}), until its run is in the transcript or has ended. Changes notify
+   * {@link ChatSessionStore.subscribeChat}.
    *
    * @param chatId - The chat.
    * @returns The departing message's id, or `undefined` when nothing is leaving.
    * @public
    */
   public departingSendOf(chatId: string): string | undefined {
-    return this.#sessions.get(chatId)?.departing?.id;
+    const session = this.#sessions.get(chatId);
+    return session?.departing?.id ?? session?.handedOff?.message.id;
   }
 
   /**
@@ -2360,13 +2303,25 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#draftReturnTopics, namePrefix: 'draftReturned', chatId, listener });
   }
 
+  /**
+   * Stop this chat's run, through the one dispatcher that owns it (P63).
+   *
+   * *Stop* in the sidebar and *Stop* in the composer use the same projected run
+   * identity and send a keyed host cancel. The host log confirms its outcome;
+   * stopping a local SDK watch alone never settles the run.
+   *
+   * @param chatId - The chat whose run should stop.
+   * @param origin - The gesture that asked, logged with the cancel.
+   * @public
+   */
   public stopRun(chatId: string, origin: StopOrigin): void {
     const session = this.#sessions.get(chatId);
     if (session === undefined) {
       return;
     }
-    /* A gesture displacing the turn is not the person stopping their send. */
-    if (origin !== 'new-turn' && !session.commandInFlight && this.#withdrawDepartingSend(session, origin)) {
+    /* Only the person's own Stop takes a send back; closing a chat or a project, or a new turn, lets it go out. */
+    const personal = origin === 'stop-button' || origin === 'stop-shortcut';
+    if (personal && !session.commandInFlight && this.#withdrawDepartingSend(session, origin)) {
       return;
     }
     session.stopRequested = true;
@@ -2376,7 +2331,10 @@ export class ChatSessionStore {
     session.watch = undefined;
     void session.chat.stop();
     if (!session.commandInFlight) {
-      void this.#cancelSessionRun(session);
+      /* A send prepared or handed over but not yet a live run here: its own run is the one to stop. */
+      const { departing, handedOff } = session;
+      const target = departing?.command === undefined ? handedOff?.runId : departing.requestId;
+      void this.#cancelSessionRun(session, target);
     }
   }
 
@@ -2671,10 +2629,9 @@ export class ChatSessionStore {
     return session.messageQueueStore.exclusive(async () => {
       let record = await session.messageQueueStore.read();
       signal.throwIfAborted();
-      session.messageQueueRef.send({ type: 'loaded', items: record.items });
       const projection = this.#projectionContext(session.chatId);
-      const connector = this.#projectHostConnectors.get(session.projectId);
       if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
+        this.#loadOutbox(session, record, false);
         return this.#holdQueue(session, record.items, 'log-not-caught-up');
       }
       const observation = this.#observed.get(session.chatId);
@@ -2686,34 +2643,25 @@ export class ChatSessionStore {
           record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId, observedPlacement);
         }
       }
-      if (!canDeliver) {
-        return this.#holdQueue(session, record.items, 'not-deliverable-here');
+      /* Loaded after the acknowledgements, so a command the log already applied is never drawn twice. */
+      this.#loadOutbox(session, record, false);
+      const connector = this.#projectHostConnectors.get(session.projectId);
+      const gate = this.#outboxGate(session, record, {
+        deliverable: canDeliver,
+        host: connector !== undefined,
+        turnHost: chatTurnAdmit(session.chatId) !== undefined,
+        commandInFlight: session.commandInFlight,
+        admitting: this.#isAdmittingTurn(session),
+        chatLoading: session.persistenceActorRef.getSnapshot().context.isLoadingChat,
+      });
+      if (gate.kind === 'empty' || connector === undefined) {
+        return this.#holdQueue(session, record.items, 'empty');
       }
-      const item =
-        record.items.find((entry) => entry.command !== undefined || entry.steer !== undefined) ?? record.items[0];
-      const notReady =
-        item === undefined
-          ? 'empty'
-          : connector === undefined
-            ? 'no-host'
-            : chatTurnAdmit(session.chatId) === undefined
-              ? 'no-turn-host'
-              : session.commandInFlight
-                ? 'command-in-flight'
-                : this.#isAdmittingTurn(session)
-                  ? 'admitting'
-                  : session.persistenceActorRef.getSnapshot().context.isLoadingChat
-                    ? 'chat-loading'
-                    : undefined;
-      if (item === undefined || connector === undefined || notReady !== undefined) {
-        return this.#holdQueue(session, record.items, notReady ?? 'empty');
+      if (gate.kind === 'hold') {
+        return this.#holdQueue(session, record.items, gate.reason);
       }
-      const run = selectCurrentRun(projection);
-      const phase = selectRunPhase(projection);
-      if (item.command !== undefined) {
-        if (run !== undefined && run.runId !== item.command.payload.runId && retainsLiveRun(phase)) {
-          return this.#holdQueue(session, record.items, 'unrelated-live-run');
-        }
+      const { item } = gate;
+      if (gate.kind === 'replay' && item.command !== undefined) {
         session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
@@ -2733,51 +2681,22 @@ export class ChatSessionStore {
           throw new Error('Message saved. The host has not confirmed durable acceptance.');
         }
         const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
+        if (session.departing?.id === item.id) {
+          session.handedOff = { message: item.message, runId: item.command.payload.runId };
+        }
+        this.#loadOutbox(session, after, false);
         return { items: after.items, status: 'changed' };
       }
-      {
-        if (
-          record.afterRunId !== undefined &&
-          projection.ledger.runs[record.afterRunId] === undefined &&
-          (record.afterPlacement === undefined ||
-            observedPlacement === undefined ||
-            record.afterPlacement === observedPlacement) &&
-          !(
-            record.afterPlacement === undefined &&
-            observedPlacement !== undefined &&
-            record.rebasedPlacement === observedPlacement
-          )
-        ) {
-          return this.#holdQueue(session, record.items, 'after-run-unseen');
+      if (gate.kind === 'steer' && item.steer !== undefined) {
+        signal.throwIfAborted();
+        const { steer } = item;
+        const answer = await sendHostCommand(async () => connector.connect(session.chatId), steer, { signal });
+        if (answer.status === 'refused') {
+          throw new Error(`Could not steer: ${answer.message}`);
         }
-        if (isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)) {
-          return this.#holdQueue(session, record.items, 'machine-live');
-        }
-        const steering = item.steer;
-        if (steering !== undefined && retainsLiveRun(phase) && run?.runId === steering.payload.runId) {
-          signal.throwIfAborted();
-          const answer = await sendHostCommand(async () => connector.connect(session.chatId), steering, { signal });
-          if (answer.status === 'refused') {
-            throw new Error(`Could not steer: ${answer.message}`);
-          }
-          return this.#holdQueue(session, record.items, 'steered');
-        }
-        const authorizedTerminal =
-          (phase === 'cancelled' || phase === 'failed') && item.afterTerminalRunId === run?.runId;
-        if (
-          run !== undefined &&
-          (retainsLiveRun(phase) || (phase !== 'completed' && item.steer === undefined && !authorizedTerminal))
-        ) {
-          return this.#holdQueue(session, record.items, 'run-not-ended');
-        }
+        return this.#holdQueue(session, record.items, 'steered');
       }
       signal.throwIfAborted();
-      if (session.withdrawals.has(item.id)) {
-        /* Stopped before it was handed over: its removal is the only thing left to wait for. */
-        await session.withdrawals.get(item.id);
-        const current = await session.messageQueueStore.read();
-        return { items: current.items, status: 'changed' };
-      }
       session.queueHold = undefined;
       session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
       session.dispatchTask = undefined;
@@ -2792,17 +2711,19 @@ export class ChatSessionStore {
         },
         false,
       );
+      if (session.withdrawing === item.id) {
+        /* A Stop during admission took it back: its removal runs under this lock once this advance lets go. */
+        return { items: record.items, status: 'waiting' };
+      }
       if (
         this.#currentDispatch(session) === undefined &&
-        !session.withdrawals.has(item.id) &&
         session.stateActorRef.getSnapshot().matches({ run: 'failed' })
       ) {
         return this.#refuseQueuedSend(session, item);
       }
       await this.#currentDispatch(session);
-      /* A Stop during admission withdrew it: wait for its removal rather than reading a half-written outbox. */
-      await session.withdrawals.get(item.id);
       const after = await session.messageQueueStore.read();
+      this.#loadOutbox(session, after, false);
       return after.items.some((entry) => entry.id === item.id)
         ? {
             items: after.items,
@@ -2814,11 +2735,55 @@ export class ChatSessionStore {
   }
 
   /**
-   * An admission refused this send (credits, a model it cannot reach, a missing host), so nothing was sent. The chat's
-   * banner says why. The message goes back to an empty composer, as a refused send always has (I5), so a retry is the
-   * person's own Send and never a second copy of the same request; a composer already holding new text keeps it, and
-   * the entry stays in the strip with the reason and Retry.
+   * The outbox as this page just read it: the strip's rows and the record the gate reads its receipt from.
+   *
+   * @param session - The chat.
+   * @param record - The outbox as read.
+   * @param keepSending - Whether the entry this page is delivering stays marked as sending while it is still queued.
+   * Only the advance itself, which decides what is sending, passes `false`.
    */
+  #loadOutbox(session: InternalSession, record: ChatMessageQueueRecord, keepSending = true): void {
+    session.outboxRecord = record;
+    const { sendingId } = session.messageQueueRef.getSnapshot().context;
+    const sending =
+      keepSending && sendingId !== undefined && record.items.some((entry) => entry.id === sendingId)
+        ? { sendingId }
+        : {};
+    session.messageQueueRef.send({ type: 'loaded', items: record.items, ...sending });
+  }
+
+  /**
+   * The outbox's gate for this chat ({@link selectOutboxGate}).
+   *
+   * @param session - The chat.
+   * @param record - The outbox's record.
+   * @param readiness - This page's readiness to deliver, or `undefined` to ask only whether work is ahead of the head.
+   * @returns The gate.
+   */
+  #outboxGate(
+    session: InternalSession,
+    record: Pick<ChatMessageQueueRecord, 'items' | 'afterRunId' | 'afterPlacement' | 'rebasedPlacement'>,
+    readiness: OutboxReadiness | undefined,
+  ): OutboxGate {
+    const projection = this.#projectionContext(session.chatId);
+    const known = projection !== undefined && projection.fault === undefined && selectCaughtUp(projection);
+    const caught = known ? projection : undefined;
+    const run = caught === undefined ? undefined : selectCurrentRun(caught);
+    const observation = this.#observed.get(session.chatId);
+    const observedPlacement = connectionPlacement(
+      observation?.status === 'attached' ? observation.placement : undefined,
+    );
+    return selectOutboxGate({
+      items: record.items,
+      caughtUp: caught !== undefined,
+      readiness,
+      live: isLive(session.stateActorRef.getSnapshot()),
+      run: caught === undefined || run === undefined ? undefined : { runId: run.runId, phase: selectRunPhase(caught) },
+      afterRunUnseen: caught !== undefined && isAfterRunUnseen(record, caught.ledger, observedPlacement),
+      withdrawing: session.withdrawing,
+    });
+  }
+
   /**
    * The outbox waits: log once per change which gate holds its head, so a queue that waits with nothing visibly
    * running names its reason in the console and in replays.
@@ -2841,15 +2806,23 @@ export class ChatSessionStore {
     return { items, status: 'waiting' };
   }
 
+  /**
+   * An admission refused this send (credits, a model it cannot reach, a missing host), so nothing was sent. The chat's
+   * banner says why. A lone send goes back to an empty composer, as a refused send always has (I5), so a retry is the
+   * person's own Send and never a second copy of the same request. A composer already holding new text keeps it, and
+   * a send with others queued behind it keeps its place, so the queue's order never changes: either way the entry
+   * stays in the strip with the reason and Retry.
+   */
   async #refuseQueuedSend(session: InternalSession, item: QueuedChatMessage): Promise<QueueAdvanceResult> {
     const reason = session.stateActorRef.getSnapshot().context.failureReason;
     const draft = session.draftActorRef.getSnapshot().context;
     if (draft.draftText === '' && draft.draftAttachments.length === 0) {
       const after = await session.messageQueueStore.update((record) =>
-        record.items.some((entry) => entry.id === item.id && entry.command === undefined)
-          ? { ...record, items: record.items.filter((entry) => entry.id !== item.id) }
+        record.items.length === 1 && record.items[0]?.id === item.id && record.items[0].command === undefined
+          ? { ...record, items: [] }
           : record,
       );
+      this.#loadOutbox(session, after);
       if (!after.items.some((entry) => entry.id === item.id)) {
         void this.#returnStoppedDraft(session, item.message);
         return { items: after.items, status: 'waiting' };
@@ -3067,48 +3040,44 @@ export class ChatSessionStore {
 
   /**
    * Recompute which outbox entry the thread shows as sent ({@link selectDepartingSend}) and tell views when it moved.
-   * A withdrawn send is never shown again, even while its removal is still being written.
+   * A send a Stop is taking back is never shown again, even while its removal is still being written.
    */
   #refreshDeparting(session: InternalSession): void {
     if (this.#sessions.get(session.chatId) !== session) {
       return;
     }
     const queue = session.messageQueueRef.getSnapshot();
-    const projection = this.#projectionContext(session.chatId);
-    const caughtUp = projection !== undefined && projection.fault === undefined && selectCaughtUp(projection);
-    const run = caughtUp ? selectCurrentRun(projection) : undefined;
     /* An outbox whose advance answered without a read has no entries to show. */
-    const departing =
+    const next =
       queue.status === 'active' && Array.isArray(queue.context.items)
-        ? selectDepartingSend({
-            queue: queue.context,
-            live: isLive(session.stateActorRef.getSnapshot()),
-            caughtUp,
-            run: run === undefined ? undefined : { runId: run.runId, phase: selectRunPhase(projection!) },
-          })
+        ? selectDepartingSend(
+            queue.context,
+            this.#outboxGate(session, { ...session.outboxRecord, items: queue.context.items }, undefined),
+          )
         : undefined;
-    const next = departing === undefined || session.withdrawals.has(departing.id) ? undefined : departing;
-    if (next?.id === session.departing?.id && next?.message === session.departing?.message) {
+    const shown = next === undefined || next.id === session.withdrawing ? undefined : next;
+    if (shown?.id === session.departing?.id && shown?.message === session.departing?.message) {
       return;
     }
-    session.departing = next;
+    session.departing = shown;
     this.#messagePresentations.delete(session.chatId);
     this.#chatTopics.get(session.chatId)?.emit();
   }
 
   /**
-   * Stop a send the host has not been handed yet (send/queue/stop lifecycle F2).
+   * Take back a send the host has not been handed yet (send/queue/stop lifecycle F2).
    *
-   * Nothing ran, so nothing is cancelled: the admission is abandoned, the outbox entry is removed and the message goes
-   * back to the composer, as if it had never been sent. A send whose command is already prepared or in flight is not
-   * this: it is stopped like any run, and a run cancelled before its turn was kept leaves the thread the same way
-   * (`isRetractedRun`).
+   * Nothing ran, so nothing is cancelled: the admission is abandoned, the outbox entry is removed under the delivery
+   * lock, and only once the removal is confirmed does the message go back to the composer, as if it had never been
+   * sent. Until then the Stop stays pressed. If another page delivered the send first, the Stop cancels the run it
+   * started instead, so the request is never both sent and back in the composer. A send whose command is already
+   * prepared or in flight is not this: it is stopped like any run.
    *
-   * @returns `true` when the Stop was this, so no run is cancelled.
+   * @returns `true` when the Stop was this, so no run is cancelled now.
    */
   #withdrawDepartingSend(session: InternalSession, origin: StopOrigin): boolean {
     const { departing } = session;
-    if (departing === undefined || departing.command !== undefined || session.withdrawals.has(departing.id)) {
+    if (departing === undefined || departing.command !== undefined || session.withdrawing !== undefined) {
       return false;
     }
     const snapshot = session.stateActorRef.getSnapshot();
@@ -3126,28 +3095,72 @@ export class ChatSessionStore {
       messageId: departing.id,
       origin,
     });
-    const removal = (async () => {
-      try {
-        await session.messageQueueStore.update((record) =>
-          record.items.some((item) => item.id === departing.id && item.command === undefined)
-            ? { ...record, items: record.items.filter((item) => item.id !== departing.id) }
-            : record,
-        );
-      } catch (error) {
-        console.warn('[ChatSessionStore] a withdrawn send could not leave the outbox', session.chatId, error);
-      }
-      /* The strip re-reads the outbox once the entry is gone. */
-      if (session.messageQueueRef.getSnapshot().status === 'active') {
-        session.messageQueueRef.send({ type: 'refresh' });
-      }
-    })();
-    session.withdrawals.set(departing.id, removal);
+    session.withdrawing = departing.id;
+    session.stopRequested = true;
+    session.stopOrigin = origin;
     if (admitting) {
       session.stateActorRef.send({ type: 'withdrawTurn', queueId: departing.id });
     }
     this.#refreshDeparting(session);
-    void this.#returnStoppedDraft(session, departing.message);
+    this.#chatTopics.get(session.chatId)?.emit();
+    void this.#finishWithdrawal(session, departing);
     return true;
+  }
+
+  /**
+   * Remove a withdrawn send under the delivery lock, so no page is handing it over meanwhile. Work queued behind it is
+   * held, as work behind a stopped run is: it goes out only with Send now.
+   */
+  async #finishWithdrawal(session: InternalSession, departing: QueuedChatMessage): Promise<void> {
+    let record: ChatMessageQueueRecord | undefined;
+    try {
+      record = await session.messageQueueStore.exclusive(async () =>
+        session.messageQueueStore.update((current) =>
+          current.items.some(
+            (item) => item.id === departing.id && item.command === undefined && item.steer === undefined,
+          )
+            ? {
+                ...current,
+                items: current.items.flatMap((item) =>
+                  item.id === departing.id
+                    ? []
+                    : [
+                        item.command === undefined && item.steer === undefined
+                          ? ({ ...item, held: true } satisfies QueuedChatMessage)
+                          : item,
+                      ],
+                ),
+              }
+            : current,
+        ),
+      );
+    } catch (error) {
+      console.warn('[ChatSessionStore] a withdrawn send could not leave the outbox', session.chatId, error);
+    }
+    if (session.withdrawing === departing.id) {
+      session.withdrawing = undefined;
+    }
+    if (this.#sessions.get(session.chatId) !== session) {
+      return;
+    }
+    if (record !== undefined) {
+      this.#loadOutbox(session, record);
+    }
+    if (record !== undefined && !record.items.some((item) => item.id === departing.id)) {
+      if (record.afterRunId === departing.requestId) {
+        /* Another page handed it over first: its run is the one to stop. */
+        void this.#cancelSessionRun(session, departing.requestId);
+      } else {
+        this.#releaseStop(session);
+        await this.#returnStoppedDraft(session, departing.message);
+      }
+    } else {
+      /* Being delivered, or the removal failed: the Stop cancels the run it starts, whenever the log has it. */
+      void this.#cancelSessionRun(session, departing.requestId);
+    }
+    if (session.messageQueueRef.getSnapshot().status === 'active') {
+      session.messageQueueRef.send({ type: 'refresh' });
+    }
   }
 
   /** Put a stopped send back in the composer, then tell the composer it may take focus. */
@@ -3156,43 +3169,73 @@ export class ChatSessionStore {
     this.#draftReturnTopics.get(session.chatId)?.emit();
   }
 
-  async #cancelSessionRun(session: InternalSession): Promise<void> {
+  /**
+   * Send the Stop's cancel, once and to the right run.
+   *
+   * @param session - The chat.
+   * @param target - A run the Stop must cancel once the log has it (a send prepared or handed over when Stop was
+   *   pressed); by default the command this page dispatched, else the log's current run.
+   */
+  async #cancelSessionRun(session: InternalSession, target?: string): Promise<void> {
+    if (target !== undefined) {
+      session.stopTarget = target;
+    }
     const projected = this.#projectionContext(session.chatId);
     const runId =
-      session.activeCommand?.type === 'start' || session.activeCommand?.type === 'resume'
+      session.stopTarget ??
+      (session.activeCommand?.type === 'start' || session.activeCommand?.type === 'resume'
         ? session.activeCommand.payload.runId
         : projected === undefined
           ? undefined
-          : selectCurrentRun(projected)?.runId;
-    const connector = this.#projectHostConnectors.get(session.projectId);
-    const lifecycle = runId === undefined ? undefined : projected?.ledger.runs[runId]?.lifecycle;
+          : selectCurrentRun(projected)?.runId);
+    const entry = runId === undefined ? undefined : projected?.ledger.runs[runId];
+    const lifecycle = entry?.lifecycle;
     if (runId === undefined || lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
       /* Nothing live to cancel: a Stop over a run that already ended must not wait for an end that came before it,
        * nor send a cancel the host can only refuse. */
       this.#releaseStop(session);
       return;
     }
-    if (connector === undefined) {
-      /* A live run whose host is not attached yet: the cancel is owed, and is sent once the host attaches
-       * (`publishProjectHostConnector`). The Stop stays pressed until then. */
+    if (session.cancelSent === runId) {
+      return;
+    }
+    const connector = this.#projectHostConnectors.get(session.projectId);
+    if (connector === undefined || (session.stopTarget !== undefined && entry === undefined)) {
+      /* Owed: a live run whose host is not attached yet, or a handed-over send the log has not shown yet. The cancel
+       * is sent when the host attaches (`publishProjectHostConnector`) or the run reaches the log (`#syncProjection`).
+       * The Stop stays pressed until then. */
       return;
     }
     const command: HostCommand = {
       type: 'cancel',
       commandId: generatePrefixedId(idPrefix.request),
-      payload: { chatId: session.chatId, runId },
+      payload: {
+        chatId: session.chatId,
+        runId,
+        /* The person's own Stop takes the request back when the turn was not kept yet (`TURN_WITHDRAWN`). */
+        ...(session.stopOrigin === 'stop-button' || session.stopOrigin === 'stop-shortcut' ? { withdraw: true } : {}),
+      },
     };
+    session.cancelSent = runId;
     logStop(command, session.stopOrigin);
     let failure: Error | undefined;
     try {
-      const answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
+      let answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
+      if (answer.status === 'refused' && answer.code === 'COMMAND_UNREADABLE' && 'withdraw' in command.payload) {
+        /* A host older than `withdraw` refuses the field and applies nothing: the same cancel without it still stops
+         * the run, which then keeps its request in the thread. */
+        answer = await sendHostCommand(async () => connector.connect(session.chatId), {
+          ...command,
+          payload: { chatId: command.payload.chatId, runId: command.payload.runId },
+        });
+      }
       if (answer.status === 'refused') {
         failure = new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
       }
     } catch (error) {
       failure = error instanceof Error ? error : new Error(String(error));
     }
-    if (failure !== undefined) {
+    if (failure !== undefined && session.cancelSent === runId) {
       /* The cancel did not land: let go of the Stop so the composer offers it again, rather than waiting for an end
        * nothing asked for. */
       logFacts('warn', '[ChatSessionStore] stop did not reach the host', {
@@ -3207,6 +3250,8 @@ export class ChatSessionStore {
 
   /** A Stop that has nothing left to wait for: the composer leaves `stopping`. */
   #releaseStop(session: InternalSession): void {
+    session.stopTarget = undefined;
+    session.cancelSent = undefined;
     if (session.stopRequested) {
       session.stopRequested = false;
       this.#chatTopics.get(session.chatId)?.emit();
@@ -3793,7 +3838,7 @@ export class ChatSessionStore {
     session.watchedRunId = command.payload.runId;
     session.watchedStreamVersion = 0;
     session.commandInFlight = true;
-    session.stopRequested = false;
+    this.#releaseStop(session);
     session.commandAbort?.abort();
     const abort = new AbortController();
     session.commandAbort = abort;
@@ -3845,7 +3890,7 @@ export class ChatSessionStore {
         }
         abort.signal.throwIfAborted();
         if (request.kind === 'send' && session.departing?.id === request.queueId) {
-          session.handedOff = request.message;
+          session.handedOff = { message: request.message, runId: command.payload.runId };
         }
       }
       const { seedRequestId } = session;
@@ -4116,23 +4161,51 @@ export class ChatSessionStore {
     }
     if (
       run?.lifecycle === 'cancelled' &&
-      run.failure?.code !== 'USER_STOPPED' &&
       session.stopRequested &&
+      (session.stopTarget === undefined || session.stopTarget === run.runId) &&
       session.restoredStoppedRunId !== run.runId
     ) {
       session.restoredStoppedRunId = run.runId;
-      const view = projection.views[run.runId];
-      /* The same test the transcript leaves the run out by: the message is in exactly one place. */
-      if (view?.user !== undefined && isRetractedRun(run, view)) {
-        if (session.handedOff?.id === view.user.id) {
-          session.handedOff = undefined;
-        }
-        void this.#returnStoppedDraft(session, view.user);
+      const stopped = projection.views[run.runId];
+      /* This page's Stop let go of a turn the agent had not kept and that showed nothing yet: the request goes back to
+       * the composer. A host that records the take-back (`TURN_WITHDRAWN`) also leaves it out of the thread
+       * (`isRetractedRun`), so the message is in exactly one place; an older host keeps it in the thread as well. */
+      if (
+        stopped?.user !== undefined &&
+        run.failure?.code !== 'USER_STOPPED' &&
+        stopped.steering === undefined &&
+        !runViewHasOutput(stopped)
+      ) {
+        void this.#returnStoppedDraft(session, stopped.user);
       }
     }
-    if (session.stopRequested && run !== undefined && !opensRun(phase) && phase !== 'paused') {
-      session.stopRequested = false;
-      this.#chatTopics.get(chatId)?.emit();
+    const { handedOff } = session;
+    if (handedOff !== undefined) {
+      const lifecycle = projection.ledger.runs[handedOff.runId]?.lifecycle;
+      /* Once its run has ended, the log alone says whether the request is shown or was taken back. */
+      if (lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
+        session.handedOff = undefined;
+        this.#messagePresentations.delete(chatId);
+      }
+    }
+    if (
+      session.stopRequested &&
+      run !== undefined &&
+      !opensRun(phase) &&
+      phase !== 'paused' &&
+      (session.stopTarget === undefined || session.stopTarget === run.runId)
+    ) {
+      this.#releaseStop(session);
+    }
+    /* A Stop owed to a handed-over send: its run has reached the log. */
+    if (
+      session.stopRequested &&
+      session.stopTarget !== undefined &&
+      session.cancelSent === undefined &&
+      !session.commandInFlight &&
+      projection.ledger.runs[session.stopTarget] !== undefined
+    ) {
+      void this.#cancelSessionRun(session);
     }
     if (
       run !== undefined &&
@@ -5303,11 +5376,7 @@ export class ChatSessionStore {
       chat,
       get messages() {
         const base = session.presentationHold?.messages ?? chat.messages;
-        if (session.handedOff !== undefined && endsWithMessage(base, session.handedOff.id)) {
-          /* The transcript has it now; a later turn must not bring it back. */
-          session.handedOff = undefined;
-        }
-        const message = session.departing?.message ?? session.handedOff;
+        const message = session.departing?.message ?? session.handedOff?.message;
         if (message === undefined || endsWithMessage(base, message.id)) {
           return base;
         }
@@ -5337,7 +5406,10 @@ export class ChatSessionStore {
       messageQueueObservation,
       departing: undefined,
       departingView: undefined,
-      withdrawals: new Map(),
+      withdrawing: undefined,
+      outboxRecord: undefined,
+      stopTarget: undefined,
+      cancelSent: undefined,
       handedOff: undefined,
       dispatchTask: undefined,
       composer,

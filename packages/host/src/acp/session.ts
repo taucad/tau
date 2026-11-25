@@ -1640,6 +1640,12 @@ export const createTurnProjection = (options: {
    * and no stored input describes a permission request.
    */
   const ambiguousToolCalls = new Set<string>();
+  /** Marks a reused open id ambiguous, dropping any persistent decision recorded for it, which no readback can pair. */
+  const markAmbiguous = (toolCallId: string): void => {
+    ambiguousToolCalls.add(toolCallId);
+    ambiguousPermissionCalls.add(toolCallId);
+    permissionDecisions.delete(toolCallId);
+  };
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: options.agentId } };
   const tauMcpMetadata = {
     tauInternal: { ...externalMetadata.tauInternal, presentation: 'tau-mcp' },
@@ -2041,7 +2047,7 @@ export const createTurnProjection = (options: {
      * other's result; only this notification's own facts are the newer call's. */
     const ambiguous = earlier !== undefined || ambiguousToolCalls.has(update.toolCallId);
     if (ambiguous) {
-      ambiguousToolCalls.add(update.toolCallId);
+      markAmbiguous(update.toolCallId);
     }
     openToolCalls.set(update.toolCallId, { toolName: callToolName, callId, facts, tauMcp, input, inputMessage });
     if (earlier !== undefined) {
@@ -2215,6 +2221,10 @@ export const createTurnProjection = (options: {
           return;
         }
         if (update.sessionUpdate === 'tool_call_update' || update.sessionUpdate === 'tool_call') {
+          /* A call that reuses an open id must not have its readback paired with the earlier call's decision. */
+          if (update.sessionUpdate === 'tool_call' && openToolCalls.has(update.toolCallId)) {
+            markAmbiguous(update.toolCallId);
+          }
           const decision = permissionDecisions.get(update.toolCallId);
           const terminal = update.status === 'completed' || update.status === 'failed';
           let observation = options.permissionReadback

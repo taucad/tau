@@ -15,7 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { ExternalAgentLogEvent } from '@taucad/agent-host/launcher';
@@ -2308,6 +2308,79 @@ it('should stop correlating readback when a provider reuses a permission call id
     ),
   ).toEqual([]);
 });
+
+it.each(['approve-then-reuse', 'reuse-then-approve', 'reuse-during-approval'])(
+  'should pair no settings readback with a call whose id another open call reuses (%s)',
+  async (order) => {
+    const rows: ExternalAgentLogEvent[] = [];
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const projection = createTurnProjection({
+      turn: {
+        ...stubTurn(rows),
+        approve: async () => {
+          if (order === 'reuse-during-approval') {
+            await answered;
+          }
+          return { interruptId: 'permission-interrupt', outcome: 'approved', optionId: 'allow_always' };
+        },
+      },
+      createId: randomUUID,
+      agentId: 'codex',
+      permissionReadback: true,
+    });
+    const open = (title: string) => {
+      projection.update({ sessionUpdate: 'tool_call', toolCallId: 'permission-call', title, status: 'pending' });
+    };
+    const approve = async () =>
+      projection.approve({
+        prompt: 'Allow?',
+        payload: {
+          toolCall: { toolCallId: 'permission-call' },
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'config-layers',
+            options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+          },
+        },
+      });
+    open('first');
+    if (order === 'approve-then-reuse') {
+      await approve();
+      open('second');
+    } else if (order === 'reuse-then-approve') {
+      open('second');
+      await approve();
+    } else {
+      const approval = approve();
+      open('second');
+      await vi.waitFor(() => {
+        expect(rows.filter((row) => row.type === 'message.appended' && row.message.role === 'tool-input')).toHaveLength(
+          2,
+        );
+      });
+      answer();
+      await approval;
+    }
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'permission-call',
+      status: 'completed',
+      _meta: { 'tau/permissionPersistence': permissionObservation },
+    });
+    await projection.flush();
+    expect(
+      rows.filter(
+        (row) =>
+          row.type === 'message.appended' &&
+          row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+      ),
+    ).toEqual([]);
+  },
+);
 
 it('should preserve the actual tool result when settings readback arrives before its ordinary completion', async () => {
   const rows: ExternalAgentLogEvent[] = [];

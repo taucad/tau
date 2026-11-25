@@ -86,11 +86,15 @@ const isServer = (): boolean => false;
  * `startedAt`: the delay, the activation time for a region that activates after the delay, or a negative time for a
  * wait that took over an indicator already showing. Once the reveal is seen (`isRevealSeen`), it is the frame the
  * reveal painted in, which a long task can make later than predicted. `isHoldPending` marks a hold that draws words no
- * frame drew while the wait ran; its first frame reports itself as the reveal.
+ * frame drew while the wait ran; its first frame reports itself as the reveal. `progress` is the wait's last reported
+ * progress and `progressedAt` when it last moved, which the slow mark counts from; `stall` counts those moves.
  */
 type TrackedWait = Readonly<{
   active: boolean;
   startedAt: number;
+  progress: number | undefined;
+  progressedAt: number | undefined;
+  stall: number;
   shownAt: number;
   isRevealSeen: boolean;
   isHoldPending: boolean;
@@ -111,6 +115,11 @@ export type WaitClockState = Readonly<{
    * `startedAt`, or a wait that starts again) restarts the animation instead of resuming the old one.
    */
   wait: number;
+  /**
+   * Counts the times the wait's progress moved. Key the elements that swap at the slow mark on it (with `wait`), so
+   * each move restarts their animations from the new slow delay: a wait whose progress moves is never called slow.
+   */
+  stall: number;
   /**
    * Call when the indicator's reveal animation starts (its `animationstart`), which is the frame its words first show
    * in, so the minimum is served from that frame. A long task can paint the reveal later than the delay; a minimum
@@ -134,16 +143,21 @@ export type UseWaitClockOptions = Readonly<{
    * own mount time. Milliseconds.
    */
   startedAt?: number;
+  /**
+   * How far the wait is, for a wait that reports progress. Each change counts as progress: the slow mark moves to
+   * 10,000 ms after it, so the slow words and "Try again" appear only after 10,000 ms without progress.
+   */
+  progress?: number;
 }>;
 
 /**
- * Time one wait on the timing ladder: the indicator reveals 1,000 ms after the wait started, turns slow at 10,000 ms,
- * and once shown stays at least 500 ms. The result is CSS delays for the indicator's animation, read from the clock
+ * Time one wait on the timing ladder: the indicator reveals 1,000 ms after the wait started, turns slow 10,000 ms after
+ * its start or its last progress, and once shown stays at least 500 ms. The result is CSS delays for the indicator's animation, read from the clock
  * only when the wait starts or ends, so no timer runs and the server render and hydration agree: before hydration the
  * delays come from navigation start through `--wait-offset`.
  *
- * @param options - Whether the wait is running and when it started.
- * @returns The indicator's timing and a count of waits to key its animated element on.
+ * @param options - Whether the wait is running, when it started and how far it is.
+ * @returns The indicator's timing, and counts of waits and of progress moves to key its animated elements on.
  * @public
  *
  * @example <caption>A wait started by a gesture</caption>
@@ -154,7 +168,7 @@ export type UseWaitClockOptions = Readonly<{
  *   useWaitClock({ active: loading, startedAt: openedAt });
  * ```
  */
-export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): WaitClockState {
+export function useWaitClock({ active, startedAt = 0, progress }: UseWaitClockOptions): WaitClockState {
   const clock = useContext(waitClockContext);
   // The server render and the hydration pass read `false`: the page has no script clock there.
   const hasClientClock = useSyncExternalStore(subscribeToNothing, isClient, isServer);
@@ -165,6 +179,9 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
     return {
       active,
       startedAt,
+      progress,
+      progressedAt: undefined,
+      stall: 0,
       shownAt: shownAtFor(startedAt, now),
       isRevealSeen: false,
       isHoldPending: false,
@@ -190,19 +207,25 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
   };
 
   // While no wait runs, `startedAt` means nothing: a consumer that moves it after the wait ends must not cut a hold.
-  if (tracked.active === active && (!active || Object.is(tracked.startedAt, startedAt))) {
-    return { timing: tracked.timing, wait: tracked.wait, revealed };
+  const isSameWait = tracked.active === active && (!active || Object.is(tracked.startedAt, startedAt));
+  if (isSameWait && (!active || Object.is(tracked.progress, progress))) {
+    return { timing: tracked.timing, wait: tracked.wait, stall: tracked.stall, revealed };
   }
 
-  // A wait started or ended: read the clock once, as React's "information from previous renders" pattern.
+  // A wait started, ended or made progress: read the clock once, as React's "information from previous renders" pattern.
   const now = readNow();
   let next: TrackedWait;
-  if (active) {
+  if (isSameWait) {
+    next = progressed(tracked, progress, now);
+  } else if (active) {
     // A new wait that replaces an indicator still owing its minimum keeps it on screen until that minimum is served.
     const isShowing = owesMinimum(tracked, now);
     next = {
       active,
       startedAt,
+      progress,
+      progressedAt: undefined,
+      stall: tracked.stall + 1,
       shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
       /* A wait that takes over a showing indicator keeps its reveal only if a frame drew it: its new element's
          entrance is not a reveal. If none had, the first frame that draws the words still starts the minimum. */
@@ -237,12 +260,46 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
                 settledAt: Math.max(elapsed, tracked.isRevealSeen || isUndrawn ? shownAt : Number.NEGATIVE_INFINITY),
                 shownAt,
               }),
-              elapsed,
+              /* The slow words are held only for a wait that had made no progress for the slow mark when it ended. */
+              now - stallStartOf(tracked),
             ),
     };
   }
   setTracked(next);
-  return { timing: next.timing, wait: next.wait, revealed };
+  return { timing: next.timing, wait: next.wait, stall: next.stall, revealed };
+}
+
+/**
+ * A running wait whose progress moved: the slow mark moves to 10,000 ms from now, and nothing else does. The reveal's
+ * element keeps its key and its delay, since changing a running animation's delay re-times it from its own start; the
+ * swapped elements are keyed on `stall`, so theirs start again.
+ *
+ * @param tracked - The wait as tracked so far.
+ * @param progress - The new progress.
+ * @param now - The current time on the animation timeline. Milliseconds.
+ * @returns The wait with its slow mark moved.
+ */
+function progressed(tracked: TrackedWait, progress: number | undefined, now: number): TrackedWait {
+  return {
+    ...tracked,
+    progress,
+    progressedAt: now,
+    stall: tracked.stall + 1,
+    timing:
+      tracked.timing.state === 'waiting'
+        ? { ...tracked.timing, slowDelay: `${slowWaitMilliseconds}ms` }
+        : tracked.timing,
+  };
+}
+
+/**
+ * Where the slow mark counts from: the wait's last progress, or its start.
+ *
+ * @param tracked - The wait as tracked so far.
+ * @returns A time on the performance timeline. Milliseconds.
+ */
+function stallStartOf(tracked: TrackedWait): number {
+  return Math.max(tracked.startedAt, tracked.progressedAt ?? tracked.startedAt);
 }
 
 /**
@@ -270,7 +327,7 @@ function isVisible(): boolean {
  * after a reveal the performance clock read later.
  *
  * @param timing - The settled timing.
- * @param settledAt - When the wait ended on the timeline, measured from its start. Milliseconds.
+ * @param settledAt - When the wait ended on the timeline, measured from its start or its last progress. Milliseconds.
  * @returns The timing, with the slow words decided by `settledAt`.
  */
 function heldWords(timing: WaitIndicatorTiming, settledAt: number): WaitIndicatorTiming {

@@ -15,18 +15,21 @@ export type WaitIndicatorProps = Readonly<{
   active: boolean;
   /** What is being waited for, such as "Loading chat"; the indicator ends it with an ellipsis. */
   label: string;
-  /** The words from 10,000 ms, such as "Still loading chat". Defaults to the label. */
+  /** The words from 10,000 ms without progress, such as "Still loading chat". Defaults to the label. */
   slowLabel?: string;
   /**
    * When the wait started, on the performance timeline (`performance.now()`, not `Date.now()`): `0` (the default) for
    * a wait that started with the document, the gesture's time for a later one, such as a refetch or a Retry. Milliseconds.
    */
   startedAt?: number;
-  /** How far the wait is, from 0 to 1, shown as a whole percentage; omit while unknown. */
+  /**
+   * How far the wait is, from 0 to 1, shown as a whole percentage; omit while unknown. Each change counts as progress:
+   * the slow words and "Try again" appear only after 10,000 ms in which it has not moved.
+   */
   progress?: number;
   /** Retries the wait. Offered beside the slow words. */
   onRetry?: () => void;
-  /** The Retry control's words. Defaults to "Retry". */
+  /** The retry control's words. Defaults to "Try again" (UX Policy rule 10). */
   retryLabel?: string;
   /**
    * Whether the slot announces the wait. A route open is one group announced once by the route's own live region, so
@@ -67,7 +70,7 @@ function timingStyle(timing: WaitIndicatorTiming): WaitTimingStyle | undefined {
 
 /**
  * Which set of words is drawn: the label until the slow mark, the slow words after it and through a hold that began
- * after it. While waiting, CSS swaps them at the slow mark.
+ * after it. While waiting, CSS swaps them at the slow mark, which a wait's progress moves.
  *
  * @param timing - The indicator's current timing.
  * @param hasSlowWords - Whether a slow label or Retry exists to swap in.
@@ -87,8 +90,9 @@ function wordClasses(timing: WaitIndicatorTiming, hasSlowWords: boolean): { labe
 
 /**
  * The one wait indicator for loading regions (UI Policy § 5 and § 6): a spinner and words in a slot the region's frame
- * already has, shown only once a wait passes 1,000 ms, kept at least 500 ms, and saying the wait is long, with Retry,
- * from 10,000 ms. It always carries words, because the spinner stops under reduced motion.
+ * already has, shown only once a wait passes 1,000 ms, kept at least 500 ms, and saying the wait is long, with "Try
+ * again", once it has made no progress for 10,000 ms. It always carries words, because the spinner stops under reduced
+ * motion.
  *
  * The slot is always rendered, at its skin's height, so it can sit in a header's trailing slot without changing the header's
  * height. Its words are laid out (and hidden) from the wait's start, so the reveal moves nothing. While nothing is
@@ -121,12 +125,12 @@ export function WaitIndicator({
   startedAt,
   progress,
   onRetry,
-  retryLabel = 'Retry',
+  retryLabel = 'Try again',
   live = true,
   variant = 'inline',
   className,
 }: WaitIndicatorProps): React.JSX.Element {
-  const { timing, wait, revealed } = useWaitClock({ active, startedAt });
+  const { timing, wait, stall, revealed } = useWaitClock({ active, startedAt, progress });
   const isWaiting = timing.state === 'waiting';
   const hasSlowWords = slowLabel !== undefined || onRetry !== undefined;
   const words = wordClasses(timing, hasSlowWords);
@@ -161,8 +165,9 @@ export function WaitIndicator({
           }}
         >
           <Loader className='size-3.5 text-primary' />
-          {/* Both sets of words share one grid cell, so the slot is as wide as the longer and the swap moves nothing. */}
-          <span className='inline-grid items-center'>
+          {/* Both sets of words share one grid cell, so the slot is as wide as the longer and the swap moves nothing.
+              Keyed on the progress moves, so each restarts the swap's animations from the moved slow mark. */}
+          <span key={stall} className='inline-grid items-center'>
             <span
               data-slot='wait-indicator-label'
               className={cn('[grid-area:1/1] first-letter:uppercase', words.label)}

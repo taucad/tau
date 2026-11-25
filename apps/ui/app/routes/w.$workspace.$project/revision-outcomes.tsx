@@ -6,7 +6,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { turnWithdrawnCode } from '#machines/chat-projection.logic.js';
+import { turnWithdrawnCode } from '@taucad/agent-host';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 

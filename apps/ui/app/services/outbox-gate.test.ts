@@ -123,6 +123,11 @@ describe('selectOutboxGate', () => {
       expected: { kind: 'hold', reason: 'held' },
     },
     {
+      name: 'a later send behind a held one',
+      overrides: { items: [entry('a', { held: true }), entry('b')] },
+      expected: { kind: 'deliver', id: 'b' },
+    },
+    {
       name: 'a held send sent now',
       overrides: { items: [{ ...steering('a', 'old'), held: true }] },
       expected: { kind: 'deliver', id: 'a' },

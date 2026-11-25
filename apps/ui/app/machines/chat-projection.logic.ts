@@ -24,6 +24,7 @@ import {
   liveForeignRun,
   mergeSegmentRows,
   parseSegmentFrom,
+  turnWithdrawnCode,
   unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
@@ -292,14 +293,6 @@ const applyToolRow = (open: Record<string, OpenToolCall>, row: unknown): Record<
   }
   return open;
 };
-
-/**
- * The detail code a host writes on a run the person took back: their Stop asked to withdraw the request
- * (`cancel.withdraw`) before the agent kept the turn. A kept turn is `USER_STOPPED` instead and offers Resume.
- *
- * @public
- */
-export const turnWithdrawnCode = 'TURN_WITHDRAWN';
 
 /**
  * Keep what a `failed` row said about its run until that run's next lifecycle row.

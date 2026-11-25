@@ -1,7 +1,9 @@
 /**
  * The durable outbox's one gate (send/queue/stop lifecycle, chat UX F1): delivery acts on it, the thread shows a send
  * as sent from it, and the queue strip draws what is left. Pure, so each rule is read in one place and tested as a
- * table; the MessageQueue model's `Ready` is the same rule.
+ * table. Its ordering holds refine the MessageQueue model's `Ready` (FIFO, the observe barrier, the gesture-time
+ * terminal permission, held sends); the page's readiness, `machine-live` and `withdrawing` are this page's own and
+ * are not modelled.
  */
 import type { ChatMessageQueueRecord, QueuedChatMessage } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { ChatRunPhase as ProjectedRunPhase } from '#machines/chat-projection.logic.js';
@@ -47,7 +49,7 @@ export type OutboxReadiness = Readonly<{
   chatLoading: boolean;
 }>;
 
-/** Everything the outbox's gate reads (the MessageQueue model's `Ready`, plus this page's readiness). @public */
+/** Everything the outbox's gate reads: the facts the MessageQueue model's `Ready` refines, plus this page's readiness. @public */
 export type OutboxGateFacts = Readonly<{
   items: readonly QueuedChatMessage[];
   /** The log is read to its end, so its current run is known. */
@@ -78,7 +80,7 @@ export type OutboxGate =
 /**
  * The outbox's one gate (MessageQueue `Ready`): delivery acts on it, and the thread shows the head as sent exactly
  * when only this page's readiness, never work ahead of it, stands in its way ({@link selectDepartingSend}). A prepared
- * or steering entry is the head wherever it sits.
+ * or steering entry is the head wherever it sits; otherwise the oldest send not held after a Stop is.
  *
  * @param facts - The outbox, this page's readiness, the chat's machine and the log's current run.
  * @returns The head and what happens to it.
@@ -86,7 +88,11 @@ export type OutboxGate =
  */
 export const selectOutboxGate = (facts: OutboxGateFacts): OutboxGate => {
   const { items, readiness, run, live } = facts;
-  const item = items.find((entry) => entry.command !== undefined || entry.steer !== undefined) ?? items[0];
+  /* Sends held after a Stop are parked: they wait for the person's Send now, but never in front of a later send. */
+  const item =
+    items.find((entry) => entry.command !== undefined || entry.steer !== undefined) ??
+    items.find((entry) => entry.held !== true) ??
+    items[0];
   if (item === undefined) {
     return { kind: 'empty' };
   }
@@ -186,6 +192,10 @@ export const selectDepartingSend = (
   gate: OutboxGate,
 ): QueuedChatMessage | undefined => {
   if (queue.error !== undefined) {
+    return undefined;
+  }
+  if (gate.kind === 'hold' && gate.reason === 'withdrawing') {
+    /* A Stop is taking it back: it is neither sent nor queued until the outbox says which. */
     return undefined;
   }
   const sending = queue.sendingId === undefined ? undefined : queue.items.find((item) => item.id === queue.sendingId);

@@ -111,6 +111,7 @@ import {
   materializeTranscript,
   chunksSince,
   runViewHasOutput,
+  isRetractedRun,
 } from '#machines/chat-projection.logic.js';
 import type {
   ChatProjection,
@@ -577,20 +578,10 @@ type InternalSession = ChatSession & {
   departingView:
     | Readonly<{ base: readonly MyUIMessage[]; message: MyUIMessage; messages: readonly MyUIMessage[] }>
     | undefined;
-  /**
-   * The departing send a Stop is taking back: nothing delivers it while its removal waits for the delivery lock, and
-   * the composer gets it back only once the removal is confirmed.
-   */
-  withdrawing: string | undefined;
   /** The outbox's record as this page last read it: the gate reads its handover receipt. */
   outboxRecord: ChatMessageQueueRecord | undefined;
-  /**
-   * The run a Stop must cancel once the log has it: a send already prepared or handed over when Stop was pressed. The
-   * Stop stays pressed until that run is cancelled or ends.
-   */
-  stopTarget: string | undefined;
-  /** The run whose cancel this Stop has sent, so a reattach or a log update never sends it twice. */
-  cancelSent: string | undefined;
+  /** A run a host too old for `cancel.withdraw` was asked to stop plainly: its unkept request comes back by local rule. */
+  plainCancelRunId: string | undefined;
   /**
    * A departing send the host accepted, shown until the SDK transcript holds it or its run ends: the outbox lets go of
    * the entry on acceptance, and the thread must not drop the request for the frames in between.
@@ -656,11 +647,10 @@ type InternalSession = ChatSession & {
   transcriptSource: ChatProjection | undefined;
   transcriptSourceVersion: number;
   commandInFlight: boolean;
-  stopRequested: boolean;
+  /** The Stop this page is carrying out, until nothing is left to wait for ({@link PendingStop}). */
+  stop: PendingStop | undefined;
   /** The gate the outbox last waited on, for its diagnostic (logged once per change). */
   queueHold: string | undefined;
-  /** What asked for the pending stop; logged with the cancel it sends. */
-  stopOrigin: StopOrigin | undefined;
   /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
   refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
@@ -715,18 +705,34 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
-/** Whether the transcript's newest request is already this message: the thread has taken a departing send. */
-const endsWithMessage = (messages: readonly MyUIMessage[], id: string): boolean => {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]!;
-    if (message.id === id) {
-      return true;
-    }
-    if (message.role === 'user') {
-      return false;
-    }
-  }
-  return false;
+/**
+ * A Stop this page is carrying out, from the press until nothing is left to wait for. One value, so letting go of it
+ * (`#releaseStop`) clears every part at once and no part outlives the Stop.
+ */
+type PendingStop = Readonly<{
+  /** The gesture that pressed it, logged with the cancel; only the person's own Stop takes a send back. */
+  origin: StopOrigin;
+  /**
+   * The departing send being taken back before the host has it: nothing delivers it while its removal waits for the
+   * delivery lock.
+   */
+  withdrawing: string | undefined;
+  /**
+   * The run this Stop must end once the log has it: a send taken back, prepared or handed over when Stop was pressed,
+   * or the command then in flight. Otherwise the log's current run when the cancel goes out.
+   */
+  target: string | undefined;
+  /** The run whose cancel was sent, so a reattach or a log update never sends it twice. */
+  sent: string | undefined;
+}>;
+
+/** The run whose cancel the session's Stop has sent, read afresh: an awaited answer may find the Stop let go. */
+const sentCancel = (session: Pick<InternalSession, 'stop'>): string | undefined => session.stop?.sent;
+
+/** Whether the composer holds nothing the person wrote, so a returned send may take it. */
+const isComposerEmpty = (session: Pick<InternalSession, 'draftActorRef'>): boolean => {
+  const draft = session.draftActorRef.getSnapshot().context;
+  return draft.draftText === '' && draft.draftAttachments.length === 0;
 };
 
 /** Two log rows are the same row (EQ3: no ordering across devices is needed). */
@@ -1278,7 +1284,12 @@ export class ChatSessionStore {
       if (session.projectId === projectId) {
         this.startPendingSeed(session.chatId);
         /* A Stop pressed while no host was attached owes its cancel; one already sent is not sent again. */
-        if (session.stopRequested && !session.commandInFlight && session.cancelSent === undefined) {
+        if (
+          session.stop !== undefined &&
+          session.stop.sent === undefined &&
+          session.stop.withdrawing === undefined &&
+          !session.commandInFlight
+        ) {
           void this.#cancelSessionRun(session);
         }
       }
@@ -2324,23 +2335,34 @@ export class ChatSessionStore {
     if (personal && !session.commandInFlight && this.#withdrawDepartingSend(session, origin)) {
       return;
     }
-    session.stopRequested = true;
-    session.stopOrigin = origin;
+    /* The run to end: the command awaiting its host answer, or a send prepared or handed over but not yet a live run
+     * here. Otherwise the log's current run. */
+    const { activeCommand, departing, handedOff } = session;
+    const target = session.commandInFlight
+      ? activeCommand?.type === 'start' || activeCommand?.type === 'resume'
+        ? activeCommand.payload.runId
+        : undefined
+      : departing?.command === undefined
+        ? handedOff?.runId
+        : departing.requestId;
+    session.stop = {
+      origin,
+      withdrawing: undefined,
+      target: target ?? session.stop?.target,
+      sent: session.stop?.sent,
+    };
     this.#chatTopics.get(chatId)?.emit();
     session.watch?.stop();
     session.watch = undefined;
     void session.chat.stop();
     if (!session.commandInFlight) {
-      /* A send prepared or handed over but not yet a live run here: its own run is the one to stop. */
-      const { departing, handedOff } = session;
-      const target = departing?.command === undefined ? handedOff?.runId : departing.requestId;
-      void this.#cancelSessionRun(session, target);
+      void this.#cancelSessionRun(session);
     }
   }
 
   /** A user Stop is awaiting its host-confirmed terminal row. @public */
   public isStopping(chatId: string): boolean {
-    return this.#sessions.get(chatId)?.stopRequested ?? false;
+    return this.#sessions.get(chatId)?.stop !== undefined;
   }
 
   /**
@@ -2665,20 +2687,28 @@ export class ChatSessionStore {
         session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
-        const answer = await sendHostCommand(
-          async () => {
-            const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
-            acceptingPlacement = connectionPlacement(client.placement);
-            return client;
-          },
-          item.command,
-          { signal },
-        );
-        if (answer.status === 'refused') {
-          throw new Error(`Delivery could not be confirmed: ${answer.message}`);
-        }
-        if (answer.effect !== 'durable') {
-          throw new Error('Message saved. The host has not confirmed durable acceptance.');
+        try {
+          const answer = await sendHostCommand(
+            async () => {
+              const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+              acceptingPlacement = connectionPlacement(client.placement);
+              return client;
+            },
+            item.command,
+            { signal },
+          );
+          if (answer.status === 'refused') {
+            throw new Error(`Delivery could not be confirmed: ${answer.message}`);
+          }
+          if (answer.effect !== 'durable') {
+            throw new Error('Message saved. The host has not confirmed durable acceptance.');
+          }
+        } catch (error) {
+          /* No run started, so a Stop waiting for this replay's run has nothing to wait for. */
+          if (session.stop?.target === item.command.payload.runId) {
+            this.#releaseStop(session);
+          }
+          throw error;
         }
         const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
         if (session.departing?.id === item.id) {
@@ -2711,7 +2741,7 @@ export class ChatSessionStore {
         },
         false,
       );
-      if (session.withdrawing === item.id) {
+      if (session.stop?.withdrawing === item.id) {
         /* A Stop during admission took it back: its removal runs under this lock once this advance lets go. */
         return { items: record.items, status: 'waiting' };
       }
@@ -2780,7 +2810,7 @@ export class ChatSessionStore {
       live: isLive(session.stateActorRef.getSnapshot()),
       run: caught === undefined || run === undefined ? undefined : { runId: run.runId, phase: selectRunPhase(caught) },
       afterRunUnseen: caught !== undefined && isAfterRunUnseen(record, caught.ledger, observedPlacement),
-      withdrawing: session.withdrawing,
+      withdrawing: session.stop?.withdrawing,
     });
   }
 
@@ -2815,8 +2845,7 @@ export class ChatSessionStore {
    */
   async #refuseQueuedSend(session: InternalSession, item: QueuedChatMessage): Promise<QueueAdvanceResult> {
     const reason = session.stateActorRef.getSnapshot().context.failureReason;
-    const draft = session.draftActorRef.getSnapshot().context;
-    if (draft.draftText === '' && draft.draftAttachments.length === 0) {
+    if (isComposerEmpty(session)) {
       const after = await session.messageQueueStore.update((record) =>
         record.items.length === 1 && record.items[0]?.id === item.id && record.items[0].command === undefined
           ? { ...record, items: [] }
@@ -2824,11 +2853,12 @@ export class ChatSessionStore {
       );
       this.#loadOutbox(session, after);
       if (!after.items.some((entry) => entry.id === item.id)) {
-        void this.#returnStoppedDraft(session, item.message);
+        void this.#returnStoppedDraft(session, item.message, item);
         return { items: after.items, status: 'waiting' };
       }
     }
     const current = await session.messageQueueStore.read();
+    this.#loadOutbox(session, current, false);
     return {
       items: current.items,
       status: 'blocked',
@@ -3047,15 +3077,12 @@ export class ChatSessionStore {
       return;
     }
     const queue = session.messageQueueRef.getSnapshot();
-    /* An outbox whose advance answered without a read has no entries to show. */
-    const next =
-      queue.status === 'active' && Array.isArray(queue.context.items)
-        ? selectDepartingSend(
-            queue.context,
-            this.#outboxGate(session, { ...session.outboxRecord, items: queue.context.items }, undefined),
-          )
+    /* Entries and receipt from one read: every record the strip draws passes through `#loadOutbox` first. */
+    const record = session.outboxRecord;
+    const shown =
+      queue.status === 'active' && record !== undefined
+        ? selectDepartingSend({ ...queue.context, items: record.items }, this.#outboxGate(session, record, undefined))
         : undefined;
-    const shown = next === undefined || next.id === session.withdrawing ? undefined : next;
     if (shown?.id === session.departing?.id && shown?.message === session.departing?.message) {
       return;
     }
@@ -3077,7 +3104,7 @@ export class ChatSessionStore {
    */
   #withdrawDepartingSend(session: InternalSession, origin: StopOrigin): boolean {
     const { departing } = session;
-    if (departing === undefined || departing.command !== undefined || session.withdrawing !== undefined) {
+    if (departing === undefined || departing.command !== undefined || session.stop?.withdrawing !== undefined) {
       return false;
     }
     const snapshot = session.stateActorRef.getSnapshot();
@@ -3095,9 +3122,7 @@ export class ChatSessionStore {
       messageId: departing.id,
       origin,
     });
-    session.withdrawing = departing.id;
-    session.stopRequested = true;
-    session.stopOrigin = origin;
+    session.stop = { origin, withdrawing: departing.id, target: departing.requestId, sent: undefined };
     if (admitting) {
       session.stateActorRef.send({ type: 'withdrawTurn', queueId: departing.id });
     }
@@ -3113,32 +3138,36 @@ export class ChatSessionStore {
    */
   async #finishWithdrawal(session: InternalSession, departing: QueuedChatMessage): Promise<void> {
     let record: ChatMessageQueueRecord | undefined;
+    /* A composer holding new text keeps it: the send then stays at the head of the outbox, held, rather than leave. */
+    const outcome = { kept: false };
     try {
       record = await session.messageQueueStore.exclusive(async () =>
-        session.messageQueueStore.update((current) =>
-          current.items.some(
-            (item) => item.id === departing.id && item.command === undefined && item.steer === undefined,
-          )
-            ? {
-                ...current,
-                items: current.items.flatMap((item) =>
-                  item.id === departing.id
-                    ? []
-                    : [
-                        item.command === undefined && item.steer === undefined
-                          ? ({ ...item, held: true } satisfies QueuedChatMessage)
-                          : item,
-                      ],
-                ),
-              }
-            : current,
-        ),
+        session.messageQueueStore.update((current) => {
+          /* Never handed to a host. A steered send counts: the gate delivers it only after its steer's run ended. */
+          if (!current.items.some((item) => item.id === departing.id && item.command === undefined)) {
+            return current;
+          }
+          /* A chat closed meanwhile has no composer to take it either: it waits, held, for the person's Send now. */
+          outcome.kept = !isComposerEmpty(session) || this.#sessions.get(session.chatId) !== session;
+          return {
+            ...current,
+            items: current.items.flatMap((item) =>
+              item.id === departing.id && !outcome.kept
+                ? []
+                : [
+                    item.id === departing.id || (item.command === undefined && item.steer === undefined)
+                      ? ({ ...item, held: true } satisfies QueuedChatMessage)
+                      : item,
+                  ],
+            ),
+          };
+        }),
       );
     } catch (error) {
       console.warn('[ChatSessionStore] a withdrawn send could not leave the outbox', session.chatId, error);
     }
-    if (session.withdrawing === departing.id) {
-      session.withdrawing = undefined;
+    if (session.stop?.withdrawing === departing.id) {
+      session.stop = { ...session.stop, withdrawing: undefined };
     }
     if (this.#sessions.get(session.chatId) !== session) {
       return;
@@ -3146,13 +3175,15 @@ export class ChatSessionStore {
     if (record !== undefined) {
       this.#loadOutbox(session, record);
     }
-    if (record !== undefined && !record.items.some((item) => item.id === departing.id)) {
+    if (record !== undefined && outcome.kept) {
+      this.#releaseStop(session);
+    } else if (record !== undefined && !record.items.some((item) => item.id === departing.id)) {
       if (record.afterRunId === departing.requestId) {
         /* Another page handed it over first: its run is the one to stop. */
         void this.#cancelSessionRun(session, departing.requestId);
       } else {
         this.#releaseStop(session);
-        await this.#returnStoppedDraft(session, departing.message);
+        await this.#returnStoppedDraft(session, departing.message, departing);
       }
     } else {
       /* Being delivered, or the removal failed: the Stop cancels the run it starts, whenever the log has it. */
@@ -3163,10 +3194,45 @@ export class ChatSessionStore {
     }
   }
 
-  /** Put a stopped send back in the composer, then tell the composer it may take focus. */
-  async #returnStoppedDraft(session: InternalSession, message: MyUIMessage): Promise<void> {
-    await this.#restoreStoppedDraft(session, message);
-    this.#draftReturnTopics.get(session.chatId)?.emit();
+  /**
+   * Put a stopped send back in the composer, then tell the composer it may take focus.
+   *
+   * A composer that took new text meanwhile keeps it, and the send is never lost: it goes back to the head of the
+   * outbox, held until the person sends it now.
+   *
+   * @param session - The chat.
+   * @param message - The send.
+   * @param fallback - Where the send stays when the composer declines it: its own outbox `entry` when it never reached
+   *   the host; a `fresh` entry when the host took it back, because its run already holds the old identity; or the
+   *   `thread`, which still shows it.
+   */
+  async #returnStoppedDraft(
+    session: InternalSession,
+    message: MyUIMessage,
+    fallback: QueuedChatMessage | 'fresh' | 'thread',
+  ): Promise<void> {
+    if (await this.#restoreStoppedDraft(session, message)) {
+      this.#draftReturnTopics.get(session.chatId)?.emit();
+      return;
+    }
+    if (fallback === 'thread') {
+      return;
+    }
+    const id = fallback === 'fresh' ? generatePrefixedId(idPrefix.message) : fallback.id;
+    const kept: QueuedChatMessage =
+      fallback === 'fresh'
+        ? { id, requestId: generatePrefixedId(idPrefix.request), message: { ...message, id }, held: true }
+        : { ...fallback, held: true };
+    try {
+      const record = await session.messageQueueStore.update((current) =>
+        current.items.some((item) => item.id === kept.id) ? current : { ...current, items: [kept, ...current.items] },
+      );
+      if (this.#sessions.get(session.chatId) === session) {
+        this.#loadOutbox(session, record);
+      }
+    } catch (error) {
+      console.warn('[ChatSessionStore] a stopped send could not be kept in the outbox', session.chatId, error);
+    }
   }
 
   /**
@@ -3175,14 +3241,20 @@ export class ChatSessionStore {
    * @param session - The chat.
    * @param target - A run the Stop must cancel once the log has it (a send prepared or handed over when Stop was
    *   pressed); by default the command this page dispatched, else the log's current run.
+   * @param accepted - The host just accepted this page's command for the run, so an ended attempt this page's log
+   *   still shows is the one before it (a resume shares its run id), not proof that nothing runs.
    */
-  async #cancelSessionRun(session: InternalSession, target?: string): Promise<void> {
-    if (target !== undefined) {
-      session.stopTarget = target;
+  async #cancelSessionRun(session: InternalSession, target?: string, accepted = false): Promise<void> {
+    if (session.stop === undefined) {
+      return;
     }
+    if (target !== undefined) {
+      session.stop = { ...session.stop, target };
+    }
+    const { stop } = session;
     const projected = this.#projectionContext(session.chatId);
     const runId =
-      session.stopTarget ??
+      stop.target ??
       (session.activeCommand?.type === 'start' || session.activeCommand?.type === 'resume'
         ? session.activeCommand.payload.runId
         : projected === undefined
@@ -3190,17 +3262,20 @@ export class ChatSessionStore {
           : selectCurrentRun(projected)?.runId);
     const entry = runId === undefined ? undefined : projected?.ledger.runs[runId];
     const lifecycle = entry?.lifecycle;
-    if (runId === undefined || lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled') {
+    if (
+      runId === undefined ||
+      (!accepted && (lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled'))
+    ) {
       /* Nothing live to cancel: a Stop over a run that already ended must not wait for an end that came before it,
        * nor send a cancel the host can only refuse. */
       this.#releaseStop(session);
       return;
     }
-    if (session.cancelSent === runId) {
+    if (stop.sent === runId) {
       return;
     }
     const connector = this.#projectHostConnectors.get(session.projectId);
-    if (connector === undefined || (session.stopTarget !== undefined && entry === undefined)) {
+    if (connector === undefined || (stop.target !== undefined && entry === undefined)) {
       /* Owed: a live run whose host is not attached yet, or a handed-over send the log has not shown yet. The cancel
        * is sent when the host attaches (`publishProjectHostConnector`) or the run reaches the log (`#syncProjection`).
        * The Stop stays pressed until then. */
@@ -3212,22 +3287,33 @@ export class ChatSessionStore {
       payload: {
         chatId: session.chatId,
         runId,
-        /* The person's own Stop takes the request back when the turn was not kept yet (`TURN_WITHDRAWN`). */
-        ...(session.stopOrigin === 'stop-button' || session.stopOrigin === 'stop-shortcut' ? { withdraw: true } : {}),
+        /* The person's own Stop takes the request back when the turn was not kept yet (`TURN_WITHDRAWN`), into an
+         * empty composer only: with new text there, the request stays in the thread as an ordinary stop. */
+        ...((stop.origin === 'stop-button' || stop.origin === 'stop-shortcut') && isComposerEmpty(session)
+          ? { withdraw: true }
+          : {}),
       },
     };
-    session.cancelSent = runId;
-    logStop(command, session.stopOrigin);
+    session.stop = { ...stop, sent: runId };
+    logStop(command, stop.origin);
     let failure: Error | undefined;
     try {
       let answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
       if (answer.status === 'refused' && answer.code === 'COMMAND_UNREADABLE' && 'withdraw' in command.payload) {
         /* A host older than `withdraw` refuses the field and applies nothing: the same cancel without it still stops
          * the run, which then keeps its request in the thread. */
+        session.plainCancelRunId = runId;
         answer = await sendHostCommand(async () => connector.connect(session.chatId), {
           ...command,
           payload: { chatId: command.payload.chatId, runId: command.payload.runId },
         });
+      }
+      if (answer.status === 'refused' && answer.code === 'RUN_NOT_LIVE') {
+        /* The run ended before the cancel arrived: the Stop has nothing left to do, and nothing went wrong. */
+        if (sentCancel(session) === runId) {
+          this.#releaseStop(session);
+        }
+        return;
       }
       if (answer.status === 'refused') {
         failure = new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
@@ -3235,7 +3321,7 @@ export class ChatSessionStore {
     } catch (error) {
       failure = error instanceof Error ? error : new Error(String(error));
     }
-    if (failure !== undefined && session.cancelSent === runId) {
+    if (failure !== undefined && sentCancel(session) === runId) {
       /* The cancel did not land: let go of the Stop so the composer offers it again, rather than waiting for an end
        * nothing asked for. */
       logFacts('warn', '[ChatSessionStore] stop did not reach the host', {
@@ -3250,10 +3336,8 @@ export class ChatSessionStore {
 
   /** A Stop that has nothing left to wait for: the composer leaves `stopping`. */
   #releaseStop(session: InternalSession): void {
-    session.stopTarget = undefined;
-    session.cancelSent = undefined;
-    if (session.stopRequested) {
-      session.stopRequested = false;
+    if (session.stop !== undefined) {
+      session.stop = undefined;
       this.#chatTopics.get(session.chatId)?.emit();
     }
   }
@@ -3582,7 +3666,7 @@ export class ChatSessionStore {
    * @param message - The user message coming back.
    * @param onlyIfEmpty - Do not overwrite text the person entered while a Stop was settling.
    */
-  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage, onlyIfEmpty = false): Promise<void> {
+  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage, onlyIfEmpty = false): Promise<boolean> {
     const attachments = message.parts.flatMap((part) =>
       part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
     );
@@ -3603,11 +3687,8 @@ export class ChatSessionStore {
         console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained', error);
       }
     }
-    if (onlyIfEmpty) {
-      const draft = session.draftActorRef.getSnapshot().context;
-      if (draft.draftText !== '' || draft.draftAttachments.length > 0) {
-        return;
-      }
+    if (onlyIfEmpty && !isComposerEmpty(session)) {
+      return false;
     }
     /* Wholesale: this replaces the displacing send's text and attachments
      * rather than clearing and then restoring over the top of it. */
@@ -3617,16 +3698,22 @@ export class ChatSessionStore {
       type: 'patch',
       fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments) },
     });
+    return true;
   }
 
-  /** Hold the composer through an asynchronously confirmed empty Stop. */
-  async #restoreStoppedDraft(session: InternalSession, message: MyUIMessage): Promise<void> {
+  /**
+   * Hold the composer through an asynchronously confirmed empty Stop.
+   *
+   * @returns Whether the composer took the message; a composer that took new text meanwhile keeps it.
+   */
+  async #restoreStoppedDraft(session: InternalSession, message: MyUIMessage): Promise<boolean> {
     const restore = this.#restoreDraftMessage(session, message, true);
     session.composerWork.add(restore);
     try {
-      await restore;
+      return await restore;
     } catch (error) {
       console.warn('[ChatSessionStore] stopped draft could not be restored', session.chatId, error);
+      return false;
     } finally {
       session.composerWork.delete(restore);
     }
@@ -3838,7 +3925,10 @@ export class ChatSessionStore {
     session.watchedRunId = command.payload.runId;
     session.watchedStreamVersion = 0;
     session.commandInFlight = true;
-    this.#releaseStop(session);
+    /* A Stop left from an earlier turn ends here; one aimed at this very request is carried out once it is accepted. */
+    if (session.stop?.target !== command.payload.runId) {
+      this.#releaseStop(session);
+    }
     session.commandAbort?.abort();
     const abort = new AbortController();
     session.commandAbort = abort;
@@ -3907,8 +3997,8 @@ export class ChatSessionStore {
       }
       // The Stop callback can flip this while the command awaits its host answer.
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- Stop mutates from another callback during the awaited command.
-      if (session.stopRequested) {
-        await this.#cancelSessionRun(session);
+      if (session.stop !== undefined) {
+        await this.#cancelSessionRun(session, undefined, true);
         return;
       }
       session.watch?.stop();
@@ -4161,22 +4251,26 @@ export class ChatSessionStore {
     }
     if (
       run?.lifecycle === 'cancelled' &&
-      session.stopRequested &&
-      (session.stopTarget === undefined || session.stopTarget === run.runId) &&
+      session.stop !== undefined &&
+      (session.stop.target === undefined || session.stop.target === run.runId) &&
       session.restoredStoppedRunId !== run.runId
     ) {
       session.restoredStoppedRunId = run.runId;
       const stopped = projection.views[run.runId];
-      /* This page's Stop let go of a turn the agent had not kept and that showed nothing yet: the request goes back to
-       * the composer. A host that records the take-back (`TURN_WITHDRAWN`) also leaves it out of the thread
-       * (`isRetractedRun`), so the message is in exactly one place; an older host keeps it in the thread as well. */
-      if (
+      /* This page's Stop took back a turn the agent had not kept: the host recorded it (`TURN_WITHDRAWN`), every page
+       * leaves it out of the thread (`isRetractedRun`), and the request goes back to the composer, so the message is in
+       * exactly one place. A host too old to read the take-back stopped the run plainly; its unkept, silent request
+       * still comes back here, and stays in the thread as well. */
+      if (stopped?.user !== undefined && isRetractedRun(stopped)) {
+        void this.#returnStoppedDraft(session, stopped.user, 'fresh');
+      } else if (
+        session.plainCancelRunId === run.runId &&
         stopped?.user !== undefined &&
         run.failure?.code !== 'USER_STOPPED' &&
         stopped.steering === undefined &&
         !runViewHasOutput(stopped)
       ) {
-        void this.#returnStoppedDraft(session, stopped.user);
+        void this.#returnStoppedDraft(session, stopped.user, 'thread');
       }
     }
     const { handedOff } = session;
@@ -4188,22 +4282,25 @@ export class ChatSessionStore {
         this.#messagePresentations.delete(chatId);
       }
     }
+    /* The run this Stop waits for has ended. While a command awaits its host answer or a take-back its removal, those
+     * decide instead: an ended attempt in this log may be the one before an accepted resume. */
     if (
-      session.stopRequested &&
+      session.stop !== undefined &&
+      session.stop.withdrawing === undefined &&
+      !session.commandInFlight &&
       run !== undefined &&
       !opensRun(phase) &&
       phase !== 'paused' &&
-      (session.stopTarget === undefined || session.stopTarget === run.runId)
+      (session.stop.target === undefined || session.stop.target === run.runId)
     ) {
       this.#releaseStop(session);
     }
     /* A Stop owed to a handed-over send: its run has reached the log. */
     if (
-      session.stopRequested &&
-      session.stopTarget !== undefined &&
-      session.cancelSent === undefined &&
+      session.stop?.target !== undefined &&
+      session.stop.sent === undefined &&
       !session.commandInFlight &&
-      projection.ledger.runs[session.stopTarget] !== undefined
+      projection.ledger.runs[session.stop.target] !== undefined
     ) {
       void this.#cancelSessionRun(session);
     }
@@ -4214,7 +4311,7 @@ export class ChatSessionStore {
       session.watch === undefined &&
       session.watchedRunId === undefined &&
       !session.commandInFlight &&
-      !session.stopRequested &&
+      session.stop === undefined &&
       !session.persistenceActorRef.getSnapshot().context.isLoadingChat &&
       session.status === 'ready' &&
       !session.recoveringPresentation &&
@@ -5377,14 +5474,15 @@ export class ChatSessionStore {
       get messages() {
         const base = session.presentationHold?.messages ?? chat.messages;
         const message = session.departing?.message ?? session.handedOff?.message;
-        if (message === undefined || endsWithMessage(base, message.id)) {
+        if (message === undefined) {
           return base;
         }
         const view = session.departingView;
         if (view?.base === base && view.message === message) {
           return view.messages;
         }
-        const messages = [...base, message];
+        /* Wherever the transcript already holds it, even behind a later request, it is shown once. */
+        const messages = base.some((entry) => entry.id === message.id) ? base : [...base, message];
         session.departingView = { base, message, messages };
         return messages;
       },
@@ -5406,10 +5504,8 @@ export class ChatSessionStore {
       messageQueueObservation,
       departing: undefined,
       departingView: undefined,
-      withdrawing: undefined,
       outboxRecord: undefined,
-      stopTarget: undefined,
-      cancelSent: undefined,
+      plainCancelRunId: undefined,
       handedOff: undefined,
       dispatchTask: undefined,
       composer,
@@ -5445,9 +5541,8 @@ export class ChatSessionStore {
       transcriptSource: undefined,
       transcriptSourceVersion: 0,
       commandInFlight: false,
-      stopRequested: false,
+      stop: undefined,
       queueHold: undefined,
-      stopOrigin: undefined,
       refreshDeferred: false,
       restoredStoppedRunId: undefined,
       presentationWatch: undefined,

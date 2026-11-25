@@ -203,6 +203,11 @@
 \* unsteered send still behind it held (`held`): the person stopped, so nothing queued behind leaves until they
 \* send it now (Steer). ComposerExclusive and HeldWaitsForPerson state both; the withdraw-releases-held witness
 \* removes the hold.
+\* Review round 2: held sends are parked, so a later send goes ahead of them (FIFO among the unheld, `NextUp`).
+\* A steered send not yet prepared may be withdrawn too. TakeBack models the host's take-back of an accepted,
+\* still-live turn (`TURN_WITHDRAWN`): the run is cancelled and its request returns to the composer, never shown.
+\* Stop is one value on the session (`PendingStop`); a cancel refused `RUN_NOT_LIVE` lets it go quietly, and a Stop
+\* during a resume's answer cancels the accepted attempt. Cancel's guards and every action above are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -218,7 +223,9 @@ Terminal(p) == p = "completed" \/ Stopped(p)
 Members(q) == {q[i] : i \in 1..Len(q)}
 Remove(q, m) == SelectSeq(q, LAMBDA x : x # m)
 Accepted == {key[1] : key \in s.accepted}
-Chosen == IF s.steerItem # None THEN s.steerItem ELSE Head(s.queue)
+Unheld(q) == SelectSeq(q, LAMBDA x : x \notin s.held)
+NextUp == IF HoldBehindWithdraw /\ Len(Unheld(s.queue)) > 0 THEN Head(Unheld(s.queue)) ELSE Head(s.queue)
+Chosen == IF s.steerItem # None THEN s.steerItem ELSE NextUp
 BarrierSeen(t) == ~ObserveBarrier \/ s.after = None \/ s.after \in s.observed[t].known
 Ready(t) == /\ BarrierSeen(t)
             /\ IF s.steerItem = None
@@ -238,7 +245,7 @@ Init == s = [queue |-> <<>>, saved |-> <<>>, submitted |-> {}, prepared |-> None
              earlyDelivery |-> FALSE, earlySteer |-> FALSE, outOfOrder |-> FALSE,
              steerItem |-> None, target |-> None,
              cancelPending |-> {}, wrongCancellation |-> FALSE, submitInterrupted |-> FALSE,
-             composer |-> {}, held |-> {}, heldDelivery |-> FALSE]
+             composer |-> {}, held |-> {}, heldDelivery |-> FALSE, takenBack |-> {}]
 \* Capture authorization at UI submit entry before attachment promotion, then
 \* forward the same intent through execution lookup and storage lock awaits.
 Submit(t, m) == /\ t \in s.alive /\ m \notin s.submitted /\ s.pending = None
@@ -311,7 +318,7 @@ Deliver(t) == LET m == s.prepared
                         (Stopped(s.phase[s.active]) /\ s.capturedTerminal[m] = s.active))),
                     !.earlySteer = @ \/ (m \notin Accepted /\ s.steerItem = m /\
                       s.target # None /\ ~Terminal(s.phase[s.target])),
-                    !.outOfOrder = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m # Head(s.queue)),
+                    !.outOfOrder = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m # NextUp),
                     !.heldDelivery = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m \in s.held),
                     !.accepted = IF accept THEN @ \cup {key} ELSE @,
                     !.active = IF accept THEN m ELSE @,
@@ -334,13 +341,19 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
 \* step; the person may submit it again, so it leaves the submitted set with its per-message facts.
 \* Every other unprepared, unsteered send still queued is held until the person sends it now.
 Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
-                  /\ m # s.prepared /\ m # s.steerItem /\ m \notin Accepted
+                  /\ m # s.prepared /\ m \notin Accepted
                   /\ s' = [s EXCEPT !.queue = Remove(@, m),
+                       !.steerItem = IF @ = m THEN None ELSE @,
+                       !.target = IF s.steerItem = m THEN None ELSE @,
                        !.saved = IF Durable THEN Remove(@, m) ELSE @,
                        !.submitted = @ \ {m}, !.counts[m] = 0,
                        !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
                        !.composer = @ \cup {m},
                        !.held = (@ \ {m}) \cup (Members(s.queue) \ {m, s.prepared, s.steerItem})]
+\* The host takes back an accepted turn it had not kept: the run is cancelled and its request goes back to the
+\* composer instead of the thread. A later send is a new request, so the message stays accepted and submitted.
+TakeBack(m) == /\ m \in Accepted /\ m = s.active /\ Live(s.phase[m]) /\ m \notin s.takenBack
+               /\ s' = [s EXCEPT !.phase[m] = "cancelled", !.takenBack = @ \cup {m}, !.composer = @ \cup {m}]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
 \* The finite crash scenario begins only after a queue save has answered.
@@ -356,6 +369,7 @@ Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
              \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))
+        \/ (\E m \in Messages : TakeBack(m))
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)
           /\ s.submitted \subseteq Messages /\ s.active \in Runs
@@ -368,7 +382,7 @@ TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)
           /\ s.capturedTerminal \in [Messages -> Runs \cup {None}]
           /\ s.afterTerminal \in [Messages -> Runs \cup {None}]
           /\ Len(s.queue) = Cardinality(Members(s.queue))
-          /\ s.composer \subseteq Messages /\ s.held \subseteq Messages
+          /\ s.composer \subseteq Messages /\ s.held \subseteq Messages /\ s.takenBack \subseteq Messages
 PayloadSurvives == s.submitted \subseteq Members(s.queue) \cup Accepted
 PreparedPayloadSurvives == s.prepared = None \/ s.prepared \in Members(s.queue)
 AtMostOnceCharge == \A m \in Messages : Cardinality({key \in s.accepted : key[1] = m}) <= 1
@@ -381,8 +395,10 @@ NoEarlyDelivery == ~s.earlyDelivery
 SteerWaitsForTerminal == ~s.earlySteer
 CancelTargetsObservedRun == ~s.wrongCancellation
 FIFOExceptExplicitSteer == ~s.outOfOrder
-\* A request is in one place: a send taken back is in the composer and nowhere the outbox could still deliver it.
-ComposerExclusive == s.composer \cap (Members(s.queue) \cup Accepted \cup {s.prepared, s.pending}) = {}
+\* A request is in one place: a send in the composer is neither deliverable from the outbox nor a kept turn. (An
+\* accepted entry the host took back may wait for its acknowledgement, but it can never start a turn again.)
+ComposerExclusive == s.composer \cap (((Members(s.queue) \cup {s.prepared}) \ Accepted)
+                                      \cup (Accepted \ s.takenBack) \cup {s.pending}) = {}
 \* Work queued behind a taken-back send leaves only when the person sends it now.
 HeldWaitsForPerson == ~s.heldDelivery
 Quiescent == s.pending = None /\ s.queue = <<>> /\ s.prepared = None /\ s.owner = None

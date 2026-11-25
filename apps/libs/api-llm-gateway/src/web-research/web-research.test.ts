@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -256,6 +257,32 @@ describe('fetchAtAddress', () => {
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe(`host pinned.invalid:${String(port)}`);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should answer a 205 with no body, and reject a status the Fetch API cannot carry', async () => {
+    /* A raw server: Node's own refuses to write a status outside 100 to 999's usual range. */
+    const server = createNetServer((socket) => {
+      socket.once('data', (chunk) => {
+        const status = chunk.toString().startsWith('GET /reset') ? '205 Reset Content' : '600 Odd';
+        socket.end(`HTTP/1.1 ${status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const at = { address: '127.0.0.1', family: 4 } as const;
+    try {
+      const reset = await fetchAtAddress(`http://pinned.invalid:${String(port)}/reset`, { signal: signal() }, at);
+
+      expect(reset.status).toBe(205);
+      expect(reset.body).toBeNull();
+      await expect(
+        fetchAtAddress(`http://pinned.invalid:${String(port)}/odd`, { signal: signal() }, at),
+      ).rejects.toThrow();
     } finally {
       server.close();
     }

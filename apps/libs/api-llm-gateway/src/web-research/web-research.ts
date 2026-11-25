@@ -68,6 +68,9 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
         method: 'GET',
         headers: { ...Object.fromEntries(new Headers(init.headers).entries()), 'accept-encoding': 'identity' },
         lookup,
+        /* No pooled socket: a kept-alive one to this host may have been opened to an address checked for an earlier
+         * request, and reusing it would skip this lookup. */
+        agent: false,
       },
       (response) => {
         const headers = new Headers();
@@ -78,17 +81,23 @@ export const fetchAtAddress = async (url: string, init: RequestInit, address: Re
         }
         const status = response.statusCode ?? 502;
         /* A null-body status cannot carry a stream; drain it. */
-        const empty = status === 204 || status === 304 || (status >= 100 && status < 200);
+        const empty = status === 204 || status === 205 || status === 304;
         if (empty) {
           response.resume();
         }
-        resolve(
-          new Response(empty ? null : (Readable.toWeb(response) as unknown as ReadableStream), {
-            status,
-            statusText: response.statusMessage,
-            headers,
-          }),
-        );
+        try {
+          resolve(
+            new Response(empty ? null : (Readable.toWeb(response) as unknown as ReadableStream), {
+              status,
+              statusText: response.statusMessage,
+              headers,
+            }),
+          );
+        } catch (error) {
+          /* A status the Fetch API cannot represent: fail this fetch, not the process. */
+          response.destroy();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       },
     );
     request.once('error', reject);

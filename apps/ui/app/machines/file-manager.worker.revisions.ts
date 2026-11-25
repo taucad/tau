@@ -16,7 +16,6 @@
  */
 
 import { Topic } from '@taucad/events';
-import { safeModeRefusal, withoutTauCloud } from '#machines/safe-mode-revision-port.js';
 import {
   awaitCheckoutCuts,
   awaitSyncSettled,
@@ -81,7 +80,9 @@ import {
   settleReadiness,
   tauRemoteUrl,
   watchRevisionStream,
+  safeModeRefusal,
   withCommitAuthor,
+  withoutTauCloud,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';

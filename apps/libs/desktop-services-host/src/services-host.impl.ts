@@ -256,6 +256,11 @@ export type AgentHostConfig = {
   readonly tauApiUrl: string;
   readonly tauWebSocketUrl: string;
   /**
+   * This launch started in safe mode (main decides it before `ready`): every project's revisions refuse Tau Cloud before
+   * any request (W9 R5). Read once per project host, never live.
+   */
+  readonly safeMode?: boolean | undefined;
+  /**
    * ACP adapters main resolved and probed (W4-ACP), or absent for Tau's own
    * runs only. Discovery is *main's* because main also advertises the ids to
    * the renderer through the preload bootstrap, and a second resolution here
@@ -1323,6 +1328,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             preparableKernels: nativeKernels.preparable,
           }),
       apiBaseUrl: config.tauApiUrl,
+      ...(config.safeMode === true ? { safeMode: true } : {}),
       syncTelemetryPlacement: 'desktop',
       /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
       syncTelemetryConsent: () => telemetryConsent,

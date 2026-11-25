@@ -522,6 +522,8 @@ describe.skipIf(desktopE2ECompletedArtifact || selfHostedApi)('adaptive desktop 
       })
       .toBe(0);
     await expectVisible(menu.getByRole('menuitem', { name: /^(?:Billing|Upgrade to Pro)\b/u }), 10_000);
+    /* The open menu makes the rest of the page inert; close it to read the footer again. */
+    await second.page.keyboard.press('Escape');
     await expectVisible(footer, 10_000);
     expect(await second.page.evaluate(() => (globalThis as { w9NotReloaded?: boolean }).w9NotReloaded === true)).toBe(
       true,

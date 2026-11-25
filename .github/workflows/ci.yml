@@ -1660,7 +1660,7 @@ jobs:
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
           if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
-          if [ "$BURN_IN_REQUIRED" = true ] && [ "$EVENT" = pull_request ]; then test "$BURN_IN_RESULT" = success; fi
+          if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed

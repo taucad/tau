@@ -96,6 +96,7 @@ export type QuarantineEntry = {
   /** Day the entry was made, `YYYY-MM-DD` (UTC). */
   created: string;
   /** Last day the entry holds, `YYYY-MM-DD` (UTC); the test gates again the day after. */
+  // oxlint-disable-next-line tau-lint/no-bare-time-identifier -- The operator-approved quarantine.json field name.
   expires: string;
   /** The one operator renewal, when there was one. */
   renewal?: QuarantineRenewal;
@@ -193,11 +194,12 @@ export const splitTest = (test: string): { file: string; name: string } | undefi
 };
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const loginPattern = /^[A-Za-z\d](?:[A-Za-z\d]|-(?=[A-Za-z\d])){0,38}$/;
+const loginPattern = /^[\dA-Za-z](?:[\dA-Za-z]|-(?=[\dA-Za-z])){0,38}$/;
 const entryKeys = new Set(['test', 'variant', 'owner', 'issue', 'class', 'created', 'expires', 'renewal', 'evidence']);
 const variantKeys = new Set(['browser', 'os', 'target']);
 const renewalKeys = new Set(['by', 'on']);
-const dayMs = 86_400_000;
+/** Milliseconds in a day. */
+const dayDuration = 86_400_000;
 
 /**
  * Days since the epoch of a `YYYY-MM-DD` day, or `undefined` when it is not a real calendar day.
@@ -214,7 +216,7 @@ export const dayNumber = (day: unknown): number | undefined => {
   if (Number.isNaN(time) || new Date(time).toISOString().slice(0, 10) !== day) {
     return undefined;
   }
-  return time / dayMs;
+  return time / dayDuration;
 };
 
 /**
@@ -246,7 +248,7 @@ export const parseQuarantine = (text: string): { entries: unknown[]; problems: s
   try {
     value = JSON.parse(text);
   } catch (error) {
-    return { entries: [], problems: [`not JSON: ${error instanceof Error ? error.message : String(error)}`] };
+    return { entries: [], problems: [`not JSON: ${(error as SyntaxError).message}`] };
   }
   if (!isRecord(value) || !Array.isArray(value['entries'])) {
     return { entries: [], problems: ['the top level must be an object with an "entries" array'] };
@@ -289,57 +291,81 @@ const variantProblems = (variant: unknown): string[] => {
   return problems;
 };
 
+/** Problems with the one operator renewal; `renewed` is `true` when the entry carries one. */
+const renewalProblems = (
+  renewal: unknown,
+  createdDay: number | undefined,
+  todayNumber: number,
+): { renewed: boolean; problems: string[] } => {
+  if (renewal === undefined) {
+    return { renewed: false, problems: [] };
+  }
+  if (!isRecord(renewal)) {
+    return { renewed: false, problems: ['"renewal" must be an object { by, on }'] };
+  }
+  const problems: string[] = [];
+  const extra = unknownKeys(renewal, renewalKeys);
+  if (extra.length > 0) {
+    problems.push(`unknown "renewal" keys: ${extra.join(', ')}`);
+  }
+  if (typeof renewal['by'] !== 'string' || !loginPattern.test(renewal['by'])) {
+    problems.push('"renewal.by" must be the renewing operator\'s GitHub login, without "@"');
+  }
+  const renewedDay = dayNumber(renewal['on']);
+  if (renewedDay === undefined) {
+    problems.push('"renewal.on" must be a calendar day, YYYY-MM-DD');
+  } else if ((createdDay !== undefined && renewedDay < createdDay) || renewedDay > todayNumber) {
+    problems.push('"renewal.on" must fall between "created" and today');
+  }
+  return { renewed: true, problems };
+};
+
+/** Problems with an entry's age (its `expires` against its `created`) and with its expiry against today. */
+const ageProblems = (days: {
+  expiryText: unknown;
+  createdDay: number;
+  expiryDay: number;
+  todayNumber: number;
+  renewed: boolean;
+}): string[] => {
+  const { createdDay, expiryDay, todayNumber, renewed } = days;
+  const problems: string[] = [];
+  const age = expiryDay - createdDay;
+  const limit = renewed ? quarantineBounds.maximumRenewedAgeDays : quarantineBounds.maximumAgeDays;
+  if (age < 1) {
+    problems.push('"expires" must be after "created"');
+  } else if (age > limit) {
+    problems.push(
+      renewed
+        ? `"expires" is ${age} days after "created"; one renewal allows ${limit} in all, and a second renewal is not allowed`
+        : `"expires" is ${age} days after "created"; an entry holds at most ${limit} days without the one operator renewal`,
+    );
+  }
+  if (todayNumber > expiryDay) {
+    problems.push(`expired on ${String(days.expiryText)}: the test gates again; remove the entry`);
+  }
+  return problems;
+};
+
 const datesProblems = (entry: Record<string, unknown>, today: string): string[] => {
   const problems: string[] = [];
-  const created = dayNumber(entry['created']);
-  const expires = dayNumber(entry['expires']);
-  const now = dayNumber(today) ?? Math.floor(Date.now() / dayMs);
-  if (created === undefined) {
+  const createdDay = dayNumber(entry['created']);
+  const expiryDay = dayNumber(entry['expires']);
+  const todayNumber = dayNumber(today) ?? Math.floor(Date.now() / dayDuration);
+  if (createdDay === undefined) {
     problems.push('"created" must be a calendar day, YYYY-MM-DD');
-  }
-  if (expires === undefined) {
-    problems.push('"expires" must be a calendar day, YYYY-MM-DD');
-  }
-  if (created !== undefined && created > now) {
+  } else if (createdDay > todayNumber) {
     problems.push(`"created" (${String(entry['created'])}) is in the future`);
   }
-  const renewal = entry['renewal'];
-  let renewed = false;
-  if (renewal !== undefined) {
-    if (!isRecord(renewal)) {
-      problems.push('"renewal" must be an object { by, on }');
-    } else {
-      renewed = true;
-      const extra = unknownKeys(renewal, renewalKeys);
-      if (extra.length > 0) {
-        problems.push(`unknown "renewal" keys: ${extra.join(', ')}`);
-      }
-      if (typeof renewal['by'] !== 'string' || !loginPattern.test(renewal['by'])) {
-        problems.push('"renewal.by" must be the renewing operator\'s GitHub login, without "@"');
-      }
-      const on = dayNumber(renewal['on']);
-      if (on === undefined) {
-        problems.push('"renewal.on" must be a calendar day, YYYY-MM-DD');
-      } else if ((created !== undefined && on < created) || on > now) {
-        problems.push('"renewal.on" must fall between "created" and today');
-      }
-    }
+  if (expiryDay === undefined) {
+    problems.push('"expires" must be a calendar day, YYYY-MM-DD');
   }
-  if (created !== undefined && expires !== undefined) {
-    const age = expires - created;
-    const limit = renewed ? quarantineBounds.maximumRenewedAgeDays : quarantineBounds.maximumAgeDays;
-    if (age < 1) {
-      problems.push('"expires" must be after "created"');
-    } else if (age > limit) {
-      problems.push(
-        renewed
-          ? `"expires" is ${age} days after "created"; one renewal allows ${limit} in all, and a second renewal is not allowed`
-          : `"expires" is ${age} days after "created"; an entry holds at most ${limit} days without the one operator renewal`,
-      );
-    }
-    if (now > expires) {
-      problems.push(`expired on ${String(entry['expires'])}: the test gates again; remove the entry`);
-    }
+  const renewal = renewalProblems(entry['renewal'], createdDay, todayNumber);
+  problems.push(...renewal.problems);
+  if (createdDay !== undefined && expiryDay !== undefined) {
+    problems.push(
+      ...ageProblems({ expiryText: entry['expires'], createdDay, expiryDay, todayNumber, renewed: renewal.renewed }),
+    );
   }
   return problems;
 };
@@ -422,7 +448,12 @@ export const variantCovers = (variant: QuarantineVariant | undefined, execution:
  * @public
  */
 export const entryKey = (entry: QuarantineEntry): string =>
-  JSON.stringify([entry.test, entry.variant?.browser ?? null, entry.variant?.os ?? null, entry.variant?.target ?? null]);
+  JSON.stringify([
+    entry.test,
+    entry.variant?.browser ?? null,
+    entry.variant?.os ?? null,
+    entry.variant?.target ?? null,
+  ]);
 
 /**
  * Reads the entries that hold today from a parsed file: each one that breaks a rule is dropped with its problems, so a
@@ -445,7 +476,8 @@ export const readQuarantine = (
   const seen = new Set<string>();
   for (const [index, raw] of parsed.entries.entries()) {
     const found = entryProblems(raw, context, today);
-    const label = isRecord(raw) && typeof raw['test'] === 'string' ? `entries[${index}] (${raw['test']})` : `entries[${index}]`;
+    const label =
+      isRecord(raw) && typeof raw['test'] === 'string' ? `entries[${index}] (${raw['test']})` : `entries[${index}]`;
     if (found.length > 0) {
       problems.push(...found.map((problem) => `${label}: ${problem}`));
       continue;

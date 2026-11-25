@@ -38,11 +38,11 @@ type VerdictCaseLike = {
 /** Structural view of the Vitest test module the verdict reads. */
 type VerdictModuleLike = {
   readonly moduleId: string;
-  errors(): readonly ErrorLike[];
   readonly children: {
     allTests(): Iterable<VerdictCaseLike>;
     allSuites(): Iterable<{ readonly fullName: string; errors(): readonly ErrorLike[] }>;
   };
+  errors(): readonly ErrorLike[];
 };
 
 /** Structural view of the Vitest instance the verdict reads in `onInit`. */
@@ -161,12 +161,11 @@ const readText = (file: string): string | undefined => {
 
 type RecordedRow = { kind?: unknown; file?: unknown; name?: unknown; state?: unknown } & Partial<OutcomeExecution>;
 
+const executionKeys = ['hash', 'run', 'attempt', 'job', 'sha'] as const;
+
+/** Whether a row belongs to this execution; the recorder writes an absent identifier as `null`. */
 const sameExecution = (row: RecordedRow, execution: OutcomeExecution): boolean =>
-  (row.hash ?? undefined) === execution.hash &&
-  (row.run ?? undefined) === execution.run &&
-  (row.attempt ?? undefined) === execution.attempt &&
-  (row.job ?? undefined) === execution.job &&
-  (row.sha ?? undefined) === execution.sha;
+  executionKeys.every((key) => (row[key] ?? undefined) === execution[key]);
 
 /** The failed test rows of this execution in the outcome file, or `undefined` when the file is missing or unreadable. */
 const recordedFailures = (recording: OutcomeRecording): Set<string> | undefined => {
@@ -198,6 +197,71 @@ const escapeAnnotation = (text: string): string =>
 const describeErrors = (errors: readonly ErrorLike[]): string =>
   errors.map((error) => error.message ?? error.name ?? 'Error').join('; ');
 
+/** What the run executed, read from Vitest's modules: every test, the files and every failure outside a test. */
+const readRun = (
+  testModules: readonly VerdictModuleLike[],
+  projectRoot: string,
+): { tests: VerdictTest[]; executedFiles: Set<string>; otherFailures: string[] } => {
+  const tests: VerdictTest[] = [];
+  const executedFiles = new Set<string>();
+  const otherFailures: string[] = [];
+  for (const testModule of testModules) {
+    const file = toPosix(
+      isAbsolute(testModule.moduleId) ? relative(projectRoot, testModule.moduleId) : testModule.moduleId,
+    );
+    executedFiles.add(file);
+    const moduleErrors = testModule.errors();
+    if (moduleErrors.length > 0) {
+      otherFailures.push(`${file} failed outside its tests: ${describeErrors(moduleErrors)}`);
+    }
+    for (const suite of testModule.children.allSuites()) {
+      const suiteErrors = suite.errors();
+      if (suiteErrors.length > 0) {
+        otherFailures.push(`${file}${testSeparator}${suite.fullName} failed in a hook: ${describeErrors(suiteErrors)}`);
+      }
+    }
+    for (const testCase of testModule.children.allTests()) {
+      const { browser } = testCase.project.config;
+      tests.push({
+        file,
+        name: testCase.fullName,
+        state: testCase.result().state,
+        browser: browser?.enabled === true && browser.name ? browser.name : undefined,
+      });
+    }
+  }
+  return { tests, executedFiles, otherFailures };
+};
+
+/** Appends the excused failures to the GitHub Actions job summary; the summary is a convenience, never the record. */
+const writeSummary = (summary: string | undefined, project: string, excused: Verdict['excused']): void => {
+  if (summary === undefined || summary === '' || excused.length === 0) {
+    return;
+  }
+  const rows = excused.map(
+    ({ test, entry }) =>
+      `| ${project} | ${identity(test).replaceAll('|', String.raw`\|`)} | #${entry.issue} | ${entry.class} | ${entry.expires} |`,
+  );
+  try {
+    appendFileSync(
+      summary,
+      [
+        '',
+        '| Project | Quarantined failure (non-gating) | Issue | Class | Expires |',
+        '| --- | --- | --- | --- | --- |',
+        ...rows,
+        '',
+      ].join('\n'),
+    );
+  } catch {
+    // The annotation and the outcome row carry the record.
+  }
+};
+
+const defaultLog = (line: string): void => {
+  console.log(line);
+};
+
 /**
  * Sets the task's verdict from the outcome record and the project's `quarantine.json`. Add it through
  * `testReporters`, which places it after the {@link OutcomeReporter} it reads.
@@ -221,8 +285,8 @@ export class QuarantineVerdict implements Reporter {
   }
 
   public onInit(vitest: VerdictVitestLike): void {
-    this.#watch = vitest.config.watch === true;
-    const coverage = vitest.config.coverage;
+    const { watch, coverage } = vitest.config;
+    this.#watch = watch === true;
     this.#coverageHidesThresholds = coverage?.enabled === true && coverage.reportOnFailure !== true;
   }
 
@@ -239,100 +303,73 @@ export class QuarantineVerdict implements Reporter {
     unhandledErrors: readonly ErrorLike[],
     reason?: 'passed' | 'interrupted' | 'failed',
   ): void {
-    const recording = this.#recorder.recording;
+    const { recording } = this.#recorder;
     if (this.#watch || recording === undefined) {
       return;
     }
     const env = this.#options.env ?? process.env;
-    const log = this.#options.log ?? ((line: string): void => console.log(line));
+    const log = this.#options.log ?? defaultLog;
     const onGitHub = env['GITHUB_ACTIONS'] === 'true';
-    const today = utcDay(this.#options.now?.() ?? new Date());
-    const projectRoot = toPosix(relative(recording.workspaceRoot, recording.projectRoot));
-    const quarantineFile = this.#options.quarantineFile ?? join(recording.projectRoot, quarantineFileName);
-    const text = readText(quarantineFile);
-    const quarantine =
-      text === undefined ? { entries: [], problems: [] } : readQuarantine(text, { projectRoot }, today);
-    for (const problem of quarantine.problems) {
-      log(
-        onGitHub
-          ? `::warning title=Quarantine entry not honoured::${escapeAnnotation(`${quarantineFile}: ${problem}`)}`
-          : `quarantine: not honoured: ${quarantineFile}: ${problem}`,
-      );
-    }
-
-    const relativeFile = (moduleId: string): string =>
-      toPosix(isAbsolute(moduleId) ? relative(recording.projectRoot, moduleId) : moduleId);
-    const tests: VerdictTest[] = [];
-    const executedFiles = new Set<string>();
-    const otherFailures: string[] = [];
-    for (const testModule of testModules) {
-      const file = relativeFile(testModule.moduleId);
-      executedFiles.add(file);
-      const moduleErrors = testModule.errors();
-      if (moduleErrors.length > 0) {
-        otherFailures.push(`${file} failed outside its tests: ${describeErrors(moduleErrors)}`);
-      }
-      for (const suite of testModule.children.allSuites()) {
-        const suiteErrors = suite.errors();
-        if (suiteErrors.length > 0) {
-          otherFailures.push(`${file}${testSeparator}${suite.fullName} failed in a hook: ${describeErrors(suiteErrors)}`);
-        }
-      }
-      for (const testCase of testModule.children.allTests()) {
-        const { browser } = testCase.project.config;
-        tests.push({
-          file,
-          name: testCase.fullName,
-          state: testCase.result().state,
-          browser: browser?.enabled === true && browser.name ? browser.name : undefined,
-        });
-      }
-    }
+    const quarantine = this.#readEntries(recording, onGitHub, log);
+    const run = readRun(testModules, recording.projectRoot);
     if (unhandledErrors.length > 0) {
-      otherFailures.push(`${unhandledErrors.length} unhandled error(s): ${describeErrors(unhandledErrors)}`);
+      run.otherFailures.push(`${unhandledErrors.length} unhandled error(s): ${describeErrors(unhandledErrors)}`);
     }
     if (reason === 'interrupted') {
-      otherFailures.push('the run was interrupted');
+      run.otherFailures.push('the run was interrupted');
     }
-
-    let recorded: Set<string> | undefined | null = null;
+    let recorded: Set<string> | undefined;
+    let recordRead = false;
     const verdict = decideVerdict({
-      tests,
-      executedFiles,
-      otherFailures,
-      entries: quarantine.entries,
+      ...run,
+      entries: quarantine,
       os: process.platform,
       target: normalizeTarget(recording.target),
       recorded: (test) => {
-        recorded ??= recordedFailures(recording);
+        if (!recordRead) {
+          recorded = recordedFailures(recording);
+          recordRead = true;
+        }
         return recorded?.has(identity(test)) ?? false;
       },
     });
     if (verdict.excused.length > 0 && this.#coverageHidesThresholds) {
       verdict.pass = false;
-      verdict.gating.push('coverage is on: Vitest skips its thresholds once a test fails, so a quarantined failure cannot pass');
+      verdict.gating.push(
+        'coverage is on: Vitest skips its thresholds once a test fails, so a quarantined failure cannot pass',
+      );
     }
-
     for (const { test, entry } of verdict.excused) {
       const message = `quarantined failure, non-gating, #${entry.issue} (${entry.class}, owner ${entry.owner}, expires ${entry.expires}): ${identity(test)}`;
       log(onGitHub ? `::notice title=Quarantined failure::${escapeAnnotation(message)}` : `quarantine: ${message}`);
     }
-    const summary = env['GITHUB_STEP_SUMMARY'];
-    if (summary !== undefined && summary !== '' && verdict.excused.length > 0) {
-      const rows = verdict.excused.map(
-        ({ test, entry }) =>
-          `| ${recording.project} | ${identity(test).replaceAll('|', '\\|')} | #${entry.issue} | ${entry.class} | ${entry.expires} |`,
-      );
-      try {
-        appendFileSync(
-          summary,
-          ['', '| Project | Quarantined failure (non-gating) | Issue | Class | Expires |', '| --- | --- | --- | --- | --- |', ...rows, ''].join('\n'),
-        );
-      } catch {
-        // The summary is a convenience; the annotation and the outcome row carry the record.
-      }
-    }
+    writeSummary(env['GITHUB_STEP_SUMMARY'], recording.project, verdict.excused);
+    this.#settle(verdict, quarantine.length > 0, log);
+  }
 
+  /** The entries valid today; each one that is not is printed, and excuses nothing. */
+  #readEntries(recording: OutcomeRecording, onGitHub: boolean, log: (line: string) => void): QuarantineEntry[] {
+    const quarantineFile = this.#options.quarantineFile ?? join(recording.projectRoot, quarantineFileName);
+    const text = readText(quarantineFile);
+    if (text === undefined) {
+      return [];
+    }
+    const today = utcDay(this.#options.now?.() ?? new Date());
+    const projectRoot = toPosix(relative(recording.workspaceRoot, recording.projectRoot));
+    const { entries, problems } = readQuarantine(text, { projectRoot }, today);
+    for (const problem of problems) {
+      const line = `${quarantineFile}: ${problem}`;
+      log(
+        onGitHub
+          ? `::warning title=Quarantine entry not honoured::${escapeAnnotation(line)}`
+          : `quarantine: not honoured: ${line}`,
+      );
+    }
+    return entries;
+  }
+
+  /** Sets the exit code: lowered to 0 only for a run whose every failure is excused, raised to 1 otherwise. */
+  #settle(verdict: Verdict, hasEntries: boolean, log: (line: string) => void): void {
     if (verdict.pass) {
       const before = this.#exitCodeBefore;
       if (verdict.excused.length > 0 && (before === undefined || Number(before) === 0)) {
@@ -341,7 +378,7 @@ export class QuarantineVerdict implements Reporter {
       }
       return;
     }
-    if (quarantine.entries.length > 0 || verdict.excused.length > 0) {
+    if (hasEntries || verdict.excused.length > 0) {
       for (const line of verdict.gating) {
         log(`quarantine: gating: ${line}`);
       }

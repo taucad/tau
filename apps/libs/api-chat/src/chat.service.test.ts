@@ -11,7 +11,7 @@ import type { BillableModelProviderAdapter } from '@taucad/api-billing';
 /* eslint-disable @typescript-eslint/naming-convention -- synthetic supplier fixture uses exact Responses fields */
 const nativeStream = (terminal: 'completed' | 'incomplete' = 'completed') =>
   [
-    { type: 'response.created', response: { id: 'response-fixture', model: 'gpt-5.6-luna', created_at: 1 } },
+    { type: 'response.created', response: { id: 'response-fixture', model: 'gpt-6-luna', created_at: 1 } },
     {
       type: 'response.output_item.added',
       output_index: 0,
@@ -39,7 +39,7 @@ const nativeStream = (terminal: 'completed' | 'incomplete' = 'completed') =>
       type: `response.${terminal}`,
       response: {
         id: 'response-fixture',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         created_at: 1,
         status: terminal,
         ...(terminal === 'incomplete' ? { incomplete_details: { reason: 'max_output_tokens' } } : {}),
@@ -61,7 +61,7 @@ const validPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A
 it('uses the installed SDK for native text/image input and the actual UI stream consumer', async () => {
   const owner = mock<ModelInvocationService>();
   const resolver = new CodeOwnedBillableModelQualificationResolver({
-    adapters: new Map([['openai-gpt-5.6-luna', mock<BillableModelProviderAdapter>()]]),
+    adapters: new Map([['openai-gpt-6-luna', mock<BillableModelProviderAdapter>()]]),
     executionTimeout: 1000,
   });
   let captured: ModelInvocationIntent | undefined;

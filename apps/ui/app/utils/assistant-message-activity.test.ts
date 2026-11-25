@@ -174,7 +174,18 @@ describe('assistant message activity', () => {
   it('keeps approvals, mixed failures, and denials truthful', () => {
     expect(describeActivity([tool('tool-edit_file', 'approval-requested')])).toBe('File edits awaiting approval');
     expect(describeActivity([tool('tool-read_file'), tool('tool-read_file', 'output-error')])).toBe(
-      'Read files (some failed)',
+      'Read files (1 of 2 failed)',
+    );
+    expect(
+      describeActivity([
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'input-available'),
+        tool('tool-shell'),
+      ]),
+    ).toBe('Reading files (2 of 3 failed), ran commands');
+    expect(describeActivity([tool('tool-shell'), tool('tool-shell', 'output-denied'), tool('tool-shell')])).toBe(
+      'Ran commands (1 of 3 denied)',
     );
     expect(describeActivity([tool('tool-test_model', 'output-denied')])).toBe('Tests denied');
   });

@@ -328,22 +328,27 @@ const displayTitle = (part: MyMessagePart, isActive: boolean): string => {
   return typeof title === 'string' && title.trim() !== '' ? title.trim() : part.toolName;
 };
 
+/** " (2 of 3 failed)": how many of a family's calls did not go through, so the closed line says it without being opened. */
+const shortfallSuffix = (states: readonly ActivityState[]): string => {
+  const failed = states.filter((state) => state === 'error').length;
+  if (failed > 0) {
+    return ` (${String(failed)} of ${String(states.length)} failed)`;
+  }
+  const denied = states.filter((state) => state === 'denied').length;
+  return denied > 0 ? ` (${String(denied)} of ${String(states.length)} denied)` : '';
+};
+
 const familyState = (parts: readonly MyMessagePart[]): { state: ActivityState; suffix: string } => {
-  const states = new Set(parts.map((part) => partState(part)));
+  const partStates = parts.map((part) => partState(part));
+  const states = new Set(partStates);
   if (states.has('approval')) {
     return { state: 'approval', suffix: '' };
   }
   if (states.has('active')) {
-    return {
-      state: 'active',
-      suffix: states.has('error') ? ' (some failed)' : states.has('denied') ? ' (some denied)' : '',
-    };
+    return { state: 'active', suffix: shortfallSuffix(partStates) };
   }
   if (states.has('completed')) {
-    return {
-      state: 'completed',
-      suffix: states.has('error') ? ' (some failed)' : states.has('denied') ? ' (some denied)' : '',
-    };
+    return { state: 'completed', suffix: shortfallSuffix(partStates) };
   }
   return states.has('error') ? { state: 'error', suffix: '' } : { state: 'denied', suffix: '' };
 };

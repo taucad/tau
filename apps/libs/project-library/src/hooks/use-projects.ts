@@ -143,6 +143,18 @@ export function useProjects(inputs: ProjectsInputs, options?: { scope?: ProjectS
     ],
   );
 
+  /* One copy of a project that another directory also holds (blueprint W0): the project, its chats index, layout,
+   * composer records and view exceptions live on in the other copy, so nothing keyed by the id is stopped or dropped
+   * here. An open session reads the folder its route named, which may be this copy by now, so it closes first, as
+   * choosing a folder does. */
+  const handleDeleteProjectCopy = useCallback(
+    async (projectId: string, locator: ProjectLocator): Promise<void> => {
+      await closeProjectSession(projectId);
+      await permanentlyDeleteProject(projectId, locator);
+    },
+    [closeProjectSession, permanentlyDeleteProject],
+  );
+
   const handleDuplicateProject = useCallback(
     async (projectId: string): Promise<CreatedProject> => duplicateProject(projectId),
     [duplicateProject],
@@ -205,6 +217,7 @@ export function useProjects(inputs: ProjectsInputs, options?: { scope?: ProjectS
     deleteProject: handleDeleteProject,
     restoreProject: handleRestoreProject,
     permanentlyDeleteProject: handlePermanentlyDeleteProject,
+    deleteProjectCopy: handleDeleteProjectCopy,
     duplicateProject: handleDuplicateProject,
     adoptProject: handleAdoptProject,
     repairProject: handleRepairProject,

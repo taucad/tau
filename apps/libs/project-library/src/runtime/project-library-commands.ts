@@ -145,8 +145,8 @@ type CreateProjectFromKernel = CreateProjectChatOptions & {
    * and evaluates becomes main.
    */
   kernel: KernelProvider | 'auto';
-  /** Override default project name */
-  projectName?: string;
+  /** Override default project name; a promise is awaited only where the name is needed, so the create overlaps it. */
+  projectName?: string | Promise<string>;
 };
 
 /**

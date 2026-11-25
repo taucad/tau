@@ -107,8 +107,9 @@ export function NewProjectChatComposer({
         .getSnapshot()
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
       try {
-        /* C1: a name asked for while the prompt was written; without one, the create asks and overlaps the wait. */
-        const projectName = await nameAhead.take({ text: content, attachments });
+        /* C1: a name asked for while the prompt was written, unawaited so the create's setup overlaps it; without one,
+         * the create asks and overlaps the wait itself. */
+        const projectName = nameAhead.take({ text: content, attachments });
         const created = await projectManager.createProject({
           kernel: creationKernel,
           ...(projectName === undefined ? {} : { projectName }),

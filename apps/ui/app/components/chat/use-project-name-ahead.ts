@@ -26,10 +26,10 @@ export type ProjectNameAhead = Readonly<{
   /** Note the draft changed; `pasted` asks at once instead of after the pause. */
   update: (draft: NameAheadDraft, pasted: boolean) => void;
   /**
-   * The name for a submitted draft: a held answer or the request in flight for it (`New Project` if that fails);
-   * `undefined` if neither covers it.
+   * The name for a submitted draft: a held answer or the request in flight for it (`New Project` if that fails),
+   * returned unawaited so the create overlaps it; `undefined` if no request covers the draft.
    */
-  take: (draft: NameAheadDraft) => Promise<string | undefined>;
+  take: (draft: NameAheadDraft) => Promise<string> | undefined;
   dispose: () => void;
 }>;
 
@@ -41,12 +41,18 @@ const minimumWords = 3;
 
 type Named = { readonly text: string; readonly attachments: string; name: Promise<string | undefined> };
 
+/** The name a request gave, or `New Project` where it gave none. */
+const nameOrDefault = async (named: Named): Promise<string> => (await named.name) ?? defaultProjectName;
+
 const attachmentsKey = (attachments: NameAheadDraft['attachments']): string =>
   attachments.map((attachment) => attachment.hash).join(',');
 
-/** A name made for `named` is kept for `text` only if `text` extends it to at most twice its length (C1). */
+/** A name made for `named` is kept for `text` only if `text` extends it, past a whole word, to at most twice its length (C1). */
 const covers = (named: Named, text: string, attachments: string): boolean =>
-  named.attachments === attachments && text.startsWith(named.text) && named.text.length * 2 >= text.length;
+  named.attachments === attachments &&
+  text.startsWith(named.text) &&
+  (text.length === named.text.length || !/\w/.test(text.charAt(named.text.length))) &&
+  named.text.length * 2 >= text.length;
 
 /**
  * Name ahead (C1): asks for a new project's name while its prompt is written, so the create that follows finds it
@@ -58,6 +64,8 @@ const covers = (named: Named, text: string, attachments: string): boolean =>
  */
 export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAhead => {
   let latest: (Named & { readonly controller: AbortController }) | undefined;
+  /* The last request that failed: a submit it covers takes the fallback rather than asking a fourth time. */
+  let failed: Named | undefined;
   let requests = 0;
   let projectId = generatePrefixedId(idPrefix.project);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -74,6 +82,7 @@ export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAh
     /* A failed answer is not held, so a later pause may ask again within the cap. */
     if (name === undefined && latest === entry) {
       latest = undefined;
+      failed = entry;
     }
     return name;
   };
@@ -98,6 +107,7 @@ export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAh
       if (text === '') {
         latest?.controller.abort();
         latest = undefined;
+        failed = undefined;
         requests = 0;
         projectId = generatePrefixedId(idPrefix.project);
         return;
@@ -118,14 +128,13 @@ export const createProjectNameAhead = (request: NameAheadRequest): ProjectNameAh
         }, nameAheadPause);
       }
     },
-    async take(draft) {
+    take(draft): Promise<string> | undefined {
       clearTimeout(timer);
-      const entry = latest;
-      if (entry === undefined || !covers(entry, draft.text.trim(), attachmentsKey(draft.attachments))) {
-        return undefined;
-      }
-      /* The request for this text failed: today's fallback, not a second request at creation. */
-      return (await entry.name) ?? defaultProjectName;
+      const text = draft.text.trim();
+      const attachments = attachmentsKey(draft.attachments);
+      const entry = [latest, failed].find((named) => named !== undefined && covers(named, text, attachments));
+      /* The request for this text failed: today's fallback, not another request at creation. */
+      return entry === undefined ? undefined : nameOrDefault(entry);
     },
     dispose() {
       clearTimeout(timer);

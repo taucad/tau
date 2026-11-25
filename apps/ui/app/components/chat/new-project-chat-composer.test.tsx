@@ -11,7 +11,7 @@ const mockConsumeDraft = vi.fn(async () => undefined);
 const mockPresentLocationError = vi.fn(() => false);
 const mockRefresh = vi.fn(async () => undefined);
 const mockFocus = vi.fn();
-const mockTakeName = vi.fn<(draft: { text: string }) => Promise<string | undefined>>();
+const mockTakeName = vi.fn<(draft: { text: string }) => Promise<string> | undefined>();
 let routerLocationState: unknown;
 let locationKey = 0;
 let capturedTextarea: ChatTextareaProperties | undefined;
@@ -113,7 +113,7 @@ describe('NewProjectChatComposer', () => {
     draftAttachments = [];
     attachmentSource = undefined;
     routerLocationState = null;
-    mockTakeName.mockResolvedValue(undefined);
+    mockTakeName.mockReturnValue(undefined);
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'workshop', projectSlug: 'bracket' } });
   });
 
@@ -181,10 +181,14 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
   });
 
-  /* C1: a name held from writing the prompt is the project's name, so the create asks for none. */
-  it('creates the project under the name held for the submitted draft', async () => {
+  /* C1: a name asked for while the prompt was written is the project's name, so the create asks for none; it is
+   * handed over unawaited, so a request still in flight does not hold back the create's setup. */
+  it('creates the project under the name asked for the submitted draft, without waiting for it', async () => {
     draftAttachments = [{ hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 3 }];
-    mockTakeName.mockResolvedValue('Pipe Wall Bracket');
+    const inFlight = new Promise<string>(() => {
+      /* Never settles: the create must not wait for it. */
+    });
+    mockTakeName.mockReturnValue(inFlight);
     render(<NewProjectChatComposer />);
 
     await act(async () => {
@@ -195,7 +199,7 @@ describe('NewProjectChatComposer', () => {
       text: 'A wall bracket for a pipe',
       attachments: [{ hash: 'a'.repeat(64), mediaType: 'image/png' }],
     });
-    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: 'Pipe Wall Bracket' }));
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: inFlight }));
   });
 
   it('leaves naming to the create when no name is held', async () => {

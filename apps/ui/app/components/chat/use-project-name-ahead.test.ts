@@ -122,11 +122,11 @@ describe('createProjectNameAhead', () => {
     calls[0]?.reply.resolve('Wall Bracket');
     await vi.runAllTimersAsync();
 
-    await expect(nameAhead.take(textDraft('A phone stand'))).resolves.toBeUndefined();
-    await expect(
-      nameAhead.take(textDraft('A wall bracket for a 32 mm pipe with two screw holes')),
-    ).resolves.toBeUndefined();
-    await expect(nameAhead.take({ text: 'A wall bracket', attachments: [storedImage('h1')] })).resolves.toBeUndefined();
+    expect(nameAhead.take(textDraft('A phone stand'))).toBeUndefined();
+    expect(nameAhead.take(textDraft('A wall bracket for a 32 mm pipe with two screw holes'))).toBeUndefined();
+    expect(nameAhead.take({ text: 'A wall bracket', attachments: [storedImage('h1')] })).toBeUndefined();
+    /* An extension inside a word changes what was named: "bracket" is not "bracketed". */
+    expect(nameAhead.take(textDraft('A wall bracketed shelf'))).toBeUndefined();
   });
 
   it('should await the request in flight for the submitted text instead of repeating it', async () => {
@@ -170,14 +170,14 @@ describe('createProjectNameAhead', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it('should ask again after a failed answer', async () => {
+  it('should ask again after a failed answer, and give a submit it covers the default name rather than a request', async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
     nameAhead.update(textDraft('A wall bracket'), true);
     calls[0]?.reply.reject(new Error('offline'));
     await vi.runAllTimersAsync();
 
-    await expect(nameAhead.take(textDraft('A wall bracket'))).resolves.toBeUndefined();
+    await expect(nameAhead.take(textDraft('A wall bracket'))).resolves.toBe('New Project');
     nameAhead.update(textDraft('A wall bracket'), true);
     expect(request).toHaveBeenCalledTimes(2);
   });
@@ -258,7 +258,7 @@ describe('useProjectNameAhead', () => {
     await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
 
     expect(mockGenerate).not.toHaveBeenCalled();
-    await expect(result.current.take(textDraft('A wall bracket for a pipe'))).resolves.toBeUndefined();
+    expect(result.current.take(textDraft('A wall bracket for a pipe'))).toBeUndefined();
   });
 
   it('should return a stable take across rerenders', () => {

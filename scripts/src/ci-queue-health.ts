@@ -144,10 +144,14 @@ export type CancelledWaste = {
 
 /**
  * One job-level infrastructure retry event: an `infra-retry` annotation that `.github/actions/apt-install/infra-retry.sh`
- * (and `apt-install.sh`) write for each retried attempt of a setup step and for a step that ran out of attempts.
+ * (and `apt-install.sh` and `download.sh`) write for each retried attempt of a setup step and for a step that ran out
+ * of attempts.
  */
 export type InfraRetryEvent = {
-  /** The setup step: `apt-install`, `playwright-install`, `pandoc-download`, `pnpm-download`, `pnpm-install`. */
+  /**
+   * The setup step: `apt-install`, `playwright-install`, `pnpm-download`, `pnpm-install`, or a pinned download
+   * (`pandoc-download`, `dotnet-sdk-download`, `node-floor-download`).
+   */
   readonly step: string;
   /** The stable failure signature, e.g. `connection-failed`, `dpkg-interrupted`, `timeout`, `exit-100`. */
   readonly signature: string;

@@ -766,7 +766,7 @@ jobs:
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --location --retry 7 --retry-all-errors \
             --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
@@ -1034,7 +1034,7 @@ jobs:
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --location --retry 7 --retry-all-errors \
             --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
@@ -1278,7 +1278,7 @@ jobs:
           found=false
           origin=https://downloads.tau.new
           if [ "$CHANNEL" = staging ]; then origin=https://downloads.taucad.dev; fi
-          status=$(curl --silent --show-error --retry 3 --output "$RUNNER_TEMP/current.json" --write-out '%{http_code}' "$origin/latest/download.json")
+          status=$(curl --silent --show-error --retry 7 --retry-all-errors --output "$RUNNER_TEMP/current.json" --write-out '%{http_code}' "$origin/latest/download.json")
           if [ "$status" != 200 ] && [ "$status" != 404 ]; then echo "Current download pointer returned $status" >&2; exit 1; fi
           # Prefer the actual installed channel baseline. Only initial bootstrap
           # (or a retry of an already-promoted tag) falls back to mirrored candidates.
@@ -1304,7 +1304,8 @@ jobs:
             # Older ARM-only releases cannot serve as an Intel baseline.
             if ! jq -e --arg target "$TARGET" '.assets[$target]' "$previous_dir/download.json" > /dev/null; then continue; fi
             url=$(jq -r --arg target "$TARGET" '.assets[$target].url' "$previous_dir/download.json")
-            curl --fail --location --retry 3 "$url" --output "$RUNNER_TEMP/baseline.zip"
+            # Every error is retried, a failed name resolution included, for about two minutes (1, 2, … 64 s).
+            curl --fail --location --retry 7 --retry-all-errors "$url" --output "$RUNNER_TEMP/baseline.zip"
             expected=$(jq -r --arg target "$TARGET" '.assets[$target].sha256' "$previous_dir/download.json")
             printf '%s  %s\n' "$expected" "$RUNNER_TEMP/baseline.zip" | shasum -a 256 -c -
             found=true

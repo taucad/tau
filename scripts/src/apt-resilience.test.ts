@@ -192,23 +192,24 @@ describe('apt installs in workflows and composite actions', () => {
 });
 
 /*
- * The other infrastructure downloads (the Playwright browsers, Pandoc, pnpm through corepack and its install) retry
+ * The other infrastructure downloads (the Playwright browsers, pnpm through corepack and its install) retry
  * through `infra-retry.sh` beside the installer, and every retry is an `infra-retry` annotation the CI health report
- * counts. Never a test step.
+ * counts; pinned files such as Pandoc download through `download.sh`, which retries through it too
+ * (pinned-download.test.ts). Never a test step.
  */
 describe('infrastructure step retries in workflows and composite actions', () => {
   const lists = stepLists();
   const retried =
     /(?:^|\s)(?:bash "\$GITHUB_ACTION_PATH\/\.\.\/apt-install\/|\.\/(?:\.tau-ci\/)?\.github\/actions\/apt-install\/)infra-retry\.sh (\S+) /u;
 
-  it('should install every Playwright browser and download Pandoc through infra-retry.sh', () => {
+  it('should install every Playwright browser through infra-retry.sh', () => {
     const bare: string[] = [];
     let wrapped = 0;
     for (const [where, steps] of lists) {
       const sideLoaded = steps.some((step) => step.uses?.startsWith('./.tau-ci/') === true);
       for (const step of steps) {
         for (const line of (step.run ?? '').split('\n')) {
-          if (!/playwright install (?!-)|curl \S+ -o "\$RUNNER_TEMP\/pandoc\.deb"/u.test(line)) {
+          if (!/playwright install (?!-)/u.test(line)) {
             continue;
           }
           if (!retried.test(line)) {
@@ -263,10 +264,7 @@ describe('infrastructure step retries in workflows and composite actions', () =>
     for (const [where, steps] of lists) {
       for (const step of steps) {
         const match = retried.exec(step.run ?? '');
-        if (
-          match &&
-          !['playwright-install', 'pandoc-download', 'pnpm-download', 'pnpm-install'].includes(match[1] ?? '')
-        ) {
+        if (match && !['playwright-install', 'pnpm-download', 'pnpm-install'].includes(match[1] ?? '')) {
           tests.push(`${where}: ${match[1] ?? ''}`);
         }
       }

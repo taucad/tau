@@ -426,7 +426,7 @@ describe('chatSessionMachine run ownership', () => {
     const actor = startOwning(script.actors);
     const dispatched: unknown[] = [];
     actor.on('startTurnRequest', (event) => dispatched.push(event));
-    const message = { id: 'msg-q', role: 'user', parts: [{ type: 'text', text: 'hi' }] } as const;
+    const message: MyUIMessage = { id: 'msg-q', role: 'user', parts: [{ type: 'text', text: 'hi' }] };
 
     actor.send({ type: 'requestTurn', gesture: { kind: 'send', message, queueId: 'msg-q' } });
     expect(runState(actor)).toBe('queued.admitting');

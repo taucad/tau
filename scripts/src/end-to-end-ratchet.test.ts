@@ -199,35 +199,20 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(oracles.map(({ job }) => job)).toContain('Browser end-to-end (agent-plugin test:e2e)');
   });
 
-  it('should leave every ratcheted suite out of the nightly matrix', () => {
+  const target = (config: Record<string, unknown> = {}): Record<string, unknown> => config;
+
+  /** Runs the nightly plan's suite listing against a stub Nx whose graph holds `nodes`. */
+  const planNightly = (
+    nodes: Record<string, unknown>,
+  ): {
+    readonly status: ReturnType<typeof spawnSync>['status'];
+    readonly stderr: string;
+    readonly labels: readonly string[];
+  } => {
     const script = nightly.jobs['plan']?.steps?.find((candidate) => candidate.id === 'suites')?.run ?? '';
     const directory = mkdtempSync(join(tmpdir(), 'tau-e2e-nightly-plan-'));
     try {
-      const target = (config: Record<string, unknown> = {}): Record<string, unknown> => config;
-      const graph = {
-        graph: {
-          nodes: {
-            'ui-e2e': {
-              name: 'ui-e2e',
-              data: {
-                targets: {
-                  'test:e2e': target({ metadata: { shards: 2 } }),
-                  'test:e2e:development': target(),
-                  'test:e2e:daemon-host': target(),
-                  'test:e2e:browser-host': target(),
-                  'test:e2e:queue': target({ dependsOn: ['test:e2e:development', 'test:e2e:daemon-host'] }),
-                },
-              },
-            },
-            'agent-host': {
-              name: 'agent-host',
-              data: { targets: { 'test:e2e': target(), 'test:e2e:queue': target({ dependsOn: ['test:e2e'] }) } },
-            },
-            viewer: { name: 'viewer', data: { targets: { 'test:e2e': target() } } },
-          },
-        },
-      };
-      writeFileSync(join(directory, 'graph-fixture.json'), JSON.stringify(graph));
+      writeFileSync(join(directory, 'graph-fixture.json'), JSON.stringify({ graph: { nodes } }));
       writeFileSync(
         join(directory, 'pnpm'),
         [
@@ -256,16 +241,76 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
           ['SUITES_WITHOUT_CHAT', nightly.env?.['SUITES_WITHOUT_CHAT'] ?? '[]'],
         ]),
       });
-      expect(result.status, result.stderr).toBe(0);
       const suites = /^suites=(.*)$/mu.exec(readFileSync(output, 'utf8'))?.[1] ?? '[]';
-      expect((JSON.parse(suites) as ReadonlyArray<{ readonly label: string }>).map(({ label }) => label)).toEqual([
-        'ui-e2e test:e2e 1/2',
-        'ui-e2e test:e2e 2/2',
-        'viewer test:e2e',
-        'ui-e2e test:e2e:browser-host',
-      ]);
+      return {
+        status: result.status,
+        stderr: result.stderr,
+        labels: (JSON.parse(suites) as ReadonlyArray<{ readonly label: string }>).map(({ label }) => label),
+      };
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('should leave every ratcheted suite out of the nightly matrix', () => {
+    const { status, stderr, labels } = planNightly({
+      'ui-e2e': {
+        name: 'ui-e2e',
+        data: {
+          targets: {
+            'test:e2e': target({ metadata: { shards: 2 } }),
+            'test:e2e:development': target(),
+            'test:e2e:daemon-host': target(),
+            'test:e2e:browser-host': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:development', 'test:e2e:daemon-host'] }),
+          },
+        },
+      },
+      'agent-host': {
+        name: 'agent-host',
+        data: { targets: { 'test:e2e': target(), 'test:e2e:queue': target({ dependsOn: ['test:e2e'] }) } },
+      },
+      viewer: {
+        name: 'viewer',
+        data: {
+          targets: {
+            'test:e2e': target({
+              dependsOn: ['test:e2e:resize', 'test:e2e:antialias', 'test:e2e:batches'],
+              metadata: { jobPerDependency: true },
+            }),
+            'test:e2e:resize': target(),
+            'test:e2e:antialias': target({ metadata: { shards: 2 } }),
+            'test:e2e:batches': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:batches'] }),
+          },
+        },
+      },
+      ui: { name: 'ui', data: { targets: { 'test:e2e': target({ dependsOn: ['test:e2e:chat-viewer'] }) } } },
+    });
+    expect(status, stderr).toBe(0);
+    expect(labels).toEqual([
+      'ui-e2e test:e2e 1/2',
+      'ui-e2e test:e2e 2/2',
+      // A jobPerDependency aggregate: one job per dependsOn target with its own shards, less the ratcheted ones (#2279).
+      'viewer test:e2e:resize',
+      'viewer test:e2e:antialias 1/2',
+      'viewer test:e2e:antialias 2/2',
+      // Without it, an aggregate stays one job.
+      'ui test:e2e',
+      'ui-e2e test:e2e:browser-host',
+    ]);
+  });
+
+  it('should fail the plan when a job-per-dependency aggregate names no target of its project', () => {
+    for (const dependsOn of [[], ['test:e2e:missing'], [{ projects: ['ui'], target: 'build' }]]) {
+      const { status, stderr } = planNightly({
+        viewer: {
+          name: 'viewer',
+          data: { targets: { 'test:e2e': target({ dependsOn, metadata: { jobPerDependency: true } }) } },
+        },
+      });
+      expect(status, JSON.stringify(dependsOn)).not.toBe(0);
+      expect(stderr).toContain('viewer:test:e2e runs a job per dependency');
     }
   });
 

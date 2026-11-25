@@ -8,7 +8,6 @@ import { projectSnapshotKernel } from '#hooks/use-chat-snapshot.js';
 import { routingKernelProfile } from '#constants/available-kernel-configurations.js';
 import { useKernelRoutingPlan } from '#cloud/kernel-commerce.js';
 import { getAllFlags } from '#flags/feature-flags.js';
-import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
@@ -35,7 +34,6 @@ const eitherStop = (...stops: ReadonlyArray<AbortSignal | undefined>): AbortSign
 export function ChatTurnHost(): ReactNode {
   const agent = useCadAgentConfig();
   const { activeChatId } = useActiveChatSession();
-  const chat = useActiveChatInstance();
   const store = useChatSessionStore();
   const { resolveModel } = useModels();
   const {
@@ -103,7 +101,7 @@ export function ChatTurnHost(): ReactNode {
       const projection = store.getProjection(activeChatId);
       const projectedRun =
         projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
-      const messages = Array.isArray(chat.messages) ? chat.messages : [];
+      const messages = store.get(activeChatId)?.messages ?? [];
       const turnTelemetry = telemetry.begin(execution, {
         kernelId: turnAgent.kernel,
         consent: consentRef.current,
@@ -247,7 +245,7 @@ export function ChatTurnHost(): ReactNode {
         throw error;
       }
     },
-    [activeChatId, admitExecution, chat, store, surfaceDispatchFailure, telemetry],
+    [activeChatId, admitExecution, store, surfaceDispatchFailure, telemetry],
   );
 
   /* The admitted turn retains its callback; future seeds need a live focused publisher. */

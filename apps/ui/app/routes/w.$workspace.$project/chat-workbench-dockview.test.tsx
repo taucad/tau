@@ -518,6 +518,32 @@ const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
 );
 const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 
+/* Every case starts from the same fixtures: a wide screen, no workspace layout, the default flags, no open files and
+ * no file, read or large-object state. A case that set one must not decide what a later one sees, whatever order the
+ * cases run in: a phone left set, for one, sends a Files request to the phone's tabs instead of the connected
+ * workbench. Cases that restore their own fixtures in `finally` keep doing so; this covers the ones that did not. */
+beforeEach(() => {
+  mobileState.value = false;
+  workspaceLayout.value = undefined;
+  featureState.value = false;
+  featureState.machines = true;
+  largeObjectState.pending.clear();
+  largeObjectState.opened.length = 0;
+  surfaceAvailability.current = new Map();
+  landedState.paths.clear();
+  freshState.held.clear();
+  freshState.failed.clear();
+  freshState.readAfresh.clear();
+  freshState.retainValue = undefined;
+  freshState.retry = () => undefined;
+  freshState.settled = () => undefined;
+  editorMachineSnapshot.context.openFiles = [];
+  editorMachineSnapshot.context.pendingOpenFile = undefined;
+  currentEditorSnapshot = editorMachineSnapshot;
+  readyDockviewApi = undefined;
+  mockDocuments.clear();
+});
+
 describe('hidden workbench operation panels', () => {
   it.each([
     ['Print', PrintWorkbenchPanel, mockPrintBody],

@@ -47,6 +47,43 @@ const bootGlobal = (): BootGlobal => {
 /* Whether `home-ready` was asked for before the shell mounted. */
 let isHomeReadyHeld = false;
 
+/* Who waits for a stage (adaptive app deployment mode I1: the Cloud loader starts only after `home-ready`). */
+const stageListeners: Record<BootStage, Set<() => void>> = { 'shell-mounted': new Set(), 'home-ready': new Set() };
+
+const reached = (stage: BootStage): boolean =>
+  stage === 'shell-mounted' ? bootGlobal().shellMounted === true : bootGlobal().homeReady === true;
+
+const notify = (stage: BootStage): void => {
+  const listeners = [...stageListeners[stage]];
+  stageListeners[stage].clear();
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      /* A waiter that throws must not stop the boot report. */
+    }
+  }
+};
+
+/**
+ * Call `listener` once the stage is reached: at once when it already is.
+ *
+ * @param stage - The stage to wait for.
+ * @param listener - Called once.
+ * @returns A cancel that drops the wait.
+ * @public
+ */
+export function onceBootStage(stage: BootStage, listener: () => void): () => void {
+  if (reached(stage)) {
+    listener();
+    return () => undefined;
+  }
+  stageListeners[stage].add(listener);
+  return () => {
+    stageListeners[stage].delete(listener);
+  };
+}
+
 const send = (stage: BootStage): void => {
   if (!isDesktopTarget()) {
     return;
@@ -83,6 +120,7 @@ export function reportBootStage(stage: BootStage): void {
     state.shellMounted = true;
     hideStrip();
     send('shell-mounted');
+    notify('shell-mounted');
     if (isHomeReadyHeld) {
       isHomeReadyHeld = false;
       reportBootStage('home-ready');
@@ -98,6 +136,7 @@ export function reportBootStage(stage: BootStage): void {
   }
   state.homeReady = true;
   send('home-ready');
+  notify('home-ready');
 }
 
 /**
@@ -107,6 +146,8 @@ export function reportBootStage(stage: BootStage): void {
  */
 export function resetBootSignals(): void {
   isHomeReadyHeld = false;
+  stageListeners['shell-mounted'].clear();
+  stageListeners['home-ready'].clear();
   delete (globalThis as { __tauBoot?: BootGlobal }).__tauBoot;
 }
 

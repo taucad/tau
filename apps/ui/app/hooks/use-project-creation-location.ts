@@ -29,6 +29,7 @@ import {
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useRootStatuses } from '@taucad/files-ui/components/filesystem/folder-status';
 
 export type HomeLocationOption = {
   readonly location: HomeProjectCreationLocation;
@@ -105,6 +106,9 @@ const loadingState: ProjectCreationLocationState = {
   canCreate: false,
 };
 
+/** The Home fallback's notice shows once per page load, however many composers mount (B9). */
+let hasShownUnavailableFallback = false;
+
 const isAbortError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 
@@ -146,6 +150,12 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const generationRef = useRef(0);
   const selectedRef = useRef<ProjectCreationLocation | undefined>(undefined);
   const loadRef = useRef<(restorePreference: boolean) => Promise<void>>(async () => undefined);
+  /* The chosen folder is not available, so creation falls back to Home without saving that (R4); the stored choice
+   * applies again when the folder is back. The selection follows the stored choice, read against the published root
+   * statuses, until the person picks or connects a location here. */
+  const rootStatuses = useRootStatuses(fileManager.fileManagerRef);
+  const rootStatusesRef = useRef(rootStatuses);
+  const isStoredChoiceRef = useRef(false);
 
   const grantWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -173,7 +183,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
           await projectManager.connectWorkspace();
           await loadRef.current(false);
         } catch {
-          toast.error('Failed to reconnect the folder.');
+          toast.error('Couldn’t reconnect the folder. Try again.');
         }
         return;
       }
@@ -206,7 +216,9 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         }
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
         toast.error(
-          isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect the folder.',
+          isWorkspaceIdentityConflictError(error)
+            ? workspaceIdentityConflictCopy
+            : 'Couldn’t reconnect the folder. Try again.',
         );
       }
     },
@@ -243,6 +255,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const select = useCallback(
     (value: ProjectCreationLocation): void => {
       selectedRef.current = value;
+      isStoredChoiceRef.current = false;
       setState((current) => {
         if (current.phase !== 'ready' || !current.hasWebAccessCapability) {
           return current;
@@ -269,7 +282,17 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
       const [workspaces, preferred] = await Promise.all([
         listWorkspaces(),
         restorePreference
-          ? getProjectCreationLocation({ webAccessSupported: true }).then(({ location }) => location)
+          ? getProjectCreationLocation({ webAccessSupported: true, rootStatuses: rootStatusesRef.current }).then(
+              ({ location, repaired }) => {
+                if (repaired === 'workspace-unavailable' && !hasShownUnavailableFallback) {
+                  hasShownUnavailableFallback = true;
+                  toast.info(
+                    'Your chosen folder can’t be found right now, so new projects go to Home. Tau uses that folder again when it is back.',
+                  );
+                }
+                return location;
+              },
+            )
           : Promise.resolve(selectedRef.current ?? homeProjectCreationLocation),
       ]);
       const workspaceOptions = await Promise.all(
@@ -281,7 +304,12 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         return;
       }
       const options = [homeOption, ...workspaceOptions] as const;
-      const value = selectedRef.current ?? preferred;
+      /* Checked after the reads: a location picked here while they ran wins over the stored choice. */
+      const followsStoredChoice = restorePreference && (selectedRef.current === undefined || isStoredChoiceRef.current);
+      if (followsStoredChoice) {
+        isStoredChoiceRef.current = true;
+      }
+      const value = followsStoredChoice ? preferred : (selectedRef.current ?? preferred);
       const selectedOption =
         options.find((option) => projectCreationLocationsEqual(option.location, value)) ?? homeOption;
       selectedRef.current = selectedOption.location;
@@ -318,14 +346,26 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         telemetry.workspaceConnected({ workspaceId: connected.workspace.workspaceId });
       }
       selectedRef.current = { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
+      isStoredChoiceRef.current = false;
       await loadRef.current(false);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
-      toast.error('Failed to connect the folder.');
+      toast.error('Couldn’t connect the folder. Try again.');
     }
   }, [projectManager, telemetry]);
 
   const refresh = useCallback(async (): Promise<void> => loadRef.current(false), []);
+
+  /* Keep the statuses a preference read repairs against current. While the selection is the stored choice, a changed
+   * root status may mean its folder is gone or back, and the first read usually comes before the file service has
+   * published any status at all: read the choice again, unless the person picked another location meanwhile. */
+  useEffect(() => {
+    rootStatusesRef.current = rootStatuses;
+    if (!isStoredChoiceRef.current) {
+      return;
+    }
+    void loadRef.current(true);
+  }, [rootStatuses]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -43,7 +43,7 @@ describe('credential-free billing CI', () => {
   });
 
   it('should run every billing PostgreSQL pull on one pinned digest, under the tag the launcher runs', () => {
-    const pulls = [...lanes, ['.github/workflows/ci.yml', 'api'] as const].flatMap(([path, name]) =>
+    const pulls = [...lanes, ['.github/workflows/ci.yml', 'api-shard'] as const].flatMap(([path, name]) =>
       (job(path, name).steps ?? [])
         .map((step) => step.run ?? '')
         .filter((run) => run.includes('postgres:17-alpine'))
@@ -52,7 +52,7 @@ describe('credential-free billing CI', () => {
 
     expect(pulls.map(({ lane }) => lane)).toEqual([
       '.github/workflows/ci.yml#billing-e2e',
-      '.github/workflows/ci.yml#api',
+      '.github/workflows/ci.yml#api-shard',
     ]);
     expect(pulls.filter(({ digest }) => digest === undefined)).toEqual([]);
     expect(new Set(pulls.map(({ digest }) => digest)).size).toBe(1);
@@ -70,7 +70,7 @@ describe('credential-free billing CI', () => {
 
     expect(existsSync(resolve(root, '.github/workflows/billing-nightly.yml'))).toBe(false);
     expect(targets('.github/workflows/ci.yml', 'billing-e2e')).toContain('test:billing-foundation');
-    expect(targets('.github/workflows/ci.yml', 'api')).toContain('test:billing-composition');
+    expect(targets('.github/workflows/ci.yml', 'api-shard')).toContain('test:billing-composition');
     // Assembled so the source holds no template-like string literal.
     expect(job('.github/workflows/ci.yml', 'api').if).toBe(
       ['$', "{{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}"].join(''),

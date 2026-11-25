@@ -109,8 +109,8 @@ export const esbuildBundler = defineBundler({
     return context.vm.detectImports(entryPath, signal);
   },
 
-  async bundle({ entryPath }, { signal }, context) {
-    return toBundleResult(await context.vm.bundle(entryPath, signal));
+  async bundle({ entryPath, globals }, { signal }, context) {
+    return toBundleResult(await context.vm.bundle(entryPath, signal, globals));
   },
 
   async execute({ code }, { signal }, context) {

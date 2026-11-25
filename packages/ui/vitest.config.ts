@@ -1,7 +1,11 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Jsdom installs `localStorage` only where Node has none: Node 25+ turns its own accessor on, which hides
+    // jsdom's, so the workers keep Node 24's default (docs/policy/react-testing-policy.md, Environment).
+    execArgv: ['--no-experimental-webstorage'],
     exclude: [...configDefaults.exclude, '**/*.browser.test.tsx'],
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
@@ -11,7 +15,7 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/packages/ui',

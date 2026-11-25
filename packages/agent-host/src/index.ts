@@ -169,6 +169,9 @@ export type {
   ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
+  ModelDeployment,
+  DeploymentModeAnswer,
+  RunBillingMode,
   InvocationFunding,
   InvocationResolutionRequest,
   TurnAttemptKey,
@@ -212,6 +215,7 @@ export type {
 export type { CommandKey, CreateTauAgentHostOptions, TauAgentHost, TauAgentTurnRequest } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
+  GatewayBillingOptions,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

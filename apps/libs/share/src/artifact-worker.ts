@@ -49,9 +49,22 @@ export type ShareArtifactWorkerCodec = ShareArtifactCodec & {
   readonly dispose: () => void;
 };
 
+/** Options for {@link createShareArtifactWorkerCodec}. @public */
+export type ShareArtifactWorkerOptions = Readonly<{
+  /**
+   * The app's module-worker factory (`@taucad/ui-core/lib/worker-factory`, which this library cannot depend on): it
+   * replaces a worker whose code failed to load. Without one the worker is constructed directly.
+   */
+  createModuleWorker?: (construct: () => Worker, options: Readonly<{ name: string }>) => Worker;
+}>;
+
 /** Create a dedicated worker-backed portable artifact codec. @public */
-export const createShareArtifactWorkerCodec = (): ShareArtifactWorkerCodec => {
-  const worker = new Worker(new URL('artifact.worker.ts', import.meta.url), { type: 'module' });
+export const createShareArtifactWorkerCodec = (options: ShareArtifactWorkerOptions = {}): ShareArtifactWorkerCodec => {
+  const createModuleWorker = options.createModuleWorker ?? ((construct: () => Worker): Worker => construct());
+  const worker = createModuleWorker(
+    () => new Worker(new URL('artifact.worker.ts', import.meta.url), { type: 'module' }),
+    { name: 'share-artifact' },
+  );
   const pending = new Map<
     number,
     {

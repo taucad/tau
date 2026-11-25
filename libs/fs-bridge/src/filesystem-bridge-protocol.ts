@@ -1134,7 +1134,10 @@ const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((valu
       Array.isArray(node['children']) && node['children'].every((child) => fileTreeNodeSchema.safeParse(child).success)
     );
   }
+  /* Facts arrive only when already known (`StatContentMetadata`): an unmeasured file, as every raw provider
+   * listing gives, carries neither, and refusing it rejected a whole directory for one plain file. */
   return (
+    (node['contentKind'] === undefined && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'binary' && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'text' &&
       (node['lineCount'] === undefined || finiteNumberSchema.safeParse(node['lineCount']).success))
@@ -1763,6 +1766,13 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   /* A read of a pending entry waits for its large object (D9) under the
    * authority's own no-progress bound; its signature has no options slot. */
   readFile: undefined,
+  /* A read of a path a tree write still owes waits for it to land (D10, STO-25) under the same bound, so do these. */
+  readFileWithDigest: undefined,
+  readRange: undefined,
+  stat: undefined,
+  lstat: undefined,
+  exists: undefined,
+  readdir: undefined,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

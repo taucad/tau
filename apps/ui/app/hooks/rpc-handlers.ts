@@ -22,7 +22,7 @@ import type {
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import type { LargeObjectsFacet } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/ui-core/lib/large-object-guard';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/agent-host-ui/lib/large-object-guard';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,

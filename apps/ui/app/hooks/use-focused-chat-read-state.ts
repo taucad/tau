@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import { useComposerRecordToasts } from '@taucad/chat-ui/hooks/use-composer-record-toasts';
 import { isDocumentActive } from '#services/chat-session-store.js';
 
 /**

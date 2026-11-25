@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -10,6 +11,7 @@ export default defineConfig({
   envDir: false,
   cacheDir: '../../node_modules/.vite/apps/api-billing',
   test: {
+    reporters: testReporters('default'),
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
     globalSetup: ['../libs/api-billing/src/testing/billing-foundation.setup.ts'],

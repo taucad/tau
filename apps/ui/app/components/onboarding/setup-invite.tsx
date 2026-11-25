@@ -2,7 +2,7 @@ import { Sparkles, X } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
@@ -16,7 +16,7 @@ import { shouldShowSetupInvite } from '#components/onboarding/should-offer-setup
  * @returns The invite, or nothing.
  */
 export function SetupInvite(): React.JSX.Element | undefined {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const { onboarding } = usePersonRecord();
   const { device, writeDevice } = useDeviceRecord();
   if (!shouldShowSetupInvite({ isOnboardingEnabled, onboarding, isDismissed: device.inviteDismissed === true })) {

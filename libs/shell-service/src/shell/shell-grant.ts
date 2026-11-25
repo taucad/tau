@@ -662,11 +662,17 @@ export const compileShellFilesystem = async (
     access: ShellResolvedAccess;
     host: ShellGrantHost;
     git?: Pick<ShellGitView, 'directory' | 'objects'> | undefined;
+    /**
+     * Host-built caches every launch reads and none writes (PowerShell's module analysis cache): readable, and
+     * read-only even where a writable grant covers them.
+     */
+    caches?: readonly string[] | undefined;
   }>,
 ): Promise<ShellFilesystemPlan> => {
   const { checkout, host, access } = input;
+  const caches = input.caches ?? [];
   const writable = [checkout, ...input.session, ...access.write];
-  const readable = [...input.toolchain, ...access.read];
+  const readable = [...input.toolchain, ...caches, ...access.read];
   const projects = await Promise.all(host.projectRoots.map(async (root) => physical(root)));
   /* Every other admitted project is denied whole (D20, F-22); a grant inside one is carved out exactly. */
   const others = projects.filter((root) => fold(host.platform, root) !== fold(host.platform, checkout));
@@ -698,6 +704,7 @@ export const compileShellFilesystem = async (
         (path) => isAbsolute(path) && !deniedPaths.some((deny) => within(host.platform, path, deny)),
       ),
       ...(input.git === undefined ? [] : [input.git.directory, input.git.objects]),
+      ...caches,
     ],
     denied: deniedPaths,
     directories: [...new Set([...input.checkoutProtected.directories, ...writeControls])],

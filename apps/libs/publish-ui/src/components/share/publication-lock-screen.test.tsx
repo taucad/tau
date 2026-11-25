@@ -15,7 +15,7 @@ const variantHeadlines: ReadonlyArray<[PublicationLockScreenVariant, RegExp]> = 
   ['signInRequired', /this design is private/i],
   ['accessDenied', /your account doesn't have access/i],
   ['notFound', /doesn't exist/i],
-  ['unpublished', /unpublished/i],
+  ['unpublished', /this link is no longer shared/i],
   ['rateLimited', /too many requests/i],
   ['serviceUnavailable', /can't load this design right now/i],
   ['filesUnavailable', /can't load this design's files/i],
@@ -35,6 +35,13 @@ describe('PublicationLockScreen', () => {
     renderLock(<PublicationLockScreen authLinks={authLinks} variant={variant} />);
     expect(screen.queryByText(/requestid/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/owner_leak_title/i)).not.toBeInTheDocument();
+  });
+
+  /* A stopped link and a deleted project both answer 410, so the screen states no cause. */
+  it('says a stopped link is no longer shared and asks for a new one', () => {
+    renderLock(<PublicationLockScreen authLinks={authLinks} variant='unpublished' />);
+    expect(screen.getByText('Ask the owner for a new link.')).toBeInTheDocument();
+    expect(screen.queryByText(/unpublished|removed|deleted/iu)).not.toBeInTheDocument();
   });
 
   it('inline mode applies full-size layout classes', () => {

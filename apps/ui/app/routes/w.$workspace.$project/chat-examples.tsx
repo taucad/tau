@@ -4,7 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { chatExamples, getRandomExamples } from '@taucad/ui-core/constants/chat-prompt-examples';
 import type { ChatExample } from '@taucad/ui-core/constants/chat-prompt-examples';
 import { pickSuggestions } from '@taucad/ui-core/lib/pick-suggestions';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useRoutingKernelProfile } from '#hooks/use-routing-kernel-profile.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
@@ -26,7 +26,7 @@ const useExamples = (): Readonly<{
   examples: readonly ChatExample[];
   refresh: () => void;
 }> => {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const { profile } = usePersonRecord();
   const {
     kernel: { preference },

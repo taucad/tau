@@ -1,6 +1,38 @@
 # replicad — Classes (2)
 
-17 top-level symbols. Signatures are verbatim typescript.
+19 top-level symbols. Signatures are verbatim typescript.
+
+// The FaceSketcher allows you to sketch on a face that is not planar, for instance the sides of a cylinder
+// Remarks: The coordinates passed to the methods corresponds to normalised distances on this surface, between 0 and 1 in both direction. Note that if you are drawing on a closed surface (typically a revolution surface or a cylinder), the first parameters represents the angle and can be smaller than 0 or bigger than 1.
+FaceSketcher: export declare class FaceSketcher extends BaseSketcher2d implements GenericSketcher<Sketch>
+
+  face: Face
+
+  // FaceSketcher.constructor (constructor)
+  constructor(face: Face, origin?: Point2D);
+
+  // FaceSketcher.buildWire (method)
+  protected buildWire(): Wire;
+
+  // Stop drawing and returns the sketch
+  // FaceSketcher.done (method)
+  done(): Sketch;
+
+  // Stop drawing, make sure the sketch is closed (by adding a straight line to from the last point to the first) and returns the sketch
+  // FaceSketcher.close (method)
+  close(): Sketch;
+
+  // Stop drawing, make sure the sketch is closed (by mirroring the lines between the first and last points drawn) and returns the sketch
+  // FaceSketcher.closeWithMirror (method)
+  closeWithMirror(): Sketch;
+
+  // Stop drawing, make sure the sketch is closed (by adding a straight line to from the last point to the first), add a fillet between the last and the first segments and returns the sketch
+  // FaceSketcher.closeWithCustomCorner (method)
+  closeWithCustomCorner(radius: number | ((f: Curve2D, s: Curve2D) => Curve2D[]), mode?: "fillet" | "chamfer" | "dogbone"): Sketch;
+
+LinearPhysicalProperties: export declare class LinearPhysicalProperties extends PhysicalProperties
+
+  readonly length: number
 
 MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> implements Shape3DLike<MeshShape, MeshShapeMesh, MeshShape, number>
 
@@ -108,6 +140,7 @@ Plane: export declare class Plane
   // Plane.clone (method)
   clone(): Plane;
 
+  // Takes ownership of `newOrigin`
   origin: Vector
 
   // Plane.translateTo (method)
@@ -239,6 +272,22 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
 
   readonly faces: Face[]
 
+  // Finds a unique edge using a finder function, which receives a fresh EdgeFinder and this shape
+  // Shape.findEdge (method)
+  findEdge(this: AnyShape, finderFcn: FinderFunction<EdgeFinder, AnyShape>): Edge;
+
+  // Finds all matching edges using a finder function, which receives a fresh EdgeFinder and this shape
+  // Shape.findEdges (method)
+  findEdges(this: AnyShape, finderFcn: FinderFunction<EdgeFinder, AnyShape>): Edge[];
+
+  // Finds a unique face using a finder function, which receives a fresh FaceFinder and this shape
+  // Shape.findFace (method)
+  findFace(this: AnyShape, finderFcn: FinderFunction<FaceFinder, AnyShape>): Face;
+
+  // Finds all matching faces using a finder function, which receives a fresh FaceFinder and this shape
+  // Shape.findFaces (method)
+  findFaces(this: AnyShape, finderFcn: FinderFunction<FaceFinder, AnyShape>): Face[];
+
   readonly solids: Solid[]
 
   readonly wires: Wire[]
@@ -276,6 +325,7 @@ Sketch: export declare class Sketch implements SketchInterface
           defaultDirection?: Point;
       });
 
+  // Keeps a copy of `newFace`
   baseFace: Face | null | undefined
 
   // Sketch.delete (method)
@@ -284,8 +334,10 @@ Sketch: export declare class Sketch implements SketchInterface
   // Sketch.clone (method)
   clone(): Sketch;
 
+  // Keeps a copy of `newOrigin`
   defaultOrigin: Vector
 
+  // Keeps a copy of `newDirection`
   defaultDirection: Vector
 
   // Transforms the lines into a face
@@ -300,10 +352,14 @@ Sketch: export declare class Sketch implements SketchInterface
 
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults to the sketch origin)
   // Sketch.revolve (method)
-  revolve(revolutionAxis?: Point, { origin, angle }?: {
+  revolve(revolutionAxis?: Point | AxisName, { origin, angle }?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
+
+  // Extrudes this sketch up to a limiting face, returning only the new solid
+  // Sketch.extrudeUntil (method)
+  extrudeUntil(limitingFace: Face, { extrusionDirection }?: ExtrudeUntilOptions): Shape3D;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
   // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
@@ -340,6 +396,7 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   constructor(plane: Plane);
   constructor(plane?: PlaneName, origin?: Point | number);
 
+  // Deletes what the sketcher owns
   // Sketcher.delete (method)
   delete(): void;
 
@@ -478,7 +535,7 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   // Sketcher.buildWire (method)
   protected buildWire(): Wire;
 
-  // Stop drawing and returns the sketch
+  // Builds the sketch
   // Sketcher.done (method)
   done(): Sketch;
 
@@ -503,6 +560,10 @@ Sketches: export declare class Sketches
   // Sketches.faces (method)
   faces(): AnyShape;
 
+  // Extrudes each sketch up to the same limiting face, returning only the extrusions
+  // Sketches.extrudeUntil (method)
+  extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
+
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
   // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   // Sketches.extrude (method)
@@ -515,7 +576,7 @@ Sketches: export declare class Sketches
 
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults to the sketch origin)
   // Sketches.revolve (method)
-  revolve(revolutionAxis?: Point, config?: {
+  revolve(revolutionAxis?: Point | AxisName, config?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
@@ -566,10 +627,17 @@ Transformation: export declare class Transformation extends WrappingObj<gp_Trsf>
   // Transformation.transform (method)
   transform(shape: TopoDS_Shape): TopoDS_Shape;
 
+// A 3D vector
+// Remarks: `wrapped` creates a `gp_Vec` the first time OpenCascade code needs one; the vector owns it and deletes it with itself (or when its coordinates change). Change a vector through its methods, not through `wrapped`.
 Vector: export declare class Vector extends WrappingObj<gp_Vec>
 
   // Vector.constructor (constructor)
   constructor(vector?: Point);
+
+  wrapped: gp_Vec
+
+  // Vector.delete (method)
+  delete(): void;
 
   readonly repr: string
 
@@ -579,14 +647,17 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
 
   readonly z: number
 
+  // As `gp_Vec::Magnitude`
   readonly Length: number
 
   // Vector.toTuple (method)
   toTuple(): [number, number, number];
 
+  // As `gp_Vec::Crossed`
   // Vector.cross (method)
   cross(v: Vector): Vector;
 
+  // As `gp_Vec::Dot`
   // Vector.dot (method)
   dot(v: Vector): number;
 
@@ -599,9 +670,11 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
   // Vector.multiply (method)
   multiply(scale: number): Vector;
 
+  // As `gp_Vec::Normalized`
   // Vector.normalized (method)
   normalized(): Vector;
 
+  // As `gp_Vec::Normalize`
   // Vector.normalize (method)
   normalize(): Vector;
 
@@ -640,6 +713,8 @@ Wire: export declare class Wire extends _1DShape<TopoDS_Wire>
   // Wire.offset2D (method)
   offset2D(offset: number, kind?: "arc" | "intersection" | "tangent"): Wire;
 
+// The base of every object that owns an OpenCascade value
+// Remarks: A wrapper adopts the value it is constructed with: it is now its only owner and deletes it exactly once, when `delete()` is called or, as a safety net, after the wrapper has been garbage collected. Code that must keep using a value after handing it to a wrapper passes a copy instead. A wrapper whose value has been deleted (by `delete()`, by an operation that consumes it, or from outside, as an evaluation sweep does) throws on use instead of reaching freed memory.
 WrappingObj: export declare class WrappingObj<Type extends Deletable>
 
   oc: OpenCascadeInstance

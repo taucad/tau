@@ -98,6 +98,27 @@ export const verifyDesktopDescriptor = (input: unknown, keys: Readonly<Record<st
   return parsed;
 };
 
+/**
+ * An update refused only because the computer's clock puts the descriptor's issue time more than five minutes in the
+ * local future (B25). Main says "Check your computer's date
+ * and time" for it instead of the generic refusal.
+ */
+export class UpdateClockError extends Error {
+  public constructor() {
+    super('Update descriptor was issued in the future by this computer’s clock');
+    this.name = 'UpdateClockError';
+  }
+}
+
+/**
+ * Whether an error is {@link UpdateClockError}, also across a library that re-throws it.
+ *
+ * @param error - The error.
+ * @returns Whether the clock refused the update.
+ */
+export const isUpdateClockError = (error: unknown): boolean =>
+  error instanceof UpdateClockError || (error instanceof Error && error.name === 'UpdateClockError');
+
 /** Admit only a fresh candidate for the installed route and exact immutable relative path. */
 export const parseDesktopUpdateDescriptor = (
   input: unknown,
@@ -118,13 +139,17 @@ export const parseDesktopUpdateDescriptor = (
     descriptor.channel !== installation.channel ||
     identity.channel !== descriptor.channel ||
     identity.version !== descriptor.version ||
-    descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}` ||
-    issued > now + 300_000
+    descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}`
   ) {
-    throw new Error('Update descriptor identity, path or issue time is invalid');
+    throw new Error('Update descriptor identity or path is invalid');
   }
   if (descriptor.version !== installation.version && !isNewerVersion(descriptor.version, installation.version)) {
     throw new Error('Update descriptor would downgrade the installed app');
+  }
+  /* Only this check reads the local clock (descriptors no longer expire): when it is the only one that fails, the
+   * clock is the cause. */
+  if (issued > now + 300_000) {
+    throw new UpdateClockError();
   }
   return descriptor;
 };

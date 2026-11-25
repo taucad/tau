@@ -225,7 +225,7 @@ export function DesktopAuthBridge(): undefined {
     }
 
     return bridge.onAuthChanged(() => {
-      purgeFinancial?.('owner_changed');
+      purgeFinancial('owner_changed');
       void queryClient?.invalidateQueries({ queryKey: authQueryKeyPrefix });
     });
   }, [purgeFinancial, queryClient]);
@@ -246,7 +246,7 @@ export function AnonymousSessionPurge(): undefined {
 
   useEffect(() => {
     if (resolved === 'anonymous') {
-      purgeFinancial?.('logout');
+      purgeFinancial('logout');
     }
   }, [purgeFinancial, resolved]);
 }

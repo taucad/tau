@@ -190,4 +190,56 @@ describe('applyCameraNavigationStep', () => {
     ).toBe(false);
     expect(classify(before, read(controls))).toBe('none');
   });
+
+  /*
+   * An orbit step near the top pole (TA carry-over 5): Turntable turns about the world up, so the step stops at the
+   * pole; Free orbit turns about the screen's axes, so the step turns its full angle over the pole, as its drag does.
+   */
+  describe('over the pole', () => {
+    const nearTop = (): CameraControlsImpl => {
+      const controls = makeControls('perspective');
+      // 5° off the world up, above the target.
+      void controls.setLookAt(Math.sin(Math.PI / 36) * 10, 0, Math.cos(Math.PI / 36) * 10, 0, 0, 0, false);
+      controls.update(0);
+      return controls;
+    };
+    const direction = (controls: CameraControlsImpl): Vector3 => {
+      controls.update(0);
+      return controls.camera.position.clone().sub(controls.getTarget(new Vector3())).normalize();
+    };
+    const toward = { kind: 'orbit', direction: 'up' } as const satisfies CameraNavigationStep;
+
+    it('stops a Turntable step at the pole', () => {
+      const controls = nearTop();
+      const before = direction(controls);
+      applyCameraNavigationStep({ controls, step: toward, orbitStyle: 'turntable' });
+      expect(direction(controls).angleTo(before)).toBeLessThan(Math.PI / 36 + 1e-6);
+      expect(controls.camera.up.toArray()).toEqual([0, 0, 1]);
+    });
+
+    it('turns a Free orbit step its full angle over the pole', () => {
+      const controls = nearTop();
+      const before = direction(controls);
+      applyCameraNavigationStep({ controls, step: toward, orbitStyle: 'free' });
+      const after = direction(controls);
+      expect(after.angleTo(before)).toBeCloseTo(cameraOrbitStepRadians, 9);
+      // Over the pole: 10° past it, on the other side.
+      expect(after.x).toBeLessThan(0);
+      expect(after.angleTo(new Vector3(0, 0, 1))).toBeCloseTo(cameraOrbitStepRadians - Math.PI / 36, 9);
+    });
+
+    it('turns two Free orbit steps of one frame as it turns them a frame apart', () => {
+      const side = { kind: 'orbit', direction: 'left' } as const satisfies CameraNavigationStep;
+      const apart = nearTop();
+      applyCameraNavigationStep({ controls: apart, step: toward, orbitStyle: 'free' });
+      apart.update(0);
+      applyCameraNavigationStep({ controls: apart, step: side, orbitStyle: 'free' });
+      // Both before the controls step: the second reads the pose the first left pending, not the camera's last one.
+      const together = nearTop();
+      applyCameraNavigationStep({ controls: together, step: toward, orbitStyle: 'free' });
+      applyCameraNavigationStep({ controls: together, step: side, orbitStyle: 'free' });
+      expect(direction(together).angleTo(direction(apart))).toBeLessThan(1e-9);
+      expect(together.camera.quaternion.angleTo(apart.camera.quaternion)).toBeLessThan(1e-9);
+    });
+  });
 });

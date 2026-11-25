@@ -81,6 +81,10 @@ const sharedConnectSources = [
 /**
  * Build the report-only document policy for one environment.
  *
+ * It carries no `upgrade-insecure-requests`: that directive does nothing in a report-only policy, and Chrome logs an
+ * error for it on every document and service worker script (FP8 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`, D14). It belongs in the enforced policy, when there is one.
+ *
  * @param environment - Whose first-party hosts to admit.
  * @returns The `Content-Security-Policy-Report-Only` value.
  */
@@ -100,7 +104,6 @@ export const buildReportOnlyContentSecurityPolicy = (environment: ContentSecurit
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    'upgrade-insecure-requests',
     'report-to default;',
   ].join('; ');
 };

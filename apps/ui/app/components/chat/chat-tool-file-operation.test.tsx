@@ -104,7 +104,7 @@ vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   },
 }));
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({
     children,
     path,
@@ -137,11 +137,17 @@ vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({
 
 const projectSend = vi.hoisted(() => vi.fn());
 
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    projectRef: { send: projectSend },
-  }),
-}));
+// The Open actions read the project from the shared context; its default stands in for a project provider.
+vi.mock('@taucad/ui-core/contexts/project-context', async () => {
+  const { createContext } = await import('react');
+  return {
+    ProjectContext: createContext({
+      projectId: 'project-1',
+      projectRef: { send: projectSend },
+      editorRef: { send: vi.fn() },
+    }),
+  };
+});
 
 const stubViewportMetrics = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
   Object.defineProperty(element, 'scrollHeight', {

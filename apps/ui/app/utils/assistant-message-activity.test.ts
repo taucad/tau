@@ -174,7 +174,18 @@ describe('assistant message activity', () => {
   it('keeps approvals, mixed failures, and denials truthful', () => {
     expect(describeActivity([tool('tool-edit_file', 'approval-requested')])).toBe('File edits awaiting approval');
     expect(describeActivity([tool('tool-read_file'), tool('tool-read_file', 'output-error')])).toBe(
-      'Read files (some failed)',
+      'Read files (1 of 2 failed)',
+    );
+    expect(
+      describeActivity([
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'input-available'),
+        tool('tool-shell'),
+      ]),
+    ).toBe('Reading files (2 of 3 failed), ran commands');
+    expect(describeActivity([tool('tool-shell'), tool('tool-shell', 'output-denied'), tool('tool-shell')])).toBe(
+      'Ran commands (1 of 3 denied)',
     );
     expect(describeActivity([tool('tool-test_model', 'output-denied')])).toBe('Tests denied');
   });
@@ -188,6 +199,38 @@ describe('assistant message activity', () => {
     expect(active).toBe('Index dependency graph — running');
     expect(completed).toBe('Index dependency graph');
     expect(`${active} ${completed}`).not.toMatch(/\b(?:Activity|Working|Stopped)\b/u);
+  });
+
+  it('folds a task-list update into the activity around it, native or through Tau MCP', () => {
+    const groups = groupAssistantParts([
+      tool('tool-read_file'),
+      tool('tool-update_todos'),
+      dynamic({ nativeName: 'update_todos' }),
+      tool('tool-shell'),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: 'aggregated', summary: 'Read files, updated tasks, ran commands' });
+    expect(describeActivity([tool('tool-update_todos', 'input-available')])).toBe('Updating tasks');
+  });
+
+  it('lets a session record without a plan pass without splitting activity, and keeps one with a plan visible', () => {
+    type SessionPart = Extract<Part, { type: 'data-acp-session' }>;
+    const session = (plan?: SessionPart['data']['plan']): SessionPart => ({
+      type: 'data-acp-session',
+      data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [], plan },
+    });
+
+    expect(classifyActivityPart(session())).toBe('skip');
+    expect(groupAssistantParts([tool('tool-read_file'), session(), tool('tool-shell')])).toHaveLength(1);
+    expect(findLastMeaningfulPartIndex([text('Done'), session()])).toBe(0);
+
+    const plan: SessionPart['data']['plan'] = {
+      type: 'items',
+      entries: [{ content: 'Inspect', priority: 'high', status: 'pending' }],
+    };
+    expect(classifyActivityPart(session(plan))).toBe('data');
+    expect(groupAssistantParts([tool('tool-read_file'), session(plan), tool('tool-shell')])).toHaveLength(3);
   });
 
   it('keeps export artifacts standalone while ordinary edits stay in the activity stack', () => {

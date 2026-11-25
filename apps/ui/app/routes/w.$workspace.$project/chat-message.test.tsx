@@ -202,7 +202,7 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: () => <div data-testid='chat-textarea' />,
 }));
 
-vi.mock('#components/chat/at-reference-chip.js', () => ({
+vi.mock('@taucad/chat-surfaces/components/chat/at-reference-chip', () => ({
   AtReferenceChip: () => <span data-testid='at-reference-chip' />,
 }));
 
@@ -210,26 +210,34 @@ vi.mock('@taucad/chat-ui/components/context-chip', () => ({
   ContextChip: () => <span data-testid='context-chip' />,
 }));
 
-vi.mock('@taucad/chat-ui/components/chat-activity-group', () => ({
+vi.mock('@taucad/chat-ui/components/chat-activity-group', async (importOriginal) => ({
+  // The real tool card reads the row context; only the group's own chrome is replaced.
+  ...(await importOriginal<Record<string, unknown>>()),
   ChatActivityGroup: ({
     children,
     summary,
     hasActiveRows,
-    isActive,
+    isSole,
+    isSettled,
   }: {
     readonly children: React.ReactNode;
     readonly summary: string;
     readonly hasActiveRows?: boolean;
-    readonly isActive?: boolean;
+    readonly isSole?: boolean;
+    readonly isSettled?: boolean;
   }) => (
     <div
       data-testid='chat-activity-group'
       data-summary={summary}
       data-active-rows={String(hasActiveRows ?? false)}
-      hidden={!isActive}
+      data-sole={String(isSole ?? false)}
+      data-settled={String(isSettled ?? false)}
     >
       {children}
     </div>
+  ),
+  ChatActivityRow: ({ children }: { readonly children: React.ReactNode }) => (
+    <div data-testid='chat-activity-row'>{children}</div>
   ),
 }));
 
@@ -541,6 +549,79 @@ describe('ChatMessage activity composition', () => {
     render(<ChatMessage messageId={message.id} />);
 
     expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-active-rows', 'false');
+  });
+
+  const readPart = (toolCallId: string): MyUIMessage['parts'][number] => ({
+    type: 'tool-read_file',
+    toolCallId,
+    state: 'output-available',
+    input: { targetFile: 'main.scad' },
+    output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+  });
+
+  it('lets a single activity row stand as its own line, and wraps every row of a larger group', () => {
+    setMessages([{ id: 'msg-sole', role: 'assistant', parts: [readPart('read-1')] }]);
+    const { unmount } = render(<ChatMessage messageId='msg-sole' />);
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-sole', 'true');
+    expect(screen.getAllByTestId('chat-activity-row')).toHaveLength(1);
+    unmount();
+
+    setMessages([
+      {
+        id: 'msg-rows',
+        role: 'assistant',
+        parts: [readPart('read-1'), { type: 'reasoning', text: 'Checking', state: 'done' }, readPart('read-2')],
+      },
+    ]);
+    render(<ChatMessage messageId='msg-rows' />);
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-sole', 'false');
+    expect(screen.getAllByTestId('chat-activity-row')).toHaveLength(3);
+  });
+
+  it('tells a group its turn has ended, so a row left running draws no motion', () => {
+    const message: MyUIMessage = {
+      id: 'msg-settled',
+      role: 'assistant',
+      parts: [{ type: 'tool-read_file', toolCallId: 'read-1', state: 'input-available', input: { targetFile: 'a' } }],
+    };
+    setMessages([message], 'streaming');
+    const { unmount } = render(<ChatMessage messageId={message.id} />);
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-settled', 'false');
+    unmount();
+
+    setMessages([message], 'ready');
+    render(<ChatMessage messageId={message.id} />);
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-settled', 'true');
+  });
+
+  it('keeps one group across a task-list update and a session record that draws nothing', () => {
+    const message: MyUIMessage = {
+      id: 'msg-one-group',
+      role: 'assistant',
+      parts: [
+        readPart('read-1'),
+        {
+          type: 'tool-update_todos',
+          toolCallId: 'todos-1',
+          state: 'output-available',
+          input: { chatId: 'chat_01', items: [{ id: 'a', title: 'Model the pyramid', status: 'done' }] },
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          output: { path: '.tau/chats/chat_01/todo.yaml', counts: { pending: 0, in_progress: 0, done: 1 } },
+        },
+        {
+          type: 'data-acp-session',
+          data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [] },
+        },
+        readPart('read-2'),
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getAllByTestId('chat-activity-group')).toHaveLength(1);
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Read files, updated tasks');
+    expect(screen.getAllByTestId('chat-activity-row')).toHaveLength(3);
   });
 });
 

@@ -145,7 +145,10 @@ describe('plugin generator', () => {
     // emitted file witnesses. A capability that adds an `optionsSchema` adds the
     // peer with it.
     expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0' });
-    expect(manifest.devDependencies).toEqual({ '@taucad/runtime': 'workspace:*' });
+    expect(manifest.devDependencies).toEqual({
+      '@taucad/runtime': 'workspace:*',
+      '@taucad/runtime-testing': 'workspace:*',
+    });
     expect(manifest.taucad?.hostTarget).toBe('browser');
     expect(readText(tree, 'packages/plugins/image-fixture/LICENSE')).toContain('Apache License');
 
@@ -387,7 +390,11 @@ describe('plugin generator', () => {
       devDependencies?: Record<string, string>;
     }>(tree, `${root}/package.json`);
     expect(manifest.peerDependencies).toEqual({ '@taucad/runtime': '^0.1.0-beta.0', zod: '^4.1.0' });
-    expect(manifest.devDependencies).toEqual({ '@taucad/runtime': 'workspace:*', zod: 'catalog:' });
+    expect(manifest.devDependencies).toEqual({
+      '@taucad/runtime': 'workspace:*',
+      '@taucad/runtime-testing': 'workspace:*',
+      zod: 'catalog:',
+    });
   });
 
   it.each([

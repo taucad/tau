@@ -81,6 +81,7 @@
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
+    "@taucad/cadmpeg": "workspace:*",
     "@taucad/camera": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
@@ -120,6 +121,7 @@
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "catalog:",
     "@agentclientprotocol/codex-acp": "catalog:",
+    "@taucad/cache-core": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",

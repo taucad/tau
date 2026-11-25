@@ -26,6 +26,7 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['anthropic-claude-opus-5', adapter],
     ['together-glm-5.3', adapter],
     ['morph-deepseek-v4.1-flash', adapter],
+    ['google-gemini-4-neon', adapter],
     ['google-gemini-4-hydrogen', adapter],
     ['xai-grok-4.6', adapter],
   ]),
@@ -44,8 +45,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(29);
-    expect(new Set(billableModelRouteIds).size).toBe(29);
+    expect(billableModelRouteIds).toHaveLength(30);
+    expect(new Set(billableModelRouteIds).size).toBe(30);
     expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-4-hydrogen');
@@ -620,6 +621,18 @@ describe('catalog route vocabulary', () => {
       ]);
     },
   );
+
+  it('should bill gemini-4-neon at its standard rate with no expiry', () => {
+    const result = qualifyRoute('google-gemini-4-neon');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-neon' });
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '3000000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '150000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '15000000000000', denominatorUnits: '1000000' },
+    ]);
+  });
 
   it('should bill gemini-4-hydrogen at its standard rate with no expiry', () => {
     const result = qualifyRoute('google-gemini-4-hydrogen');

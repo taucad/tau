@@ -41,7 +41,8 @@ const authoredRoots = [
   'tsconfig.json',
 ] as const;
 
-const stableUntrackedRoots = ['.git', '.nx', 'node_modules', 'out', 'out-tsc', 'repos'] as const;
+// `.tau-ci` is the CI sparse checkout of the workflow's own apt installer (scripts/src/apt-resilience.test.ts).
+const stableUntrackedRoots = ['.git', '.nx', '.tau-ci', 'node_modules', 'out', 'out-tsc', 'repos'] as const;
 
 type WorkspaceRootInventory = {
   readonly actualEntries: readonly string[];

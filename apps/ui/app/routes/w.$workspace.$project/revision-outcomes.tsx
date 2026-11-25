@@ -6,7 +6,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 /**
  * A turn that ended without recording a revision, as a surface reads it.

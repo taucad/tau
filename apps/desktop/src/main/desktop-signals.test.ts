@@ -11,8 +11,10 @@ import {
   gitSubcommandOf,
   redactGitErrorLine,
   rendererGoneSignal,
+  rendererHangOngoingSignal,
   rendererHangSignal,
   rendererHangThreshold,
+  rendererReloadPolicySignal,
   revisionEngineFailureSignal,
   scrubFailureText,
   updaterFailureSignal,
@@ -46,6 +48,29 @@ describe('rendererHangSignal', () => {
       fingerprint: ['desktop-renderer-hang'],
       tags: { hang_seconds: '12' },
       contexts: { hang: { milliseconds: 12_400 } },
+    });
+  });
+});
+
+describe('rendererHangOngoingSignal (T-B24.1)', () => {
+  it('should report a hang that has not ended as an error, beside the ended one', () => {
+    expect(rendererHangOngoingSignal(30_000)).toStrictEqual({
+      message: 'Renderer unresponsive',
+      level: 'error',
+      fingerprint: ['desktop-renderer-hang'],
+      tags: { hang_seconds: '30', ongoing: 'true' },
+      contexts: { hang: { milliseconds: 30_000 } },
+    });
+  });
+});
+
+describe('rendererReloadPolicySignal (T-B11.1)', () => {
+  it('should name the step, the exit reason and the count', () => {
+    expect(rendererReloadPolicySignal('home', 'oom', 2)).toStrictEqual({
+      message: 'Renderer reload policy: home',
+      level: 'error',
+      fingerprint: ['desktop-renderer-reload-policy', 'home'],
+      tags: { step: 'home', reason: 'oom', count: '2' },
     });
   });
 });

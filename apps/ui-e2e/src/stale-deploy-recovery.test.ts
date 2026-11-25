@@ -25,179 +25,38 @@
  * so a page opened from it must carry its own deploy's build id for the guard
  * to tell that a newer deploy replaced it.
  *
+ * These pages run without the web app's service worker (PL7): their contexts
+ * block service workers. This suite is the recovery of a page whose chunks
+ * the network no longer serves. A page the worker controls asks for such a
+ * chunk again without its deploy cookie (`retryUnpinnedMiss`), and here the
+ * next deploy is a byte-identical copy that has every previous chunk, so
+ * whether a page reached recovery depended on whether the worker, registered
+ * once the page is idle, had taken it before the deploy (a flake, merge queue
+ * job 135169781115). What a worker-controlled tab does across a deploy is
+ * `service-worker-deploy.test.ts`'s, in the nightly suite until it ratchets.
+ *
+ * A page fully loaded on the previous deploy, whose chunks the next deploy still
+ * serves (retention modelled), learns that the next deploy is live and then
+ * navigates: the root's client middleware (RR9) loads the destination as a
+ * document from the next deploy, a push as a push and a replace as a replace,
+ * where the router alone would have rendered it on the previous build.
+ *
  * Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at
  * a Chromium other than Playwright's pinned revision.
  */
 // @vitest-environment node
-import { cp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
-import { join, resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
-import express from 'express';
-import type { Request, Response } from 'express';
-import { createRequestHandler } from '@react-router/express';
-import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+// oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
+import { clientRoot, prepareDeploys, startDeployServer } from './support/two-deploys.ts';
+import type { DeployServer, Deploys } from './support/two-deploys.ts';
+// oxlint-enable no-restricted-imports
 
-type Deploy = 'previous' | 'next';
-type ServerBuild = Parameters<typeof createRequestHandler>[0]['build'];
 type Settled = 'reloaded into the next deploy' | 'reload offered' | 'error page';
-
-const buildRoot = resolve(import.meta.dirname, '../../ui/build');
-const clientRoot = join(buildRoot, 'client');
-/** Beside `server/`, so the copy resolves the same externals and `../client` assets. */
-const nextServerRoot = join(buildRoot, 'server-next-deploy');
-const deployCookie = 'tau-e2e-deploy';
-/** The project shell the build prerenders (`apps/ui/app/lib/route-classes.ts`), and the URLs Netlify rewrites to it. */
-const projectShellFile = join(clientRoot, 'w/__shell/__shell/index.html');
-const projectUrl = /^\/w\/[^/.]+\/[^/.]+\/?$/u;
-const heldChunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
-/** Milliseconds between the two deploys' build ids. */
-const deployGap = 60_000;
-
-/** What Netlify answers for a hashed asset the live deploy does not have. */
-const sendDeletedAsset = (response: Response): void => {
-  response
-    .status(404)
-    .type('text/html')
-    .set('Cache-Control', 'no-cache')
-    .send('<!DOCTYPE html><title>Not Found</title>');
-};
-
-const readBuildId = (html: string): number => {
-  const match = /TAU_BUILD_ID\\?":\\?"(\d+)/u.exec(html);
-  if (match?.[1] === undefined) {
-    throw new Error('The rendered document publishes no TAU_BUILD_ID.');
-  }
-  return Number(match[1]);
-};
-
-/** Each deploy's project shell: the prerendered file, and for the next deploy the same file under its build id. */
-const readShells = async (previousBuildId: number, nextBuildId: number): Promise<Record<Deploy, string>> => {
-  const previous = await readFile(projectShellFile, 'utf8');
-  if (readBuildId(previous) !== previousBuildId) {
-    throw new Error('The prerendered project shell carries another build id than the server bundle it was built with.');
-  }
-  return { previous, next: previous.replaceAll(String(previousBuildId), String(nextBuildId)) };
-};
-
-/** Copy the previous deploy's server bundle as the next deploy: the same code under a later build id. */
-const createNextDeploy = async (previousBuildId: number, nextBuildId: number): Promise<void> => {
-  await rm(nextServerRoot, { recursive: true, force: true });
-  await cp(join(buildRoot, 'server'), nextServerRoot, { recursive: true });
-  const entries = await readdir(nextServerRoot, { recursive: true });
-  const scripts = entries.filter((name) => name.endsWith('.js'));
-  const replaced = await Promise.all(
-    scripts.map(async (name) => {
-      const path = join(nextServerRoot, name);
-      const source = await readFile(path, 'utf8');
-      if (!source.includes(String(previousBuildId))) {
-        return false;
-      }
-      await writeFile(path, source.replaceAll(String(previousBuildId), String(nextBuildId)));
-      return true;
-    }),
-  );
-  if (!replaced.includes(true)) {
-    throw new Error(`Build id ${String(previousBuildId)} does not occur in the server bundle.`);
-  }
-};
-
-const importServerBuild = async (root: string): Promise<ServerBuild> =>
-  (await import(pathToFileURL(join(root, 'index.js')).href)) as ServerBuild;
-
-/** Two deploys behind one origin, switched by `deploy`. */
-type DeployServer = {
-  readonly origin: string;
-  readonly documents: Deploy[];
-  readonly heldRequest: Promise<void>;
-  deploy(): void;
-  close(): Promise<void>;
-};
-
-const startDeployServer = async (
-  builds: Readonly<Record<Deploy, ServerBuild>>,
-  shells?: Readonly<Record<Deploy, string>>,
-  hold = true,
-): Promise<DeployServer> => {
-  let live: Deploy = 'previous';
-  const documents: Deploy[] = [];
-  const held: Array<() => void> = [];
-  let markHeld: () => void = () => undefined;
-  const heldRequest = new Promise<void>((resolve) => {
-    markHeld = resolve;
-  });
-  const handlers = {
-    previous: createRequestHandler({ build: builds.previous }),
-    next: createRequestHandler({ build: builds.next }),
-  };
-  const serveAsset = express.static(clientRoot, { immutable: true, maxAge: '1y' });
-
-  const app = express();
-  app.disable('x-powered-by');
-  app.use(coiMiddleware());
-  app.use('/assets', (request: Request, response: Response, next) => {
-    const renderedByNext = request.headers.cookie?.includes(`${deployCookie}=next`) === true;
-    if (hold && live === 'previous' && heldChunk.test(request.originalUrl)) {
-      held.push(() => {
-        sendDeletedAsset(response);
-      });
-      markHeld();
-      return;
-    }
-    if (live === 'next' && !renderedByNext) {
-      sendDeletedAsset(response);
-      return;
-    }
-    serveAsset(request, response, next);
-  });
-  app.use(express.static(clientRoot, { maxAge: '1h' }));
-  app.all('*splat', (request: Request, response: Response, next) => {
-    if (request.headers['sec-fetch-dest'] === 'document') {
-      documents.push(live);
-      response.cookie(deployCookie, live, { path: '/' });
-    }
-    if (shells !== undefined && request.method === 'GET' && projectUrl.test(request.path)) {
-      response
-        .status(200)
-        .type('text/html')
-        .set('Cache-Control', 'public, max-age=0, must-revalidate')
-        .send(shells[live]);
-      return;
-    }
-    void handlers[live](request, response, next);
-  });
-
-  const server: Server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return {
-    origin: `http://127.0.0.1:${String(port)}`,
-    documents,
-    heldRequest,
-    deploy() {
-      live = 'next';
-      for (const release of held.splice(0)) {
-        release();
-      }
-    },
-    async close() {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      });
-    },
-  };
-};
 
 /** What the page settled on after the deploy, read in one poll so no second waiter is left pending. */
 const settledState = async (page: Page, nextBuildId: number): Promise<Settled> => {
@@ -225,26 +84,14 @@ const settledState = async (page: Page, nextBuildId: number): Promise<Settled> =
 
 describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', () => {
   let browser: Browser | undefined;
-  let builds: Readonly<Record<Deploy, ServerBuild>> | undefined;
-  let shells: Readonly<Record<Deploy, string>> | undefined;
+  let deploys: Deploys | undefined;
   let server: DeployServer | undefined;
   let context: BrowserContext | undefined;
-  let previousBuildId = 0;
   let nextBuildId = 0;
 
   beforeAll(async () => {
-    const previousBuild = await importServerBuild(join(buildRoot, 'server'));
-    const probe = await startDeployServer({ previous: previousBuild, next: previousBuild });
-    try {
-      const response = await fetch(`${probe.origin}/`, { headers: { 'sec-fetch-dest': 'document' } });
-      previousBuildId = readBuildId(await response.text());
-    } finally {
-      await probe.close();
-    }
-    nextBuildId = previousBuildId + deployGap;
-    await createNextDeploy(previousBuildId, nextBuildId);
-    builds = { previous: previousBuild, next: await importServerBuild(nextServerRoot) };
-    shells = await readShells(previousBuildId, nextBuildId);
+    deploys = await prepareDeploys('recovery');
+    nextBuildId = deploys.nextBuildId;
     browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
   }, 120_000);
 
@@ -257,20 +104,26 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
 
   afterAll(async () => {
     await browser?.close();
-    await rm(nextServerRoot, { recursive: true, force: true });
+    await deploys?.remove();
   });
 
   /** A fresh browser context on a fresh pair of deploys, with the previous one live. */
   const open = async (
     path = '/',
     hold = true,
+    retain = false,
   ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
-    if (browser === undefined || builds === undefined || shells === undefined) {
+    if (browser === undefined || deploys === undefined) {
       expect.fail('the builds and browser did not start');
     }
-    const live = await startDeployServer(builds, shells, hold);
+    const live = await startDeployServer(
+      deploys.builds,
+      { shells: deploys.shells, workers: deploys.workers.scripts },
+      { hold, retain },
+    );
     server = live;
-    context = await browser.newContext();
+    // No worker (see the file comment): recovery must not depend on whether one took the page first.
+    context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('console', (message) => {
@@ -338,6 +191,64 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     expect(new URL(page.url()).pathname).toBe('/import/github.com/taucad/tau');
   }, 120_000);
 
+  /** Deploy the next build and have the page ask the server, as a tab restored from the back/forward cache does. */
+  const deployAndTell = async (page: Page, live: DeployServer): Promise<void> => {
+    live.deploy();
+    await page.evaluate(() => {
+      globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    // `build-skew` takes the server's word after it named the next build three times (`serverConfirmations`).
+    await expect.poll(() => live.buildChecks(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+    await page.waitForTimeout(500);
+  };
+
+  /* React Router 8 migration RR9: once the server names another build, the root's client middleware turns a client
+   * navigation into a document load from the live deploy. The previous deploy's chunks are still served here, so
+   * without it the router would render the destination on the previous build. */
+  it('should load the next page from the new deploy once the server names it, as a push', async () => {
+    const { page, live } = await open('/', false, true);
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const historyLength = await page.evaluate(() => globalThis.history.length);
+
+    // Any in-app link to another page that Home shows: `<Link>` calls the router's `navigate`.
+    const link = page.locator('a[href^="/"]:not([href="/"]):not([href^="//"]):visible').first();
+    const href = await link.getAttribute('href');
+
+    await deployAndTell(page, live);
+    await link.click();
+
+    expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname).toBe(new URL(href ?? '', live.origin).pathname);
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(await page.evaluate(() => globalThis.history.length)).toBe(historyLength + 1);
+  }, 120_000);
+
+  it('should load the next page from the new deploy once the server names it, keeping a replace', async () => {
+    const { page, live } = await open('/', false, true);
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const historyLength = await page.evaluate(() => globalThis.history.length);
+
+    await deployAndTell(page, live);
+    // `useNavigate()(to, { replace: true })` calls this; the test reaches it through React Router's own global.
+    await page.evaluate(() => {
+      const router = (
+        globalThis as unknown as {
+          readonly __reactRouterDataRouter: {
+            navigate: (to: string, options: { readonly replace: boolean }) => Promise<void>;
+          };
+        }
+      ).__reactRouterDataRouter;
+      void router.navigate('/files?from=home', { replace: true });
+    });
+
+    expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe('/files?from=home');
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(await page.evaluate(() => globalThis.history.length)).toBe(historyLength);
+  }, 120_000);
+
   it('should offer the reload, never force it, once the user has worked on the page', async () => {
     const { page, live, errors } = await open();
     await page.getByRole('main').waitFor({ timeout: 30_000 });
@@ -355,5 +266,411 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
 
     expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
     expect(live.documents).toStrictEqual(['previous', 'next']);
+  }, 120_000);
+});
+
+/*
+ * PL7 staging defects FP9 (rows 9 and 11 of its red-first table): one build, the file present, one transient failure.
+ * A code load that failed once can never succeed again in the same page, since the browser keeps a failed module, and
+ * every module that failed with it, for the realm's life; the only general recovery is a new realm. So a failure on a
+ * build the server still runs reloads an untouched page into that build, and optional code degrades where it failed.
+ * The server drops the connection of one request after its response has begun (`failNext`), as a network change on
+ * wake or a dead connection does; a missing file would not catch it. The TAU-UI-6 rows above are the control: a chunk
+ * a replaced build no longer serves.
+ */
+describe('a code load that fails once on the build the server still runs (FP9, FP10)', () => {
+  let browser: Browser | undefined;
+  let deploys: Deploys | undefined;
+  let server: DeployServer | undefined;
+  let context: BrowserContext | undefined;
+
+  beforeAll(async () => {
+    deploys = await prepareDeploys('transient');
+    browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
+  }, 120_000);
+
+  afterEach(async () => {
+    await context?.close();
+    await server?.close();
+    context = undefined;
+    server = undefined;
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+    await deploys?.remove();
+  });
+
+  /** A fresh context on a server whose previous deploy stays live: no deploy happens in these rows. */
+  const open = async (): Promise<{ readonly page: Page; readonly live: DeployServer; readonly failures: string[] }> => {
+    if (browser === undefined || deploys === undefined) {
+      expect.fail('the builds and browser did not start');
+    }
+    const live = await startDeployServer(
+      deploys.builds,
+      { shells: deploys.shells, workers: deploys.workers.scripts },
+      { hold: false },
+    );
+    server = live;
+    context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    const failures: string[] = [];
+    page.on('console', (message) => {
+      if (/dynamically imported module|Importing a module script failed/u.test(message.text())) {
+        failures.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      if (/dynamically imported module/u.test(error.message)) {
+        failures.push(error.message);
+      }
+    });
+    page.on('requestfailed', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/assets/')) {
+        failures.push(`${request.url()} ${request.failure()?.errorText ?? ''}`);
+      }
+    });
+    return { page, live, failures };
+  };
+
+  const buildIdOf = async (page: Page): Promise<string | undefined> =>
+    page.evaluate(() => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID);
+
+  it('should reload an untouched page into the live build once when a lazy chunk it needs fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const chunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
+    // A module import's own request (`script`), not a page's idle prefetch of the same file.
+    const failed = live.failNext(chunk, { dest: 'script' });
+
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await failed;
+
+    // One new realm on the same build: the second document is the same deploy's.
+    try {
+      await expect.poll(() => live.documents.length, { timeout: 30_000 }).toBe(2);
+    } catch (error) {
+      throw new Error(
+        `No reload into the live build after the failed chunk (documents ${JSON.stringify(live.documents)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    expect(live.documents).toStrictEqual(['previous', 'previous']);
+    expect(await buildIdOf(page)).toBe(String(deploys?.previousBuildId));
+    // The new page mounts the palette items once idle, so its own request for the chunk may follow the load.
+    await expect.poll(() => live.requestCount(chunk), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+  }, 120_000);
+
+  /**
+   * Start a chat from Home's composer, as the production report did (`/w/home/new-project?chat=…`): the chat panel
+   * mounts its activity row, whose spinner loads its own chunk.
+   */
+  const startChatFromHome = async (page: Page, origin: string): Promise<void> => {
+    await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+    await page
+      .getByRole('button', { name: 'Continue without' })
+      .click({ timeout: 5000 })
+      .catch(() => undefined);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).first();
+    await composer.click();
+    await page.keyboard.type('Make a cube');
+    await page.keyboard.press('Enter');
+    await page.waitForURL(/\/w\/home\/new-project\?chat=/u, { timeout: 30_000 });
+  };
+
+  it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const spinnerChunk = /^\/assets\/metal-morph-spinner-(?!service-)[\w-]+\.js$/u;
+    // The import's own request: Home's idle prefetch of the project tier (`empty`) may ask for the chunk first.
+    const failed = live.failNext(spinnerChunk, { dest: 'script' });
+
+    await startChatFromHome(page, live.origin);
+    await failed;
+    await page.waitForTimeout(3000);
+
+    // The spinner is optional code: it degrades to the flat spinner instead of taking the chat panel down (D20).
+    expect(
+      await page.getByRole('heading', { name: 'Chat Unavailable' }).count(),
+      `module load errors: ${JSON.stringify(failures)}`,
+    ).toBe(0);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).last();
+    await composer.waitFor({ timeout: 10_000 });
+    await composer.click();
+    await page.keyboard.type('Still here');
+    expect(await composer.textContent()).toContain('Still here');
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+    // The page was worked on, so it never reloads by itself for code it can do without.
+    expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
+
+  /**
+   * Let a chat turn reach the agent host without an API: the page's model catalog and the self-host deployment answer,
+   * as the browser specs' fixtures give them. The run's own model call then fails, which these rows do not read.
+   */
+  const routeTurnAdmission = async (origin: string): Promise<void> => {
+    const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+      // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
+      await import('../../libs/api-llm-gateway/src/models/model.constants.js');
+    const catalog = Object.values(modelList)
+      .flatMap((entries) => Object.values(entries))
+      .filter((entry) => isModelListEntryEnabled(entry))
+      .map((entry) => modelListEntryToModel(entry));
+    const answer = (body: unknown) => ({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    await context?.route(/\/v1\/models(?:\?|$)/u, async (route) => route.fulfill(answer(catalog)));
+    await context?.route(/\/v1\/deployment(?:\?|$)/u, async (route) =>
+      route.fulfill(answer({ version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 })),
+    );
+  };
+
+  const implementation = /^\/assets\/agent-host\.impl-[\w-]+\.js$/u;
+  const agentWorkerScript = /^\/assets\/agent-host\.worker-[\w-]+\.js$/u;
+
+  /*
+   * FP10 (row 10 of the blueprint's table): the agent host worker's own import of its implementation fails. The
+   * server answers it 404 once, as an edge that has not caught up with a deploy does, then serves it. The worker is a
+   * realm of its own, so the page replaces it with a new worker instead of asking the one whose import failed again.
+   */
+  it('should replace the agent host worker whose implementation failed to load once, with no reload', async () => {
+    const { page, live, failures } = await open();
+    await routeTurnAdmission(live.origin);
+    const failed = live.failNext(implementation, { answer: 'not-found' });
+
+    await startChatFromHome(page, live.origin);
+    await failed;
+
+    // A new worker, which loads the implementation: the failed one is never asked again.
+    try {
+      await expect.poll(() => live.requestCount(agentWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+    } catch (error) {
+      throw new Error(
+        `The page asked the failed worker again instead of starting another (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.waitForTimeout(3000);
+    expect(await page.getByText(/failed to load|did not finish loading/iu).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
+
+  it('should offer Reload, never Try again, once new workers could not load the agent host either', async () => {
+    const { page, live } = await open();
+    await routeTurnAdmission(live.origin);
+    void live.failNext(implementation, { answer: 'not-found', count: 3 });
+
+    await startChatFromHome(page, live.origin);
+
+    /* The run's own card. The sidebar's status line shows the same failure, but only once the seed's command met it;
+     * the chat's host read can meet it first, while the seed still waits for that read (merge-queue jobs 136629890632
+     * and 138839875362), and then only the card says it. */
+    const card = page.locator('[data-decision="run-error"]');
+    try {
+      await card
+        .getByText(/failed to load|did not finish loading/iu)
+        .first()
+        .waitFor({ timeout: 60_000 });
+    } catch (error) {
+      const shown = await card.allInnerTexts();
+      throw new Error(
+        `No load failure card (agent host workers ${String(live.requestCount(agentWorkerScript))}, implementation requests ${String(live.requestCount(implementation))}); run cards: ${JSON.stringify(shown)}`,
+        { cause: error },
+      );
+    }
+    await page.waitForTimeout(1000);
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+    expect(await card.getByRole('button', { name: 'Reload', exact: true }).count()).toBe(1);
+    // A new worker for each failure up to the bound; a later use may start another, which the fault no longer meets.
+    expect(live.requestCount(agentWorkerScript)).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+  /*
+   * PL7 staging verification of 2026-11-21 (Brain `research/artifacts/pl7-service-worker-staging-defects-blueprint/
+   * runs/2026-11-21-staging-verification/`, row 5). The kernel's runtime worker is built by the one factory, but its
+   * owner, the CAD unit, met only a closed channel: no new worker, the viewer showed "Channel closed" and offered nothing.
+   */
+  const sharedModel = '/s/builtin~replicad.bench-vise';
+  const runtimeWorkerScript = /^\/assets\/runtime\.worker-[\w-]+\.js$/u;
+  /** The runtime worker's static import of replicad: the first replicad chunk its module graph asks for. */
+  const replicadChunk = /^\/assets\/replicad-[\w-]+\.js$/u;
+
+  /** The runtime worker's requests, for a failure's message. */
+  const workerRequests = (live: DeployServer): string =>
+    JSON.stringify(
+      live.requests
+        .filter((request) => /replicad|runtime\.worker/u.test(request.path))
+        .map((request) => `${request.destination ?? ''} ${request.path}`),
+    );
+
+  /** After its code failed to load, a new runtime worker starts and the viewer is not left dead, with no reload. */
+  const expectReplacedRuntimeWorker = async (page: Page, live: DeployServer, failures: string[]): Promise<void> => {
+    try {
+      await expect.poll(() => live.requestCount(runtimeWorkerScript), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+    } catch (error) {
+      throw new Error(
+        `No new runtime worker after its code failed to load (requests ${workerRequests(live)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    // The new worker loads what the failed one could not.
+    await expect.poll(() => live.requestCount(replicadChunk), { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(3000);
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
+  };
+
+  it('should replace the kernel runtime worker when its script fails to load once, with no reload and no dead viewer', async () => {
+    const { page, live, failures } = await open();
+    const failed = live.failNext(runtimeWorkerScript);
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await failed;
+
+    await expectReplacedRuntimeWorker(page, live, failures);
+  }, 120_000);
+
+  /* The browser aborts the import once, as the staging run did: a server-side fault does not fail it, since Chromium
+   * fetches a module worker's static import again within the same worker after a reset or a 404. */
+  it('should replace the kernel runtime worker when its static replicad import fails to load once, with no reload', async () => {
+    const { page, live, failures } = await open();
+    let aborted = false;
+    const abortedOnce = Promise.withResolvers<void>();
+    await context?.route(
+      (url) => replicadChunk.test(url.pathname),
+      async (route) => {
+        if (aborted) {
+          await route.continue();
+          return;
+        }
+        aborted = true;
+        await route.abort('connectionreset');
+        abortedOnce.resolve();
+      },
+    );
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await abortedOnce.promise;
+
+    await expectReplacedRuntimeWorker(page, live, failures);
+  }, 120_000);
+
+  it('should offer Reload in the viewer, never a dead "Channel closed", once new runtime workers failed too', async () => {
+    const { page, live } = await open();
+    // The page replaces the worker up to its bound (three failures in ten minutes), then hands the failure on.
+    void live.failNext(runtimeWorkerScript, { count: 3 });
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'commit' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    // The page was worked on, so the page's own recovery offers the reload instead of taking it.
+    await page.mouse.click(1, 1);
+
+    const reload = page
+      .getByRole('region', { name: 'Model viewer unavailable' })
+      .getByRole('button', { name: 'Reload', exact: true });
+    try {
+      await reload.waitFor({ timeout: 60_000 });
+    } catch (error) {
+      throw new Error(
+        `No Reload offered (runtime worker requests ${String(live.requestCount(runtimeWorkerScript))}); viewer says ${JSON.stringify(await page.getByRole('main').textContent())}`,
+        { cause: error },
+      );
+    }
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(live.requestCount(runtimeWorkerScript)).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
+  /* Row 5, `/convert` early: a static dependency of the destination's route module fails during a client navigation
+   * within the auto-reload window. The page's reload must land on the destination, as the route loader's own does,
+   * not on the page the navigation left. */
+  it('should reload into the destination when its route module fails to load during a client navigation', async () => {
+    const { page, live, failures } = await open();
+    await page.goto(`${live.origin}/`, { waitUntil: 'load' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const failed = live.failNext(/^\/assets\/cad-viewer-[\w-]+\.js$/u, { dest: 'script' });
+    /* The destination's document takes a moment, as a deployed edge's does (staging: the page's build check answered
+     * first). Locally it would commit before any other reload could start, and hide which reload the page takes. */
+    await context?.route(
+      (url) => url.pathname === '/convert',
+      async (route) => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1500);
+        });
+        await route.continue();
+      },
+    );
+
+    await page.evaluate(() => {
+      const router = (
+        globalThis as unknown as { readonly __reactRouterDataRouter: { navigate: (to: string) => Promise<void> } }
+      ).__reactRouterDataRouter;
+      void router.navigate('/convert');
+    });
+    await failed;
+
+    try {
+      await expect.poll(() => live.documents.length, { timeout: 30_000 }).toBe(2);
+    } catch (error) {
+      throw new Error(
+        `No document load after the failed route module (documents ${JSON.stringify(live.documents)}); module load errors: ${JSON.stringify(failures)}`,
+        { cause: error },
+      );
+    }
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname).toBe('/convert');
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+  }, 120_000);
+
+  /** The chunk that holds the part thumbnail service, found by a string of its own: its name follows the bundler. */
+  const thumbnailServiceChunk = (): RegExp => {
+    const assets = join(clientRoot, 'assets');
+    const file = readdirSync(assets).find(
+      (name) => name.endsWith('.js') && readFileSync(join(assets, name), 'utf8').includes('part-webp-q'),
+    );
+    if (file === undefined) {
+      expect.fail('no built chunk holds the part thumbnail service');
+    }
+    return new RegExp(`^/assets/${file.replaceAll('.', String.raw`\.`)}$`, 'u');
+  };
+
+  /* Row 5, `part-gallery`: part previews and the part gallery are optional, so the chunk that holds them failing once
+   * degrades them instead of taking down the viewer that imports them, and with it the route. */
+  it('should keep the shared model route when the part preview code fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const chunk = thumbnailServiceChunk();
+    // Opened as a document, so no idle prefetch from another page has the chunk in the HTTP cache first.
+    void live.failNext(chunk);
+    /* Worked on from the start, as the staging tab was: the page offers a reload instead of taking one, so only the
+     * route itself can stay standing. The page's recovery counts any input, whoever dispatched it, once its listeners
+     * are in place, which the entry's own import decides. */
+    await page.addInitScript(() => {
+      const input = setInterval(() => {
+        globalThis.dispatchEvent(new Event('pointerdown'));
+      }, 50);
+      setTimeout(() => {
+        clearInterval(input);
+      }, 5000);
+    });
+
+    await page.goto(`${live.origin}${sharedModel}`, { waitUntil: 'load' });
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+
+    expect(
+      await page.getByRole('heading', { name: 'Something went wrong' }).count(),
+      `part preview chunk requests: ${String(live.requestCount(chunk))}; module load errors: ${JSON.stringify(failures)}`,
+    ).toBe(0);
+    expect(await page.getByText('Channel closed').count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous']);
   }, 120_000);
 });

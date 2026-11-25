@@ -2,8 +2,8 @@
  * Order-preserving assistant activity grouping and semantic tool summaries.
  *
  * Adjacent reasoning parts form one reasoning disclosure. Adjacent tool parts
- * form one activity disclosure. Text, data, and exported artifacts remain
- * standalone chronological barriers.
+ * form one activity disclosure. Text, visible data, and exported artifacts
+ * remain standalone chronological barriers.
  */
 
 import type { MyMessagePart } from '@taucad/chat';
@@ -26,6 +26,7 @@ export type ActivityFamily =
   | 'screenshot'
   | 'test'
   | 'chat'
+  | 'plan'
   | 'other';
 
 type ActivityState = 'active' | 'approval' | 'completed' | 'denied' | 'error';
@@ -70,6 +71,8 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
   ['tool-shell', 'execute'],
+  // The tray above the composer owns the live task list; an update is one more routine row of the turn's record.
+  ['tool-update_todos', 'plan'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
@@ -93,6 +96,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['screenshot', 'screenshot'],
   ['test_model', 'test'],
   ['shell', 'execute'],
+  ['update_todos', 'plan'],
 ]);
 
 const externalFamilies = new Map<string, ActivityFamily>([
@@ -184,6 +188,13 @@ const familyLabels: Record<Exclude<ActivityFamily, 'other'>, Record<ActivityStat
     denied: 'Chat read denied',
     error: 'Chat read failed',
   },
+  plan: {
+    active: 'Updating tasks',
+    approval: 'Task update awaiting approval',
+    completed: 'Updated tasks',
+    denied: 'Task update denied',
+    error: 'Task update failed',
+  },
 };
 
 const tauFacts = (part: MyMessagePart): Record<string, unknown> | undefined =>
@@ -264,6 +275,10 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
   if (['step-start', 'data-usage', 'data-context-usage'].includes(part.type)) {
     return 'skip';
   }
+  /* A session record without a plan draws nothing, so it must not split the activity around it. */
+  if (part.type === 'data-acp-session' && part.data.plan === undefined) {
+    return 'skip';
+  }
   if (part.type === 'file' || part.type === 'source-url' || part.type === 'source-document') {
     return 'text';
   }
@@ -313,22 +328,27 @@ const displayTitle = (part: MyMessagePart, isActive: boolean): string => {
   return typeof title === 'string' && title.trim() !== '' ? title.trim() : part.toolName;
 };
 
+/** " (2 of 3 failed)": how many of a family's calls did not go through, so the closed line says it without being opened. */
+const shortfallSuffix = (states: readonly ActivityState[]): string => {
+  const failed = states.filter((state) => state === 'error').length;
+  if (failed > 0) {
+    return ` (${String(failed)} of ${String(states.length)} failed)`;
+  }
+  const denied = states.filter((state) => state === 'denied').length;
+  return denied > 0 ? ` (${String(denied)} of ${String(states.length)} denied)` : '';
+};
+
 const familyState = (parts: readonly MyMessagePart[]): { state: ActivityState; suffix: string } => {
-  const states = new Set(parts.map((part) => partState(part)));
+  const partStates = parts.map((part) => partState(part));
+  const states = new Set(partStates);
   if (states.has('approval')) {
     return { state: 'approval', suffix: '' };
   }
   if (states.has('active')) {
-    return {
-      state: 'active',
-      suffix: states.has('error') ? ' (some failed)' : states.has('denied') ? ' (some denied)' : '',
-    };
+    return { state: 'active', suffix: shortfallSuffix(partStates) };
   }
   if (states.has('completed')) {
-    return {
-      state: 'completed',
-      suffix: states.has('error') ? ' (some failed)' : states.has('denied') ? ' (some denied)' : '',
-    };
+    return { state: 'completed', suffix: shortfallSuffix(partStates) };
   }
   return states.has('error') ? { state: 'error', suffix: '' } : { state: 'denied', suffix: '' };
 };

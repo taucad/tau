@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { cadmpegKernel } from '@taucad/cadmpeg';
 import {
   describeGitHubImport,
+  findMainFile,
   handOverHostGrants,
-  normalizeRepositoryFolder,
-  parseGitHubUrl,
+  importFileAcceptString,
+  isMainFileCandidate,
+  nativeCadExtensions,
   resolveGitHubImportTarget,
 } from '#routes/import.$/import.utils.js';
 
@@ -73,32 +76,6 @@ describe('resolveGitHubImportTarget', () => {
   });
 });
 
-describe('parseGitHubUrl', () => {
-  it('decodes folder segments and ignores file URLs', () => {
-    expect(parseGitHubUrl('https://github.com/taucad/tau/tree/main/examples/my%20part')).toStrictEqual({
-      owner: 'taucad',
-      repo: 'tau',
-      ref: 'main',
-      path: 'examples/my part',
-    });
-    expect(parseGitHubUrl('https://github.com/taucad/tau.git')).toStrictEqual({
-      owner: 'taucad',
-      repo: 'tau',
-      ref: undefined,
-      path: '',
-    });
-    expect(parseGitHubUrl('https://github.com/taucad/tau/blob/main/README.md')).toMatchObject({ path: '' });
-  });
-});
-
-describe('normalizeRepositoryFolder', () => {
-  it('trims slashes and refuses relative segments', () => {
-    expect(normalizeRepositoryFolder('//public//kcl-samples/')).toBe('public/kcl-samples');
-    expect(normalizeRepositoryFolder('public/../secrets')).toBe('');
-    expect(normalizeRepositoryFolder('')).toBe('');
-  });
-});
-
 describe('describeGitHubImport', () => {
   it('names the repository without a redundant @main suffix', () => {
     expect(describeGitHubImport({ owner: 'taucad', repo: 'tau', ref: 'main', path: '', mainFile: '' })).toStrictEqual({
@@ -143,5 +120,24 @@ describe('handOverHostGrants', () => {
     expect(handOverHostGrants({ accepted: false, incoming: ['file-b'], held, release })).toBe(false);
     expect(held).toStrictEqual(['folder-a']);
     expect(release).toHaveBeenCalledExactlyOnceWith(['file-b']);
+  });
+});
+
+describe('native CAD files', () => {
+  it('accepts exactly the extensions the cadmpeg kernel opens', () => {
+    expect(nativeCadExtensions).toStrictEqual(cadmpegKernel().extensions.map((extension) => `.${extension}`));
+    for (const extension of nativeCadExtensions) {
+      expect(importFileAcceptString.split(',')).toContain(extension);
+    }
+  });
+
+  it('lets a native CAD file be the main file, whatever its case', () => {
+    expect(isMainFileCandidate('parts/BRACKET.SLDPRT')).toBe(true);
+    expect(isMainFileCandidate('notes.md')).toBe(false);
+    expect(findMainFile(['notes.md', 'parts/BRACKET.SLDPRT'])).toBe('parts/BRACKET.SLDPRT');
+  });
+
+  it('prefers a kernel source over a native CAD file', () => {
+    expect(findMainFile(['bracket.sldprt', 'bracket.scad'])).toBe('bracket.scad');
   });
 });

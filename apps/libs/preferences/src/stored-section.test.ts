@@ -117,15 +117,53 @@ describe('prepareSectionWrite', () => {
   });
 
   it('stores the orbit style and reads it back after a reload, refusing an unknown one', () => {
-    const write = prepareSectionWrite(viewerPreferencesSection, undefined, { controls: { orbitStyle: 'tumble' } });
+    const write = prepareSectionWrite(viewerPreferencesSection, undefined, { controls: { orbitStyle: 'free' } });
     expect(write.status).toBe('write');
     const raw = write.status === 'write' ? write.raw : undefined;
-    expect(readSection(viewerPreferencesSection, raw).value.controls).toEqual({ orbitStyle: 'tumble' });
+    expect(readSection(viewerPreferencesSection, raw).value.controls).toEqual({ orbitStyle: 'free' });
     expect(() =>
       prepareSectionWrite(viewerPreferencesSection, raw, {
-        controls: { orbitStyle: 'trackball' as unknown as 'tumble' },
+        controls: { orbitStyle: 'trackball' as unknown as 'free' },
       }),
     ).toThrow();
+  });
+
+  it('reads a stored legacy Tumble orbit style as unset (Turntable) and keeps the rest of the viewer section', () => {
+    const stored = JSON.stringify({
+      value: {
+        version: 1,
+        controls: { preset: 'alt', invertZoom: true, orbitStyle: 'tumble' },
+        gizmo: { style: 'axes' },
+        viewDefaults: { 'display.grid': false },
+      },
+    });
+    const read = readSection(viewerPreferencesSection, stored);
+    expect(read.status).toBe('current');
+    expect(read.value).toEqual({
+      version: 1,
+      controls: { preset: 'alt', invertZoom: true },
+      gizmo: { style: 'axes' },
+      viewDefaults: { 'display.grid': false },
+    });
+    expect(read.value.controls).not.toHaveProperty('orbitStyle');
+    const write = prepareSectionWrite(viewerPreferencesSection, stored, { controls: { zoomToCursor: false } });
+    expect(write.status === 'write' && JSON.parse(write.raw)).toEqual({
+      value: {
+        version: 1,
+        controls: { preset: 'alt', invertZoom: true, zoomToCursor: false },
+        gizmo: { style: 'axes' },
+        viewDefaults: { 'display.grid': false },
+      },
+    });
+  });
+
+  it('reads an unknown stored orbit style as an empty viewer section, with no orbit style', () => {
+    const stored = JSON.stringify({
+      value: { version: 1, controls: { preset: 'alt', orbitStyle: 'trackball' }, gizmo: {}, viewDefaults: {} },
+    });
+    const read = readSection(viewerPreferencesSection, stored);
+    expect(read.status).toBe('empty');
+    expect(read.value.controls.orbitStyle).toBeUndefined();
   });
 
   it('refuses a write that would store an invalid value', () => {

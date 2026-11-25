@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { writeConsent } from '@taucad/consent';
 import { Button } from '@taucad/ui/components/button';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { legalUrl } from '#lib/legal-url.js';
 
 /**

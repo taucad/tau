@@ -2,7 +2,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
 
 const session = vi.hoisted(() => ({ data: undefined as unknown, isPending: true }));
@@ -25,8 +25,34 @@ vi.mock('@better-auth-ui/react', () => ({
 }));
 
 const { UserButton } = await import('#components/auth/user/user-button.js');
+const { writeIdentityRecord } = await import('#hooks/use-identity.js');
 
 describe('UserButton', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    session.data = undefined;
+    session.isPending = true;
+  });
+
+  /* W9 D1 (R1): offline, a failed or paused check is not a sign-out. */
+  it('shows the last-known person on an offline launch, quietly unverified, and never offers "Sign in"', async () => {
+    writeIdentityRecord({
+      id: 'user-1',
+      name: 'Ada Lovelace',
+      email: 'ada@example.test',
+    });
+    render(<UserButton size='default' />);
+
+    const trigger = screen.getByRole('button', { name: /Ada Lovelace/u });
+    expect(within(trigger).queryByText('Account')).not.toBeInTheDocument();
+
+    await userEvent.click(trigger);
+
+    expect(await screen.findByText('Can’t reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Sign out')).toBeInTheDocument();
+    expect(screen.queryByText('Sign in')).not.toBeInTheDocument();
+  });
+
   it('should keep the trigger named while the session loads', () => {
     render(<UserButton size='sm' />);
 

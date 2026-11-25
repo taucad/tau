@@ -7,7 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { clearLegacyProjectListing } from '#lib/legacy-project-listing.lib.js';
+import { clearLegacyProjectListing } from '@taucad/files-ui/lib/legacy-project-listing.lib';
 import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 
 export type SignOutProps = {
@@ -56,7 +56,7 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
     }
     hasSignedOut.current = true;
 
-    purgeFinancial?.('logout');
+    purgeFinancial('logout');
     signOut();
   }, [purgeFinancial, signOut]);
 

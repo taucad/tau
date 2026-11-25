@@ -2,6 +2,7 @@
 import type { WebAppManifest } from 'web-app-manifest';
 import type { LoaderFunction } from 'react-router';
 import { metaConfig } from '#constants/meta.constants.js';
+import { appStartUrl } from '#lib/route-classes.js';
 
 export const loader: LoaderFunction = () => {
   return Response.json(
@@ -10,7 +11,12 @@ export const loader: LoaderFunction = () => {
       name: metaConfig.name,
       description: metaConfig.description,
       orientation: 'portrait',
-      start_url: '/',
+      /* The app's Home, whatever the visitor's `tau-entry` preference: `/` alone opens marketing without it. The
+       * service worker answers it from the Home shell, so an installed app launches offline (PL7). */
+      start_url: appStartUrl,
+      // A stable identity, so a later change of `start_url` updates the installed app instead of making another.
+      id: '/',
+      scope: '/',
       display: 'standalone',
       // @see https://developer.mozilla.org/en-US/docs/Web/Manifest/Reference/display_override
       display_override: ['fullscreen', 'minimal-ui'],

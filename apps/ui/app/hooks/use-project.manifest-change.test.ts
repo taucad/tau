@@ -155,6 +155,38 @@ describe('createProjectManifestChangeObserver', () => {
     observer.dispose();
   });
 
+  /* STO-25: a model renders from the first view only once the workspace holds the bytes the write landed. */
+  it('names the bytes the workspace manifest was found equal to, and none while it reloads or reports', async () => {
+    let current = project('Local placeholder');
+    const remote = project('Remote project');
+    const remoteBytes = serializeProjectManifest(projectToManifest(remote));
+    let bytes = serializeProjectManifest(projectToManifest(current));
+    const onReconciled = vi.fn();
+    const observer = createProjectManifestChangeObserver({
+      projectId: current.id,
+      getCurrent: () => ({ project: current, issue: undefined }),
+      reload: vi.fn(),
+      report: vi.fn(),
+      onReconciled,
+    });
+    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> => bytes;
+    /* The placeholder's own bytes: found equal, and named, though they are not the tree's. */
+    await observer.check({ readManifest });
+    expect(onReconciled).toHaveBeenLastCalledWith(bytes);
+    /* The landed manifest differs: a reload is owed, and the workspace is no bytes' it read. */
+    bytes = remoteBytes;
+    await observer.check({ readManifest });
+    expect(onReconciled).toHaveBeenLastCalledWith(undefined);
+    current = remote;
+    await observer.check({ readManifest });
+    expect(onReconciled).toHaveBeenLastCalledWith(remoteBytes);
+    /* Bytes it cannot keep are reported: the workspace's manifest is not theirs. */
+    bytes = new TextEncoder().encode('{');
+    await observer.check({ readManifest });
+    expect(onReconciled).toHaveBeenLastCalledWith(undefined);
+    observer.dispose();
+  });
+
   it('reloads an externally changed manifest once', async () => {
     const current = project('Current');
     const changed = project('External change');
@@ -275,6 +307,8 @@ describe('resolveScopedProjectManifest', () => {
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: expected.id })).resolves.toEqual({
       project: expected,
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
     expect(contentService.resolve).toHaveBeenCalledWith('tau.json', { forceText: true });
   });
@@ -291,6 +325,8 @@ describe('resolveScopedProjectManifest', () => {
       project: current,
       /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
       issue: expect.objectContaining({ code: 'manifest-invalid' }),
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
   });
 
@@ -325,6 +361,8 @@ describe('resolveScopedProjectManifest', () => {
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: expectedId })).resolves.toEqual({
       project: { ...project('Other'), id: expectedId },
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
   });
 

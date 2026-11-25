@@ -19,7 +19,7 @@ import { ResumeCountdown } from '#routes/w.$workspace.$project/chat-error-rate-l
 export const ChatErrorServiceUnavailable = memo(function ({
   className,
   resumable,
-  title = 'Unable to reach Tau',
+  title = 'Couldn’t reach Tau',
   description,
   countdown,
 }: {
@@ -32,11 +32,7 @@ export const ChatErrorServiceUnavailable = memo(function ({
   readonly countdown?: Readonly<{ resumeAt: number }>;
 }): React.JSX.Element {
   const { continueChat, regenerate } = useChatActions();
-  const reason =
-    description ??
-    (resumable
-      ? 'Check your connection.'
-      : "We couldn't connect to the Tau service. This could be due to a network issue or the service may be temporarily unavailable. Please check your connection and try again.");
+  const reason = description ?? (resumable ? 'Check your connection.' : 'Check your connection and try again.');
 
   return (
     <ChatErrorCard

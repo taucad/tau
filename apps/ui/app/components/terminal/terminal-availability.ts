@@ -9,8 +9,10 @@
  * - `available`: the pane may start a session on the person's action (D21).
  *
  * The host's shell probe stays the authority on whether a shell can run here: a refusal at start (Windows
- * `sandbox-unavailable` until its provider lands, a macOS `pty-unavailable`) arrives typed from the host and the pane
- * shows it. This predicate never claims a capability the host has not confirmed; it only rules the pane out early.
+ * `sandbox-unavailable` while its sandbox is off, `provisioning-required` until its one-time setup has run, a macOS
+ * `pty-unavailable`) arrives typed from the host and the pane shows it, with a Set up action for
+ * `provisioning-required`. This predicate never claims a capability the host has not confirmed; it only rules the pane
+ * out early.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -76,7 +78,8 @@ export const terminalAvailability = (
     case 'not-on-disk': {
       return {
         status: 'unavailable',
-        message: 'This project is stored in Tau, not in a folder on this computer, so the Terminal has nowhere to run.',
+        message:
+          'This project is in browser storage, not in a folder on this computer, so the Terminal has nowhere to run.',
         recovery: 'Open a project from a folder on this computer to use the Terminal.',
       };
     }

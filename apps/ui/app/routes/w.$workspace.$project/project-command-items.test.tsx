@@ -7,7 +7,7 @@ import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { consumeBranchControl, getBranchControlRequest } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { consumeBranchControl, getBranchControlRequest } from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 let registeredItems: CommandPaletteItem[] = [];
@@ -358,7 +358,7 @@ describe('ProjectCommandPaletteItems', () => {
         ['New branch…', true],
       ],
     );
-    expect(item('connect-tau-cloud')?.label).toBe('Back up to Tau Cloud');
+    expect(item('connect-tau-cloud')?.label).toBe('Back up to the cloud');
     item('switch-branch')?.action?.();
     expect(openPanel).toHaveBeenLastCalledWith('revisions');
     expect(getBranchControlRequest('project-1')).toBe('switch-branch');

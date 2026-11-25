@@ -1,11 +1,12 @@
 import { convertLegacyProjectManifestBytes } from '@taucad/types';
-import type { AppUiPreferences, StorageProvider } from '#types/storage.types.js';
+import type { StorageProvider } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/project-library/types/project-library-io.types';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type {
   PendingPermanentDeleteProjectOperation,
   PendingProjectOperation,
-} from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+} from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 import { announceCandidateConsent, withCandidateConsentLock } from '@taucad/ui-core/lib/geospec-candidate-consent';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
@@ -72,7 +73,7 @@ const deviceEditorStateFromLegacy = (raw: unknown): EditorState => {
  */
 export class StorageUpgradeBlockedError extends Error {
   public constructor() {
-    super('Local storage could not be opened. Close other Tau tabs and reload.');
+    super('Couldn’t open Tau’s storage on this device. Close other Tau tabs and reload.');
     this.name = 'StorageUpgradeBlockedError';
   }
 }
@@ -241,7 +242,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
         const stateRequest = libraryStore.get(operation.projectId);
         stateRequest.addEventListener('success', () => {
           const state = stateRequest.result as ProjectLibraryState | undefined;
-          if (state?.deletedAt === undefined) {
+          /* One copy of several: another directory keeps the project, so it need not be in the Trash. */
+          if (state?.deletedAt === undefined && operation.copy !== true) {
             abortWith(new Error('Permanent delete is available only for trashed projects'));
             return;
           }

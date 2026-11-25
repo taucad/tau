@@ -15,6 +15,7 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
+import { disconnectRemoteFlags } from '#flags/remote-flags.js';
 import { mock } from 'vitest-mock-extended';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -31,8 +32,8 @@ import type { Project } from '@taucad/types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { PendingProjectOperation } from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -267,6 +268,8 @@ const announceRootConfigurationChange = (): void => {
 
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: 1,
+  // Read when `stale-build-recovery` loads, which the agent host client's worker replacement imports (FP10).
+  lookupBudget: 0,
   isBuildSuperseded: () => false,
   subscribeBuildSkew: () => () => undefined,
 }));
@@ -291,7 +294,7 @@ const mockResumeResources = vi.fn<(operationId: string) => Promise<readonly Chat
 const mockCompletePending = vi.fn<(operationId: string) => Promise<void>>();
 const mockBeginPermanentDeleteProject = vi.fn<(projectId: string, storage: unknown) => Promise<string>>();
 const mockPrepareProjectCreation = vi.fn<(input: unknown) => Promise<PendingProjectOperation>>();
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({
@@ -397,6 +400,14 @@ const holdReplayAtResources = () => {
   };
 };
 
+/*
+ * No analytics boundary runs here, so the PostHog-backed flags would stay unknown for the whole file and every
+ * create would read the listing for the first-project tour. Settle them as a host without analytics does.
+ */
+beforeEach(() => {
+  disconnectRemoteFlags();
+});
+
 describe('useProjectManager recovery (I8)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -467,7 +478,7 @@ describe('useProjectManager recovery (I8)', () => {
             files: {},
             location: { kind: 'home' },
           }),
-        ).rejects.toThrow(`An earlier creation of this project has not finished on this device: ${fakeProject.id}`);
+        ).rejects.toThrow('This project is still being set up on this device. Try again in a moment.');
       });
 
       expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
@@ -679,7 +690,7 @@ describe('useProjectManager recovery (I8)', () => {
         location: { kind: 'home' },
       });
       // Observed before the replay is released, so its refusal is never unhandled.
-      const refused = expect(creation).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      const refused = expect(creation).rejects.toThrow('This project is already on this device.');
       await settle();
       // Held behind the replay: it has read nothing of the journal since bootstrap.
       expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();

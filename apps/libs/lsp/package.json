@@ -41,6 +41,7 @@
     "@taucad/fs-client": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
     "@taucad/types": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
     "typescript": "catalog:",

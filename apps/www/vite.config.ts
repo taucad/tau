@@ -26,7 +26,8 @@ export default defineConfig(({ command }) => ({
   },
   cacheDir: '../../node_modules/.vite/apps/www',
   plugins: [...(isGraph ? [] : [reactRouter(), netlifyReactRouter()]), tailwindcss()],
-  ssr: { noExternal: [/^@taucad\//u] },
+  // The server environment's own `resolve`: the Environment API build does not read top-level `ssr` options.
+  environments: { ssr: { resolve: { noExternal: [/^@taucad\//u] } } },
   build: { target: 'es2022', assetsDir: '_www/bundles' },
   server: { port: 3003 },
 }));

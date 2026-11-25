@@ -33,7 +33,7 @@ import {
   projectLocationDescriptor,
   projectLocationFullLabel,
 } from '@taucad/files-ui/utils/project-creation-location.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';

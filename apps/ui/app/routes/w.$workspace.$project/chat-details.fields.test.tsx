@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 // The main-file picker reads the project's file tree; these tests are about the field labels around it.
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({ selectedFile, title }: { selectedFile: string; title: string }) => (
     <button type='button' aria-label={title}>
       {selectedFile}

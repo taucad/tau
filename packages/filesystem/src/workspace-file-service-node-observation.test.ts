@@ -75,7 +75,7 @@ const createNodeService = async (options?: {
     mountTable,
   });
   cleanups.push(async () => {
-    service.dispose();
+    await service.close();
     await stopHost();
     port2.close();
     rmSync(root, { recursive: true, force: true });

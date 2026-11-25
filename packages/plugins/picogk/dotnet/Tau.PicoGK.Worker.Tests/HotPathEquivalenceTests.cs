@@ -14,37 +14,263 @@ namespace Tau.PicoGK.Worker.Tests;
 public sealed partial class WorkerTests
 {
     [Fact]
-    public void CountingEdgeSortOrdersKeysAndKeepsEachKeysCornersLikeTheComparisonSort()
+    public void BucketedVertexNormalsMatchTheStoredFaceAndSortedEdgeLayoutBitForBit()
     {
-        var random = new Random(20261023);
-        foreach (var (vertexCount, edgeCount) in new[] { (1, 0), (1, 1), (2, 2), (5, 40), (300, 2000), (70000, 9000) })
+        var random = new Random(20261119);
+        foreach (var (columns, rows, extra) in new[] { (1, 1, 0), (2, 2, 3), (6, 5, 40), (40, 30, 400), (120, 90, 2000) })
         {
-            var edges = new ulong[edgeCount];
-            for (var index = 0; index < edgeCount; index++)
+            // A height field with random sharp folds, plus triangles that are collapsed, repeat a corner,
+            // reuse an existing edge (nonmanifold), or stand alone.
+            var positions = new List<float>();
+            for (var row = 0; row <= rows; row++)
+            for (var column = 0; column <= columns; column++)
+                positions.AddRange([column, row, random.Next(4) == 0 ? random.Next(-3, 4) : random.NextSingle() * .1f]);
+            var vertexCount = positions.Count / 3;
+            var indices = new List<uint>();
+            for (var row = 0; row < rows; row++)
+            for (var column = 0; column < columns; column++)
             {
-                if (random.Next(9) == 0)
-                {
-                    edges[index] = ulong.MaxValue;
-                    continue;
-                }
-                var first = (uint)random.Next(vertexCount);
-                var second = (uint)random.Next(vertexCount);
-                edges[index] = ((ulong)Math.Min(first, second) << 32) | Math.Max(first, second);
+                var a = (uint)(row * (columns + 1) + column);
+                var b = a + 1;
+                var c = a + (uint)columns + 1;
+                var d = c + 1;
+                indices.AddRange([a, b, d, a, d, c]);
             }
-            var corners = Enumerable.Range(0, edgeCount).ToArray();
-            var expectedEdges = (ulong[])edges.Clone();
-            var expectedCorners = (int[])corners.Clone();
-            Array.Sort(expectedEdges, expectedCorners);
-            ModelRunner.SortEdges(edges, corners, vertexCount);
-            Assert.Equal(expectedEdges, edges);
-            // Pairing reads each key's corners as a set; the corners stay attached to their keys.
-            Assert.Equal(Group(expectedEdges, expectedCorners), Group(edges, corners));
+            for (var index = 0; index < extra; index++)
+            {
+                var a = (uint)random.Next(vertexCount);
+                var b = (uint)random.Next(vertexCount);
+                var c = (uint)random.Next(vertexCount);
+                switch (random.Next(4))
+                {
+                    case 0: indices.AddRange([a, a, a]); break;
+                    case 1: indices.AddRange([a, b, a]); break;
+                    case 2 when indices.Count > 0:
+                        var triangle = random.Next(indices.Count / 3) * 3;
+                        indices.AddRange([indices[triangle + 1], indices[triangle], c]);
+                        break;
+                    default: indices.AddRange([a, b, c]); break;
+                }
+            }
+            var expectedPositions = positions.ToArray();
+            var expectedIndices = indices.ToArray();
+            var actualPositions = positions.ToArray();
+            var actualIndices = indices.ToArray();
+            var expected = ReferenceVertexNormals(ref expectedPositions, ref expectedIndices, out var expectedSources, out var expectedStability);
+            var actual = ModelRunner.VertexNormals(ref actualPositions, ref actualIndices, out var actualSources, out var actualStability);
+            Assert.Equal(Bits(expected), Bits(actual));
+            Assert.Equal(Bits(expectedPositions), Bits(actualPositions));
+            Assert.Equal(expectedIndices, actualIndices);
+            Assert.Equal(expectedSources, actualSources);
+            Assert.Equal(expectedStability, actualStability);
         }
 
-        static string[] Group(ulong[] edges, int[] corners) => edges.Zip(corners)
-            .GroupBy(pair => pair.First)
-            .Select(group => $"{group.Key}:{string.Join(',', group.Select(pair => pair.Second).Order())}")
-            .ToArray();
+        static uint[] Bits(float[] values) => Array.ConvertAll(values, BitConverter.SingleToUInt32Bits);
+    }
+
+    // The layout VertexNormals replaced (CH11), held as the reference its output must equal.
+    private static float[] ReferenceVertexNormals(ref float[] positions, ref uint[] indices, out int[] sources, out LayoutStability stability)
+    {
+        var minimumArea = float.PositiveInfinity;
+        var maximumEdgeSum = 0f;
+        var creaseMargin = float.PositiveInfinity;
+        var uvAxisMargin = float.PositiveInfinity;
+        var vertexCount = positions.Length / 3;
+        var creaseCosine = MathF.Cos(MathF.PI / 6);
+        var faces = new Vector3[indices.Length / 3];
+        var directions = new Vector3[faces.Length];
+        var edges = new ulong[indices.Length];
+        var corners = new int[indices.Length];
+        var parents = new int[indices.Length];
+        Array.Fill(parents, -1);
+        for (var triangle = 0; triangle < indices.Length; triangle += 3)
+        {
+            var a = checked((int)indices[triangle]) * 3;
+            var b = checked((int)indices[triangle + 1]) * 3;
+            var c = checked((int)indices[triangle + 2]) * 3;
+            var ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
+            var ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
+            var face = Vector3.Cross(ab, ac);
+            var absolute = Vector3.Abs(face);
+            var dominant = MathF.Max(absolute.X, MathF.Max(absolute.Y, absolute.Z));
+            var runnerUp = MathF.Max(MathF.Min(absolute.X, absolute.Y), MathF.Min(MathF.Max(absolute.X, absolute.Y), absolute.Z));
+            uvAxisMargin = MathF.Min(uvAxisMargin, dominant - runnerUp);
+            minimumArea = MathF.Min(minimumArea, face.Length());
+            maximumEdgeSum = MathF.Max(maximumEdgeSum, ab.Length() + ac.Length());
+            faces[triangle / 3] = face;
+            directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
+            for (var corner = triangle; corner < triangle + 3; corner++)
+            {
+                var first = indices[corner];
+                var second = indices[NextCorner(corner)];
+                edges[corner] = first == second ? ulong.MaxValue : ((ulong)Math.Min(first, second) << 32) | Math.Max(first, second);
+                corners[corner] = corner;
+            }
+        }
+
+        // Compact edge adjacency: a linear counting sort, with no scan of a vertex's entire fan.
+        ReferenceSortEdges(edges, corners, vertexCount);
+        for (var start = 0; start < edges.Length;)
+        {
+            var end = start + 1;
+            while (end < edges.Length && edges[end] == edges[start]) end++;
+            // Boundary, collapsed and nonmanifold edges are shading boundaries. In particular,
+            // do not join an arbitrary pair before discovering a third incident triangle.
+            if (end - start == 2 && edges[start] != ulong.MaxValue)
+            {
+                var first = corners[start];
+                var second = corners[start + 1];
+                var dot = Vector3.Dot(directions[first / 3], directions[second / 3]);
+                creaseMargin = MathF.Min(creaseMargin, MathF.Abs(dot - creaseCosine));
+                if (dot >= creaseCosine)
+                {
+                    var firstEnd = NextCorner(first);
+                    var secondEnd = NextCorner(second);
+                    if (indices[first] == indices[second])
+                    {
+                        Join(first, second);
+                        Join(firstEnd, secondEnd);
+                    }
+                    else
+                    {
+                        Join(first, secondEnd);
+                        Join(firstEnd, second);
+                    }
+                }
+            }
+            start = end;
+        }
+
+        // Reuse the sorted corner buffer as root -> render vertex storage.
+        Array.Fill(corners, -1);
+        var used = new bool[vertexCount];
+        var duplicates = new List<int>();
+        var remapped = new uint[indices.Length];
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var root = Find(corner);
+            if (corners[root] < 0)
+            {
+                var source = checked((int)indices[corner]);
+                if (!used[source])
+                {
+                    corners[root] = source;
+                    used[source] = true;
+                }
+                else
+                {
+                    corners[root] = checked(vertexCount + duplicates.Count);
+                    duplicates.Add(source);
+                }
+            }
+            remapped[corner] = checked((uint)corners[root]);
+        }
+        sources = new int[checked(vertexCount + duplicates.Count)];
+        for (var vertex = 0; vertex < vertexCount; vertex++) sources[vertex] = vertex;
+        if (duplicates.Count > 0)
+        {
+            var expanded = new float[checked(sources.Length * 3)];
+            positions.CopyTo(expanded, 0);
+            for (var duplicate = 0; duplicate < duplicates.Count; duplicate++)
+            {
+                var target = vertexCount + duplicate;
+                var source = duplicates[duplicate];
+                sources[target] = source;
+                Array.Copy(positions, source * 3, expanded, target * 3, 3);
+            }
+            positions = expanded;
+        }
+        indices = remapped;
+        var normals = new float[positions.Length];
+        var fanFaces = new int[sources.Length];
+        var minimumFanArea = float.PositiveInfinity;
+        var maximumFanFaces = 0;
+        for (var corner = 0; corner < indices.Length; corner++)
+        {
+            var offset = checked((int)indices[corner]) * 3;
+            var face = faces[corner / 3];
+            fanFaces[offset / 3]++;
+            normals[offset] += face.X;
+            normals[offset + 1] += face.Y;
+            normals[offset + 2] += face.Z;
+        }
+        for (var vertex = 0; vertex < sources.Length; vertex++)
+        {
+            var offset = vertex * 3;
+            var sum = new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]);
+            if (fanFaces[vertex] > 0)
+            {
+                minimumFanArea = MathF.Min(minimumFanArea, sum.Length());
+                maximumFanFaces = Math.Max(maximumFanFaces, fanFaces[vertex]);
+            }
+            var normal = Vector3.Normalize(sum);
+            if (!float.IsFinite(normal.X)) normal = Vector3.UnitZ;
+            normals[offset] = normal.X;
+            normals[offset + 1] = normal.Y;
+            normals[offset + 2] = normal.Z;
+        }
+        stability = new LayoutStability(minimumArea, maximumEdgeSum, creaseMargin, minimumFanArea, maximumFanFaces, uvAxisMargin);
+        return normals;
+
+        static int NextCorner(int corner) => corner / 3 * 3 + (corner + 1) % 3;
+
+        int Find(int corner)
+        {
+            var root = corner;
+            while (parents[root] >= 0) root = parents[root];
+            while (corner != root)
+            {
+                var next = parents[corner];
+                parents[corner] = root;
+                corner = next;
+            }
+            return root;
+        }
+
+        void Join(int first, int second)
+        {
+            first = Find(first);
+            second = Find(second);
+            if (first == second) return;
+            if (parents[first] > parents[second]) (first, second) = (second, first);
+            parents[first] += parents[second];
+            parents[second] = first;
+        }
+    }
+
+    /*
+     * CH11: orders edge keys (smaller vertex << 32 | larger vertex) ascending, collapsed edges (ulong.MaxValue)
+     * last, as Array.Sort(edges, corners) did, with two stable counting passes: by the larger vertex, then by
+     * the smaller. Equal keys stay adjacent; the order of the corners inside a key may differ from the
+     * comparison sort's, which the pairing below never observes: it reads only pairs, symmetrically, and the
+     * union-find partition does not depend on join order.
+     */
+    private static void ReferenceSortEdges(ulong[] edges, int[] corners, int vertexCount)
+    {
+        if (edges.Length < 2) return;
+        var swapEdges = new ulong[edges.Length];
+        var swapCorners = new int[corners.Length];
+        var counts = new int[vertexCount + 2];
+        CountingPass(edges, corners, swapEdges, swapCorners, counts, vertexCount, high: false);
+        Array.Clear(counts);
+        CountingPass(swapEdges, swapCorners, edges, corners, counts, vertexCount, high: true);
+
+        static void CountingPass(ulong[] sourceEdges, int[] sourceCorners, ulong[] targetEdges, int[] targetCorners,
+            int[] counts, int vertexCount, bool high)
+        {
+            // Bucket vertexCount holds collapsed edges, after every vertex bucket.
+            foreach (var edge in sourceEdges) counts[Bucket(edge, vertexCount, high) + 1]++;
+            for (var bucket = 1; bucket < counts.Length; bucket++) counts[bucket] += counts[bucket - 1];
+            for (var index = 0; index < sourceEdges.Length; index++)
+            {
+                var target = counts[Bucket(sourceEdges[index], vertexCount, high)]++;
+                targetEdges[target] = sourceEdges[index];
+                targetCorners[target] = sourceCorners[index];
+            }
+        }
+
+        static int Bucket(ulong edge, int vertexCount, bool high) =>
+            edge == ulong.MaxValue ? vertexCount : (int)(high ? edge >> 32 : edge & uint.MaxValue);
     }
 
     [Fact]

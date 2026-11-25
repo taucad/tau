@@ -1,4 +1,7 @@
 import { useSelector } from '@xstate/react';
+import { RefreshCw } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
+import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
 import { ViewerStatusPill } from '@taucad/workbench-panes/shell/viewer-status';
 import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -26,6 +29,32 @@ export function ChatViewerStatus(): React.ReactNode {
 
   if (loadingState) {
     return <ViewerStatusPill label={loadingState} />;
+  }
+
+  /* FP10 (PL7 staging verification 2026-11-21, row 5): the runtime's own code did not load and the unit has replaced
+   * its worker as often as the page allows. This page can never load that code again, so the slot offers Reload, in
+   * every viewer profile, never a retry in place and never only the closed channel the transport saw. */
+  if (failureMessage !== undefined && isCodeLoadFailure(new Error(failureMessage))) {
+    return (
+      <section
+        aria-label='Model viewer unavailable'
+        className='m-auto flex max-w-xl flex-wrap items-center gap-2 rounded-md border bg-background/90 p-2 text-sm shadow-sm backdrop-blur-sm'
+      >
+        <p className='min-w-48 flex-1 text-muted-foreground'>
+          Part of Tau did not finish loading, so the model cannot render. Reload the page to continue.
+        </p>
+        <Button
+          size='sm'
+          variant='outline'
+          onClick={() => {
+            globalThis.location.reload();
+          }}
+        >
+          <RefreshCw aria-hidden className='size-3.5' />
+          Reload
+        </Button>
+      </section>
+    );
   }
 
   return (

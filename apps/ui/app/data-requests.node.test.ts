@@ -2,9 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- TAU_DEBUG mirrors the environment contract. */
 /**
  * Loaders called the way a client navigation calls them: through React Router's own request handler, with the
- * `/<path>.data?_routes=…` request the browser sends and the app's future flags. Under `v8_passThroughRequests` (the
- * React Router 8 behaviour, blueprint B4) a loader's `request.url` is that raw request, so each loader here must read
- * the page's URL from its `url` argument.
+ * `/<path>.data?_routes=…` request the browser sends. React Router 8 passes a loader that raw request as `request.url`
+ * (blueprint B4), so each loader here must read the page's URL from its `url` argument.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRequestHandler, requestData } from '#testing/data-request.js';
@@ -39,9 +38,9 @@ vi.mock('#environment.config.js', async (importOriginal) => ({
 
 const root = { id: 'root', path: '', module: await import('#root.js') } satisfies TestRoute;
 
-/** A handler holding the root and the given route, built with the app's own future flags. */
+/** A handler holding the root and the given route. */
 const handlerFor = (route: Omit<TestRoute, 'parentId'>): ReturnType<typeof createTestRequestHandler> =>
-  createTestRequestHandler({ routes: [root, { ...route, parentId: 'root' }], future: config.future });
+  createTestRequestHandler({ routes: [root, { ...route, parentId: 'root' }] });
 
 beforeEach(() => {
   mocks.harnessEnabled = true;
@@ -50,8 +49,39 @@ beforeEach(() => {
 });
 
 describe('data requests', () => {
-  it('passes loaders the raw request, as React Router 8 does', () => {
-    expect(config.future.v8_passThroughRequests).toBe(true);
+  it('sets no React Router 7 `v8_*` flag, which React Router 8 rejects: raw requests and trailing-slash-aware data names are its defaults', () => {
+    expect(Object.keys(config.future)).toEqual(['unstable_optimizeDeps']);
+  });
+
+  describe('data request names (RR4)', () => {
+    const home = { id: 'routes/_index', index: true, module: { default: () => null } } satisfies Omit<
+      TestRoute,
+      'parentId'
+    >;
+
+    it("answers Home's data at `/_.data`, the name the client now sends", async () => {
+      const handler = handlerFor(home);
+
+      const result = await requestData(handler, 'https://tau.new/', ['root']);
+
+      expect(result).toMatchObject({
+        kind: 'routes',
+        status: 200,
+        routes: { root: { data: { queries: { models: 'catalog' } } } },
+      });
+    });
+
+    it('answers a page with a trailing slash at `<path>/_.data`, with the data of that page', async () => {
+      const handler = handlerFor({ id: 'routes/projects', path: 'projects', module: { default: () => null } });
+
+      const result = await requestData(handler, 'https://tau.new/projects/', ['root']);
+
+      expect(result).toMatchObject({
+        kind: 'routes',
+        status: 200,
+        routes: { root: { data: { queries: { models: 'catalog' } } } },
+      });
+    });
   });
 
   describe('root loader', () => {
@@ -63,15 +93,6 @@ describe('data requests', () => {
         status: 301,
         location: 'https://tau.new/projects?tab=recent',
       });
-    });
-
-    it('keeps the offline shell neutral on its .data request, without reading the model catalog', async () => {
-      const handler = handlerFor({ id: 'routes/usage', path: 'usage', module: { default: () => null } });
-
-      const result = await requestData(handler, 'https://tau.new/usage', ['root']);
-
-      expect(result).toMatchObject({ kind: 'routes', routes: { root: { data: { queries: undefined } } } });
-      expect(mocks.prefetchModelCatalog).not.toHaveBeenCalled();
     });
 
     it('reads the model catalog on any other page', async () => {

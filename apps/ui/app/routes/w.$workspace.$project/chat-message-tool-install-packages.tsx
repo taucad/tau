@@ -63,6 +63,7 @@ export function ChatMessageToolInstallPackages({
         <ChatToolCard
           variant='minimal'
           status={issues.length > 0 ? 'warning' : 'ready'}
+          /* Outside a transcript (the Packages panel) the report answers the Install press, so a refusal shows. */
           isDefaultOpen={issues.length > 0}
         >
           <ChatToolCardHeader>

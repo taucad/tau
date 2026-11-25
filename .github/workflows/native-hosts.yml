@@ -19,15 +19,19 @@
 # project) and PicoGK's typed refusals on darwin-x64. Every check runs exactly as before, in exactly one
 # job, and the caller's required check needs every job (a failed job fails the called workflow).
 #
-# Placement (CI throughput review Q-3, 2026-11-13): `ci.yml` calls this workflow (`workflow_call`) in the
-# merge queue, and on a push to `main` the queue did not already prove, when its plan finds a
-# `tag:ci:native-hosts` project (Build123d, PicoGK, the CLI) or a `test:native-linux` project affected.
-# Its plan passes the affected `test:native-linux` projects as `native-linux` and whether a
-# `tag:ci:native-hosts` project is affected as `intel`, which starts the Intel row (it joins the queue at
-# the native lane's rate instead of on every push). The plan job here is then skipped, and the required
-# check fails when a row does. Never on a pull request: the queue proves the rows on the exact commit that
-# lands, and a push that reuses the queue verdict runs none again. The push and schedule triggers are
-# gone: the daily drift check (`drift-check.yml`, Q-7) dispatches this workflow when a runner image or
+# Placement (CI throughput review Q-3, 2026-11-13; INTEL-1, operator approval 2026-11-18, ping 2):
+# - Linux rows: `ci.yml` calls this workflow (`workflow_call`, `hosts: linux`) in the merge queue, and on a
+#   push to `main` the queue did not already prove, when its plan finds a `tag:ci:native-hosts` project
+#   (Build123d, PicoGK, the CLI) or a `test:native-linux` project affected, with the affected
+#   `test:native-linux` projects as `native-linux`. The plan job here is then skipped, and the required
+#   check fails when a row does. Never on a pull request: the queue proves the rows on the exact commit that
+#   lands, and a push that reuses the queue verdict runs none again.
+# - Intel rows (darwin-x64): never in the merge queue, where they were its slowest jobs (cli 33.2, build123d
+#   29.6, picogk 25.6 min p95) and the runner lost contact mid-job, as MAC-X left it (tau #2505).
+#   `release-desktop-staging.yml` job `Intel native gate` calls this workflow with `hosts: intel` and the
+#   candidate's `ref`, with no cache token, and its tag job needs it, so no desktop candidate exists without
+#   every darwin-x64 row green on its own commit.
+# The push and schedule triggers are gone: the daily drift check (`drift-check.yml`, Q-7) dispatches this workflow when a runner image or
 # registry digest changed, and that dispatch or a manual one runs the plan here, which selects every row
 # and is not a required check. The 03:17 nightly was retired once the drift check dispatched this workflow
 # green and the queue had run the Intel row green twice (resume § 5b).
@@ -37,14 +41,20 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      hosts:
+        description: '`linux`: the Linux rows (`ci.yml`, the merge queue and a push). `intel`: the darwin-x64 rows alone (the desktop candidate gate).'
+        type: string
+        required: true
       native-linux:
-        description: The affected `test:native-linux` projects, comma-separated, from `ci.yml`'s plan.
+        description: "The affected `test:native-linux` projects, comma-separated, from `ci.yml`'s plan (with `hosts: linux`)."
         type: string
-        required: true
-      intel:
-        description: "`'true'` when `ci.yml`'s plan finds a `tag:ci:native-hosts` project affected: the Intel row runs."
+        required: false
+        default: ''
+      ref:
+        description: The commit the rows check out (the desktop candidate's); empty checks out the caller's.
         type: string
-        required: true
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -60,20 +70,20 @@ env:
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
-# Nothing here is cancelled. A run called from `ci.yml` (where `inputs.intel` is set) gets a group of its own
+# Nothing here is cancelled. A called run (where `inputs.hosts` is set) gets a group of its own
 # (`github.run_id`): `ci.yml`'s group already holds the run, and a shared group would let a newer push
 # replace a `main` run's rows still waiting for a runner, which `ci.yml` never cancels. Each dispatch keeps
 # a group of its own. The group names this workflow literally: called from `ci.yml`,
 # `github.workflow` is `CI`, and a group equal to the caller's would cancel the call.
 concurrency:
-  group: native-hosts-${{ inputs.intel != '' && github.run_id || format('{0}-{1}', github.event_name, github.ref) }}
+  group: native-hosts-${{ inputs.hosts != '' && github.run_id || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: false
 
 jobs:
   plan:
     name: Select the native host rows
-    # Called from `ci.yml` (`inputs.intel` set), its plan selected the rows; a dispatch runs this.
-    if: inputs.intel == ''
+    # Called (`inputs.hosts` set), the caller selected the rows; a dispatch runs this.
+    if: inputs.hosts == ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -86,6 +96,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -93,7 +104,7 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
-      # Nightly and on dispatch, every row and every `test:native-linux` project. `tail -1` drops Nx's log lines.
+      # On dispatch, every row and every `test:native-linux` project. `tail -1` drops Nx's log lines.
       - name: Select the rows
         id: plan
         run: |
@@ -107,8 +118,8 @@ jobs:
   linux:
     name: Native kernels on ${{ matrix.target }} (${{ matrix.project }})
     needs: [plan]
-    # Called from `ci.yml`, the plan is skipped and `ci.yml`'s plan selected these rows.
-    if: ${{ !cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true') }}
+    # Called from `ci.yml` (`hosts: linux`), the plan is skipped and `ci.yml`'s plan selected these rows.
+    if: ${{ !cancelled() && (inputs.hosts == 'linux' || needs.plan.outputs.linux == 'true') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -138,6 +149,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      # The checkout above can be a commit older than this workflow, so the download helper comes from this
+      # workflow's own commit (scripts/src/pinned-download.test.ts).
+      - name: Check out this workflow's download helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -226,7 +249,16 @@ jobs:
       - name: Accept glibc 2.28 selection and refuse musl
         if: matrix.arch == 'x64' && matrix.project == 'cli'
         run: |
-          node_root=$(dirname "$(dirname "$(command -v node)")")
+          # The CLI's floor Node, not setup-nx's: these rows are a glibc 2.28 user's host, and the official Node 26
+          # binary also links libatomic.so.1, which debian:10 and rockylinux:8 do not ship (and `--network=none`
+          # cannot install). Node 24 needs glibc 2.28 alone, like the CLI's own floor (`engines.node >=24`).
+          floor=v24.20.0
+          name="node-$floor-linux-x64"
+          # Pinned from nodejs.org/dist/v24.20.0/SHASUMS256.txt.
+          ./.tau-ci/.github/actions/apt-install/download.sh node-floor-download "https://nodejs.org/dist/$floor/$name.tar.xz" \
+            "$RUNNER_TEMP/$name.tar.xz" sha256:2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
+          node_root="$RUNNER_TEMP/$name"
           expect_blocked() {
             local name=$1 filter=$2 options=$3 image=$4
             shift 4
@@ -300,12 +332,23 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-native-hosts-${{ matrix.target }}-${{ matrix.project }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   # The `test:native-linux` projects, one job each: `ci.yml`'s selection when it called this workflow, this
   # workflow's plan otherwise.
   native-linux-rows:
     name: List the linux-x64 native rows
     needs: [plan]
-    if: ${{ !cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true') }}
+    if: ${{ !cancelled() && (inputs.hosts == 'linux' || needs.plan.outputs.linux == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -335,6 +378,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -376,11 +420,22 @@ jobs:
             echo 'No closure test ran: the selected rows prepare no plugin closure.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-native-linux-${{ matrix.project }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
   intel:
     name: Native kernels on darwin-x64 (${{ matrix.project }})
     needs: [plan]
-    # Called from `ci.yml`, when its plan finds a `tag:ci:native-hosts` project affected; every dispatch.
-    if: ${{ !cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true') }}
+    # Called from the desktop candidate gate (`hosts: intel`), never from `ci.yml`; every dispatch.
+    if: ${{ !cancelled() && (inputs.hosts == 'intel' || needs.plan.outputs.intel == 'true') }}
     runs-on: macos-26-intel
     timeout-minutes: 60
     # One job per project: the Build123d suites, `tau prepare build123d` with the built CLI, and PicoGK's
@@ -391,10 +446,14 @@ jobs:
         project: [build123d, cli, picogk]
     env:
       TARGET: darwin-x64
+      # At the desktop candidate gate every Nx task runs fresh, as the gate's other checks do; the caller passes
+      # no cache token either, so there is no remote cache to read.
+      NX_SKIP_NX_CACHE: ${{ inputs.hosts == 'intel' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -488,3 +547,14 @@ jobs:
           }
           refuse picogk-intel arch
           TAU_DEPENDENCY_TARGET=win32-x64 refuse picogk-forced os
+
+      # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
+      # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-native-intel-${{ matrix.project }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

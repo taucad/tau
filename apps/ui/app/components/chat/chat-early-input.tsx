@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { cn } from '@taucad/ui/utils/cn';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { buildDraftMessage } from '#hooks/draft.machine.js';
+import { buildDraftMessage } from '@taucad/chat-ui/hooks/draft.machine';
 import { markPageUsed } from '#components/onboarding/home-interaction.js';
 import {
   captureHandOff,

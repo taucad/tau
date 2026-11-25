@@ -55,6 +55,8 @@ type EntryFaceQueries = {
   createFinder: () => ReplicadModule.FaceFinder;
   /** The face's memoized center of mass, read from OCCT at most once. */
   centerOf: (face: ReplicadFace) => VectorTuple;
+  /** Deletes the listed faces and every finder created, once the entry is resolved. */
+  dispose: () => void;
 };
 
 type VectorTuple = readonly [x: number, y: number, z: number];
@@ -175,6 +177,7 @@ const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibr
   }
 
   let faces: readonly ReplicadFace[] | undefined;
+  const finders: ReplicadModule.FaceFinder[] = [];
   const centerReaders = new WeakMap<ReplicadFace, () => VectorTuple>();
   const listFaces = (): readonly ReplicadFace[] => {
     if (!faces) {
@@ -188,7 +191,11 @@ const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibr
     return faces;
   };
   return {
-    createFinder: () => new LazyNormalFaceFinder(),
+    createFinder: () => {
+      const finder = new LazyNormalFaceFinder();
+      finders.push(finder);
+      return finder;
+    },
     listFaces,
     centerOf: (face) => {
       let readCenter = centerReaders.get(face);
@@ -197,6 +204,16 @@ const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibr
         centerReaders.set(face, readCenter);
       }
       return readCenter();
+    },
+    // The listing and the finders are the resolver's own: `shape.faces` hands out a new wrapper per face, and a
+    // finder owns what its filters made. Only face indices leave the resolver.
+    dispose: () => {
+      for (const face of faces ?? []) {
+        face.delete();
+      }
+      for (const finder of finders) {
+        finder.delete();
+      }
     },
   };
 };
@@ -307,43 +324,47 @@ export const resolveEntryInterfaces = (entry: InputShape, replicadLibrary: Repli
     resolvedInterfaces.push(resolveSingleFaceInterface({ entryName, interfaceName: name, declaration, queries }));
   };
 
-  for (const [key, declaration] of Object.entries(interfaces)) {
-    if (!isValidAuthoringKey(key)) {
-      const reason = isValidInterfaceName(key)
-        ? 'authoring keys are index-free; indices come only from group() membership'
-        : 'it does not match the GeoSpec interface-name grammar';
-      throw new Error(`GeoSpec interface key '${key}' on entry '${entryName}' is invalid: ${reason}`);
-    }
+  try {
+    for (const [key, declaration] of Object.entries(interfaces)) {
+      if (!isValidAuthoringKey(key)) {
+        const reason = isValidInterfaceName(key)
+          ? 'authoring keys are index-free; indices come only from group() membership'
+          : 'it does not match the GeoSpec interface-name grammar';
+        throw new Error(`GeoSpec interface key '${key}' on entry '${entryName}' is invalid: ${reason}`);
+      }
 
-    switch (declaration.kind) {
-      case 'face':
-      case 'axis': {
-        resolveFaceLike(key, declaration);
-        break;
-      }
-      case 'group': {
-        for (const [index, member] of declaration.members.entries()) {
-          resolveFaceLike(`${key}[${index + 1}]`, member);
+      switch (declaration.kind) {
+        case 'face':
+        case 'axis': {
+          resolveFaceLike(key, declaration);
+          break;
         }
-        break;
-      }
-      case 'datum': {
-        validateDatumFrame({
-          interfaceName: key,
-          entryName,
-          xAxis: declaration.xAxis,
-          zAxis: declaration.zAxis,
-        });
-        resolvedInterfaces.push({
-          kind: 'datum',
-          name: key,
-          origin: declaration.origin,
-          xAxis: declaration.xAxis,
-          zAxis: declaration.zAxis,
-        });
-        break;
+        case 'group': {
+          for (const [index, member] of declaration.members.entries()) {
+            resolveFaceLike(`${key}[${index + 1}]`, member);
+          }
+          break;
+        }
+        case 'datum': {
+          validateDatumFrame({
+            interfaceName: key,
+            entryName,
+            xAxis: declaration.xAxis,
+            zAxis: declaration.zAxis,
+          });
+          resolvedInterfaces.push({
+            kind: 'datum',
+            name: key,
+            origin: declaration.origin,
+            xAxis: declaration.xAxis,
+            zAxis: declaration.zAxis,
+          });
+          break;
+        }
       }
     }
+  } finally {
+    queries.dispose();
   }
 
   return resolvedInterfaces.length > 0 ? { ...rest, interfaces, resolvedInterfaces } : rest;

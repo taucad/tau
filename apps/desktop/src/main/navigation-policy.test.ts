@@ -9,6 +9,7 @@ import {
   isRendererUrl,
   isTrustedSender,
   navigationDecision,
+  navigationLogTarget,
   postHogConnectOrigins,
   rendererOrigins,
 } from '#main/navigation-policy.js';
@@ -60,6 +61,23 @@ describe('navigationDecision', () => {
     for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'tau://auth/callback', 'not a url']) {
       expect([url, navigationDecision(url, production)]).toEqual([url, 'deny']);
     }
+  });
+});
+
+describe('navigationLogTarget', () => {
+  it('should log only the origin of a link, never its path, query or fragment', () => {
+    /* A vendor sign-in URL Cmd+clicked in the sign-in tab carries its OAuth state in the query. */
+    expect(navigationLogTarget('https://vendor.example/oauth/authorize?code=abc&state=xyz#frag')).toBe(
+      'https://vendor.example',
+    );
+  });
+
+  it('should log only the scheme of a URL without a host', () => {
+    expect(navigationLogTarget('mailto:someone@example.com')).toBe('mailto:');
+  });
+
+  it('should log nothing of a string that is not a URL', () => {
+    expect(navigationLogTarget('not a url')).toBe('invalid');
   });
 });
 

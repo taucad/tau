@@ -1,5 +1,6 @@
 import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
+import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
 import { createCallbackLogic } from 'xstate';
@@ -17,9 +18,9 @@ import { installBrowserHost } from '#main/browser-host.js';
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir, totalmem } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -44,7 +45,7 @@ import {
   systemPreferences,
   utilityProcess,
 } from 'electron';
-import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent, MessageBoxOptions, WebContents } from 'electron';
 import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
@@ -52,6 +53,8 @@ import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
+  acpLoginLaunch,
+  computeStoreWorkspace,
   defaultConfigDirectory,
   defaultDependencyStore,
   discoverAcpAgents,
@@ -65,6 +68,7 @@ import { createAuthService } from '#main/auth-service.js';
 import {
   createDiagnosticsLog,
   forwardRendererDiagnostics,
+  pagesThatCanSave,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
   watchRendererHangs,
@@ -86,6 +90,7 @@ import {
   isPermissionGranted,
   isTrustedSender,
   navigationDecision,
+  navigationLogTarget,
   postHogConnectOrigins,
   rendererOrigins,
 } from '#main/navigation-policy.js';
@@ -99,11 +104,13 @@ import {
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
+import { registerAgentSignIn } from '#main/agent-sign-in.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   bundledStoreGuardEnvironment,
+  windowsShellSandboxEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -123,13 +130,18 @@ import { createRendererTelemetryConsentRelay } from '#main/telemetry-consent.js'
 import { admitOtaProbe } from '#main/ota-probe.js';
 import {
   bootstrapFailedSignal,
+  bootUnhealthySignal,
   errnoOf,
   mainUncaughtSignal,
+  safeModeSignal,
   optionalStepFailedSignal,
   probeLeftoverIgnoredSignal,
+  rendererReloadPolicySignal,
   storeQuarantinedSignal,
+  updateBlockedSignal,
   updaterFailureSignal,
 } from '#main/desktop-signals.js';
+import { closedPageName, createRendererReloadPolicy } from '#main/renderer-reload-policy.js';
 import type { BootstrapStep, DesktopSignal, OptionalBootstrapStep } from '#main/desktop-signals.js';
 import {
   addTroubleshootingMenu,
@@ -147,12 +159,27 @@ import {
   reportRevisionEngineFailure,
 } from '#main/error-reporting.js';
 import { createExternalAgentDiscovery } from '#main/external-agent-discovery.js';
+import { bootHealthFileName, buildIdentity, startBootHealth } from '#main/boot-health.js';
+import type { BootHealth, LaunchMode } from '#main/boot-health.js';
+import { bootDeadlineScaleOf, createBootWatchdog } from '#main/boot-watchdog.js';
+import type { BootWatchdog, RecoveryTrigger } from '#main/boot-watchdog.js';
+import { applyPendingResets, readPendingResets } from '#main/recovery-resets.js';
+import {
+  createRecoveryActionHandler,
+  createRecoveryHooks,
+  createRecoveryWindowController,
+} from '#main/recovery-window.js';
+import type { RecoveryHooks, RecoveryWindowLike } from '#main/recovery-window.js';
 import { admitRouteQualificationProbe, prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
+import { readDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { createAutoInstall } from '#main/update-auto-install.js';
+import type { AutoInstall } from '#main/update-auto-install.js';
+import { desktopDownloadPage } from '#shared/desktop-release.js';
 import { startUpdateTriggers } from '#main/update-triggers.js';
 import type { MoveToApplicationsHost } from '#main/app-location.js';
 import {
@@ -177,12 +204,21 @@ import {
   hostHandOffChannel,
   quitChannels,
   bootstrapArgumentPrefix,
+  bootChannels,
   computeControlChannels,
+  recoveryChannels,
+  rendererBootStages,
+  safeModeSwitch,
   servicesPortRelayTag,
   slicersChannels,
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
-import type { AppIconTheme, DesktopMachineBindingFailure } from '#shared/desktop-bootstrap.js';
+import type {
+  AppIconTheme,
+  DesktopMachineBindingFailure,
+  RendererBootStage,
+  SafeModeReason,
+} from '#shared/desktop-bootstrap.js';
 import {
   generatedImageIpcChannel,
   isQuickLookEnabled,
@@ -193,6 +229,49 @@ import {
 } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+
+/**
+ * The deepest existing directory on `path`, walking up from it: where a folder picker should open for a folder that
+ * moved or was deleted (blueprint R4).
+ *
+ * @param path - An absolute path that may no longer exist.
+ * @returns The nearest existing ancestor directory, or `undefined` when none of it exists.
+ */
+const nearestExistingDirectory = async (path: string): Promise<string | undefined> => {
+  let candidate = resolve(path);
+  for (;;) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each step up depends on the one below not existing.
+    const found = await stat(candidate).catch(() => undefined);
+    if (found?.isDirectory() === true) {
+      return candidate;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return undefined;
+    }
+    candidate = parent;
+  }
+};
+/** Whether `inner` is `outer` or inside it, the node host's containment rule (`host.ts` `isContained`). */
+const isPathWithin = (outer: string, inner: string): boolean => {
+  const fromOuter = relative(outer, inner);
+  return fromOuter === '' || (!isAbsolute(fromOuter) && fromOuter !== '..' && !fromOuter.startsWith(`..${sep}`));
+};
+
+/** Resolve symbolic links where the path exists, so a link cannot hide an overlap. */
+const canonicalOrResolved = async (path: string): Promise<string> => {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+/** Whether a picked folder contains, or is inside, `protectedDirectory` (blueprint R6). */
+const overlapsDirectory = async (picked: string, protectedDirectory: string): Promise<boolean> => {
+  const [folder, guarded] = await Promise.all([canonicalOrResolved(picked), canonicalOrResolved(protectedDirectory)]);
+  return isPathWithin(folder, guarded) || isPathWithin(guarded, folder);
+};
 
 /*
  * Main's own faults, from its first line (B18, D6). Nothing below may end a launch in silence: the handlers are
@@ -443,12 +522,17 @@ app.on('open-file', (event, path) => {
 });
 enqueueOpenFiles(process.argv.slice(1));
 
+/* The recovery window is main's own, not an app window: set once bootstrap creates its controller (D0). */
+let isRecoveryWindow = (_window: BrowserWindow): boolean => false;
+/** The app's own windows: every window but the recovery window. */
+const appWindows = (): BrowserWindow[] => BrowserWindow.getAllWindows().filter((window) => !isRecoveryWindow(window));
+
 /** Bring the app forward, whatever asked it to (a second launch, a deep link). */
 const focusMainWindow = (): void => {
   if (hideTestWindow) {
     return;
   }
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = appWindows()[0];
   if (window?.isMinimized()) {
     window.restore();
   }
@@ -563,6 +647,11 @@ const residentMetricsReuseMilliseconds = 500;
 export const quitRendererMilliseconds =
   rendererCloseStepsMilliseconds + projectReleaseMilliseconds + quitMarginMilliseconds;
 
+/* Set while a recovery restart runs in a launch whose page never mounted: the quit owner then asks no page (D0). */
+let restartWithoutPage = false;
+/* Web contents whose hung renderer main ended (B24): the quit owner does not wait on them. */
+const endedHungPages = new Set<number>();
+
 /**
  * Ask every window's sessions registry to close its projects, and wait.
  *
@@ -576,8 +665,13 @@ const askRendererToQuiesce = async (
   boundMilliseconds: number,
   attemptId: string,
 ): Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'> => {
-  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-  if (windows.length === 0) {
+  const windows = pagesThatCanSave(
+    appWindows().filter((window) => !window.isDestroyed()),
+    endedHungPages,
+  );
+  /* A recovery restart in a launch that never reached `shell-mounted` has no page with anything to save, and a hung
+   * page (B24) would hold it for the whole bound (D0). */
+  if (windows.length === 0 || restartWithoutPage) {
     return 'no-window';
   }
   return new Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'>((resolve) => {
@@ -613,11 +707,134 @@ const askRendererToQuiesce = async (
   });
 };
 
+/** The largest `.tau/workspace.json` main reads for the renderer; a marker is a few hundred bytes. */
+const workspaceMarkerByteLimit = 64 * 1024;
+
 /* Set by bootstrap once it can make the main window: a second launch then reopens one when none exists (B19). */
 let ensureMainWindow: (() => void) | undefined;
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
+
+/*
+ * Boot health and safe mode (D0, R12). Only a launch that holds the single-instance lock touches the ledger, so a
+ * second launch that is about to quit can neither read nor overwrite the first one's record; probe launches are not
+ * recorded. Safe mode is decided here, before `whenReady`, because hardware acceleration can only be turned off
+ * before `ready`; it is a property of this launch and is never stored as a setting.
+ */
+const recordsBootHealth = ownsSingleInstanceLock && otaProbe === undefined && routeQualification === undefined;
+if (recordsBootHealth) {
+  /* Resets the recovery window asked for are applied now, before anything opens the files they move. */
+  applyPendingResets({
+    userData: app.getPath('userData'),
+    sessionData: app.getPath('sessionData'),
+    stamp: new Date().toISOString().replaceAll(':', '-'),
+    appOrigins: ['app_tau_0', ...(isDevelopment ? ['http_localhost_3001'] : [])],
+    report: reportMain,
+    log: logMain,
+  });
+}
+/* LW8: the commit packaging recorded beside the bundles (`dist/host-build.json`); empty when none was (ST-9). */
+const desktopHostBuild = readDesktopHostBuild(join(import.meta.dirname, '..'));
+const bootHealth: BootHealth | undefined = recordsBootHealth
+  ? startBootHealth({
+      path: join(app.getPath('userData'), bootHealthFileName),
+      build: buildIdentity({
+        version: app.getVersion(),
+        sourceCommit: desktopHostBuild,
+        packaged: app.isPackaged,
+      }),
+      version: app.getVersion(),
+      safeModeRequested: process.argv.includes(safeModeSwitch),
+      launchId: randomUUID(),
+    })
+  : undefined;
+const launchMode: LaunchMode = bootHealth?.mode ?? 'normal';
+const safeModeReason: SafeModeReason | undefined =
+  launchMode === 'safe-auto' ? 'unhealthy-launches' : launchMode === 'safe-requested' ? 'requested' : undefined;
+const safeMode = safeModeReason !== undefined;
+if (bootHealth?.previousOutcome === 'unhealthy' && bootHealth.previous !== undefined) {
+  logMain('warn', 'main.boot-unhealthy', { previous: bootHealth.previous, count: bootHealth.unhealthyCount });
+  reportMain(bootUnhealthySignal(bootHealth.previous, bootHealth.unhealthyCount));
+}
+if (safeModeReason !== undefined) {
+  /* Safe mode starts without the GPU: a GPU process that cannot start (B26) is one of the faults it works around. */
+  app.disableHardwareAcceleration();
+  logMain('warn', 'main.safe-mode', { reason: safeModeReason, count: bootHealth?.unhealthyCount });
+  reportMain(safeModeSignal(safeModeReason, bootHealth?.unhealthyCount ?? 0));
+}
+/* The recovery window and the restarts behind it, once bootstrap can make them. The watchdog and the renderer reload
+ * policy (WP8) act through these two hooks. */
+let recoveryHooks: RecoveryHooks | undefined;
+let recoveryTrigger: RecoveryTrigger | undefined;
+const bootWatchdog: BootWatchdog | undefined =
+  bootHealth === undefined
+    ? undefined
+    : createBootWatchdog({
+        setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),
+        clearTimeout: (handle) => {
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+        openRecovery: (trigger) => {
+          logMain('warn', 'main.recovery-opened', { trigger });
+          recoveryHooks?.openRecovery(trigger);
+        },
+        offerRecovery: (trigger) => {
+          /* Beside the app: the window that is still loading is neither closed nor reloaded. */
+          logMain('warn', 'main.recovery-offered', { trigger });
+          recoveryHooks?.openRecovery(trigger);
+        },
+        markDeadlinePassed: () => {
+          logMain('warn', 'main.boot-deadline-passed', { stage: bootHealth.stage() });
+          bootHealth.markDeadlinePassed();
+        },
+        endUserClosed: () => {
+          bootHealth.end('user-closed-window');
+        },
+        noteGpuProcessGone: () => {
+          bootHealth.noteGpuProcessGone();
+        },
+        report: reportMain,
+        safeMode: () => safeMode,
+        scale: bootDeadlineScaleOf(process.env['TAU_E2E_BOOT_DEADLINE_SCALE']),
+      });
+bootWatchdog?.start();
+app.on('child-process-gone', (_event, details) => {
+  if (details.type === 'GPU') {
+    logMain('error', 'main.gpu-process-gone', { reason: details.reason, exitCode: details.exitCode });
+  }
+  bootWatchdog?.childProcessGone(details);
+});
+
+/* A second launch that asks for safe mode reaches this one, which cannot change mode in place: ask once (D0). */
+let safeModePromptShowing = false;
+const offerSafeModeRestart = async (): Promise<void> => {
+  if (safeModePromptShowing || safeMode) {
+    return;
+  }
+  safeModePromptShowing = true;
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      title: 'Tau',
+      message: 'Restart Tau in safe mode?',
+      detail: 'Tau is already running. Safe mode starts it again with only Home and fewer features, for one launch.',
+      buttons: ['Restart in Safe Mode', 'Not Now'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) {
+      await recoveryHooks?.restartInSafeMode();
+    }
+  } catch (error) {
+    logMain('error', 'main.safe-mode-prompt-failed', error);
+  } finally {
+    safeModePromptShowing = false;
+  }
+};
+
 app.on('second-instance', (_event, argv) => {
-  enqueueOpenFiles(argv.slice(1));
+  if (!safeMode) {
+    enqueueOpenFiles(argv.slice(1));
+  }
   const link = deepLinkArgument(argv.slice(1), desktopScheme);
   if (link !== undefined) {
     receiveDeepLink(link);
@@ -626,6 +843,13 @@ app.on('second-instance', (_event, argv) => {
    * create the window when there is none, then bring it forward, which shows a hidden one. */
   ensureMainWindow?.();
   focusMainWindow();
+  /* Past the 45 s rule, the window this launch shows is not starting: offer recovery beside it as well (B19). */
+  if (bootWatchdog?.pastShellDeadline() === true) {
+    recoveryHooks?.openRecovery('second-instance');
+  }
+  if (argv.includes(safeModeSwitch)) {
+    void offerSafeModeRestart();
+  }
 });
 
 process.title = 'Tau';
@@ -663,22 +887,14 @@ app.on('window-all-closed', () => {
 let bootstrapStep: BootstrapStep = 'startup';
 
 /**
- * Start this app again with extra switches: the AppImage relauncher when this is an AppImage, because Electron's own
- * relauncher starts the image in a way that cannot mount it, and `app.relaunch` otherwise.
+ * Start this app again with `switches` (`relaunchSelf` in `update-platform.ts`): the AppImage relauncher on an
+ * AppImage, `app.relaunch` otherwise, and never carrying this launch's `--safe-mode` (D0).
  *
  * @param switches - Switches the next launch carries, such as `--safe-mode`.
  */
 const relaunchWith = async (switches: readonly string[]): Promise<void> => {
-  const image = process.env['APPIMAGE'];
-  if (image !== undefined) {
-    const { relaunchAppImage, relaunchSwitches } = await import('#main/update-platform.js');
-    await relaunchAppImage(image, [
-      ...relaunchSwitches(process.argv).filter((value) => !switches.includes(value)),
-      ...switches,
-    ]);
-    return;
-  }
-  app.relaunch({ args: [...process.argv.slice(1).filter((value) => !switches.includes(value)), ...switches] });
+  const { relaunchSelf } = await import('#main/update-platform.js');
+  await relaunchSelf(switches);
 };
 
 const bootstrapElectronApp = async (): Promise<void> => {
@@ -709,6 +925,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* The store guard the Linux Terminal writes the project's git store through, when this build ships one (LP5). */
   const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+  );
+  /* The Windows shell sandbox helper this build ships, and its off-by-default switch (Q15, D15). */
+  const windowsSandboxEnvironment = windowsShellSandboxEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+    environment,
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   /* A step the window does not need is logged, reported and skipped when it fails; it never ends the launch (B18). */
@@ -774,7 +995,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
   const tauConfigDirectory =
     desktopChannel === 'staging' ? join(app.getPath('userData'), 'config') : defaultConfigDirectory();
-  const machinesEnabled = isMachinesFeatureEnabled(environment['TAU_MACHINES_ENABLED']);
+  /* Safe mode skips the optional subsystems: machines, the browser host, Quick Look and agent discovery (D0). */
+  const machinesEnabled = !safeMode && isMachinesFeatureEnabled(environment['TAU_MACHINES_ENABLED']);
   const machinesDirectory = join(tauConfigDirectory, 'machines');
   if (machinesEnabled) {
     optionalStep(
@@ -819,13 +1041,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
     hasLaunchFiles: openFiles.hasPending(),
   });
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
-  optionalStep(
-    'quick-look-cleanup',
-    () => {
-      removeStaleQuickLookSessions(quickLookTemporaryRoot);
-    },
-    undefined,
-  );
+  if (!safeMode) {
+    optionalStep(
+      'quick-look-cleanup',
+      () => {
+        removeStaleQuickLookSessions(quickLookTemporaryRoot);
+      },
+      undefined,
+    );
+  }
+  const quickLookEnabled = !safeMode && isQuickLookEnabled();
   const quickLookControllers = new Map<number, QuickLookController>();
   let quitting = false;
 
@@ -857,7 +1082,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
   const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
-  installBrowserHost({ origins, userDataPath: app.getPath('userData') });
+  if (!safeMode) {
+    installBrowserHost({ origins, userDataPath: app.getPath('userData') });
+  }
   // The macOS consent prompt appears once; later answers come from System Settings without a prompt.
   session.defaultSession.setPermissionRequestHandler(async (...[contents, permission, callback, details]) => {
     const microphone = isMicrophonePermissionGranted({
@@ -932,8 +1159,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   let computeWorker: Worker | undefined;
-  /* One connection per root while some utility runs durable compute on it,
-   * counted by holder: a root nobody runs keeps no connection in main. */
+  /* One connection per store workspace while some utility runs durable compute
+   * on it, counted by holder: a store nobody runs keeps no connection in main.
+   * A project's worktrees and copies share its workspace (`computeStoreWorkspace`). */
   const computeConnections = new Map<
     string,
     { readonly connection: ReturnType<typeof connectSqliteComputeStoreWorker>; holders: number }
@@ -950,7 +1178,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     computeWorker = undefined;
   };
   const holdComputeConnection = (projectRoot: string) => {
-    let entry = computeConnections.get(projectRoot);
+    const workspace = computeStoreWorkspace(projectRoot);
+    let entry = computeConnections.get(workspace);
     if (!entry) {
       if (!computeWorker) {
         const worker = new Worker(computeStoreWorkerEntry, {
@@ -966,10 +1195,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
         computeWorker = worker;
       }
       entry = {
-        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace: projectRoot }),
+        connection: connectSqliteComputeStoreWorker({ worker: computeWorker, workspace }),
         holders: 0,
       };
-      computeConnections.set(projectRoot, entry);
+      computeConnections.set(workspace, entry);
     }
     const held = entry;
     held.holders += 1;
@@ -983,8 +1212,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
         released = true;
         held.holders -= 1;
         /* A worker restart already disposed and replaced a stale entry. */
-        if (held.holders === 0 && computeConnections.get(projectRoot) === held) {
-          computeConnections.delete(projectRoot);
+        if (held.holders === 0 && computeConnections.get(workspace) === held) {
+          computeConnections.delete(workspace);
           held.connection.dispose();
         }
       },
@@ -1238,6 +1467,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
       TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* LW8: the commit packaging recorded beside the bundles, read above. */
+      TAU_DESKTOP_HOST_BUILD: desktopHostBuild, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
@@ -1254,6 +1485,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
       ...storeGuardEnvironment,
+      ...windowsSandboxEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -1555,6 +1787,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     systemPrompt: desktopAgentSystemPrompt,
     tauApiUrl: environment['TAU_API_URL']!,
     tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+    /* W9 R5: safe mode reaches the project hosts too, so their revisions make no Tau Cloud request. */
+    ...(safeMode ? { safeMode: true } : {}),
   };
   const externalAgents = createExternalAgentDiscovery({
     resolveFrom: import.meta.url,
@@ -1573,14 +1807,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * until this settled, because the descriptors were frozen into its
    * `additionalArguments`. They are served over `externalAgentsChannel`
    * instead, so a hanging CLI or a slow model probe delays no pixel. */
-  // async-iife: bootstrap -- discovery is optional; the agent host is configured without it.
-  void (async (): Promise<void> => {
-    try {
-      await externalAgents.list();
-    } catch (error) {
-      skipOptionalStep('agent-discovery', error);
-    }
-  })();
+  if (safeMode) {
+    /* No discovery in safe mode: the agent host runs Tau's own agent only. */
+    services.post({ type: 'agentHost', config: agentHostBaseConfig });
+  } else {
+    // async-iife: bootstrap -- discovery is optional; the agent host is configured without it.
+    void (async (): Promise<void> => {
+      try {
+        await externalAgents.list();
+      } catch (error) {
+        skipOptionalStep('agent-discovery', error);
+      }
+    })();
+  }
 
   /* Every IPC entry point is pinned to the app's own top-level document. The
    * preload re-runs on whatever the window navigates to, so without this a
@@ -1598,6 +1837,85 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  const updaterReady = Promise.withResolvers<DesktopUpdater>();
+  /* The updater's last snapshot, for the recovery window (D0, D8). */
+  let latestUpdate: ReturnType<DesktopUpdater['snapshot']> | undefined;
+  let publishRecoveryState = (): void => undefined;
+  /* What this launch's renderer has reported (D0). Check for Updates… before the shell mounts opens the recovery
+   * window instead of a renderer window, and the updater's health is `home-ready` in a normal launch (D8). */
+  let shellMountedThisLaunch = false;
+  let homeReadyThisLaunch = false;
+  /* A CI probe observes its renderer and starts the updater itself; it records no ledger and installs nothing alone. */
+  const probing = otaProbe !== undefined || routeQualification !== undefined;
+  /* Open the recovery window, and whether it is open, once bootstrap has made it. */
+  let openRecoveryFor = (_trigger: RecoveryTrigger): void => undefined;
+  let isRecoveryOpen = (): boolean => false;
+  /*
+   * Decision N1: a launch that never reached `home-ready`, in automatic safe mode or with the recovery window showing,
+   * installs a downloaded, verified update by itself after a 10 s countdown with Cancel, once for each target version.
+   */
+  const autoInstall: AutoInstall | undefined =
+    bootHealth === undefined
+      ? undefined
+      : createAutoInstall({
+          mode: launchMode,
+          blockedTarget: bootHealth.blockedAutoInstallTarget,
+          recoveryShowing: () => isRecoveryOpen(),
+          showCountdown: () => {
+            openRecoveryFor('auto-install');
+          },
+          noteAutoInstall: (targetVersion) => {
+            bootHealth.noteAutoInstall(targetVersion);
+          },
+          install: async () => {
+            const updater = await updaterReady.promise;
+            await updater.install();
+          },
+          publish: () => {
+            publishRecoveryState();
+          },
+          report: reportDesktopSignal,
+          log: (level, event, detail) => {
+            log.log(level, event, detail);
+          },
+        });
+  /* D0: the renderer's two boot stages, from the app's own top-level document only. */
+  ipcMain.on(bootChannels.stage, (event, stage: unknown) => {
+    if (
+      !rendererBootStages.includes(stage as RendererBootStage) ||
+      !trusted(event.senderFrame) ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      return;
+    }
+    const reached = stage as RendererBootStage;
+    if (bootHealth !== undefined && bootHealth.stage() !== 'home-ready') {
+      log.log('info', 'main.boot-stage', { stage: reached });
+    }
+    bootHealth?.advance(reached);
+    bootWatchdog?.stage(reached);
+    shellMountedThisLaunch = true;
+    if (reached === 'home-ready' && !homeReadyThisLaunch) {
+      homeReadyThisLaunch = true;
+      autoInstall?.homeReady();
+      /* The launch is healthy now: one check acknowledges it without waiting for the next periodic check (D8). */
+      if (!probing) {
+        // async-iife: bootstrap -- a failed check is published by the updater as its own state.
+        void (async (): Promise<void> => {
+          const updater = await updaterReady.promise;
+          await updater.check();
+        })();
+      }
+    }
+  });
+  /* D0: sleep is not a hang. Every pending deadline stops on suspend and starts again from zero on resume. */
+  powerMonitor.on('suspend', () => {
+    bootWatchdog?.suspend();
+  });
+  powerMonitor.on('resume', () => {
+    bootWatchdog?.resume();
+  });
+
   /* W9: the permission selector's store lives in the services host; main validates and forwards. */
   const permissionBridge = registerPermissionBridge({
     handle: (channel, listener) => {
@@ -1613,7 +1931,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
-  const updaterReady = Promise.withResolvers<DesktopUpdater>();
   ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {
     if (!trusted(event.senderFrame)) {
       throw new Error('Untrusted update request');
@@ -1656,7 +1973,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
     nativeKernels.cancel(kernel);
   });
 
-  ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents.list() : []));
+  ipcMain.handle(externalAgentsChannel, async (event) =>
+    trusted(event.senderFrame) && !safeMode ? externalAgents.list() : [],
+  );
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
   const bambuStudio = machinesEnabled
@@ -1736,7 +2055,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   };
 
-  if (isQuickLookEnabled()) {
+  if (quickLookEnabled) {
     ipcMain.handle(quickLookIpcChannels.previewPath, (event, payload: unknown) =>
       handleQuickLook(event, (controller) => {
         controller.previewPath(payload);
@@ -1847,21 +2166,49 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return undefined;
   });
 
+  /* R7, T-B5.8: a reset database adopts each granted folder under the id its marker names. Only a granted folder is
+   * read, only its marker, and an oversized or unreadable one answers nothing. */
+  ipcMain.handle(directoryGrantChannels.marker, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('Desktop shell refused an invalid directory marker read.');
+    }
+    if (!roots.roots().includes(resolve(path))) {
+      return undefined;
+    }
+    const marker = join(resolve(path), '.tau', 'workspace.json');
+    try {
+      const { size } = await stat(marker);
+      if (size > workspaceMarkerByteLimit) {
+        return undefined;
+      }
+      return await readFile(marker, 'utf8');
+    } catch {
+      return undefined;
+    }
+  });
+
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {
     if (!trusted(event.senderFrame)) {
       return undefined;
     }
     const pickerId = (options as { id?: unknown } | undefined)?.id;
+    const requestedStart = (options as { defaultPath?: unknown } | undefined)?.defaultPath;
     const rememberedFor = typeof pickerId === 'string' ? pickerId : undefined;
     const directory = await (async () => {
       if (seededPick !== undefined) {
         return seededPick;
       }
       const window = BrowserWindow.fromWebContents(event.sender);
+      /* Locate asks to start at a folder's old place (R4); the nearest part of it that still exists is where it opens. */
+      const start =
+        typeof requestedStart === 'string' && isAbsolute(requestedStart) && !requestedStart.includes('\0')
+          ? await nearestExistingDirectory(requestedStart)
+          : undefined;
       const remembered = rememberedFor === undefined ? undefined : lastDirectoryById.get(rememberedFor);
+      const defaultPath = start ?? remembered;
       const request = {
         properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'>,
-        ...(remembered === undefined ? {} : { defaultPath: remembered }),
+        ...(defaultPath === undefined ? {} : { defaultPath }),
       };
       const result = await (window ? dialog.showOpenDialog(window, request) : dialog.showOpenDialog(request));
       return result.canceled ? undefined : result.filePaths[0];
@@ -1870,6 +2217,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
       lastDirectoryById.set(rememberedFor, directory);
     }
     if (directory === undefined) {
+      return undefined;
+    }
+    /* R6: a folder around or inside Tau's own data cannot be a root, because the node host refuses to admit it
+     * (`AUTHORITY_ROOT_OVERLAP`). Refuse it here, with the reason, before it reaches the grant file. */
+    if (await overlapsDirectory(directory, authorityDirectory)) {
+      log.log('warn', 'dialog.directory-refused', { reason: 'authority-overlap' });
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const refusal: MessageBoxOptions = {
+        type: 'warning',
+        message: 'Tau can’t use this folder',
+        detail:
+          "This folder contains Tau's own data, or is inside it. Choose a folder that holds only your projects, such as a folder inside Documents.",
+        buttons: ['OK'],
+      };
+      await (window ? dialog.showMessageBox(window, refusal) : dialog.showMessageBox(refusal));
       return undefined;
     }
     /* The picker *is* the admission event: a root becomes nameable by the
@@ -2008,6 +2370,33 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
+  /* An external agent's own sign-in, the one process outside the Terminal's sandbox (D19/D20 amendment,
+   * 2026-11-16): the discovered CLI with its profile's login arguments and its adapter's environment, never a
+   * shell, started on the person's Enter. Main's environment is the base the adapter's own is built from. */
+  const agentSignIn = registerAgentSignIn({
+    ipcMain,
+    trusted,
+    launchOf: (agentId) => {
+      const adapter = externalAgents.adapterOf(agentId);
+      return adapter === undefined ? undefined : acpLoginLaunch(adapter);
+    },
+    loadPty: async () => {
+      // eslint-disable-next-line import-x/no-extraneous-dependencies -- optional on purpose: without node-pty the sign-in tab answers pty-unavailable, as the Terminal does.
+      const nodePty = await import('node-pty');
+      /* A CommonJS module: Node's ESM loader puts node-pty's exports on `default`, a bundled build on the namespace. */
+      const { spawn } = 'default' in nodePty ? nodePty.default : nodePty;
+      return { spawn: (file, args, options) => spawn(file, [...args], options) };
+    },
+    createChannel: () => new MessageChannelMain(),
+    home: homedir(),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+  app.on('will-quit', () => {
+    agentSignIn.closeAll();
+  });
+
   /**
    * One in-app route, as an absolute URL for whichever renderer is serving.
    *
@@ -2017,6 +2406,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const rendererUrl = (path: string): string =>
     new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
 
+  let bootWindowCreated = false;
   const createMainWindow = async (): Promise<BrowserWindow> => {
     /* Reopen where the user left the window; the first launch fills the work
      * area (display minus menu bar and dock) of the display the user launched
@@ -2047,12 +2437,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds(),
             firstRun: isFirstLaunchWindow,
+            ...(safeModeReason === undefined ? {} : { safeMode: { reason: safeModeReason } }),
           })}`,
         ],
       },
     });
     isFirstLaunchWindow = false;
-    if (isQuickLookEnabled()) {
+    if (quickLookEnabled) {
       quickLookControllers.set(
         window.id,
         createQuickLookController({
@@ -2105,16 +2496,101 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
+    /* B11: reload once, send a second death within 60 s Home with a notice, and hand a third within 5 minutes to the
+     * recovery window (D0). A hung page the hang rule ended is not a death. */
+    const reloadPolicy = createRendererReloadPolicy({ now: () => performance.now() });
+    let pageTitle: string | undefined;
+    window.webContents.on('page-title-updated', (_event, title) => {
+      pageTitle = title;
+    });
+    let endingHungPage = false;
+    const contentsId = window.webContents.id;
+    window.webContents.on('did-finish-load', () => {
+      endedHungPages.delete(contentsId);
+    });
+    window.once('closed', () => {
+      endedHungPages.delete(contentsId);
+    });
+    const openHomeAfterDeaths = async (closed: string): Promise<void> => {
+      try {
+        await window.loadURL(rendererUrl('/'));
+      } catch (error) {
+        log.log('error', 'main.renderer-home-failed', error);
+      }
+      if (window.isDestroyed()) {
+        return;
+      }
+      try {
+        await dialog.showMessageBox(window, {
+          type: 'warning',
+          title: 'Tau',
+          message: `${closed} was closed`,
+          detail: 'The page stopped working twice within a minute, so Tau opened Home instead.',
+          buttons: ['OK'],
+          noLink: true,
+        });
+      } catch (error) {
+        log.log('error', 'main.renderer-home-notice-failed', error);
+      }
+    };
     forwardRendererDiagnostics(window.webContents, log, {
-      recover: () => {
+      recover: (reason) => {
         noteRendererGone();
-        if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-          window.webContents.reload();
+        if (endingHungPage) {
+          endingHungPage = false;
+          return;
         }
+        if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+          return;
+        }
+        const decision = reloadPolicy.gone(reason);
+        if (decision === undefined) {
+          return;
+        }
+        const { step, count } = decision;
+        log.log('warn', 'main.renderer-reload', { step, reason, count });
+        reportDesktopSignal(rendererReloadPolicySignal(step, reason, count));
+        if (step === 'reload') {
+          window.webContents.reload();
+          return;
+        }
+        if (step === 'stop') {
+          recoveryHooks?.openRecovery('renderer-deaths');
+          return;
+        }
+        void openHomeAfterDeaths(closedPageName(window.webContents.getURL(), pageTitle));
       },
       report: reportDesktopSignal,
     });
-    watchRendererHangs(window, log, { report: reportDesktopSignal });
+    watchRendererHangs(window, log, {
+      report: reportDesktopSignal,
+      /* B24: at 30 s, report the hang and offer Wait, Reload or Restart in Safe Mode (D0). */
+      hangRule: {
+        setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),
+        clearTimeout: (handle) => {
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+        showMessageBox: async (options) => dialog.showMessageBox(window, options),
+        endHungPage: () => {
+          if (window.isDestroyed() || window.webContents.isDestroyed()) {
+            return;
+          }
+          /* A hung renderer can neither reload itself nor answer the quit owner: end it. Its exit is no death. */
+          endingHungPage = true;
+          endedHungPages.add(window.webContents.id);
+          window.webContents.forcefullyCrashRenderer();
+        },
+        reload: () => {
+          if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+            return;
+          }
+          window.webContents.reload();
+        },
+        restartInSafeMode: () => {
+          void recoveryHooks?.restartInSafeMode();
+        },
+      },
+    });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is
@@ -2124,7 +2600,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (navigationDecision(url, origins) === 'open-externally') {
         void shell.openExternal(url);
       }
-      log.log('info', 'navigation.window-open-denied', { url });
+      log.log('info', 'navigation.window-open-denied', { target: navigationLogTarget(url) });
       return { action: 'deny' };
     });
     const guardNavigation =
@@ -2142,7 +2618,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         if (decision === 'open-externally') {
           void shell.openExternal(url);
         }
-        log.log('warn', 'navigation.blocked', { event, url, decision });
+        log.log('warn', 'navigation.blocked', { event, target: navigationLogTarget(url), decision });
       };
     window.webContents.on('will-navigate', guardNavigation('will-navigate'));
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
@@ -2171,7 +2647,42 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.once('closed', () => {
       clearTimeout(revealDeadline);
     });
-    await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
+    /* D0: the launch's first window is the one the watchdog follows. */
+    const bootWindow = !bootWindowCreated;
+    bootWindowCreated = true;
+    if (bootWindow && bootWatchdog !== undefined) {
+      const watchdog = bootWatchdog;
+      bootWatchdog.windowCreated();
+      window.webContents.on('did-finish-load', () => {
+        bootHealth?.advance('window-loaded');
+        watchdog.windowLoaded();
+      });
+      window.webContents.on('did-fail-load', (...details) => {
+        watchdog.loadFailed({ isMainFrame: details[4], errorCode: details[1] });
+      });
+      window.webContents.on('render-process-gone', () => {
+        watchdog.rendererGone();
+      });
+      window.once('closed', () => {
+        /* Closed by the person, not by a quit: not a hang, and the record ends inconclusive. */
+        if (!quitting) {
+          watchdog.windowClosed();
+        }
+      });
+    }
+    /* Safe mode opens Home and nothing else: no file or link routing (D0). */
+    const firstRoute = !safeMode && openFiles.hasPending() ? '/import?desktop-open=1' : '/';
+    try {
+      await window.loadURL(rendererUrl(firstRoute));
+    } catch (error) {
+      if (!bootWindow || bootWatchdog === undefined) {
+        throw error;
+      }
+      /* A first load that fails outright opens the recovery window; a slow one is left alone (D0). */
+      const errno = typeof error === 'object' && error !== null && 'errno' in error ? error.errno : undefined;
+      log.log('error', 'main.first-load-failed', { errno });
+      bootWatchdog.loadRejected(typeof errno === 'number' ? errno : undefined);
+    }
     clearTimeout(revealDeadline);
     reveal();
     return window;
@@ -2283,12 +2794,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
               buttons: context.retryable
-                ? ['Retry saving', 'Keep Tau open', 'Quit anyway']
+                ? ['Try saving again', 'Keep Tau open', 'Quit anyway']
                 : ['Restore workspace', 'Quit anyway'],
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
+              detail: `${context.error ?? ''} Try saving again, or restore the app after pending saves finish. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
             });
             done(
               context.retryable
@@ -2325,13 +2836,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
             await services.recover(context.attemptId, quitQuiesceMilliseconds);
             quitting = false;
             try {
-              for (const window of BrowserWindow.getAllWindows().filter((open) => !open.isDestroyed())) {
+              for (const window of appWindows().filter((open) => !open.isDestroyed())) {
                 window.reload();
               }
               resumeQueuedNavigation();
               /* Restoring after the last window closed (Windows and Linux quit then) keeps a window, not a bare
                * process. */
-              if (process.platform !== 'darwin' && BrowserWindow.getAllWindows().length === 0) {
+              if (process.platform !== 'darwin' && appWindows().length === 0) {
                 await createMainWindow();
               }
             } finally {
@@ -2346,7 +2857,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           case 'recoveryReview': {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
-              buttons: installFailed ? ['Retry recovery'] : ['Retry recovery', 'Quit anyway'],
+              buttons: installFailed ? ['Try recovery again'] : ['Try recovery again', 'Quit anyway'],
               defaultId: 0,
               cancelId: 0,
               message: 'Tau is waiting to restore your workspace.',
@@ -2363,11 +2874,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
             try {
               /* Keep Tau open after the last window closed (Windows and Linux quit then) keeps a window, not a bare
                * process. */
-              if (
-                stage === 'cancelling' &&
-                process.platform !== 'darwin' &&
-                BrowserWindow.getAllWindows().length === 0
-              ) {
+              if (stage === 'cancelling' && process.platform !== 'darwin' && appWindows().length === 0) {
                 await createMainWindow();
               }
               if (stage === 'viewing') {
@@ -2375,7 +2882,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
                 const route = machine
                   ? `/machines/${encodeURIComponent(machine.hostId)}/${encodeURIComponent(machine.machineId)}`
                   : '/machines';
-                const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
+                const window = appWindows()[0] ?? (await createMainWindow());
                 window.webContents.send(quitChannels.navigate, route);
                 focusMainWindow();
               }
@@ -2438,6 +2945,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
               log.log('error', 'main.shutdown', error);
             }
             shutdownComplete = true;
+            /* D0: a quit or restart through the quit owner is a clean end; the ledger keeps the first ending. */
+            bootHealth?.end('clean');
+            bootWatchdog?.dispose();
             done('settled');
             settleShutdown?.(true);
             break;
@@ -2490,6 +3000,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
     event.preventDefault();
     pendingQuit ??= quitWhenReady(quitReason ?? 'external');
   });
+  /*
+   * A restart in a launch whose shell never mounted asks no page to save (D0): such a page has nothing to save and
+   * cannot answer, so waiting on it would end in the saving review. The recovery window's restarts and an update's
+   * install, including N1's automatic one, both come through here (T-B22.4).
+   *
+   * The boundary is `shell-mounted`, not `home-ready`. A project session builds its file manager once `rootFiles`
+   * holds the shared worker, which it does before it is `ready` and keeps when it fails, and a link or an opened
+   * file can import into a project before Home is ready. A mounted page may therefore hold edits, so it is still asked
+   * to save, and a page that does not answer still ends in the saving review rather than losing them.
+   */
+  const prepareToRestart = async (reason: string): Promise<boolean> => {
+    restartWithoutPage = bootWatchdog !== undefined && !bootWatchdog.shellMounted();
+    if (restartWithoutPage) {
+      log.log('info', 'main.restart-without-page', { reason });
+    }
+    try {
+      return await prepareToQuit('restart', reason);
+    } finally {
+      restartWithoutPage = false;
+    }
+  };
   /* Start only once the shared shutdown owner and normal application startup are ready. */
   const prepareToInstall = async (commit: () => void | Promise<void>): Promise<boolean> => {
     if (shutdownComplete || shutdownPending !== undefined || installBeforeExit !== undefined) {
@@ -2502,11 +3033,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
       committed = true;
     };
     try {
-      return (await prepareToQuit('restart', 'update-install')) && committed;
+      return (await prepareToRestart('update-install')) && committed;
     } finally {
       installBeforeExit = undefined;
       installFailed = false;
     }
+  };
+  /** Report a blocked update path once for each reason in a launch (B25, B27). */
+  const reportedBlocks = new Set<string>();
+  const noteUpdateBlocked = (reason: DesktopUpdateSnapshot['blockedReason']): void => {
+    if (reason === undefined || reportedBlocks.has(reason)) {
+      return;
+    }
+    reportedBlocks.add(reason);
+    log.log('warn', 'updater.blocked', { reason });
+    reportDesktopSignal(updateBlockedSignal(reason, process.platform));
   };
   /* Started before the first window, so an update can repair a launch whose page never renders (B17, D8). A CI
    * probe is the exception: it decides whether to install only after observing its renderer, so it starts after. */
@@ -2520,7 +3061,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       channel: desktopChannel,
       environment,
       autoUpdater,
-      prepareToRestart: async () => prepareToQuit('restart', 'update-install'),
+      prepareToRestart: async () => prepareToRestart('update-install'),
       ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
       ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
       ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
@@ -2533,12 +3074,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
         return response.json() as Promise<unknown>;
       },
       installForProbe,
+      isOnline: () => net.isOnline(),
       onState: (snapshot) => {
-        for (const window of BrowserWindow.getAllWindows()) {
+        for (const window of appWindows()) {
           if (!window.isDestroyed() && trusted(window.webContents.mainFrame)) {
             window.webContents.send(desktopUpdateChannels.changed, snapshot);
           }
         }
+        /* The recovery window shows the updater's live status (D0, D8). */
+        latestUpdate = snapshot;
+        noteUpdateBlocked(snapshot.blockedReason);
+        publishRecoveryState();
+        autoInstall?.updateChanged(snapshot);
       },
       openExternal: async (url) => shell.openExternal(url),
       log: (level, event, detail) => {
@@ -2563,36 +3110,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
         platformUpdater = await startPlatformUpdater({
           ...updaterOptions,
           prepareToInstall,
-          confirmHealthy: async () => {
-            const deadline = Date.now() + 30_000;
-            while (Date.now() < deadline) {
-              const window = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
-              if (!window) {
-                /* The updater now starts before the first window: wait for it within the same bound. */
-                // oxlint-disable-next-line no-await-in-loop -- Poll for the first window only until the bounded startup deadline.
-                await sleep(250);
-                continue;
-              }
-              // oxlint-disable-next-line no-await-in-loop -- Startup acknowledgement waits for the real renderer save registration.
-              const ready: unknown = await window.webContents.executeJavaScript(
-                'location.protocol === "app:" && location.host === "tau" && document.querySelector("main") !== null && globalThis.tau?.quit?.isReady() === true',
-              );
-              if (ready === true) {
-                return true;
-              }
-              // oxlint-disable-next-line no-await-in-loop -- Poll the renderer only until the bounded startup deadline.
-              await sleep(250);
-            }
-            return false;
-          },
+          /*
+           * One health signal (D0, D8): a launch is healthy for the updater when it is a normal launch that reached
+           * `home-ready`. It answers at once; `home-ready` runs one check of its own. A CI probe starts the updater only
+           * after it has observed its renderer's save handler, which was this answer before `home-ready` existed.
+           */
+          confirmHealthy: async () => probing || (launchMode === 'normal' && homeReadyThisLaunch),
         });
       } catch (error) {
+        /* A damaged installation marker (B27): this copy cannot update itself, so the updater says so, with Download
+         * Tau, instead of failing every check with the same error. */
         log.log('error', 'updater.installed-route-invalid', { message: String(error) });
         const { startPlatformUpdateController } = await import('#main/update-controller.js');
         platformUpdater = startPlatformUpdateController(
           { ...updaterOptions, prepareToInstall },
           {
             systemManaged: false,
+            blockedReason: 'installation-marker',
             check: async () => {
               throw error;
             },
@@ -2608,6 +3142,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const updater = platformUpdater ?? startDesktopUpdater(updaterOptions);
 
     updaterReady.resolve(updater);
+    latestUpdate = updater.snapshot();
+    bootHealth?.advance('updater-started');
     /* A CI probe runs one bounded check of its own; an unpackaged build has no updater to ask. */
     if (app.isPackaged && otaProbe === undefined && routeQualification === undefined) {
       startUpdateTriggers({
@@ -2624,24 +3160,135 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   };
   const checkForUpdates = async (): Promise<void> => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      await createMainWindow();
+    /* No window has mounted this launch: the recovery window shows the check and its result, and needs nothing the
+     * renderer needs (D8, B22). */
+    if (shellMountedThisLaunch) {
+      if (appWindows().length === 0) {
+        await createMainWindow();
+      }
+      focusMainWindow();
+    } else {
+      openRecoveryFor('check-for-updates');
     }
-    focusMainWindow();
     const updater = await updaterReady.promise;
     await updater.check(true);
   };
+  /*
+   * The recovery window (D0, R12): main's own static page, opened by the watchdog, the menu, the safe-mode bar and a
+   * classified error panel, with a native dialog under it. Its hooks are what the watchdog and the renderer reload
+   * policy (WP8) act through.
+   */
+  const recoveryController = createRecoveryWindowController({
+    createWindow: (options) =>
+      new BrowserWindow({ ...options, icon: applicationIcon }) as unknown as RecoveryWindowLike,
+    /* A test-only override names a missing page to reach the native fallback; a locked build strips it. */
+    page: process.env['TAU_E2E_RECOVERY_PAGE'] ?? join(import.meta.dirname, 'recovery/index.html'),
+    preload: join(import.meta.dirname, '../preload/recovery-preload.cjs'),
+    showMessageBox: async (options) => dialog.showMessageBox(options),
+    fallback: {
+      restartInSafeMode: async () => hooks.restartInSafeMode(),
+      downloadTau: async () => shell.openExternal(desktopDownloadPage(desktopChannel, latestUpdate)),
+      showLogs: () => {
+        shell.showItemInFolder(log.filePath);
+      },
+      quit: () => {
+        quitFor('recovery-quit');
+      },
+    },
+    report: reportDesktopSignal,
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+    devTools: !app.isPackaged,
+    hidden: hideTestWindow,
+  });
+  isRecoveryWindow = (window) => recoveryController.isRecoveryContents(window.webContents);
+  const hooks = createRecoveryHooks({
+    controller: {
+      open: (trigger) => {
+        recoveryTrigger = trigger;
+        recoveryController.open(trigger);
+        /* With the recovery window showing, a ready update may install by itself (N1). */
+        autoInstall?.reevaluate();
+      },
+    },
+    prepareToQuit: async (_purpose, reason) => prepareToRestart(reason),
+    relaunch: relaunchWith,
+    quit: () => {
+      app.quit();
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+  recoveryHooks = hooks;
+  openRecoveryFor = (trigger) => {
+    hooks.openRecovery(trigger);
+  };
+  isRecoveryOpen = () => recoveryController.isOpen();
+  /** What the recovery window shows: why it opened, the ledger, the updater and the resets waiting for a start. */
+  const recoveryState = () => ({
+    mode: launchMode,
+    ...(recoveryTrigger === undefined ? {} : { trigger: recoveryTrigger }),
+    unhealthyCount: bootHealth?.unhealthyCount ?? 0,
+    stage: bootHealth?.stage(),
+    ...(bootHealth?.previousOutcome === undefined ? {} : { previousOutcome: bootHealth.previousOutcome }),
+    ...(latestUpdate === undefined ? {} : { update: latestUpdate }),
+    ...(autoInstall?.state() === undefined ? {} : { autoInstall: autoInstall.state() }),
+    downloadPage: desktopDownloadPage(desktopChannel, latestUpdate),
+    pendingResets: readPendingResets(app.getPath('userData')),
+  });
+  publishRecoveryState = () => {
+    recoveryController.send(recoveryChannels.changed, recoveryState());
+  };
+  ipcMain.handle(recoveryChannels.state, (event) => {
+    if (!recoveryController.isRecoveryContents(event.sender) && !trusted(event.senderFrame)) {
+      throw new Error('Desktop shell refused the recovery state request.');
+    }
+    return recoveryState();
+  });
+  const handleRecoveryAction = createRecoveryActionHandler({
+    userData: app.getPath('userData'),
+    senderOf: (value) => {
+      const event = value as IpcMainInvokeEvent;
+      if (recoveryController.isRecoveryContents(event.sender)) {
+        return event.senderFrame === event.sender.mainFrame ? 'recovery' : undefined;
+      }
+      return trusted(event.senderFrame) && event.senderFrame === event.sender.mainFrame ? 'app' : undefined;
+    },
+    actions: {
+      restart: async (mode) => {
+        await (mode === 'safe' ? hooks.restartInSafeMode() : hooks.restartNormally());
+      },
+      showLogs: () => {
+        shell.showItemInFolder(log.filePath);
+      },
+      copyDiagnostics: async () => copyDiagnostics(),
+      openRecoveryWindow: () => {
+        hooks.openRecovery('requested');
+      },
+      checkForUpdates: async () => {
+        const updater = await updaterReady.promise;
+        await updater.check(true);
+      },
+      installUpdate: async () => {
+        const updater = await updaterReady.promise;
+        await updater.install();
+      },
+      cancelAutoInstall: () => {
+        autoInstall?.cancel();
+      },
+      downloadTau: async () => shell.openExternal(desktopDownloadPage(desktopChannel, latestUpdate)),
+      resetsChanged: () => {
+        publishRecoveryState();
+      },
+    },
+  });
+  ipcMain.handle(recoveryChannels.action, async (event, payload: unknown) => handleRecoveryAction(payload, event));
   /* Help → Troubleshooting (U5, D6): reachable with no working page, and installed with Check for Updates… before
    * the first window. */
   const restartInSafeMode = async (): Promise<void> => {
-    if (await prepareToQuit('restart', 'safe-mode')) {
-      try {
-        await relaunchWith(['--safe-mode']);
-      } catch (error) {
-        log.log('error', 'main.safe-mode-relaunch-failed', error);
-      }
-      app.quit();
-    }
+    await hooks.restartInSafeMode();
   };
   const copyDiagnostics = async (): Promise<void> => {
     await log.flush();
@@ -2655,6 +3302,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
           packaged: app.isPackaged,
           electron: process.versions.electron,
           grantedFolders: roots.roots().filter((root) => root !== homeRoot).length,
+          ...(bootHealth === undefined
+            ? {}
+            : {
+                bootHealth: {
+                  mode: launchMode,
+                  unhealthyCount: bootHealth.unhealthyCount,
+                  stage: bootHealth.stage(),
+                  ...(bootHealth.previous === undefined || bootHealth.previousOutcome === undefined
+                    ? {}
+                    : {
+                        previous: {
+                          outcome: bootHealth.previousOutcome,
+                          stage: bootHealth.previous.stage,
+                          ended: bootHealth.previous.ended,
+                        },
+                      }),
+                },
+              }),
         },
         log.filePath,
         homedir(),
@@ -2697,14 +3362,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     // Native menus must be reinstalled after adding items.
     Menu.setApplicationMenu(applicationMenu);
   }
-  const probing = otaProbe !== undefined || routeQualification !== undefined;
   if (!probing) {
     bootstrapStep = 'updater';
     await startUpdater(false);
   }
   bootstrapStep = 'window';
   ensureMainWindow = () => {
-    if (!quitting && BrowserWindow.getAllWindows().length === 0) {
+    if (!quitting && appWindows().length === 0) {
       // async-iife: bootstrap -- a failed window is logged; the second launch that asked for it has already quit.
       void (async (): Promise<void> => {
         try {
@@ -2717,10 +3381,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
   await createMainWindow();
   showOpenFileImport = () => {
-    if (quitting) {
+    /* Safe mode does no file routing: the files wait for a normal launch to be opened again (D0). */
+    if (quitting || safeMode) {
       return;
     }
-    const window = BrowserWindow.getAllWindows()[0];
+    const window = appWindows()[0];
     if (!window || window.webContents.getURL().includes('/import?desktop-open=1')) {
       return;
     }
@@ -2769,10 +3434,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
         });
       } else if (link.kind === 'auth-callback') {
         await auth.handleCallback(link);
+      } else if (safeMode) {
+        /* Safe mode does no link routing (D0); the sign-in callback above is not a route. */
+        log.log('info', 'deep-link.ignored-in-safe-mode', { kind: link.kind });
       } else {
         log.log('info', 'deep-link.opened', { kind: link.kind });
         /* On macOS the app stays alive with every window closed. */
-        const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
+        const window = appWindows()[0] ?? (await createMainWindow());
         if (link.kind === 'machine') {
           window.webContents.send(quitChannels.navigate, link.route);
         } else if (link.kind === 'host') {
@@ -2800,7 +3468,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
 
   app.on('activate', () => {
-    if (!quitting && BrowserWindow.getAllWindows().length === 0) {
+    if (!quitting && appWindows().length === 0) {
       void createMainWindow();
     }
   });

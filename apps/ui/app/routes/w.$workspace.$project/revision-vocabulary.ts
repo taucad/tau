@@ -20,6 +20,7 @@ import {
   CircleDashed,
   CirclePause,
   CloudAlert,
+  CloudOff,
   FileDiff,
   GitMerge,
   History,
@@ -30,11 +31,11 @@ import type { RemoteFacet, RevisionGitOperation, RevisionStatusProjection, SyncF
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
-import { entryTitleOf } from '#lib/revision-entry-title.js';
-import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
+import { entryTitleOf } from '@taucad/revisions-ui/lib/revision-entry-title';
+import type { TurnRevisionState } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 
 /** What a surface draws for one state: one glyph in one tone, the mark it stands for, and the sentence. @public */
 export type RevisionFacts = Readonly<{
@@ -115,7 +116,7 @@ export const switchedSentence = (to: string, from: string | undefined, saved: bo
 export const switchRefusedSentence = (branch: string): string => `Couldn’t switch to ${branch}`;
 
 /** A settled missing cloud listing does not distinguish deletion from removed access. @public */
-export const cloudUnavailable = 'Cloud copy unavailable';
+export const cloudUnavailable = 'Backup unavailable';
 
 /**
  * An absent cloud listing proves unavailability, not who removed access or
@@ -124,7 +125,7 @@ export const cloudUnavailable = 'Cloud copy unavailable';
  * @public
  */
 export const cloudUnavailableSentence =
-  'The cloud copy was deleted or your access changed. Your history is still on this device.';
+  'This project was deleted from the cloud, or your access changed. Your history is still on this device.';
 
 /**
  * A version's number as every surface writes it: `V3` (M11, B6). An entry has
@@ -334,7 +335,7 @@ export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefi
       return undefined;
     }
     case 'manual': {
-      return 'Saved · Not pushed to GitHub';
+      return 'Saved · Not on GitHub yet';
     }
     case 'checking': {
       return 'Checking for changes…';
@@ -359,7 +360,9 @@ export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefi
         if (remote?.kind === 'tau') {
           return 'Backed up · Sign in again to keep backing up';
         }
-        return `Backed up · ${remote !== undefined && isGithubRemote(remote) ? 'GitHub' : 'Your Git host'} refused access`;
+        return remote !== undefined && isGithubRemote(remote)
+          ? 'Backed up · Reconnect GitHub to keep backing up'
+          : 'Backed up · Your Git host asked for a sign-in';
       }
       return 'Not backed up';
     }
@@ -457,7 +460,7 @@ const backupAsk = (
         ? 'Sign in to back up'
         : isGithubRemote(remote)
           ? 'Reconnect GitHub'
-          : 'Your Git host refused access';
+          : 'Your Git host asked for a sign-in';
     }
     case 'quota': {
       return 'Storage is full';
@@ -571,6 +574,10 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   }
   if (hasRevisionConflict(status)) {
     return { icon: GitMerge, tone: 'text-warning', mark: 'attention', sentence: conflictSentence(status, where) };
+  }
+  /* W9 R5: safe mode keeps Tau Cloud off for this launch; said calmly, with nothing to do here (a normal restart ends it). */
+  if (sync.state === 'failed' && sync.reason === 'safeMode') {
+    return { icon: CloudOff, tone: 'text-muted-foreground', mark: 'none', sentence: 'Tau Cloud is off in safe mode' };
   }
   const ask = where.role === 'revoked' ? undefined : backupAsk(status, where.isSignedOut);
   return ask === undefined

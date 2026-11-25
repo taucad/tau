@@ -47,7 +47,6 @@ const callLoader = async (cookie: string): ReturnType<typeof loader> => {
 
 /** React Router's `MetaArgs` fixture is partial by design; this route reads none of it. */
 const metaArguments: Parameters<typeof meta>[0] = {
-  data: undefined,
   loaderData: undefined,
   params: {},
   location: { pathname: '/usage', search: '', hash: '', state: undefined, key: 'test', mask: undefined },

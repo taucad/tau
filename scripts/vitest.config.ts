@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 import { browserTests, workspaceTests } from '#test-sets.js';
@@ -15,7 +16,7 @@ const selection =
 export default defineConfig({
   test: {
     environment: 'node',
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
     ...selection,
     coverage: {
       provider: 'v8',

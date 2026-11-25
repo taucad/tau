@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { TurnPlacementPort } from '@taucad/agent-host';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient, AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createGatewayModelTransport } from '@taucad/agent-host';
 import type * as AgentHost from '@taucad/agent-host';
 import type * as AgentLauncher from '@taucad/agent-host/launcher';
 import { acpModelProbeTimeout, requireRevisionToolchain } from '@taucad/host';
@@ -43,10 +43,8 @@ const servedHosts = vi.hoisted(() => [] as TauHost.ProjectHost[]);
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
 const toolRegistries = vi.hoisted(() => [] as Array<ReturnType<typeof AgentTools.createHostToolRegistry>>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
-/** The options of every model transport the utility built (this test build is self-host, `tauCloudBuildEnabled`). */
-const transportCalls = vi.hoisted(
-  () => [] as Array<Parameters<typeof AgentHost.createTauCloudGatewayModelTransport>[0]>,
-);
+/** The options of every model transport the utility built. */
+const transportCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentHost.createGatewayModelTransport>[0]>);
 /** One-shot hold on the next launcher close, so a test can act while that close is in flight. */
 const launcherCloseGate = vi.hoisted(() => ({
   next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
@@ -109,7 +107,7 @@ vi.mock('@taucad/agent-host', async (importOriginal) => {
   const actual = await importOriginal<typeof AgentHost>();
   return {
     ...actual,
-    createGatewayModelTransport: (options: Parameters<typeof actual.createTauCloudGatewayModelTransport>[0]) => {
+    createGatewayModelTransport: (options: Parameters<typeof actual.createGatewayModelTransport>[0]) => {
       transportCalls.push(options);
       return actual.createGatewayModelTransport(options);
     },
@@ -2132,14 +2130,51 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     await vi.waitFor(() => {
       expect(transportCalls).not.toHaveLength(0);
     });
-    const { funding } = createTauCloudGatewayModelTransport(transportCalls.at(-1)!);
+    const { funding } = createGatewayModelTransport(transportCalls.at(-1)!);
     if (funding.type !== 'funded') {
-      throw new TypeError('The Tau Cloud gateway transport is always funded.');
+      throw new TypeError('A transport with a billing layer carries the funded facet.');
     }
 
     await expect(funding.principal()).resolves.toBe('user_1');
     host.handleMessage(frame({ type: 'authToken', token: undefined }));
     await expect(funding.principal()).resolves.toBeUndefined();
+  });
+
+  /* D1: the channel's API answers each run's mode, whatever the build; only a 404 or an explicit answer is unfunded. */
+  it("should ask the channel's API origin for each run's billing mode, never the build", async () => {
+    const requested: string[] = [];
+    const answers = [
+      new Response(
+        JSON.stringify({
+          version: 1,
+          edition: 'cloud',
+          billing: { funded: true, environment: 'staging' },
+          maxAgeSeconds: 300,
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.stubGlobal('fetch', async (input: string) => {
+      requested.push(input);
+      const next = answers.shift();
+      if (next === undefined) {
+        throw new TypeError('fetch failed');
+      }
+      return next;
+    });
+    try {
+      const { host, workspaceRoot } = await configuredHost();
+      connect(host, workspaceRoot);
+      await vi.waitFor(() => {
+        expect(transportCalls).not.toHaveLength(0);
+      });
+      const { billing } = transportCalls.at(-1)!;
+
+      await expect(billing?.deployment(new AbortController().signal)).resolves.toBe('funded');
+      expect(requested).toEqual(['http://localhost:4000/v1/deployment']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   /* LW17: the API's provider fact names the same host and build the desktop's own evidence does. */
@@ -2235,6 +2270,16 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   });
 
   it('records one finalized revision per turn on launcher 2 (V17)', async () => {
+    /* The API answers like one that predates the deployment route (404, unfunded), so the run is admitted (I2). */
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) =>
+      typeof input === 'string' && input.endsWith('/v1/deployment')
+        ? new Response('{}', { status: 404 })
+        : realFetch(input, init),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
     const { host, workspaceRoot } = await configuredHost();
     await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
     const projectId = 'proj_revision';

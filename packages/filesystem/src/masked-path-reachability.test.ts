@@ -370,7 +370,7 @@ describe('what project duplication reads from a disk-backed project', () => {
       mountTable: new MountTable(),
     });
     diskCleanups.push(async () => {
-      service.dispose();
+      await service.close();
       // The host unsubscribes its watcher here; deleting the tree first fails that with EINVAL.
       await stopHost();
       port2.close();

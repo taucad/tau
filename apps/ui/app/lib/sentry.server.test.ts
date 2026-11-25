@@ -370,7 +370,7 @@ describe('routeErrorInstrumentation (RR7)', () => {
       },
       publicPath: '/',
       assetsBuildDirectory: 'build/client',
-      future: { v8_middleware: true, v8_passThroughRequests: true },
+      future: {},
       ssr: true,
       isSpaMode: false,
       prerender: [],

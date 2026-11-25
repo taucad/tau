@@ -1,10 +1,11 @@
 // @vitest-environment node
 /*
- * One source for the words a project open says (cloud open loading states): the viewer's pill and caption, the
- * project placeholder, the project status control and the route's busy markers all read them from
- * `app/lib/project-open-copy.ts`. Each surface once spelled them itself and they drifted ("Downloading project files"
- * beside "Downloading files…"). This gate reads every source in `apps/ui/app` and fails on a string literal or JSX text
- * that spells an open step's words anywhere but that module, and on the retired words anywhere at all.
+ * One source for the words a project open says (cloud open loading states; Progressive Loading Policy rules 18 and 19):
+ * the viewer's pill and caption, the project status control, the route's busy markers and its announcement all read
+ * them from `app/lib/project-open-copy.ts`. Each surface once spelled them itself and they drifted ("Downloading project
+ * files" beside "Downloading files…"). This gate reads every source in `apps/ui/app` and fails on a string literal or
+ * JSX text that spells the open's words anywhere but that module, and on the retired words anywhere at all, the copy
+ * module included: an open says one label for the whole wait and never names a step, the device or the transport.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -16,23 +17,30 @@ import { describe, expect, it } from 'vitest';
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
 const copyModule = 'lib/project-open-copy.ts';
 
-/** The open steps' words, which only the copy module spells. Matched whole, with or without a trailing ellipsis. */
+/** The open's words, which only the copy module spells. Matched whole, with or without a trailing ellipsis. */
 const canonical: ReadonlySet<string> = new Set([
   'Opening project',
+  'Still opening project',
+  'Check your connection, then try again.',
+]);
+
+/**
+ * Words the open no longer says, matched anywhere in a literal: the step labels and the device sentences one label
+ * replaced (2026-11-25), and the lane sentences the seamless review withdrew before they shipped.
+ */
+const retired: readonly string[] = [
+  'Downloading project files',
+  'Your model will open when its files are ready',
+  'Your files will appear when they are ready',
   'Downloading files',
   'Preparing files',
   'Still downloading files',
   'Opening this project on this device.',
   'Bringing this project to this device.',
   'Getting your files ready to open.',
-  'Check your connection, then try again.',
-]);
-
-/** Words the open no longer says, matched anywhere in a literal. */
-const retired: readonly string[] = [
-  'Downloading project files',
-  'Your model will open when its files are ready',
-  'Your files will appear when they are ready',
+  'Your chats open once this project is on this device.',
+  'Parameters appear when the model opens.',
+  'Send once the project is open',
 ];
 
 const isSource = (name: string): boolean =>

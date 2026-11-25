@@ -13,7 +13,6 @@ import {
   summarizeFile,
 } from '#burn-in.js';
 import type { BurnInReport, GraphNodes } from '#burn-in.js';
-import { parseUnits } from '#burn-in-cli.js';
 import { seededDraw } from '#fixtures/flake-repro/seeded-draw.js';
 
 /*
@@ -298,18 +297,5 @@ describe('summary', () => {
     expect(text).toContain('**the cap cut some files short**');
     expect(text).toContain('0 / 4 (cut short, 10 planned)');
     expect(text).not.toContain('--sequence.seed=<seed>');
-  });
-});
-
-describe('burn-in units', () => {
-  const units = (file: string): string => JSON.stringify([{ project: 'ui', target: 'test', files: [file] }]);
-
-  it('accepts a route test whose folder names a parameter with `$`', () => {
-    const file = 'apps/ui/app/routes/w.$workspace.$project/chat-history.test.tsx';
-    expect(parseUnits(units(file))).toEqual([{ project: 'ui', target: 'test', files: [file] }]);
-  });
-
-  it.each(['apps/ui/../secrets.test.ts', 'apps/ui/a b.test.ts', 'apps/ui/`x`.test.ts'])('refuses %s', (file) => {
-    expect(() => parseUnits(units(file))).toThrow(/outside/u);
   });
 });

@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  detailDelayMilliseconds,
   indicatorEntranceMilliseconds,
   indicatorDelayMilliseconds,
   indicatorMinimumMilliseconds,
   settledTiming,
+  skeletonDelayMilliseconds,
   slowWaitMilliseconds,
   waitingTiming,
   waitPhaseAt,
@@ -16,6 +18,10 @@ describe('the wait timing ladder', () => {
     expect([indicatorDelayMilliseconds, indicatorMinimumMilliseconds, slowWaitMilliseconds]).toEqual([
       1000, 500, 10_000,
     ]);
+  });
+
+  it('should hold the skeleton mark at 300 ms and the detail mark at 3,000 ms', () => {
+    expect([skeletonDelayMilliseconds, detailDelayMilliseconds]).toEqual([300, 3000]);
   });
 
   it('should hide the indicator at 999 ms and show it at 1,000 ms', () => {
@@ -50,21 +56,41 @@ describe('the indicator timing', () => {
   it('should measure a running wait from its start, not from the mount', () => {
     expect(waitingTiming({ startedAt: 0, now: 0 })).toEqual({
       state: 'waiting',
+      skeletonDelay: '300ms',
       revealDelay: '1000ms',
+      detailDelay: '3000ms',
       slowDelay: '10000ms',
       entrance: '150ms',
     });
-    expect(waitingTiming({ startedAt: 0, now: 900 })).toMatchObject({ revealDelay: '100ms', slowDelay: '9100ms' });
+    expect(waitingTiming({ startedAt: 0, now: 900 })).toMatchObject({
+      skeletonDelay: '-600ms',
+      revealDelay: '100ms',
+      detailDelay: '2100ms',
+      slowDelay: '9100ms',
+    });
     expect(waitingTiming({ startedAt: 2000, now: 3200 })).toMatchObject({ revealDelay: '-200ms', slowDelay: '8800ms' });
   });
 
   it('should take the server-rendered delays from navigation start through --wait-offset', () => {
     expect(waitingTiming({ startedAt: 0 })).toEqual({
       state: 'waiting',
+      skeletonDelay: 'calc(300ms + var(--wait-offset, 0ms))',
       revealDelay: 'calc(1000ms + var(--wait-offset, 0ms))',
+      detailDelay: 'calc(3000ms + var(--wait-offset, 0ms))',
       slowDelay: 'calc(10000ms + var(--wait-offset, 0ms))',
       entrance: '150ms',
     });
+  });
+
+  it('should count the slow mark from the last progress, so a wait whose numbers move is never slow', () => {
+    // Progress at 9,000 ms moves the slow mark to 19,000 ms; the reveal and the detail keep the wait's start.
+    expect(waitingTiming({ startedAt: 0, now: 9500, progressedAt: 9000 })).toMatchObject({
+      revealDelay: '-8500ms',
+      detailDelay: '-6500ms',
+      slowDelay: '9500ms',
+    });
+    // Progress recorded before the wait's start counts from the start.
+    expect(waitingTiming({ startedAt: 2000, now: 2000, progressedAt: 1000 })).toMatchObject({ slowDelay: '10000ms' });
   });
 
   it('should hold a shown indicator for the rest of its minimum, and no longer', () => {
@@ -131,5 +157,11 @@ describe('the wait utilities in tokens.css', () => {
       `animation: wait-reveal var(--wait-entrance, ${indicatorEntranceMilliseconds}ms) ease-out var(--wait-reveal-delay, ${indicatorDelayMilliseconds}ms) both;`,
     );
     expect(tokens).toContain(`var(--wait-slow-delay, ${slowWaitMilliseconds}ms) both;`);
+    expect(tokens).toContain(
+      `animation: wait-reveal var(--wait-entrance, ${indicatorEntranceMilliseconds}ms) ease-out var(--wait-skeleton-delay, ${skeletonDelayMilliseconds}ms) both;`,
+    );
+    expect(tokens).toContain(
+      `animation: wait-appear 0.01ms linear var(--wait-detail-delay, ${detailDelayMilliseconds}ms) both;`,
+    );
   });
 });

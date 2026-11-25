@@ -53,7 +53,9 @@
 (* The model is untimed: the 5 s poll, the observation debounce and the    *)
 (* worker round trips are steps. What an operation writes is the root it   *)
 (* adds or removes; thumbnails, metadata, cloud projects and the workspace *)
-(* connection handshake are abstracted away.                               *)
+(* connection handshake are abstracted away. A project's root stands for   *)
+(* every directory that carries its id: a delete removes one directory,    *)
+(* and the root goes only when no other copy remains (`Applied`).          *)
 (***************************************************************************)
 \* A2 (app state orchestration): the project-manager and workspace-connection actors moved into the
 \* `ProjectLibrary` service, which the runtime starts. Discovery, recovery and route access still run in
@@ -146,6 +148,16 @@
 \* service, its commands, storage, observations and workspace commands, the provider and listing hooks, and their
 \* types) moved unchanged from `@taucad/files-ui` to `@taucad/project-library`; the sources re-point their imports
 \* of the files-ui modules that stayed. No action or correspondence changes.
+\* W0 copy delete (2026-11-24): a permanent delete removes one exact directory, the copy the person chose or the one
+\* the route binds. When it settles while another directory still carries the project id (`settleCopyDelete` in
+\* `project-library-storage.ts`), the project lives on there, so the settled "delete" row leaves the project's root;
+\* only the last copy's delete removes it. Whether a copy remains is decided when the row settles, not by the row's
+\* `copy` flag: a row journaled with `copy: true` removes the root if the other copy went meanwhile, and one journaled
+\* without it keeps the root if another copy appeared. The flag only turns a directory found already gone into a
+\* conflict or not, a failure the model already allows. The model keeps no directories, so a settled "delete" row,
+\* this tab's or another tab's, now removes the root or leaves it (`Applied`), and `Ops` needs no third operation. The
+\* gate (`MutationJournaled`, `HeldActive`), the journal-then-apply order and recovery are unchanged; every invariant
+\* and property is unchanged and is checked over the larger set of behaviours.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids
@@ -235,7 +247,9 @@ Bounds == [mut |-> 0, crash |-> 0, stop |-> 0, bump |-> 0, poll |-> 0, change |-
 
 \* What a read of storage sees: nothing of the workspace's roots while it is away.
 Visible == IF ws = "available" THEN [ok |-> TRUE, roots |-> storage] ELSE NoListing
-Apply(o, p, s) == IF o = "create" THEN s \cup {p} ELSE s \ {p}
+\* The roots a settled row of operation o on p may leave: a create adds p; a delete removes one directory of p, so p's
+\* root goes when that was its last copy and stays while another directory carries the id (W0).
+Applied(o, p, s) == IF o = "create" THEN {s \cup {p}} ELSE {s \ {p}, s}
 FreeRow == CHOOSE r \in Rows : rowProj[r] = None
 HasFreeRow == \E r \in Rows : rowProj[r] = None
 HeldActive(p) == \E r \in Rows : rowProj[r] = p /\ rec[r].st \in Active
@@ -383,8 +397,8 @@ ReplayStarted(r) ==
 Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 
 \* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery` and
-\* `resumePendingProjectOperation`: success removes the row; any failure marks it failed with its reason
-\* and invalidates. A terminal row is never replayed in this tab, so the model keeps no attempts for it
+\* `resumePendingProjectOperation`: success removes the row and applies it (`Applied`); any failure marks
+\* it failed with its reason and invalidates. A terminal row is never replayed in this tab, so the model keeps no attempts for it
 \* (today `recoveryAttemptsRef` keeps them, and nothing reads them again); a row that failed with
 \* `workspace-unavailable` keeps its attempts and waits for WorkspaceReturned. Only the recovery loop's
 \* replays count an attempt (ReplayStarted, `settleRecovery`); a mutation's own settle counts none.
@@ -396,7 +410,7 @@ ReplaySettled(r) ==
                       [] out = "terminal" -> [Unseen EXCEPT !.st = "failed", !.why = "terminal"]
                       [] out = "workspace" -> [@ EXCEPT !.st = "failed", !.why = "workspace", !.via = "journal"]]
        /\ journal' = IF out = "ok" THEN journal \ {r} ELSE journal
-       /\ storage' = IF out = "ok" THEN Apply(rowOp[r], rowProj[r], storage) ELSE storage
+       /\ storage' \in IF out = "ok" THEN Applied(rowOp[r], rowProj[r], storage) ELSE {storage}
   /\ Bump
   /\ act' = Label(IF rec[r].via = "mutation" THEN "MutationApplied" ELSE "ReplaySettled")
   /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, deliveries, n>>
@@ -478,7 +492,7 @@ EnvSettledRow(r) ==
   /\ EnvSettlesReplaying \/ rec[r].st # "replaying"
   /\ n' = [n EXCEPT !.settle = @ + 1]
   /\ journal' = journal \ {r}
-  /\ storage' = Apply(rowOp[r], rowProj[r], storage)
+  /\ storage' \in Applied(rowOp[r], rowProj[r], storage)
   /\ Bump
   /\ act' = Label("EnvSettledRow")
   /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries>>

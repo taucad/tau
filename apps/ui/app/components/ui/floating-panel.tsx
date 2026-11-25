@@ -405,6 +405,13 @@ class FloatingPanelErrorBoundary extends React.Component<
 /** How many floating panel contents hold this one: a nested panel's header is never the one under a grabber. */
 const FloatingPanelContentDepthContext = React.createContext(0);
 
+/**
+ * A status the host shows in a phone sheet's header, in the trailing slot before the outermost panel's actions: the
+ * workspace's own wait while the sheet covers the region that says it (Progressive Loading Policy rule 17). Nothing
+ * elsewhere.
+ */
+const SheetHeaderStatusContext = React.createContext<ReactNode>(undefined);
+
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
   const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
@@ -477,6 +484,10 @@ function FloatingPanelContentHeaderActions({
   className,
 }: FloatingPanelContentHeaderActionsProps): React.JSX.Element {
   const isMobile = useIsMobile();
+  const depth = React.useContext(FloatingPanelContentDepthContext);
+  /* Only the host provides it, and only for its covering sheet. Not gated on being inside the drawer: the Terminal
+     sheet renders through a portal outside the drawer's React tree. */
+  const sheetStatus = React.useContext(SheetHeaderStatusContext);
   return (
     <div
       className={cn(
@@ -493,6 +504,7 @@ function FloatingPanelContentHeaderActions({
       )}
       data-slot='floating-panel-content-header-actions'
     >
+      {isMobile && depth <= 1 ? sheetStatus : null}
       {children}
     </div>
   );
@@ -679,6 +691,7 @@ export {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
   FloatingPanelErrorContent,
+  SheetHeaderStatusContext,
   useFloatingPanel,
 };
 export type { Side, Align, FloatingPanelErrorFallbackProps };

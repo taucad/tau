@@ -112,7 +112,7 @@ export function ProjectRouteGate({
           <div
             className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
             role='status'
-            aria-label={projectOpenCopy.connecting.label}
+            aria-label={projectOpenCopy.label}
           >
             <Loader className='size-8' />
           </div>

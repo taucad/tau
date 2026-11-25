@@ -246,7 +246,39 @@ describe('model wait reporting', () => {
     mocks.project = 'preparing';
     mocks.firstView = 'preparing';
     const view = render(<ProjectSyncAnnouncement />);
-    expect(view.container).toHaveTextContent('Preparing files');
+    expect(view.container).toHaveTextContent(/^Opening project…$/u);
+  });
+
+  /* Progressive Loading Policy rules 18, 19 and 22: one label for the whole open, said once; no step, device sentence,
+   * percentage or detail line. */
+  it('says the open’s one label at every step, so the region does not speak again when a step changes', () => {
+    mocks.facet = facet();
+    const region = (): HTMLElement => document.querySelector<HTMLElement>('[role=status]')!;
+    mocks.project = 'connecting';
+    const view = render(<ProjectSyncAnnouncement />);
+    const node = region().firstChild;
+    expect(region()).toHaveTextContent(/^Opening project…$/u);
+
+    for (const step of ['downloading', 'preparing'] as const) {
+      mocks.project = step;
+      view.rerender(<ProjectSyncAnnouncement />);
+      expect(region(), step).toHaveTextContent(/^Opening project…$/u);
+      expect(region().firstChild, step).toBe(node);
+    }
+    expect(region()).not.toHaveTextContent(/%|device|files|Downloading|Preparing/u);
+  });
+
+  it('is the one live region of the open, and says a failure in it', () => {
+    mocks.project = 'downloading';
+    const view = render(<ProjectSyncAnnouncement />);
+    expect(view.container.querySelectorAll('[role=status], [role=alert], [aria-live]')).toHaveLength(1);
+
+    mocks.model = 'failed';
+    mocks.project = 'failed';
+    mocks.remote = { phase: 'failed', reason: 'unknown', error: 'The download stopped.' };
+    view.rerender(<ProjectSyncAnnouncement />);
+    expect(view.container.querySelectorAll('[role=status], [role=alert], [aria-live]')).toHaveLength(1);
+    expect(view.container).toHaveTextContent('Couldn’t open this project. The download didn’t finish. Try again.');
   });
 
   /* STO-25 SP6 review: `first_view` is what this route shows, not the root's own readiness. */

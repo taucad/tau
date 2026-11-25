@@ -113,6 +113,27 @@ export type ProjectActions = {
 const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
   recovery.storage.providerBasePath.split('/').findLast(Boolean) ?? recovery.storage.providerBasePath;
 
+/** A copy that shares its project's id with another folder, as the conflict card lists it. */
+type DuplicateCopy = Extract<ProjectDiscoveryConflict, { status: 'duplicate-id' }>;
+
+/** Where a directory lives, as a project card's location row says it: Home, or its workspace folder by name. */
+const locatorPlaceLabel = (locator: ProjectLocator, workspaceName: string | undefined): string =>
+  projectLocationFullLabel(
+    projectLocationDescriptor(
+      locator.backend === 'webaccess' ? { kind: 'workspace', workspaceName } : { kind: 'home' },
+    ),
+  );
+
+/** One folder of a copied project: where it is, its own name, and when its `tau.json` last changed, when known. */
+const copyFolderLabel = (
+  folder: Readonly<{ locator: ProjectLocator; workspaceName?: string; modifiedAt?: number }>,
+): string => {
+  const { locator } = folder;
+  const name = locator.relativeDirectory.split('/').findLast(Boolean) ?? locator.relativeDirectory;
+  const place = `${locatorPlaceLabel(locator, folder.workspaceName)} · ${name}`;
+  return folder.modifiedAt === undefined ? place : `${place} · changed ${formatRelativeTime(folder.modifiedAt)}`;
+};
+
 /** Why a discovered directory does not open, and what gets it open again. */
 const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
   switch (conflict.status) {
@@ -225,6 +246,7 @@ export function ProjectLibrary({
    */
   const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
+  const [copyDeleteTarget, setCopyDeleteTarget] = useState<DuplicateCopy | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   /* Everything this device holds, the Trash included — one listing under the
      same query key — so a trashed project is never offered as Tau Cloud's alone. */
@@ -241,6 +263,7 @@ export function ProjectLibrary({
     duplicateProject,
     restoreProject,
     permanentlyDeleteProject: deleteProjectPermanently,
+    deleteProjectCopy,
     adoptProject,
     repairProject,
     chooseProjectDirectory,
@@ -486,6 +509,23 @@ export function ProjectLibrary({
       console.error('Error permanently deleting project:', error);
     }
   }, [deleteProjectPermanently, permanentDeleteTarget]);
+
+  const confirmCopyDelete = useCallback(async () => {
+    const copy = copyDeleteTarget;
+    if (!copy) {
+      return;
+    }
+    try {
+      await deleteProjectCopy(copy.projectId, copy.locator);
+      setCopyDeleteTarget(undefined);
+      toast.success(`Deleted this copy of ${copy.manifest.name}`);
+    } catch (error) {
+      toast.error(`Could not delete this copy of ${copy.manifest.name}`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      console.error('Error deleting project copy:', error);
+    }
+  }, [copyDeleteTarget, deleteProjectCopy]);
 
   const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
     const target = repairTarget;
@@ -738,6 +778,12 @@ export function ProjectLibrary({
                 <div className='min-w-0 flex-1'>
                   <div className='truncate font-medium'>{label}</div>
                   <div className='text-sm text-muted-foreground'>{conflictSummary(conflict)}</div>
+                  {conflict.status === 'duplicate-id' ? (
+                    <CopyFolders
+                      copy={conflict}
+                      bound={heldProjects.find((project) => project.id === conflict.projectId)}
+                    />
+                  ) : null}
                   {/* A missing manifest has nothing to add to its summary. */}
                   {(conflict.status === 'invalid' || conflict.status === 'adoption-required') &&
                   conflict.issue.code !== 'manifest-missing' ? (
@@ -762,6 +808,17 @@ export function ProjectLibrary({
                     }
                   >
                     Use this folder
+                  </Button>
+                )}
+                {conflict.status === 'duplicate-id' && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => {
+                      setCopyDeleteTarget(conflict);
+                    }}
+                  >
+                    Delete this copy
                   </Button>
                 )}
               </div>
@@ -924,7 +981,61 @@ export function ProjectLibrary({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog
+        open={copyDeleteTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCopyDeleteTarget(undefined);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this copy of “{copyDeleteTarget?.manifest.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the folder {copyDeleteTarget ? copyFolderLabel(copyDeleteTarget) : ''}, with
+              every file and chat inside it. The other copy stays, and so does this project’s state on this device. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              onClick={() => {
+                void confirmCopyDelete();
+              }}
+            >
+              Delete this copy
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageContent>
+  );
+}
+
+/**
+ * Both folders of a copied project, so a person can tell them apart before choosing one or deleting this copy: this
+ * copy, and the copy the project's route opens now, each with when it last changed.
+ */
+function CopyFolders({
+  copy,
+  bound,
+}: Readonly<{ copy: DuplicateCopy; bound: ProjectListItem | undefined }>): React.JSX.Element {
+  return (
+    <dl className='mt-1 grid gap-0.5 text-sm text-muted-foreground'>
+      <div className='flex min-w-0 gap-1'>
+        <dt className='shrink-0 font-medium'>This copy</dt>
+        <dd className='truncate'>{copyFolderLabel(copy)}</dd>
+      </div>
+      {bound === undefined ? null : (
+        <div className='flex min-w-0 gap-1'>
+          <dt className='shrink-0 font-medium'>Tau opens</dt>
+          <dd className='truncate'>{copyFolderLabel(bound)}</dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
@@ -1374,14 +1485,9 @@ function cardLocation(project: ListedCardProject): {
   const slugPath = project.slugs
     ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
     : projectSlugOf(project.locator);
-  const isWorkspace = project.locator.backend === 'webaccess';
   return {
-    LocationIcon: isWorkspace ? FolderOpen : House,
-    label: projectLocationFullLabel(
-      projectLocationDescriptor(
-        isWorkspace ? { kind: 'workspace', workspaceName: project.workspaceName } : { kind: 'home' },
-      ),
-    ),
+    LocationIcon: project.locator.backend === 'webaccess' ? FolderOpen : House,
+    label: locatorPlaceLabel(project.locator, project.workspaceName),
     slugPath,
   };
 }

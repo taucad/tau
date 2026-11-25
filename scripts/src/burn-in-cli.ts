@@ -298,12 +298,11 @@ const planCommand = async (values: Record<string, string | undefined>): Promise<
 };
 
 /**
- * Read the plan's units. Each name is passed to Vitest as one argument (never through a shell), so only path traversal
- * and characters outside a path's ordinary set are refused; `$` is allowed, as React Router route folders use it.
+ * The burn-in units the plan wrote. Names are limited to path characters; `$` is one, since React Router route
+ * directories (`w.$workspace.$project`) carry it and every name reaches Vitest as an argument, never through a shell.
  *
- * @param text - The `--units` JSON the plan wrote.
+ * @param text - The plan's `burn-in-units` JSON.
  * @returns The units.
- * @public
  */
 export const parseUnits = (text: string | undefined): BurnInUnit[] => {
   let parsed: unknown;

@@ -242,7 +242,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
         const stateRequest = libraryStore.get(operation.projectId);
         stateRequest.addEventListener('success', () => {
           const state = stateRequest.result as ProjectLibraryState | undefined;
-          if (state?.deletedAt === undefined) {
+          /* One copy of several: another directory keeps the project, so it need not be in the Trash. */
+          if (state?.deletedAt === undefined && operation.copy !== true) {
             abortWith(new Error('Permanent delete is available only for trashed projects'));
             return;
           }

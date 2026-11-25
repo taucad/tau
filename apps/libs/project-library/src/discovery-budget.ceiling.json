@@ -1,0 +1,104 @@
+{
+  "$comment": "What each library mutation may ask of the filesystem authority on the 386-directory profile (project-library fast-path blueprint FW0), held by discovery-budget.test.ts. A ceiling only goes down: a count above it fails, and a count below it fails until the ceiling is lowered to match. `scan` and `verification` are what one full discovery scan and one targeted route verification cost on the profile, measured by packages/filesystem/src/project-directories.discovery-cost.test.ts; a change there changes them here. A discovery read is a file read or listing made to learn what a project directory holds.",
+  "profile": {
+    "home": 84,
+    "workspace": 302,
+    "duplicates": 3
+  },
+  "scan": {
+    "fileReads": 772,
+    "listings": 2,
+    "browserCalls": 2324
+  },
+  "verification": {
+    "fileReads": 2,
+    "listings": 0,
+    "browserCalls": 8
+  },
+  "mutations": {
+    "delete-copy": {
+      "scans": 3,
+      "verifications": 0,
+      "discoveryReads": 2322,
+      "browserCalls": 6972
+    },
+    "permanent-delete": {
+      "scans": 3,
+      "verifications": 0,
+      "discoveryReads": 2322,
+      "browserCalls": 6972
+    },
+    "use-this-folder": {
+      "scans": 2,
+      "verifications": 0,
+      "discoveryReads": 1548,
+      "browserCalls": 4648
+    },
+    "create": {
+      "scans": 2,
+      "verifications": 0,
+      "discoveryReads": 1548,
+      "browserCalls": 4648
+    },
+    "duplicate": {
+      "scans": 2,
+      "verifications": 0,
+      "discoveryReads": 1548,
+      "browserCalls": 4648
+    },
+    "rename": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "trash": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "restore": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "chat-create": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "chat-soft-delete": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "chat-delete": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "chat-purge": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "chat-recency": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    },
+    "window-focus": {
+      "scans": 1,
+      "verifications": 0,
+      "discoveryReads": 774,
+      "browserCalls": 2324
+    }
+  }
+}

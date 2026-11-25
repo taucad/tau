@@ -6368,6 +6368,179 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      it('should hold the sends queued behind a turn the host took back until Send now', async () => {
+        const chatId = 'withdrawn_followers';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        try {
+          publishLogRows(store, chatId, [
+            ...runningRows('taken'),
+            logRow(2, {
+              runId: 'taken',
+              type: 'message.appended',
+              message: { id: 'msg_taken', role: 'user', content: [{ type: 'text', text: 'Take me back' }] },
+            }),
+          ]);
+          await store.requestTurn(chatId, queuedGesture('later'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, {
+                runId: 'taken',
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                attempt: 1,
+                detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'later', held: true }],
+            });
+          });
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should let go of a Stop once its own run ended, even when a later run is already current', async () => {
+        const chatId = 'stop_aimed_run';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'running', 'req_first')],
+            3,
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          expect(store.isStopping(chatId)).toBe(true);
+          /* One catch-up batch: the stopped run's end, then another page's run already under way. */
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(5, 'cancelled', 'req_first'),
+              lifecycleRow(6, 'admitted', 'other'),
+              lifecycleRow(7, 'running', 'other'),
+            ],
+            5,
+          );
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should never let a late answer to an earlier cancel settle a later Stop of the same run', async () => {
+        const chatId = 'stop_stale_answer';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const first = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => first.promise);
+        const second = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => second.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          /* The run ends, then resumes under the same id, and the person stops it again. */
+          publishLogRows(store, chatId, [lifecycleRow(2, 'cancelled', 'live')], 2);
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, { runId: 'live', type: 'run.lifecycle', state: 'admitted', attempt: 2 }),
+              logRow(4, { runId: 'live', type: 'run.lifecycle', state: 'running', attempt: 2 }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(store.getProjection(chatId)?.ledger.runs['live']?.lifecycle).toBe('running');
+          });
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          first.resolve({
+            commandId: 'first',
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'RUN_NOT_LIVE',
+            message: 'This run is not live.',
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.isStopping(chatId)).toBe(true);
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should still stop a run the host accepted when this page could not record the acceptance', async () => {
+        const chatId = 'stop_ack_failed';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        const unadmit = queueAdmission(chatId);
+        const { messageQueueStore } = session as unknown as {
+          messageQueueStore: { acknowledge: (id: string, commandId: string) => Promise<unknown> };
+        };
+        vi.spyOn(messageQueueStore, 'acknowledge').mockRejectedValueOnce(new Error('Disk full'));
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          store.stopRun(chatId, 'stop-button');
+          answer.resolve({ commandId: 'req_first', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'running', 'req_first')],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          expect(hostCommand.mock.calls[1]![0]).toMatchObject({ type: 'cancel', payload: { runId: 'req_first' } });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should let go of a Stop waiting for a replayed send whose replay the host refused', async () => {
         const chatId = 'stop_refused_replay';
         const projectId = 'departing_project';

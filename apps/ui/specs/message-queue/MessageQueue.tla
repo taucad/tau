@@ -215,6 +215,8 @@
 \* from the log's `TURN_WITHDRAWN` row even when the Stop was let go before that row arrived.
 \* A `TURN_RELEASED` that reaches the page before its run's ending row waits briefly for that row before it is
 \* judged; that changes no action or verdict.
+\* TakeBack now holds the sends queued behind a taken-back turn, as Withdraw does. A Stop aimed at a run settles
+\* from that run's end, and each cancel's answer settles only the Stop that sent it.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -364,10 +366,12 @@ Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
                           !.held = @ \cup {m} \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 \* The host takes back an accepted turn it had not kept: the run is cancelled and its request goes back to the
 \* composer instead of the thread. A later send is a new request, so the message stays accepted and submitted.
-\* A composer holding new text declines it, and the store parks it as a new held send under a new identity, which
-\* this finite message set does not model.
+\* Every unprepared, unsteered send queued behind it is held, as after a withdrawal. A composer holding new text
+\* declines the request, and the store parks it as a new held send under a new identity, which this finite message
+\* set does not model. The store writes the outbox and the composer separately; the model takes them as one step.
 TakeBack(m) == /\ m \in Accepted /\ m = s.active /\ Live(s.phase[m]) /\ m \notin s.takenBack
-               /\ s' = [s EXCEPT !.phase[m] = "cancelled", !.takenBack = @ \cup {m}, !.composer = @ \cup {m}]
+               /\ s' = [s EXCEPT !.phase[m] = "cancelled", !.takenBack = @ \cup {m}, !.composer = @ \cup {m},
+                    !.held = @ \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
 \* The finite crash scenario begins only after a queue save has answered.

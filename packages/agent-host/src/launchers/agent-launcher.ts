@@ -18,7 +18,9 @@ import type { ExternalAgentPort } from '#host/external-agent.js';
 import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
-import type { EventLogAppender } from '#log/event-log-appender.js';
+import { v1Batch } from '#log/event-log-appender.js';
+import type { EventLogAppender, EventLogBatch } from '#log/event-log-appender.js';
+import { EventLogError } from '#log/event-log-error.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
@@ -123,6 +125,14 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /**
+   * One bounded page of this device's own rows, answered at once: from this process's writer while it holds one, else
+   * from the log's bytes as they are. Like {@link AgentLauncher.read} it takes no lock and assumes no leadership
+   * (RH-R1), so it is how an observer reads a chat, whether or not a run of it is live.
+   */
+  readEvents(
+    input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+  ): Promise<EventLogBatch>;
   /** Immutable provisional catch-up pages followed by exact current-byte validation; cancellation releases the lease. */
   catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Read the current leadership actor only; never requests a lock or sends a chat command. */
@@ -560,6 +570,15 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
+    if (handed === undefined && leading.port?.opensWriter(chatId) === false) {
+      /* RH-R1: only a claim opens the writer. Anything else that reads through the host once the chat was relinquished
+       * (an observer's page read, a read parked across the relinquish) is refused here, rather than taking the chat's
+       * exclusive handle where no relinquish closes it and every later claim is refused `WRITER_LOCKED`. */
+      throw new EventLogError(
+        'LOG_CLOSED',
+        `This process does not hold chat ${chatId}'s writer, which opens only under the chat's lock. Read the chat through the launcher.`,
+      );
+    }
     const log = await (handed ?? binding.openWriter(chatId, writerOpen));
     writers.add(chatId);
     writerGenerations.set(chatId, createPortableId());
@@ -1320,6 +1339,26 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
+    },
+    readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
+      if (closed) {
+        throw Object.assign(new Error('The Tau agent launcher is closed.'), {
+          code: 'HOST_CLOSED' satisfies RefusalCode,
+        });
+      }
+      requireChatPathSegment(chatId);
+      if (writers.has(chatId)) {
+        try {
+          return await host.readEvents({ chatId, cursor, limit, maxBytes });
+        } catch (error) {
+          /* The writer closed under this read (the chat was relinquished): its rows are the bytes now. */
+          if ((error as { readonly code?: unknown }).code !== ('LOG_CLOSED' satisfies RefusalCode)) {
+            throw error;
+          }
+        }
+      }
+      const chat = await view(chatId);
+      return v1Batch(await chat.log.readBatch({ cursor, limit, maxBytes }));
     },
     stoppability: (chatId) => port.stoppability(chatId),
     liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),

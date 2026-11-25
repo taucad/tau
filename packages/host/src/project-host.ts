@@ -535,7 +535,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
   /* Reads only on quiescence, by which time the launcher exists. */
-  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input), {
+  const observer = options.observeChats?.(async (input) => launcher.readEvents(input), {
     design: async ({ revision, paths }) => revisions.history.files(revision, paths),
   });
   const launcher = createAgentLauncher({

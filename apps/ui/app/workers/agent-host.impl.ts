@@ -1125,7 +1125,7 @@ const composeProjectHost = async (
       principal: provide.principal,
       projectId: provide.authority.projectId,
       hostBuild: hostBuildOf(provide.release),
-      readEvents: async (input) => launcher.host.readEvents(input),
+      readEvents: async (input) => launcher.readEvents(input),
     });
     opened(() => evidence?.close());
   }

@@ -1243,6 +1243,8 @@ describe('Revisions pane vocabulary and History', () => {
 
     const card = await screen.findByRole('group', { name: 'History' });
     expect(within(card).getAllByTestId('history-skeleton')).toHaveLength(1);
+    /* The bars show from the wait ladder's 300 ms mark, by CSS, not with the frame (Progressive Loading Policy rule 16). */
+    expect(within(card).getByTestId('history-skeleton')).toHaveClass('wait-skeleton');
     expect(
       screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]'),
     ).not.toBeNull();

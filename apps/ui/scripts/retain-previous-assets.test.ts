@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import type { Server, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -64,7 +64,12 @@ const startLiveDeploy = async (
   misbehave: (
     path: string,
     attempt: number,
-  ) => 'hang' | 'unavailable' | { readonly status: number; readonly retryAfter?: string } | undefined = () => undefined,
+  ) =>
+    | 'hang'
+    | 'unavailable'
+    | { readonly status: number; readonly retryAfter?: string; readonly after?: number }
+    | { readonly after: number }
+    | undefined = () => undefined,
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
   const server: Server = createServer((request, response) => {
@@ -78,10 +83,23 @@ const startLiveDeploy = async (
       response.writeHead(503).end();
       return;
     }
-    if (typeof fault === 'object') {
-      response.writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter }).end();
+    // `after` holds the answer back, so a test can order the answers it races.
+    const answer = (): void => {
+      if (typeof fault === 'object' && 'status' in fault) {
+        response
+          .writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter })
+          .end();
+        return;
+      }
+      serve(path, response);
+    };
+    if (typeof fault === 'object' && fault.after !== undefined) {
+      setTimeout(answer, fault.after);
       return;
     }
+    answer();
+  });
+  function serve(path: string, response: ServerResponse): void {
     if (path === servedRuntimesIndexFileName && files[path] !== undefined) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(files[path]);
       return;
@@ -97,7 +115,7 @@ const startLiveDeploy = async (
     }
     // A file named like the index but not served as one is an HTML page, as an app's catch-all answers.
     response.writeHead(200, path === servedAssetsIndexFileName ? { 'content-type': 'text/html' } : {}).end(body);
-  });
+  }
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve);
   });
@@ -533,7 +551,13 @@ describe('retainPreviousAssets', () => {
           { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
           { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
         ]),
-        (path) => (path === 'assets/route-OLD1.js' ? { status: 403 } : undefined),
+        // The 403 answers at once; the tampered bytes arrive after it, while the fallback would already be chosen.
+        (path) =>
+          path === 'assets/route-OLD1.js'
+            ? { status: 403 }
+            : path === 'assets/route-OLD2.js'
+              ? { after: 100 }
+              : undefined,
       );
       const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
       const warnings: string[] = [];
@@ -551,7 +575,8 @@ describe('retainPreviousAssets', () => {
           { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
           { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
         ]),
-        (path) => (path === 'assets/route-OLD2.js' ? { status: 403 } : undefined),
+        // OLD1 is written before OLD2's 403 arrives, so the failed pass has retained a file when the fallback starts.
+        (path) => (path === 'assets/route-OLD2.js' ? { status: 403, after: 100 } : undefined),
       );
       const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
       const warnings: string[] = [];

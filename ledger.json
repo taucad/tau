@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:44:08.253Z",
+  "updatedAt": "2026-11-25T23:51:42.612Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2237,6 +2237,19 @@
       "counted": 0,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45723526829,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2863",
+      "sha": "484d98507e516938ea12bf8f080f96f031011356",
+      "at": "2026-11-25T23:51:27Z",
+      "conclusion": "success",
+      "artifacts": 2,
+      "counted": 1391,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3249,20 +3262,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "scripts:test": {
-      "executions": 29,
-      "tests": 33189,
+      "executions": 30,
+      "tests": 34522,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:43:08Z"
+      "lastSeen": "2026-11-25T23:51:27Z"
     },
     "scripts:test:e2e": {
-      "executions": 32,
-      "tests": 1856,
+      "executions": 33,
+      "tests": 1914,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:43:08Z"
+      "lastSeen": "2026-11-25T23:51:27Z"
     },
     "settings-ui:test": {
       "executions": 12,

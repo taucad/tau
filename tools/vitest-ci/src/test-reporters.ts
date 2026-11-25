@@ -2,8 +2,9 @@
  * The reporter list every Tau Vitest config uses: `reporters: testReporters('verbose')`.
  *
  * The list keeps the config's own console reporter, adds `github-actions` on GitHub Actions (a failure becomes a
- * check-run annotation) and adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
- * cache replay restores the original run's rows. A change to how every config reports is one change here.
+ * check-run annotation), adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
+ * cache replay restores the original run's rows, and ends with the {@link QuarantineVerdict}, which lets a failure the
+ * project's `quarantine.json` names report without gating. A change to how every config reports is one change here.
  *
  * The outcome recorder is imported through the package's own subpath, not a `#` alias, because the configs that
  * import this module are type-checked under other projects' compiler options, some with a `#*` path alias. The list
@@ -14,6 +15,7 @@ import process from 'node:process';
 
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import type { OutcomeEnvironment } from '@taucad/vitest-ci/outcome-reporter';
+import { QuarantineVerdict } from '@taucad/vitest-ci/quarantine-verdict';
 import type { BuiltinReporters } from 'vitest/node';
 
 /**
@@ -36,8 +38,13 @@ import type { BuiltinReporters } from 'vitest/node';
 export const testReporters = (
   base: BuiltinReporters = 'default',
   env: OutcomeEnvironment = process.env,
-): Array<BuiltinReporters | OutcomeReporter> => [
-  base,
-  ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
-  new OutcomeReporter(),
-];
+): Array<BuiltinReporters | OutcomeReporter | QuarantineVerdict> => {
+  const recorder = new OutcomeReporter();
+  return [
+    base,
+    ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
+    recorder,
+    // Last: it reads the outcome file the recorder writes in the same `onTestRunEnd` round.
+    new QuarantineVerdict(recorder),
+  ];
+};

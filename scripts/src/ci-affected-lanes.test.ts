@@ -1275,7 +1275,7 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
     replicad: { root: 'packages/plugins/replicad', type: 'lib', tags: ['type:package'], targets: ['test'] },
-    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: ['test', 'compute-qualify-ci'] },
+    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:nightly-only'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -2092,7 +2092,7 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
           '#!/usr/bin/env bash',
           'set -euo pipefail',
           'case "$*" in',
-          '  "nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
+          '  "nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
           '  "nx run-many "*) echo "$*" >> "$FIXTURES/calls" ;;',
           '  *) echo "unexpected pnpm $*" >&2; exit 1 ;;',
           'esac',

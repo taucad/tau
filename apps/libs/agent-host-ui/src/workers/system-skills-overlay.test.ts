@@ -53,6 +53,10 @@ describe('the browser system skill overlay', () => {
     const { resource, path } = resources[0]!;
     const before = systemSkillResourceStats();
     const startedAt = workerTimings.now();
+    /* The summary counts whole seconds, so it holds what earlier tests recorded in this second: count the change. */
+    const totalOf = (counter: 'overlay.read' | 'overlay.fetch'): number =>
+      workerTimings.summarize(startedAt).counters[counter]?.total ?? 0;
+    const counted = { reads: totalOf('overlay.read'), fetches: totalOf('overlay.fetch') };
 
     const [first, second] = await Promise.all([systemSkillsOverlay().read(path), systemSkillsOverlay().read(path)]);
     const third = await systemSkillsOverlay().read(path);
@@ -72,10 +76,10 @@ describe('the browser system skill overlay', () => {
       hits: after.hits - before.hits,
       bytes: after.bytes - before.bytes,
     }).toStrictEqual({ fetches: 1, hits: 3, bytes: resource.byteLength });
-    expect(workerTimings.summarize(startedAt).counters).toMatchObject({
-      'overlay.read': { total: 4 },
-      'overlay.fetch': { total: 1 },
-    });
+    expect({
+      reads: totalOf('overlay.read') - counted.reads,
+      fetches: totalOf('overlay.fetch') - counted.fetches,
+    }).toStrictEqual({ reads: 4, fetches: 1 });
   });
 
   it('should reject a failed response with EIO and fetch again on the next read', async () => {

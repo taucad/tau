@@ -84,11 +84,12 @@ const abandonedOnPendingAttempt: ChatErrorPayload = {
 const now = 1_000_000;
 const noJitter = (): number => 0.5;
 
-describe('autoResumePlanOf (audit R5)', () => {
-  beforeEach(() => {
-    resetAutoResumes();
-  });
+/* The auto-resume budgets are module state: every test starts with them unspent, in any order. */
+beforeEach(() => {
+  resetAutoResumes();
+});
 
+describe('autoResumePlanOf (audit R5)', () => {
   it('should wait out a rate limit for the gateway’s Retry-After', () => {
     expect(autoResumePlanOf(failedRun(rateLimited({ retryAfterSeconds: 30 })), now, noJitter)).toEqual({
       key: 'rateLimit:run_1:1',

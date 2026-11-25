@@ -92,6 +92,13 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ),
 }));
 
+/* The chat sync and availability stubs are shared: every test starts from chats loading on a ready project. */
+beforeEach(() => {
+  chatSync.state = 'loading';
+  availability.whole = 'ready';
+  availability.chats = 'ready';
+});
+
 /* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
  * workspace opens and the chat gate shows while the focused chat is ensured. */
 describe('ChatLaneFrame', () => {
@@ -149,9 +156,6 @@ describe('FocusedChatErrorPanel', () => {
 
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
-    chatSync.state = 'loading';
-    availability.whole = 'ready';
-    availability.chats = 'ready';
     syncNow.mockClear();
     mockEditorRefSend.mockClear();
   });

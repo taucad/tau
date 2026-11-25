@@ -889,7 +889,7 @@ jobs:
       # FQ-1 (CI flake quarantine blueprint): the rows `@taucad/vitest-ci` wrote, one per test execution, for the
       # flake ledger. A task replayed from the cache restores its rows with the ids of the run that executed it.
       - name: Upload test outcomes
-        if: always() && startsWith(matrix.lane, 'test-')
+        if: always() && startsWith(matrix.lane, 'test-') && steps.queue.outputs.run-id == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-outcomes-${{ matrix.lane }}

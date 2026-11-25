@@ -1045,6 +1045,11 @@
     "reason": "enumerates or probes sibling project directories"
   },
   {
+    "file": "scripts/src/test-outcome-outputs.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/test-shard-dealer.test.ts",
     "target": "apps/ui/project.json",
     "reason": "reads another project's configuration it checks"

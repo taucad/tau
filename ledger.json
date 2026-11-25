@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T11:13:39.019Z",
+  "updatedAt": "2026-11-25T11:41:28.415Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1535,6 +1535,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45604979152,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2830",
+      "sha": "198b8b8316772de9cbd916f7c86be943a460632c",
+      "at": "2026-11-25T11:41:13Z",
+      "conclusion": "success",
+      "artifacts": 14,
+      "counted": 13482,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -1819,12 +1832,12 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "billing-e2e:test": {
-      "executions": 3,
-      "tests": 153,
+      "executions": 4,
+      "tests": 204,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "billing-ui:test": {
       "executions": 2,
@@ -2547,20 +2560,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "scripts:test": {
-      "executions": 6,
-      "tests": 6702,
+      "executions": 7,
+      "tests": 7832,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "scripts:test:e2e": {
-      "executions": 6,
-      "tests": 348,
+      "executions": 7,
+      "tests": 406,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "settings-ui:test": {
       "executions": 2,
@@ -2691,44 +2704,44 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 2,
-      "tests": 30,
+      "executions": 3,
+      "tests": 45,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 4,
-      "tests": 12,
+      "executions": 5,
+      "tests": 15,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 4,
-      "tests": 40,
+      "executions": 5,
+      "tests": 50,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 4,
-      "tests": 172,
+      "executions": 5,
+      "tests": 215,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 8,
-      "tests": 8,
+      "executions": 10,
+      "tests": 10,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui-kit:test": {
       "executions": 1,
@@ -2739,28 +2752,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "ui:test": {
-      "executions": 18,
-      "tests": 35732,
+      "executions": 24,
+      "tests": 47648,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 6,
-      "tests": 366,
+      "executions": 8,
+      "tests": 488,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "ui:verify-browser": {
-      "executions": 3,
-      "tests": 396,
+      "executions": 4,
+      "tests": 528,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:07:57Z"
+      "lastSeen": "2026-11-25T11:41:13Z"
     },
     "units:test": {
       "executions": 1,

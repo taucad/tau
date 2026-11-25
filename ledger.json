@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T23:19:27.743Z",
+  "updatedAt": "2026-11-25T23:20:29.674Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2120,6 +2120,19 @@
       "counted": 1374,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45719020961,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2858",
+      "sha": "91e033de79d3788e6d1540d0570b39fc76ab1597",
+      "at": "2026-11-25T23:20:14Z",
+      "conclusion": "success",
+      "artifacts": 6,
+      "counted": 114,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3092,12 +3105,12 @@
       "lastSeen": "2026-11-25T23:07:56Z"
     },
     "runtime-e2e:compute-qualify-ci": {
-      "executions": 7,
-      "tests": 287,
+      "executions": 8,
+      "tests": 328,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:08:01Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "runtime-testing:test": {
       "executions": 6,
@@ -3276,44 +3289,44 @@
       "lastSeen": "2026-11-25T23:09:16Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 21,
-      "tests": 315,
+      "executions": 22,
+      "tests": 330,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T23:19:11Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 23,
-      "tests": 69,
+      "executions": 24,
+      "tests": 72,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:19:11Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 23,
-      "tests": 230,
+      "executions": 24,
+      "tests": 240,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:19:11Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 25,
-      "tests": 1075,
+      "executions": 26,
+      "tests": 1118,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:19:11Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 51,
-      "tests": 51,
+      "executions": 53,
+      "tests": 53,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T23:19:11Z"
+      "lastSeen": "2026-11-25T23:20:14Z"
     },
     "ui-kit:test": {
       "executions": 4,
@@ -3593,24 +3606,24 @@
       "targetKey": "test:e2e:development",
       "file": "src/picovoxel-multi.spec.ts",
       "firstSeen": "2026-11-25T13:44:58Z",
-      "lastSeen": "2026-11-25T23:19:11Z",
+      "lastSeen": "2026-11-25T23:20:14Z",
       "lastFailure": "2026-11-25T23:19:11Z",
-      "executions": 55,
+      "executions": 58,
       "failures": 0,
       "retriedPasses": 2,
-      "passStreak": 1,
+      "passStreak": 4,
       "variants": {
         "linux-x64 browser=firefox": {
-          "executions": 19,
+          "executions": 20,
           "failures": 0,
           "events": 2,
-          "lastSeen": "2026-11-25T23:19:11Z"
+          "lastSeen": "2026-11-25T23:20:14Z"
         },
         "linux-x64 browser=chromium": {
-          "executions": 36,
+          "executions": 38,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-25T23:19:11Z"
+          "lastSeen": "2026-11-25T23:20:14Z"
         }
       },
       "events": [
@@ -3641,14 +3654,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 14482816984979053031",
-        "linux-x64 browser=firefox 14482816984979053031",
-        "linux-x64 browser=chromium 6334531171323546616",
         "linux-x64 browser=firefox 6334531171323546616",
         "linux-x64 browser=chromium 3004314035661728782",
         "linux-x64 browser=chromium 4035382258564959554",
         "linux-x64 browser=firefox 4035382258564959554",
-        "linux-x64 browser=chromium 11222852610061883834"
+        "linux-x64 browser=chromium 11222852610061883834",
+        "linux-x64 browser=chromium 14161733566247745722",
+        "linux-x64 browser=firefox 14161733566247745722",
+        "linux-x64 browser=chromium 9668376770488439037"
       ],
       "failureShas": [],
       "aliases": []

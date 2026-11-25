@@ -831,10 +831,11 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(lane?.uses).toBeDefined();
     const rest = condition.replace(" && github.event_name == 'merge_group'", '');
     expect(rest).not.toMatch(/\|\||\bgithub\.(?:ref|ref_name|event_name|base_ref|head_ref)\b/u);
-    // The required gate and the fail-fast jobs run no lane (ci-fail-fast.test.ts).
+    // The required gate and the fail-fast jobs run no lane (ci-fail-fast.test.ts), and neither does `queue-builds`,
+    // which only fills the remote cache the queue's end-to-end rows restore from (end-to-end-ratchet.test.ts).
     for (const [name, definition] of Object.entries(ci.jobs)) {
       if (
-        !/^(?:affected|fail-fast-.*)$/u.test(name) &&
+        !/^(?:affected|fail-fast-.*|queue-builds)$/u.test(name) &&
         (definition.if ?? '').includes("github.event_name == 'merge_group'")
       ) {
         expect(definition.uses, name).toBeDefined();

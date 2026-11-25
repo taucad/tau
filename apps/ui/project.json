@@ -109,7 +109,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         },
         {
           "env": "POSTHOG_CLIENT_KEY"
@@ -159,7 +159,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -374,7 +374,7 @@
           "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
-          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+          "dependentTasksOutputFiles": "out/csharp-language/stage/assets-manifest.json"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",

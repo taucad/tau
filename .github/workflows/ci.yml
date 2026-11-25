@@ -1244,6 +1244,47 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # One build of each UI bundle the end-to-end rows consume, per merge-queue run (CI decomposition global review,
+  # ruling 6, which completes DC-4). With no `needs`, it starts with the run and writes `ui:build` and
+  # `ui:build:serve` (`ui-e2e:queue-build`, `ui-e2e:queue-build:serve`) to the remote cache; `e2e-queue` waits for
+  # it, and the suites that ran each of them from scratch (`deploy-skew`, `non-isolated` and `daemon-host` the web
+  # build, `daemon-host` the serve build, about 13 runner-minutes in queue run 45350462131) restore them. A row
+  # still runs its own `ui:build` under its own env fixture, and Nx restores this one only when every input of the
+  # hash, the env inputs included, is the row's, so no row runs against another variant than before; the workflow
+  # env above holds the fixture's TAU_*_URL values. `ui:build` reads the staged C# language bundle as a dependency
+  # output, hashed after `csharp-language:prepare` runs, so `daemon-host`, which stages it for its serve build before
+  # its `nx run ui:build`, now gets the same hash as everyone else (it never had: it missed in every run). One row per bundle: two builds on one runner exhaust it (see
+  # `--parallel=1` above). The rows run whatever this job's result, and build a bundle it did not write. A pull
+  # request's rows build their own: its plan selects them only when its diff touches the project, which this job,
+  # with no plan, cannot see. `run-many`, not `nx affected`: in a queue run that does not affect `ui`, both bundles
+  # are already in the cache and restore in seconds.
+  queue-builds:
+    name: Queue UI build (${{ matrix.target }})
+    if: ${{ github.event_name == 'merge_group' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [queue-build, 'queue-build:serve']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Build the bundle
+        env:
+          TARGET: ${{ matrix.target }}
+        run: pnpm nx run-many -t "$TARGET" --parallel=1
+
   # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed five consecutive
   # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
   # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
@@ -1259,7 +1300,8 @@ jobs:
     name: Browser end-to-end (${{ matrix.suite.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    needs: [plan]
+    # `queue-builds` (above) only to start after it, never for its result.
+    needs: [plan, queue-builds]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true' }}
     permissions:
       contents: 'read'

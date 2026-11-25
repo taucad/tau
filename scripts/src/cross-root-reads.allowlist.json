@@ -585,11 +585,6 @@
     "reason": "test fixture read from another project"
   },
   {
-    "file": "apps/ui/csharp-language-assets-cache-key.ts",
-    "target": "out/**",
-    "reason": "reads build or test output under out/, not a source file"
-  },
-  {
     "file": "apps/ui/depth-ownership.vitest.browser.config.ts",
     "target": "packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.js",
     "reason": "imports another project's source by relative path instead of its package"

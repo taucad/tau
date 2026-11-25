@@ -76,13 +76,36 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(planScript).toContain('e2e_queue=$(flag e2e-queue)');
     expect(planScript).toContain('echo "e2e-queue-suites=$e2e_queue_suites"');
     expect(ci.jobs['plan']?.outputs?.['e2e-queue-suites']).toBe(expression('steps.plan.outputs.e2e-queue-suites'));
-    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.needs).toEqual(['plan', 'queue-builds']);
     expect(lane?.if).toBe(
       expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true'"),
     );
     expect(lane?.strategy?.matrix?.['suite']).toBe(expression('fromJSON(needs.plan.outputs.e2e-queue-suites)'));
     // The rows carry the nightly's job names, so a suite keeps its name when it moves.
     expect(lane?.name).toBe(nightly.jobs['e2e']?.name);
+  });
+
+  it('should build each UI bundle the rows restore once per merge-queue run (global review 2026-11-24, ruling 6)', () => {
+    const builds = ci.jobs['queue-builds'];
+    // No `needs`: it starts with the run, and only the queue writes what it builds.
+    expect(builds?.needs).toBeUndefined();
+    expect(builds?.if).toBe(expression("github.event_name == 'merge_group'"));
+    expect(builds?.strategy?.matrix?.['target']).toEqual(['queue-build', 'queue-build:serve']);
+    expect(builds?.steps?.at(-1)?.run).toBe('pnpm nx run-many -t "$TARGET" --parallel=1');
+    // The rows wait for it but never for its result: a row whose bundle it did not write builds it, as before.
+    expect(lane?.if).not.toContain('queue-builds');
+    // Each target names the one bundle the ui-e2e queue suites build, and nothing else.
+    const uiEndToEndProject = JSON.parse(read('apps/ui-e2e/project.json')) as {
+      readonly targets: Record<string, { readonly executor?: string; readonly dependsOn?: readonly unknown[] }>;
+    };
+    expect(uiEndToEndProject.targets['queue-build']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build' }],
+    });
+    expect(uiEndToEndProject.targets['queue-build:serve']).toMatchObject({
+      executor: 'nx:noop',
+      dependsOn: [{ projects: ['ui'], target: 'build:serve' }],
+    });
   });
 
   it('should require every row in the required check when the plan selected the lane', () => {

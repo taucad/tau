@@ -188,6 +188,9 @@
 \* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
 \* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
 \* changes.
+\* use_skill startup latency T2 (2026-11-26): the transcript `chat-session-store.ts`, `chat-turn-host.tsx`,
+\* `use-cad-chat-client.ts` and `use-chat.tsx` read is the fold of the projection, with a durably accepted gesture shown
+\* until its run folds; delivery, persistence, acknowledgement and the queue are untouched. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -1094,14 +1094,27 @@ describe('database panel', () => {
     expect(troubleshooting.resetLocalDatabase).toHaveBeenCalledTimes(1);
   });
 
-  it('should offer Update Tau beside the reset for a database a newer Tau opened', async () => {
+  /* D3: a newer Tau's database is not damaged; updating brings the folders back, and a reset would only lose them. */
+  it('should offer Update Tau and no reset for a database a newer Tau opened', async () => {
     stubDesktopShell({ troubleshooting, updates });
     handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
 
     const panel = await renderHome();
 
     expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
+  });
+
+  it('should offer Update Tau and no reset on the web for a database a newer Tau opened, even with a mirror', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
+    handleStoreTestState.mirror = 'opfs';
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
   });
 
   it('should ask to close the other Tau window when the database is blocked, and offer Try again', async () => {
@@ -1131,6 +1144,13 @@ describe('database panel', () => {
     const panel = await renderHome();
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Reset folder list' }));
+    /* The reset forgets every folder this browser connected, so it asks first. */
+    expect(handleStoreTestState.resetHomeRecords).not.toHaveBeenCalled();
+    expect(within(panel).getByText(/forgets the folders/u)).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Cancel' }));
+    expect(within(panel).queryByText(/forgets the folders/u)).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset folder list' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset and reload' }));
     await waitFor(() => {
       expect(handleStoreTestState.resetHomeRecords).toHaveBeenCalledTimes(1);
     });

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T08:41:06.553Z",
+  "updatedAt": "2026-11-25T11:08:13.736Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1509,6 +1509,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45599734951,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2805",
+      "sha": "a526b00ad93c6951afbc597eb4efd931534ea70b",
+      "at": "2026-11-25T11:07:57Z",
+      "conclusion": "success",
+      "artifacts": 14,
+      "counted": 13480,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -1793,12 +1806,12 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "billing-e2e:test": {
-      "executions": 2,
-      "tests": 102,
+      "executions": 3,
+      "tests": 153,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "billing-ui:test": {
       "executions": 2,
@@ -2521,20 +2534,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "scripts:test": {
-      "executions": 5,
-      "tests": 5572,
+      "executions": 6,
+      "tests": 6702,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "scripts:test:e2e": {
-      "executions": 5,
-      "tests": 290,
+      "executions": 6,
+      "tests": 348,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "settings-ui:test": {
       "executions": 2,
@@ -2665,44 +2678,44 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 1,
-      "tests": 15,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T08:23:55Z"
-    },
-    "ui-e2e:test:e2e:daemon-host": {
-      "executions": 3,
-      "tests": 9,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
-    },
-    "ui-e2e:test:e2e:development": {
-      "executions": 3,
+      "executions": 2,
       "tests": 30,
       "failures": 0,
       "otherFailures": 0,
+      "firstSeen": "2026-11-25T08:23:55Z",
+      "lastSeen": "2026-11-25T11:07:57Z"
+    },
+    "ui-e2e:test:e2e:daemon-host": {
+      "executions": 4,
+      "tests": 12,
+      "failures": 0,
+      "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
+    },
+    "ui-e2e:test:e2e:development": {
+      "executions": 4,
+      "tests": 40,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 3,
-      "tests": 129,
+      "executions": 4,
+      "tests": 172,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 6,
-      "tests": 6,
+      "executions": 8,
+      "tests": 8,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "ui-kit:test": {
       "executions": 1,
@@ -2713,28 +2726,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "ui:test": {
-      "executions": 12,
-      "tests": 23818,
+      "executions": 18,
+      "tests": 35732,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 4,
-      "tests": 244,
+      "executions": 6,
+      "tests": 366,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "ui:verify-browser": {
-      "executions": 2,
-      "tests": 264,
+      "executions": 3,
+      "tests": 396,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T11:07:57Z"
     },
     "units:test": {
       "executions": 1,

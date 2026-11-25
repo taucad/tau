@@ -33,6 +33,36 @@ const publish = (event: WorkerRevisionEvent): void => {
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 
+type RunEntry = { lifecycle: string; failure?: { code: string }; changes?: Record<string, unknown> };
+/** The chat logs this page folds, when a test gives it some. */
+const chatLog: {
+  runs: Record<string, RunEntry>;
+  listeners: Set<() => void>;
+  set: (runId: string, entry: RunEntry) => void;
+} = {
+  runs: {},
+  listeners: new Set(),
+  set(runId, entry) {
+    chatLog.runs[runId] = entry;
+    for (const listener of chatLog.listeners) {
+      listener();
+    }
+  },
+};
+let sessionsStore: unknown;
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useOptionalChatSessionStore: () => sessionsStore,
+}));
+const withChatLog = (): void => {
+  sessionsStore = {
+    getProjection: () => ({ ledger: { runs: chatLog.runs } }),
+    subscribeProjection: (_chatId: string, listener: () => void) => {
+      chatLog.listeners.add(listener);
+      return () => chatLog.listeners.delete(listener);
+    },
+  };
+};
+
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   const base = harness.revisionStatusMock();
@@ -84,6 +114,9 @@ const renderTurnOutcomes = (): ReturnType<typeof render> =>
   );
 
 beforeEach(() => {
+  sessionsStore = undefined;
+  chatLog.runs = {};
+  chatLog.listeners.clear();
   revisionStatusHarness.reset();
   errors.length = 0;
   projectedChats = [];
@@ -161,6 +194,54 @@ describe('RevisionOutcomes', () => {
 
     expect(errors).toHaveLength(1);
     expect(getByTestId('latest')).toHaveTextContent('failed:turn-stopped');
+  });
+
+  /* Round 3: a turn let go at the stop bound is released before its run's ending row reaches this page's log. */
+  describe('a release that arrives before its run has ended here', () => {
+    const released: WorkerRevisionEvent = {
+      type: 'turn.failed',
+      turnId: 'turn-stopped',
+      runId: 'run-stopped',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      reason: 'The turn ended before it recorded a revision.',
+      code: 'TURN_RELEASED',
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should stay silent once the log shows the person stopped it', async () => {
+      withChatLog();
+      chatLog.set('run-stopped', { lifecycle: 'running' });
+      const { getByTestId } = renderTurnOutcomes();
+
+      publish(released);
+      expect(errors).toHaveLength(0);
+      act(() => {
+        chatLog.set('run-stopped', { lifecycle: 'cancelled', failure: { code: 'USER_STOPPED' } });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(errors).toHaveLength(0);
+      expect(getByTestId('latest')).toHaveTextContent('none');
+    });
+
+    it('should say so once the bound passes with no end in the log', async () => {
+      vi.useFakeTimers();
+      withChatLog();
+      chatLog.set('run-stopped', { lifecycle: 'running' });
+      renderTurnOutcomes();
+
+      publish(released);
+      expect(errors).toHaveLength(0);
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+
+      expect(errors).toHaveLength(1);
+    });
   });
 
   /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name

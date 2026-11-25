@@ -16,11 +16,12 @@ function ConnectedQueue({
 }): React.JSX.Element {
   const store = useChatSessionStore();
   const context = useSelector(actor, (snapshot) => snapshot.context);
-  /* A send nothing runs ahead of is in the thread, not queued: the strip shows only work waiting behind a turn. */
+  /* A send nothing runs ahead of is in the thread, and a stopped one on its way back to the composer is neither: the
+   * strip shows only work waiting behind a turn. */
   const subscribe = useCallback((listener: () => void) => store.subscribeChat(chatId, listener), [chatId, store]);
-  const readDeparting = useCallback(() => store.departingSendOf(chatId), [chatId, store]);
-  const departingId = useSyncExternalStore(subscribe, readDeparting, readDeparting);
-  const { items, sendingId } = useMemo(() => selectQueueStrip(context, departingId), [context, departingId]);
+  const readUnqueued = useCallback(() => store.unqueuedSendOf(chatId), [chatId, store]);
+  const unqueuedId = useSyncExternalStore(subscribe, readUnqueued, readUnqueued);
+  const { items, sendingId } = useMemo(() => selectQueueStrip(context, unqueuedId), [context, unqueuedId]);
   return (
     <ChatMessageQueueView
       items={items}

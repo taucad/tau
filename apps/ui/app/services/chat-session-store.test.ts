@@ -6007,7 +6007,7 @@ describe('ChatSessionStore', () => {
         }
       });
 
-      /* Review round 2: a stopped send is never lost, and never in two places. */
+      /* A stopped send is never lost, and never in two places. */
       it('should keep a send stopped during admission held in its place when the composer holds new text', async () => {
         const chatId = 'departing_kept';
         const projectId = 'departing_project';
@@ -6072,6 +6072,51 @@ describe('ChatSessionStore', () => {
           });
           /* Only the steer's cancel went out: the taken-back send never started a run. */
           expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should park a steered send taken back into a busy composer, so only Send now takes it out', async () => {
+        const chatId = 'departing_steered_kept';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('old'));
+          await store.requestTurn(chatId, queuedGesture('urgent'));
+          await store.steerQueuedMessage(chatId, 'urgent');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+
+          store.stopRun(chatId, 'stop-button');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'urgent', held: true }],
+            });
+          });
+          /* Its steer was spent on the run it already ended: kept, it would read as Send now and go out on its own. */
+          expect(
+            (deps.client.json(chatMessageQueuePath(projectId, chatId)) as { items: Array<Record<string, unknown>> })
+              .items[0],
+          ).not.toHaveProperty('steer');
+          store.refreshMessageQueue(chatId);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
         } finally {
           unadmit();
           unpublish();
@@ -6170,6 +6215,154 @@ describe('ChatSessionStore', () => {
           expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
           expect(session.messages.some((message) => message.id === 'msg_taken')).toBe(false);
         } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should stop calling a handed-over send departing once the log has its request', async () => {
+        const chatId = 'departing_logged';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(store.departingSendOf(chatId)).toBe('first');
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              lifecycleRow(4, 'running', 'req_first'),
+              logRow(5, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+            ],
+            3,
+          );
+          /* Still running, but its own rows describe it now: the cue reads the run, and the request can be edited. */
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
+          expect(session.messages.filter((message) => message.id === 'first')).toHaveLength(1);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should return a send the host took back even when its Stop was let go first', async () => {
+        const chatId = 'withdrawn_after_release';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockRejectedValueOnce(new Error('Channel closed'));
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, [
+            ...runningRows('taken'),
+            logRow(2, {
+              runId: 'taken',
+              type: 'message.appended',
+              message: { id: 'msg_taken', role: 'user', content: [{ type: 'text', text: 'Take me back' }] },
+            }),
+          ]);
+          store.stopRun(chatId, 'stop-button');
+          /* The answer was lost, so the Stop is offered again; the keyed cancel had still landed. */
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, {
+                runId: 'taken',
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                attempt: 1,
+                detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(session.messages.some((message) => message.id === 'msg_taken')).toBe(false);
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should finish a take-back as it started when Stop is pressed again', async () => {
+        const chatId = 'departing_stopped_twice';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('twice'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+
+          store.stopRun(chatId, 'stop-button');
+          store.stopRun(chatId, 'stop-button');
+          /* The send is neither departing nor queued while it goes back. */
+          expect(store.isStopping(chatId)).toBe(true);
+          expect(store.unqueuedSendOf(chatId)).toBe('twice');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('twice');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a send taken back during admission held when the composer takes new text before it returns', async () => {
+        const chatId = 'departing_raced';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('raced'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+
+          store.stopRun(chatId, 'stop-button');
+          /* The person types before the outbox has let go of the send. */
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'raced', held: true }],
+            });
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
           unpublish();
           store.release(chatId);
         }

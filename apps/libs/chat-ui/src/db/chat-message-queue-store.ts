@@ -27,8 +27,8 @@ export type QueuedChatMessage = Readonly<{
   commandPlacement?: string;
   steer?: QueuedCancelCommand;
   /**
-   * Held behind a send the person took back with Stop: like work queued behind a stopped run, it waits for Send now
-   * (a steer) rather than going out on its own.
+   * Parked after the person's Stop, or a refused send the composer could not take back: it leaves only by Send now (a
+   * steer), never on its own, and never ahead of a later send.
    */
   held?: true;
 }>;

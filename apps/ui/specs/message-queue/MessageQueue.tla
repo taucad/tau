@@ -208,6 +208,13 @@
 \* still-live turn (`TURN_WITHDRAWN`): the run is cancelled and its request returns to the composer, never shown.
 \* Stop is one value on the session (`PendingStop`); a cancel refused `RUN_NOT_LIVE` lets it go quietly, and a Stop
 \* during a resume's answer cancels the accepted attempt. Cancel's guards and every action above are unchanged.
+\* Review round 3: a withdrawn send is parked first and leaves the outbox only once an empty composer has taken it,
+\* so Withdraw may also leave it queued and parked (a composer holding new text); either way it is in one place.
+\* Parking drops the send's spent steer, so it never reads as Send now. Admission refusals use the same offer.
+\* The thread calls a handed-over send departing only until the log has its request. A take-back is restored
+\* from the log's `TURN_WITHDRAWN` row even when the Stop was let go before that row arrived.
+\* A `TURN_RELEASED` that reaches the page before its run's ending row waits briefly for that row before it is
+\* judged; that changes no action or verdict.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -337,21 +344,28 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                      !.counts[s.prepared] = 0, !.held = @ \ {s.prepared},
                      !.target = IF s.steerItem = s.prepared THEN None ELSE @,
                      !.steerItem = IF s.steerItem = s.prepared THEN None ELSE @]
-\* Withdrawing a send that was never prepared or accepted returns it to the composer in the same
-\* step; the person may submit it again, so it leaves the submitted set with its per-message facts.
-\* Every other unprepared, unsteered send still queued is held until the person sends it now.
+\* Withdrawing a send that was never prepared or accepted parks it, and every other unprepared, unsteered send
+\* still queued, until the person sends it now; its spent steer is dropped. Then either an empty composer takes it,
+\* and it leaves the queue, its saved copy and the submitted set with its per-message facts (the person may submit
+\* it again), or the composer holds new text and it stays queued, parked. The store holds it first and removes it
+\* only once the composer has it; the model takes both writes as one step.
 Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
                   /\ m # s.prepared /\ m \notin Accepted
-                  /\ s' = [s EXCEPT !.queue = Remove(@, m),
-                       !.steerItem = IF @ = m THEN None ELSE @,
-                       !.target = IF s.steerItem = m THEN None ELSE @,
-                       !.saved = IF Durable THEN Remove(@, m) ELSE @,
-                       !.submitted = @ \ {m}, !.counts[m] = 0,
-                       !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
-                       !.composer = @ \cup {m},
-                       !.held = (@ \ {m}) \cup (Members(s.queue) \ {m, s.prepared, s.steerItem})]
+                  /\ \/ s' = [s EXCEPT !.queue = Remove(@, m),
+                          !.steerItem = IF @ = m THEN None ELSE @,
+                          !.target = IF s.steerItem = m THEN None ELSE @,
+                          !.saved = IF Durable THEN Remove(@, m) ELSE @,
+                          !.submitted = @ \ {m}, !.counts[m] = 0,
+                          !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
+                          !.composer = @ \cup {m},
+                          !.held = (@ \ {m}) \cup (Members(s.queue) \ {m, s.prepared, s.steerItem})]
+                     \/ s' = [s EXCEPT !.steerItem = IF @ = m THEN None ELSE @,
+                          !.target = IF s.steerItem = m THEN None ELSE @,
+                          !.held = @ \cup {m} \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 \* The host takes back an accepted turn it had not kept: the run is cancelled and its request goes back to the
 \* composer instead of the thread. A later send is a new request, so the message stays accepted and submitted.
+\* A composer holding new text declines it, and the store parks it as a new held send under a new identity, which
+\* this finite message set does not model.
 TakeBack(m) == /\ m \in Accepted /\ m = s.active /\ Live(s.phase[m]) /\ m \notin s.takenBack
                /\ s' = [s EXCEPT !.phase[m] = "cancelled", !.takenBack = @ \cup {m}, !.composer = @ \cup {m}]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted

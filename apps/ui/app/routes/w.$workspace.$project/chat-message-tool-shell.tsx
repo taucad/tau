@@ -198,7 +198,7 @@ export function ChatMessageToolShell({ part }: { readonly part: ShellInvocation 
       }
       const succeeded = output.status === 'completed' && output.exitCode === 0;
       return (
-        <ChatToolCard variant='minimal' status={succeeded ? 'ready' : 'error'} isDefaultOpen={!succeeded}>
+        <ChatToolCard variant='minimal' status={succeeded ? 'ready' : 'error'}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={SquareTerminal} />
             <ChatToolCardTitle>

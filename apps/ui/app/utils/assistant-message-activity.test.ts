@@ -190,6 +190,35 @@ describe('assistant message activity', () => {
     expect(`${active} ${completed}`).not.toMatch(/\b(?:Activity|Working|Stopped)\b/u);
   });
 
+  it('folds a task-list update into the activity around it, native or through Tau MCP', () => {
+    const groups = groupAssistantParts([
+      tool('tool-read_file'),
+      tool('tool-update_todos'),
+      dynamic({ nativeName: 'update_todos' }),
+      tool('tool-shell'),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: 'aggregated', summary: 'Read files, updated tasks, ran commands' });
+    expect(describeActivity([tool('tool-update_todos', 'input-available')])).toBe('Updating tasks');
+  });
+
+  it('lets a session record without a plan pass without splitting activity, and keeps one with a plan visible', () => {
+    const session = (plan?: unknown): Part =>
+      ({
+        type: 'data-acp-session',
+        data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [], plan },
+      }) as unknown as Part;
+
+    expect(classifyActivityPart(session())).toBe('skip');
+    expect(groupAssistantParts([tool('tool-read_file'), session(), tool('tool-shell')])).toHaveLength(1);
+    expect(findLastMeaningfulPartIndex([text('Done'), session()])).toBe(0);
+
+    const plan = { type: 'items', entries: [{ content: 'Inspect', priority: 'high', status: 'pending' }] };
+    expect(classifyActivityPart(session(plan))).toBe('data');
+    expect(groupAssistantParts([tool('tool-read_file'), session(plan), tool('tool-shell')])).toHaveLength(3);
+  });
+
   it('keeps export artifacts standalone while ordinary edits stay in the activity stack', () => {
     const groups = groupAssistantParts([tool('tool-edit_file'), tool('tool-export_model'), tool('tool-read_file')]);
 

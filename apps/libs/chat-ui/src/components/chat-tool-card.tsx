@@ -6,6 +6,13 @@ import { ChevronRight } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { AnimatedShinyText } from '#components/animated-shiny-text.js';
+import {
+  ActivityRowBoundary,
+  activityChevronClassName,
+  activityContainerClassName,
+  useActivityRow,
+  useActivityRowDisclosure,
+} from '#components/chat-activity-group.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 // ============================================================================
@@ -14,6 +21,7 @@ import { cn } from '@taucad/ui/utils/cn';
 
 type ChatToolCardVariant = 'card' | 'minimal';
 type ChatToolCardStatus = 'loading' | 'ready' | 'error' | 'warning';
+type ChatToolCardPlacement = 'row' | 'sole' | 'standalone';
 
 type ChatToolCardContextValue = {
   isOpen: boolean;
@@ -21,6 +29,8 @@ type ChatToolCardContextValue = {
   variant: ChatToolCardVariant;
   status: ChatToolCardStatus;
   isCollapsible: boolean;
+  /** Where the card sits: a cell of an activity container, a group's only row, or on its own. */
+  placement: ChatToolCardPlacement;
 };
 
 const ChatToolCardContext = createContext<ChatToolCardContextValue | undefined>(undefined);
@@ -42,6 +52,7 @@ type ChatToolCardProps = {
   readonly children: React.ReactNode;
   readonly variant?: ChatToolCardVariant;
   readonly status?: ChatToolCardStatus;
+  /** Ignored inside an activity group, where only the reader opens a row. */
   readonly isDefaultOpen?: boolean;
   readonly isOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
@@ -56,21 +67,28 @@ type ChatToolCardProps = {
 function ChatToolCard({
   children,
   variant = 'card',
-  status = 'ready',
+  status: receivedStatus = 'ready',
   isDefaultOpen: defaultOpen = false,
   isOpen: controlledIsOpen,
   onOpenChange,
   className,
   isCollapsible = true,
 }: ChatToolCardProps): React.JSX.Element {
+  // An activity row never opens itself: failure, streaming and reload all leave it closed.
+  const row = useActivityRow();
+
   // Internal state for uncontrolled mode
-  const [internalIsOpen, setInternalIsOpen] = useState(defaultOpen);
+  const [internalIsOpen, setInternalIsOpen] = useState(row === undefined ? defaultOpen : false);
 
   // Determine if controlled
   const isControlled = controlledIsOpen !== undefined;
 
   // Determine actual open state
   const isOpen = isControlled ? controlledIsOpen : internalIsOpen;
+  useActivityRowDisclosure(isOpen && isCollapsible);
+  const placement: ChatToolCardPlacement = row === undefined ? 'standalone' : row.isSole ? 'sole' : 'row';
+  // A call left running by a turn that has ended draws no motion.
+  const status = receivedStatus === 'loading' && row?.isSettled === true ? 'ready' : receivedStatus;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -90,8 +108,9 @@ function ChatToolCard({
       variant,
       status,
       isCollapsible,
+      placement,
     }),
-    [isOpen, handleOpenChange, variant, status, isCollapsible],
+    [isOpen, handleOpenChange, variant, status, isCollapsible, placement],
   );
 
   return (
@@ -107,7 +126,7 @@ function ChatToolCard({
         data-status={status}
         onOpenChange={handleOpenChange}
       >
-        {children}
+        <ActivityRowBoundary>{children}</ActivityRowBoundary>
       </Collapsible>
     </ChatToolCardContext.Provider>
   );
@@ -120,9 +139,11 @@ function ChatToolCard({
 type ChatToolCardHeaderProps = {
   readonly children: React.ReactNode;
   readonly className?: string;
+  /** Minimal variant only: a preview of what the row holds, held at the row's far edge after the chevron. */
+  readonly trailing?: React.ReactNode;
 };
 
-function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): React.JSX.Element {
+function ChatToolCardHeader({ children, className, trailing }: ChatToolCardHeaderProps): React.JSX.Element {
   const { variant, isOpen, isCollapsible } = useChatToolCard();
 
   if (variant === 'minimal') {
@@ -130,14 +151,10 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
     const content = (
       <>
         {children}
-        {isCollapsible ? (
-          <ChevronRight
-            className={cn(
-              'size-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
-              isOpen && 'rotate-90',
-            )}
-          />
-        ) : undefined}
+        {isCollapsible ? <ChevronRight className={cn(activityChevronClassName, isOpen && 'rotate-90')} /> : undefined}
+        {trailing === undefined ? undefined : (
+          <span className='ml-auto flex shrink-0 items-center gap-1 pl-1'>{trailing}</span>
+        )}
       </>
     );
 
@@ -161,7 +178,7 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
           variant='ghost'
           size='xs'
           className={cn(
-            'group/chat-tool-trigger -ml-2 flex w-full min-w-0 justify-start gap-1.5 overflow-hidden font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent',
+            'group/chat-tool-trigger -ml-2 flex w-full min-w-0 justify-start gap-1.5 overflow-hidden font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent pointer-coarse:min-h-8',
             className,
           )}
         >
@@ -322,7 +339,8 @@ type ChatToolCardContentProps = {
 };
 
 function ChatToolCardContent({ children, className, forceMount }: ChatToolCardContentProps): React.JSX.Element {
-  const { variant } = useChatToolCard();
+  const { variant, placement } = useChatToolCard();
+  const isMinimal = variant === 'minimal';
 
   return (
     <CollapsibleContent
@@ -330,12 +348,18 @@ function ChatToolCardContent({ children, className, forceMount }: ChatToolCardCo
         // Skip animations when forceMount is true (content is always in DOM)
         !forceMount && 'data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down',
         variant === 'card' && 'border-t',
-        variant === 'minimal' && 'pl-1.5',
-        className,
+        isMinimal && placement === 'standalone' && 'pl-1.5',
+        isMinimal && placement === 'row' && 'pb-1.5',
+        placement !== 'sole' && className,
       )}
       forceMount={forceMount}
     >
-      {children}
+      {isMinimal && placement === 'sole' ? (
+        // A lone row opens into the same bordered surface a group's rows sit in.
+        <div className={cn(activityContainerClassName, 'px-2.5 py-1.5', className)}>{children}</div>
+      ) : (
+        children
+      )}
     </CollapsibleContent>
   );
 }

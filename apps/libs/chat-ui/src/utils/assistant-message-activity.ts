@@ -2,8 +2,8 @@
  * Order-preserving assistant activity grouping and semantic tool summaries.
  *
  * Adjacent reasoning parts form one reasoning disclosure. Adjacent tool parts
- * form one activity disclosure. Text, data, and exported artifacts remain
- * standalone chronological barriers.
+ * form one activity disclosure. Text, visible data, and exported artifacts
+ * remain standalone chronological barriers.
  */
 
 import type { MyMessagePart } from '@taucad/chat';
@@ -26,6 +26,7 @@ export type ActivityFamily =
   | 'screenshot'
   | 'test'
   | 'chat'
+  | 'plan'
   | 'other';
 
 type ActivityState = 'active' | 'approval' | 'completed' | 'denied' | 'error';
@@ -70,6 +71,8 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
   ['tool-shell', 'execute'],
+  // The tray above the composer owns the live task list; an update is one more routine row of the turn's record.
+  ['tool-update_todos', 'plan'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
@@ -93,6 +96,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['screenshot', 'screenshot'],
   ['test_model', 'test'],
   ['shell', 'execute'],
+  ['update_todos', 'plan'],
 ]);
 
 const externalFamilies = new Map<string, ActivityFamily>([
@@ -184,6 +188,13 @@ const familyLabels: Record<Exclude<ActivityFamily, 'other'>, Record<ActivityStat
     denied: 'Chat read denied',
     error: 'Chat read failed',
   },
+  plan: {
+    active: 'Updating tasks',
+    approval: 'Task update awaiting approval',
+    completed: 'Updated tasks',
+    denied: 'Task update denied',
+    error: 'Task update failed',
+  },
 };
 
 const tauFacts = (part: MyMessagePart): Record<string, unknown> | undefined =>
@@ -262,6 +273,10 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
     return 'research';
   }
   if (['step-start', 'data-usage', 'data-context-usage'].includes(part.type)) {
+    return 'skip';
+  }
+  /* A session record without a plan draws nothing, so it must not split the activity around it. */
+  if (part.type === 'data-acp-session' && part.data.plan === undefined) {
     return 'skip';
   }
   if (part.type === 'file' || part.type === 'source-url' || part.type === 'source-document') {

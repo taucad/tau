@@ -327,6 +327,28 @@ const userText = (message: AgentMessage): string => {
     : message.content.map((block) => (block.type === 'text' ? block.text : '')).join('');
 };
 
+const tagsOf = (text: string): readonly string[] => text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? [];
+
+/**
+ * Whether a message of the model's context is one the person wrote: a user row that is not a compaction summary, not
+ * one of Tau's own rows (`tauInternal`: a safeguard nudge, an interrupt note, the chat-state note) and not a
+ * `<system-reminder>`. It is `isPersonsMessage` of `#log/event-types.js` for the context the model is sent, where a
+ * summary and a reminder are user rows too.
+ *
+ * Compaction keeps the newest such message whole, and the safeguards count the agent's tool calls from it, so the two
+ * read "the person last spoke here" from this one definition.
+ *
+ * @internal
+ * @param message - One message of the model's context.
+ * @param identities - The session's message identities, which carry each row's durable metadata.
+ * @returns `true` for the person's own message.
+ */
+export const isPersonsContextMessage = (message: AgentMessage, identities: SessionRecord['messages']): boolean =>
+  message.role === 'user' &&
+  summaryText(message) === undefined &&
+  identities.metadata(message)?.tauInternal === undefined &&
+  !tagsOf(userText(message)).some((tag) => tag.toLowerCase().includes('system-reminder'));
+
 const lastUserText = (messages: readonly AgentMessage[]): string => {
   for (let index = messages.length - 1; index >= 0; index--) {
     const text = userText(messages[index]!);
@@ -346,7 +368,7 @@ const keepContext = (
   let newestUser: AgentMessage | undefined;
   for (const message of messages) {
     const text = userText(message);
-    const tags = text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? [];
+    const tags = tagsOf(text);
     for (const tag of tags) {
       if (tag.toLowerCase().includes('safety')) {
         safety.add(message);
@@ -355,12 +377,7 @@ const keepContext = (
         newestByTag.set(tag, message);
       }
     }
-    if (
-      message.role === 'user' &&
-      summaryText(message) === undefined &&
-      identities.metadata(message)?.tauInternal === undefined &&
-      !tags.some((tag) => tag.toLowerCase().includes('system-reminder'))
-    ) {
+    if (isPersonsContextMessage(message, identities)) {
       newestUser = message;
     }
   }

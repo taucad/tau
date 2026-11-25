@@ -483,6 +483,12 @@ type CreateSafeguardsOptions = {
   readonly thresholds?: Partial<SafeguardThresholds> | undefined;
   readonly detectors?: readonly SafeguardDetector[] | undefined;
   readonly firedSignatures?: Iterable<string> | undefined;
+  /**
+   * Whether a message is one the person wrote, as opposed to a reminder, a summary or another row Tau put in the
+   * context itself. The detectors count only the tool calls made since the last such message: what the agent did
+   * before the person spoke again is not evidence that it is stuck now. Left out, every call in the context counts.
+   */
+  readonly isPersonsMessage?: ((message: AgentMessage) => boolean) | undefined;
   readonly record: (decision: SafeguardRecord, reminder?: AgentMessage) => Promise<void>;
   readonly recordOutcome?: ((outcome: SafeguardOutcome) => Promise<void>) | undefined;
   readonly hash?: ((input: string) => Promise<string>) | undefined;
@@ -513,7 +519,14 @@ export const createAgentSafeguards = (
       });
     }
 
-    const events = await summarizeToolEvents(messages, hash);
+    /* The window is this turn, not the chat. A run ended for repeating one failing call leaves those results in the
+     * history; counted again on the next turn they ended it before the model was asked anything, and every turn
+     * after it, so the chat could not continue. The safeguards' own reminder is not the person, so a run still counts
+     * across it to the terminate threshold. */
+    const { isPersonsMessage } = options;
+    const lastSpoke = isPersonsMessage ? messages.findLastIndex((message) => isPersonsMessage(message)) : -1;
+    const summarized = await summarizeToolEvents(messages, hash);
+    const events = lastSpoke === -1 ? summarized : summarized.filter((event) => event.index > lastSpoke);
     let selected: SafeguardRecord | undefined;
     for (const detector of detectors) {
       const detection = detector(events);

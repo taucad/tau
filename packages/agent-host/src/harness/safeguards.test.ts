@@ -89,6 +89,74 @@ describe('AgentSafeguards', () => {
     expect(JSON.stringify(result.content)).toContain('Please review what was attempted');
   });
 
+  describe('the window the detectors count over', () => {
+    const person = (text: string): AgentMessage => ({ role: 'user', content: [{ type: 'text', text }], timestamp: 0 });
+    const isPersonsMessage = (message: AgentMessage): boolean =>
+      message.role === 'user' && !JSON.stringify(message.content).includes('<system-reminder>');
+
+    it('should let the model answer a new message after an earlier turn was stopped for repeating itself', async () => {
+      const recorded: SafeguardRecord[] = [];
+      const safeguards = createAgentSafeguards({
+        record: async (entry) => {
+          recorded.push(entry);
+        },
+        hash: async (input) => `hash:${input}`,
+        isPersonsMessage,
+      });
+      const base = vi.fn() as unknown as StreamFn;
+
+      await safeguards.transformContext([
+        person('Export the part.'),
+        ...repeatedCalls(6, true),
+        person('Never mind the export. What is 2 + 2?'),
+      ]);
+      await safeguards.wrapStreamFn(base)(stubModel, normalizeContext({ messages: [] }));
+
+      expect(recorded).toEqual([]);
+      expect(base).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not count calls made before the person last spoke toward a reminder', async () => {
+      const record = vi.fn(async () => undefined);
+      const safeguards = createAgentSafeguards({ record, hash: async (input) => `hash:${input}`, isPersonsMessage });
+
+      const messages = [
+        person('Read it.'),
+        ...repeatedCalls(4),
+        person('Read it again, I changed it.'),
+        ...repeatedCalls(1),
+      ];
+      const result = await safeguards.transformContext(messages);
+
+      expect(result).toBe(messages);
+      expect(record).not.toHaveBeenCalled();
+    });
+
+    it("should keep counting across the safeguards' own reminder, which is not the person speaking", async () => {
+      const recorded: SafeguardRecord[] = [];
+      const safeguards = createAgentSafeguards({
+        record: async (entry) => {
+          recorded.push(entry);
+        },
+        hash: async (input) => `hash:${input}`,
+        isPersonsMessage,
+      });
+      const base = vi.fn() as unknown as StreamFn;
+      const reminder = person('<system-reminder>\nStop retrying.\n</system-reminder>');
+
+      await safeguards.transformContext([
+        person('Export the part.'),
+        ...repeatedCalls(3, true),
+        reminder,
+        ...repeatedCalls(3, true),
+      ]);
+      await safeguards.wrapStreamFn(base)(stubModel, normalizeContext({ messages: [] }));
+
+      expect(recorded.map((entry) => entry.kind)).toEqual(['terminate']);
+      expect(base).not.toHaveBeenCalled();
+    });
+  });
+
   /* Slice (a): a grep that could not search a pending file has not found nothing. */
   it('does not call a grep empty when it names files it could not search', async () => {
     const grepCalls = (pendingFiles: readonly string[]): AgentMessage[] =>

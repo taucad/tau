@@ -55,7 +55,7 @@ import {
 } from '#harness/cad-middleware.js';
 import { omitAttachments, planAttachmentOmissions } from '#transport/document-payload.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
-import { installCompaction, isCompactionSummaryRow } from '#harness/compaction.js';
+import { installCompaction, isCompactionSummaryRow, isPersonsContextMessage } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { agentHistory } from '#harness/agent-context.js';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
@@ -1696,6 +1696,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   );
   const safeguards = createAgentSafeguards({
     thresholds: options.safeguardThresholds,
+    isPersonsMessage: (message) => isPersonsContextMessage(message, record.messages),
     recordOutcome: options.onSafeguardOutcome,
     firedSignatures: initialEvents.flatMap((event) => (event.type === 'safeguard.recorded' ? [event.safeguardId] : [])),
     record: async (decision, reminder) => {

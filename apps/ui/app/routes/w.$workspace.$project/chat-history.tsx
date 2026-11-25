@@ -316,17 +316,18 @@ const ExpandedChatHistory = memo(function ({
     chatTextareaRef.current?.focus();
   }, []);
   const location = useLocation();
-  const isComposerFocusRequested = location.state?.focusChatComposer === true;
   /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
-   * when the navigation commits lands on an inert composer and is dropped. It is given once the requested chat is the
-   * one presented (a URL naming no chat presents whatever it opens). */
+   * when the navigation commits lands on an inert composer and is dropped. It is given once per navigation, once the
+   * requested chat is the one presented (a URL naming no chat presents whatever it opens). */
   const requestedChatId = projectChatIdFromSearch(location.search);
   const isRequestedChatPresented = requestedChatId === undefined || requestedChatId === activeChatId;
+  const composerFocusRequest =
+    location.state?.focusChatComposer === true && isRequestedChatPresented ? location.key : undefined;
   useEffect(() => {
-    if (isComposerFocusRequested && isRequestedChatPresented) {
+    if (composerFocusRequest !== undefined) {
       chatTextareaRef.current?.focus();
     }
-  }, [isComposerFocusRequested, isRequestedChatPresented, location.key]);
+  }, [composerFocusRequest]);
 
   // Empty-cancel: the persistence machine has lifted the cancelled user
   // message back into the composer draft (via the store's

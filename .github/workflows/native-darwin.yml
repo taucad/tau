@@ -298,6 +298,17 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      # The checkout above can be a commit older than this workflow, so the download helper comes from this
+      # workflow's own commit (scripts/src/pinned-download.test.ts).
+      - name: Check out this workflow's download helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
@@ -307,8 +318,8 @@ jobs:
       - name: Install the .NET 10 SDK
         id: dotnet
         run: |
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
-          echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
+          ./.tau-ci/.github/actions/apt-install/download.sh dotnet-sdk-download "$DOTNET_SDK_URL" "$RUNNER_TEMP/dotnet-sdk.tar.gz" \
+            "sha512:$DOTNET_SDK_SHA512"
           mkdir -p "$RUNNER_TEMP/dotnet"
           tar -xzf "$RUNNER_TEMP/dotnet-sdk.tar.gz" -C "$RUNNER_TEMP/dotnet"
           echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"

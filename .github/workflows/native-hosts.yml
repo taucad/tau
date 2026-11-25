@@ -152,6 +152,17 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      # The checkout above can be a commit older than this workflow, so the download helper comes from this
+      # workflow's own commit (scripts/src/pinned-download.test.ts).
+      - name: Check out this workflow's download helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
@@ -243,9 +254,9 @@ jobs:
           # cannot install). Node 24 needs glibc 2.28 alone, like the CLI's own floor (`engines.node >=24`).
           floor=v24.20.0
           name="node-$floor-linux-x64"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.xz" "https://nodejs.org/dist/$floor/$name.tar.xz"
-          curl -fsSL --retry 3 "https://nodejs.org/dist/$floor/SHASUMS256.txt" | grep " $name.tar.xz\$" \
-            | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          # Pinned from nodejs.org/dist/v24.20.0/SHASUMS256.txt.
+          ./.tau-ci/.github/actions/apt-install/download.sh node-floor-download "https://nodejs.org/dist/$floor/$name.tar.xz" \
+            "$RUNNER_TEMP/$name.tar.xz" sha256:2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
           tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
           node_root="$RUNNER_TEMP/$name"
           expect_blocked() {

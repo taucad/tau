@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-25T11:47:12.763Z",
+  "updatedAt": "2026-11-25T12:15:25.381Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -1561,80 +1561,93 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45609054664,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2831",
+      "sha": "6252c602bbfbbf3aebf291b804c4c691807081e6",
+      "at": "2026-11-25T12:15:10Z",
+      "conclusion": "success",
+      "artifacts": 30,
+      "counted": 47209,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
     "agent-host-ui:test": {
-      "executions": 2,
-      "tests": 60,
+      "executions": 3,
+      "tests": 90,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-host:test": {
-      "executions": 1,
-      "tests": 2062,
+      "executions": 2,
+      "tests": 4123,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-host:test:e2e": {
-      "executions": 1,
-      "tests": 31,
+      "executions": 2,
+      "tests": 62,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-observability:test": {
-      "executions": 1,
-      "tests": 209,
+      "executions": 2,
+      "tests": 418,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-observability:test:e2e": {
-      "executions": 1,
-      "tests": 108,
+      "executions": 2,
+      "tests": 216,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-plugin:test": {
-      "executions": 2,
-      "tests": 376,
+      "executions": 3,
+      "tests": 564,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-plugin:test:e2e": {
-      "executions": 2,
-      "tests": 54,
+      "executions": 3,
+      "tests": 81,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "agent-tools:test": {
-      "executions": 2,
-      "tests": 1232,
+      "executions": 3,
+      "tests": 1848,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-agent-observability:test": {
-      "executions": 4,
-      "tests": 562,
+      "executions": 6,
+      "tests": 843,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-auth:test": {
       "executions": 2,
@@ -1645,28 +1658,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api-billing:test": {
-      "executions": 4,
-      "tests": 922,
+      "executions": 6,
+      "tests": 1384,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-chat:test": {
-      "executions": 4,
-      "tests": 277,
+      "executions": 6,
+      "tests": 415,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-contracts:test": {
-      "executions": 2,
-      "tests": 4,
+      "executions": 3,
+      "tests": 6,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-core:test": {
       "executions": 2,
@@ -1685,20 +1698,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api-e2e:test:git": {
-      "executions": 2,
-      "tests": 48,
+      "executions": 3,
+      "tests": 72,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-e2e:test:server-modes": {
-      "executions": 2,
-      "tests": 4,
+      "executions": 3,
+      "tests": 6,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-email:test": {
       "executions": 2,
@@ -1709,28 +1722,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api-extractor:test": {
-      "executions": 2,
-      "tests": 836,
+      "executions": 3,
+      "tests": 1254,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-git-core:test": {
-      "executions": 4,
-      "tests": 980,
+      "executions": 6,
+      "tests": 1470,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-git-mirror:test": {
-      "executions": 4,
-      "tests": 384,
+      "executions": 6,
+      "tests": 576,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-hosts:test": {
       "executions": 2,
@@ -1749,20 +1762,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api-llm-gateway:test": {
-      "executions": 4,
-      "tests": 702,
+      "executions": 6,
+      "tests": 1053,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-object-storage:test": {
-      "executions": 4,
-      "tests": 258,
+      "executions": 6,
+      "tests": 387,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-observability:test": {
       "executions": 2,
@@ -1773,12 +1786,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api-projects:test": {
-      "executions": 4,
-      "tests": 650,
+      "executions": 6,
+      "tests": 975,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api-redis:test": {
       "executions": 2,
@@ -1797,20 +1810,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "api:test": {
-      "executions": 4,
-      "tests": 2474,
+      "executions": 6,
+      "tests": 3711,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "api:test:models": {
-      "executions": 2,
-      "tests": 10,
+      "executions": 3,
+      "tests": 15,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "apps-runtime-e2e:vitest": {
       "executions": 6,
@@ -1829,36 +1842,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "assimp:test": {
-      "executions": 2,
-      "tests": 132,
+      "executions": 3,
+      "tests": 198,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "bambu:test": {
-      "executions": 2,
-      "tests": 438,
+      "executions": 3,
+      "tests": 657,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "billing-e2e:test": {
-      "executions": 4,
-      "tests": 204,
+      "executions": 5,
+      "tests": 255,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "billing-ui:test": {
-      "executions": 2,
-      "tests": 419,
+      "executions": 3,
+      "tests": 629,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "billing:test": {
       "executions": 1,
@@ -1869,36 +1882,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "brep:test": {
-      "executions": 2,
-      "tests": 26,
+      "executions": 3,
+      "tests": 39,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "build123d:test": {
-      "executions": 6,
-      "tests": 570,
+      "executions": 9,
+      "tests": 855,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "build123d:test:native-darwin": {
-      "executions": 2,
-      "tests": 28,
+      "executions": 3,
+      "tests": 42,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "bundler-core:test": {
-      "executions": 2,
-      "tests": 192,
+      "executions": 3,
+      "tests": 288,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "cache-core:test": {
       "executions": 1,
@@ -1909,12 +1922,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "cadmpeg:test": {
-      "executions": 2,
-      "tests": 94,
+      "executions": 3,
+      "tests": 141,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "camera:test": {
       "executions": 1,
@@ -1925,60 +1938,60 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "carvera:test": {
-      "executions": 2,
-      "tests": 100,
+      "executions": 3,
+      "tests": 150,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "chat-surfaces:test": {
-      "executions": 2,
-      "tests": 126,
+      "executions": 3,
+      "tests": 189,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "chat-ui:test": {
-      "executions": 2,
-      "tests": 1488,
+      "executions": 3,
+      "tests": 2232,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "chat:test": {
-      "executions": 4,
-      "tests": 1816,
+      "executions": 6,
+      "tests": 2723,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "cli-e2e:test:native-darwin": {
-      "executions": 2,
-      "tests": 20,
+      "executions": 3,
+      "tests": 30,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "cli-e2e:test:scenarios": {
-      "executions": 4,
-      "tests": 164,
+      "executions": 6,
+      "tests": 246,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "cli:test": {
-      "executions": 2,
-      "tests": 904,
+      "executions": 3,
+      "tests": 1356,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "consent:test": {
       "executions": 1,
@@ -1989,28 +2002,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "converter:test": {
-      "executions": 2,
-      "tests": 8,
+      "executions": 3,
+      "tests": 12,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "csharp-language:test": {
-      "executions": 2,
-      "tests": 42,
+      "executions": 3,
+      "tests": 63,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "desktop-services-host:test": {
-      "executions": 2,
-      "tests": 460,
+      "executions": 3,
+      "tests": 690,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "desktop-services-host:test:terminal-conformance": {
       "executions": 2,
@@ -2021,12 +2034,12 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "desktop-terminal:test": {
-      "executions": 1,
-      "tests": 40,
+      "executions": 2,
+      "tests": 80,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "desktop-terminal:test:terminal-conformance": {
       "executions": 1,
@@ -2037,44 +2050,44 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "desktop:test": {
-      "executions": 2,
-      "tests": 2222,
+      "executions": 3,
+      "tests": 3333,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "docs:test": {
-      "executions": 2,
-      "tests": 2326,
+      "executions": 3,
+      "tests": 3489,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "dotnet-kernel-core:test": {
-      "executions": 2,
-      "tests": 70,
+      "executions": 3,
+      "tests": 105,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "editor-ui:test": {
-      "executions": 2,
-      "tests": 1419,
+      "executions": 3,
+      "tests": 2128,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "esbuild:test": {
-      "executions": 2,
-      "tests": 122,
+      "executions": 3,
+      "tests": 183,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "events:test": {
       "executions": 1,
@@ -2093,12 +2106,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "files-ui:test": {
-      "executions": 2,
-      "tests": 784,
+      "executions": 3,
+      "tests": 1176,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "files:test": {
       "executions": 2,
@@ -2109,12 +2122,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "filesystem:test": {
-      "executions": 1,
-      "tests": 2056,
+      "executions": 2,
+      "tests": 4114,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "formal:test": {
       "executions": 1,
@@ -2125,36 +2138,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "fs-bridge:test": {
-      "executions": 1,
-      "tests": 407,
+      "executions": 2,
+      "tests": 814,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "fs-client:test": {
-      "executions": 1,
-      "tests": 436,
+      "executions": 2,
+      "tests": 872,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "geometry-core:test": {
-      "executions": 2,
-      "tests": 878,
+      "executions": 3,
+      "tests": 1316,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "gltf:test": {
-      "executions": 2,
-      "tests": 82,
+      "executions": 3,
+      "tests": 123,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "grammars:test": {
       "executions": 1,
@@ -2165,28 +2178,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "grbl:test": {
-      "executions": 2,
-      "tests": 90,
+      "executions": 3,
+      "tests": 135,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "heif:test": {
-      "executions": 2,
-      "tests": 48,
+      "executions": 3,
+      "tests": 72,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "host:test": {
-      "executions": 2,
-      "tests": 2744,
+      "executions": 3,
+      "tests": 4117,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "host:test:shell-conformance": {
       "executions": 2,
@@ -2205,36 +2218,36 @@
       "lastSeen": "2026-11-25T08:32:01Z"
     },
     "image:test": {
-      "executions": 2,
-      "tests": 406,
+      "executions": 3,
+      "tests": 609,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "jobs-solvers:test": {
-      "executions": 2,
-      "tests": 36,
+      "executions": 3,
+      "tests": 54,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "jobs:test": {
-      "executions": 2,
-      "tests": 28,
+      "executions": 3,
+      "tests": 42,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "jscad:test": {
-      "executions": 2,
-      "tests": 290,
+      "executions": 3,
+      "tests": 435,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "json-schema:test": {
       "executions": 1,
@@ -2253,44 +2266,44 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "lsp-fs:test": {
-      "executions": 1,
-      "tests": 51,
+      "executions": 2,
+      "tests": 102,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "lsp:test": {
-      "executions": 2,
-      "tests": 42,
+      "executions": 3,
+      "tests": 63,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "lsp:verify-browser": {
-      "executions": 2,
-      "tests": 2,
+      "executions": 3,
+      "tests": 3,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "manifold:test": {
-      "executions": 2,
-      "tests": 110,
+      "executions": 3,
+      "tests": 165,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "mcp:test": {
-      "executions": 2,
-      "tests": 146,
+      "executions": 3,
+      "tests": 219,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "memory:test": {
       "executions": 1,
@@ -2301,20 +2314,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "middleware:test": {
-      "executions": 2,
-      "tests": 230,
+      "executions": 3,
+      "tests": 345,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "native-process-core:test": {
-      "executions": 2,
-      "tests": 168,
+      "executions": 3,
+      "tests": 252,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "nx:test": {
       "executions": 1,
@@ -2325,36 +2338,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "occt-core:test": {
-      "executions": 2,
-      "tests": 220,
+      "executions": 3,
+      "tests": 330,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "opencascade:test": {
-      "executions": 2,
-      "tests": 238,
+      "executions": 3,
+      "tests": 357,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "openrscad:test": {
-      "executions": 2,
-      "tests": 170,
+      "executions": 3,
+      "tests": 255,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "openscad-language:test": {
-      "executions": 2,
-      "tests": 56,
+      "executions": 3,
+      "tests": 84,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "oxlint:test": {
       "executions": 1,
@@ -2373,36 +2386,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "picogk:test": {
-      "executions": 2,
-      "tests": 604,
+      "executions": 3,
+      "tests": 907,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "picogk:test:native-darwin": {
-      "executions": 2,
-      "tests": 46,
+      "executions": 3,
+      "tests": 69,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "picogk:test:native-linux": {
-      "executions": 2,
-      "tests": 46,
+      "executions": 3,
+      "tests": 69,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "picovoxel:test": {
-      "executions": 2,
-      "tests": 560,
+      "executions": 3,
+      "tests": 840,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "planetary-gearbox:test": {
       "executions": 1,
@@ -2413,12 +2426,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "preferences:test": {
-      "executions": 2,
-      "tests": 116,
+      "executions": 3,
+      "tests": 174,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "project-core:test": {
       "executions": 1,
@@ -2429,36 +2442,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "project-library:test": {
-      "executions": 2,
-      "tests": 414,
+      "executions": 3,
+      "tests": 622,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "project-workspace:test": {
-      "executions": 2,
-      "tests": 162,
+      "executions": 3,
+      "tests": 243,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "publish-ui:test": {
-      "executions": 2,
-      "tests": 488,
+      "executions": 3,
+      "tests": 732,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "python-kernel-core:test": {
-      "executions": 2,
-      "tests": 104,
+      "executions": 3,
+      "tests": 156,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "r2-audit:test": {
       "executions": 2,
@@ -2469,60 +2482,60 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "react-e2e:test:e2e": {
-      "executions": 16,
-      "tests": 26,
+      "executions": 24,
+      "tests": 39,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "react-e2e:test:e2e:development": {
-      "executions": 8,
-      "tests": 8,
+      "executions": 12,
+      "tests": 12,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "react:test": {
-      "executions": 2,
-      "tests": 24,
+      "executions": 3,
+      "tests": 36,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "replicad:test": {
-      "executions": 2,
-      "tests": 800,
+      "executions": 3,
+      "tests": 1200,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "revisions-ui:test": {
-      "executions": 2,
-      "tests": 220,
+      "executions": 3,
+      "tests": 330,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "revisions:test": {
-      "executions": 6,
-      "tests": 4898,
+      "executions": 9,
+      "tests": 7348,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "rolldown:test": {
-      "executions": 2,
-      "tests": 54,
+      "executions": 3,
+      "tests": 81,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "rpc:test": {
       "executions": 1,
@@ -2533,28 +2546,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "runtime-e2e:compute-qualify-ci": {
-      "executions": 2,
-      "tests": 82,
+      "executions": 3,
+      "tests": 123,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "runtime-testing:test": {
-      "executions": 2,
-      "tests": 122,
+      "executions": 3,
+      "tests": 183,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "runtime:test": {
-      "executions": 2,
-      "tests": 5415,
+      "executions": 3,
+      "tests": 8124,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "sandbox:test": {
       "executions": 1,
@@ -2573,28 +2586,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "scripts:test": {
-      "executions": 7,
-      "tests": 7832,
+      "executions": 8,
+      "tests": 8962,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "scripts:test:e2e": {
-      "executions": 7,
-      "tests": 406,
+      "executions": 8,
+      "tests": 464,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "settings-ui:test": {
-      "executions": 2,
-      "tests": 104,
+      "executions": 3,
+      "tests": 156,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "share:test": {
       "executions": 1,
@@ -2605,12 +2618,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "shell-service:test": {
-      "executions": 1,
-      "tests": 155,
+      "executions": 2,
+      "tests": 310,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T06:23:35Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "shell-service:test:shell-conformance": {
       "executions": 1,
@@ -2621,36 +2634,36 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "skills:test": {
-      "executions": 2,
-      "tests": 24,
+      "executions": 3,
+      "tests": 36,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "slicer:test": {
-      "executions": 2,
-      "tests": 402,
+      "executions": 3,
+      "tests": 603,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "smlib:test": {
-      "executions": 2,
-      "tests": 326,
+      "executions": 3,
+      "tests": 489,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "smlibpy:test": {
-      "executions": 2,
-      "tests": 178,
+      "executions": 3,
+      "tests": 267,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "spatial:test": {
       "executions": 1,
@@ -2661,12 +2674,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "tau-examples:test": {
-      "executions": 2,
-      "tests": 200,
+      "executions": 3,
+      "tests": 300,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "taucad-ui:test": {
       "executions": 1,
@@ -2685,20 +2698,20 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "three:test": {
-      "executions": 2,
-      "tests": 189,
+      "executions": 3,
+      "tests": 284,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "tscircuit:test": {
-      "executions": 2,
-      "tests": 516,
+      "executions": 3,
+      "tests": 773,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "types:test": {
       "executions": 1,
@@ -2709,52 +2722,52 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "ui-core:test": {
-      "executions": 2,
-      "tests": 1340,
+      "executions": 3,
+      "tests": 2010,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 3,
-      "tests": 45,
+      "executions": 4,
+      "tests": 60,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 5,
-      "tests": 15,
+      "executions": 6,
+      "tests": 18,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 5,
-      "tests": 50,
+      "executions": 6,
+      "tests": 60,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 5,
-      "tests": 215,
+      "executions": 6,
+      "tests": 258,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 10,
-      "tests": 10,
+      "executions": 12,
+      "tests": 12,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui-kit:test": {
       "executions": 1,
@@ -2765,28 +2778,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "ui:test": {
-      "executions": 24,
-      "tests": 47648,
+      "executions": 30,
+      "tests": 59572,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 8,
-      "tests": 488,
+      "executions": 10,
+      "tests": 610,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "ui:verify-browser": {
-      "executions": 4,
-      "tests": 528,
+      "executions": 5,
+      "tests": 660,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T11:41:13Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "units:test": {
       "executions": 1,
@@ -2805,12 +2818,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "viewer:test": {
-      "executions": 2,
-      "tests": 5432,
+      "executions": 3,
+      "tests": 8147,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "vite:test": {
       "executions": 1,
@@ -2829,28 +2842,28 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "warehouse:test": {
-      "executions": 2,
-      "tests": 20,
+      "executions": 3,
+      "tests": 30,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "workbench-panes:test": {
-      "executions": 2,
-      "tests": 716,
+      "executions": 3,
+      "tests": 1074,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "workbench:test": {
-      "executions": 2,
-      "tests": 120,
+      "executions": 3,
+      "tests": 180,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     },
     "workspace-plugin:test": {
       "executions": 1,
@@ -2885,12 +2898,12 @@
       "lastSeen": "2026-11-25T06:23:35Z"
     },
     "zoo:test": {
-      "executions": 2,
-      "tests": 2779,
+      "executions": 3,
+      "tests": 4168,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-25T08:32:01Z"
+      "lastSeen": "2026-11-25T12:15:10Z"
     }
   },
   "identities": {}

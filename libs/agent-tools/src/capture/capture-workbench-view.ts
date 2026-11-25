@@ -8,7 +8,8 @@
 
 import type { CaptureWorkbenchView } from '@taucad/chat/rpc';
 
-import { canonicalCaptureViews, createIsometricCaptureCamera } from '#capture/capture-views.js';
+import { canonicalCaptureViews } from '#capture/capture-views.js';
+import { createIsometricCaptureCamera } from '#capture/viewer-capture-options.js';
 
 type Vector = readonly [number, number, number];
 

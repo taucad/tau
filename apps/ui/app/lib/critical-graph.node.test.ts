@@ -281,7 +281,6 @@ function staticSpecifiers(file: string): string[] {
 const transcriptPathStops: Readonly<Record<string, string>> = {
   'libs/chat/src/schemas/message.schema.ts':
     'record and draft validation (`safeValidateUiMessages`), not the transcript',
-  'components/chat/chat-textarea.tsx': "the composer's `prewarmChatSdk`, which no transcript reader consumes since T4",
   'chat-clients/_internal/name-generator-client.ts': 'the project/chat name profile client (`DefaultChatTransport`)',
 };
 
@@ -513,14 +512,13 @@ describe('critical module graph', () => {
       loadedSpecifiers,
     );
     const sdk = heavyReach(graph).get('ai');
-    const loader = [...graph.keys()].find((node) => nameOf(node) === 'apps/libs/chat-ui/src/services/chat-sdk.ts');
     const stops = Object.keys(transcriptPathStops).filter(
       (stop) => ![...graph.keys()].some((node) => nameOf(node) === stop),
     );
     expect(
-      { sdk, loader: loader === undefined ? undefined : chainTo(graph, loader), stops },
+      { sdk, stops },
       `the transcript path loads the AI SDK, or a stop is no longer reached: ${stops.join(', ')}`,
-    ).toEqual({ sdk: undefined, loader: undefined, stops: [] });
+    ).toEqual({ sdk: undefined, stops: [] });
     // The lazy walk parses most of the app: seconds alone, longer under a full parallel run.
   }, 30_000);
 

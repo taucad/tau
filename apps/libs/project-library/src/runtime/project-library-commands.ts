@@ -699,19 +699,26 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   };
 
   /**
-   * Delete a project and its directory for good, through a journaled operation.
+   * Delete one exact directory of a project for good, through a journaled operation: the copy the person chose by its
+   * locator, or else the one the project's route binds. Every other directory that carries the id is untouched, and
+   * while one does, so is the device state keyed by the id; the last copy's delete removes that state too.
    *
    * @param projectId - The project.
+   * @param locator - The copy to delete. While another directory carries the id, the project need not be in the Trash.
    */
-  public readonly permanentlyDeleteProject = async (projectId: string): Promise<void> => {
+  public readonly permanentlyDeleteProject = async (projectId: string, locator?: ProjectLocator): Promise<void> => {
     await this.#host.whenDiscoveryReady();
     const worker = await this.#host.readiedWorker();
     /* Rule 4: a row this tab replays for the project settles first, so the locator is read after it. */
     const mutation = await this.#host.beginMutation(projectId, { gated: true });
     let operation: PendingProjectOperation | undefined;
+    let survives = false;
     try {
-      const storage = await this.#discoverPermanentDeleteStorage(projectId);
-      const operationId = await worker.beginPermanentDeleteProject(projectId, storage);
+      const target = await this.#discoverPermanentDeleteStorage(projectId, locator);
+      survives = target.survives;
+      const operationId = await (survives
+        ? worker.beginPermanentDeleteProject(projectId, target.storage, { copy: true })
+        : worker.beginPermanentDeleteProject(projectId, target.storage));
       const pendingOperations = await worker.getPendingProjectOperations();
       operation = pendingOperations.find((candidate) => candidate.operationId === operationId);
       if (!operation) {
@@ -725,7 +732,12 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     await mutation.apply(operation, worker);
     this.#host.noteLibraryChanged();
     void this.#host.invalidateProjectListing();
-    this.#host.forgetProject(projectId);
+    if (survives) {
+      // Another copy keeps the project: its queries are read again, from the copy the route binds now.
+      this.#host.invalidateProject(projectId);
+    } else {
+      this.#host.forgetProject(projectId);
+    }
   };
 
   /**
@@ -897,23 +909,47 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     return urls.filter((url) => url !== undefined);
   }
 
-  async #discoverPermanentDeleteStorage(projectId: string): Promise<PendingProjectStorage> {
+  /**
+   * Find the one directory a permanent delete removes, in a pass whose roots are all observed: the copy at `locator`,
+   * or with none the copy the route binds, or the only copy. The directory must still carry the project id; the
+   * authority checks that once more under the project and physical locks before it deletes. `survives` says another
+   * directory carried the id too.
+   */
+  async #discoverPermanentDeleteStorage(
+    projectId: string,
+    locator: ProjectLocator | undefined,
+  ): Promise<Readonly<{ storage: PendingProjectStorage; survives: boolean }>> {
     const configured = await getProjectFileSystemConfig(projectId);
-    if (configured === undefined || configured.backend === 'memory') {
+    if (locator === undefined && (configured === undefined || configured.backend === 'memory')) {
       throw new Error(`Project locator unavailable: ${projectId}`);
     }
     const fileManager = await this.#host.facade();
     const discovery = await fileManager.client.listProjectManifests();
-    const configuredRoot = persistentStorageRootKey(configured);
-    const configuredRootStatus = discovery.roots.find((root) => persistentStorageRootKey(root.root) === configuredRoot);
-    if (configuredRootStatus?.status !== 'complete' || discovery.roots.some((root) => root.status === 'inaccessible')) {
+    const targetRoot =
+      locator?.storageRootKey ??
+      (configured === undefined || configured.backend === 'memory' ? undefined : persistentStorageRootKey(configured));
+    const targetRootStatus = discovery.roots.find((root) => persistentStorageRootKey(root.root) === targetRoot);
+    if (targetRootStatus?.status !== 'complete' || discovery.roots.some((root) => root.status === 'inaccessible')) {
       throw new Error(`Project storage is not completely observable: ${projectId}`);
     }
     const occurrences = projectOccurrences(discovery, projectId);
-    if (occurrences.length !== 1 || occurrences[0]?.status !== 'valid') {
-      throw new Error(`Project must have exactly one current occurrence: ${projectId}`);
+    const target =
+      locator === undefined
+        ? (occurrences.find((occurrence) => routeBindsLocator(configured, occurrence.locator)) ??
+          (occurrences.length === 1 ? occurrences[0] : undefined))
+        : occurrences.find(
+            (occurrence) =>
+              occurrence.locator.storageRootKey === locator.storageRootKey &&
+              occurrence.locator.relativeDirectory === locator.relativeDirectory,
+          );
+    if (target === undefined) {
+      throw new Error(
+        locator === undefined
+          ? `Choose which copy of the project to delete: ${projectId}`
+          : `This folder no longer holds the project: ${projectId}`,
+      );
     }
-    return locatorToPendingStorage(occurrences[0].locator);
+    return { storage: locatorToPendingStorage(target.locator), survives: occurrences.length > 1 };
   }
 
   /**

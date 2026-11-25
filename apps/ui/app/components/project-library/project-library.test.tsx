@@ -15,6 +15,11 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
+import {
+  projectLocationDescriptor,
+  projectLocationFullLabel,
+} from '@taucad/files-ui/utils/project-creation-location.utils';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import type {
   ProjectDiscoveryConflict,
   WorkspaceBindingRepairGroup,
@@ -72,6 +77,7 @@ const createUseProjectsResult = () => ({
   adoptProject: vi.fn(async () => undefined),
   repairProject: vi.fn(async () => undefined),
   chooseProjectDirectory: vi.fn(async () => undefined),
+  deleteProjectCopy: vi.fn(async () => undefined),
 });
 let mockUseProjectsResult = createUseProjectsResult();
 /** Projects in this device's Trash: answered only to a listing whose scope holds them. */
@@ -1102,6 +1108,67 @@ describe('ProjectLibrary', () => {
     await vi.waitFor(() => {
       expect(mockUseProjectsResult.chooseProjectDirectory).toHaveBeenCalledExactlyOnceWith(locator, manifest.id);
     });
+  });
+
+  it('names both folders of a copied project with their times, and deletes only the chosen copy once confirmed', async () => {
+    const copyLocator = {
+      backend: 'webaccess',
+      storageRootKey: 'webaccess:wsp_alpha',
+      relativeDirectory: 'relief-copy',
+      workspaceId: 'wsp_alpha',
+    } as const;
+    const manifest = createProjectFixture({
+      id: 'proj_ccccccccccccccccccccc',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.cs' } },
+    });
+    const copyChangedAt = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    const boundChangedAt = Date.now() - 5 * 60 * 1000;
+    const bound: ProjectListItem = { ...makeProject(manifest.id, 'Relief', 'relief'), modifiedAt: boundChangedAt };
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: [bound],
+      conflicts: [
+        {
+          status: 'duplicate-id',
+          projectId: manifest.id,
+          manifest: projectToManifest(manifest),
+          locator: copyLocator,
+          modifiedAt: copyChangedAt,
+          workspaceName: 'Alpha',
+        },
+      ],
+    };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const card = within(screen.getByRole('group', { name: 'Project conflicts' }));
+    const home = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
+    const alpha = projectLocationFullLabel(projectLocationDescriptor({ kind: 'workspace', workspaceName: 'Alpha' }));
+    expect(card.getByText(`${alpha} · relief-copy · changed ${formatRelativeTime(copyChangedAt)}`)).toBeInTheDocument();
+    expect(card.getByText(`${home} · relief · changed ${formatRelativeTime(boundChangedAt)}`)).toBeInTheDocument();
+    expect(card.getByText('This copy')).toBeInTheDocument();
+    expect(card.getByText('Tau opens')).toBeInTheDocument();
+    expect(card.getByRole('button', { name: 'Use this folder' })).toBeInTheDocument();
+
+    await userEvent.click(card.getByRole('button', { name: 'Delete this copy' }));
+    const dialog = within(await screen.findByRole('alertdialog'));
+    expect(dialog.getByText(/relief-copy/u)).toBeInTheDocument();
+    expect(mockUseProjectsResult.deleteProjectCopy).not.toHaveBeenCalled();
+    await userEvent.click(dialog.getByRole('button', { name: 'Delete this copy' }));
+
+    await vi.waitFor(() => {
+      expect(mockUseProjectsResult.deleteProjectCopy).toHaveBeenCalledExactlyOnceWith(manifest.id, copyLocator);
+    });
+    expect(mockUseProjectsResult.permanentlyDeleteProject).not.toHaveBeenCalled();
   });
 
   it('names a degraded manifest’s exact defect and repairs it on request', async () => {

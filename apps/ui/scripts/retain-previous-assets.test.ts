@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server, ServerResponse } from 'node:http';
@@ -57,6 +57,26 @@ const createClient = async (files: Readonly<Record<string, string>>): Promise<st
   return directory;
 };
 
+/** Resolves once `file` exists, so a test can hold an answer until a download has been written. */
+const untilFile = async (file: string): Promise<void> => {
+  try {
+    await access(file);
+  } catch {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2);
+    });
+    await untilFile(file);
+  }
+};
+
+/** Every message in a failure, an `AggregateError`'s included. */
+const messagesOf = (error: unknown): string[] =>
+  error instanceof AggregateError
+    ? error.errors.flatMap(messagesOf)
+    : error instanceof Error
+      ? [error.message]
+      : [String(error)];
+
 /** The live deploy: serves `files` by path and its index, and counts requests. */
 const startLiveDeploy = async (
   files: Readonly<Record<string, string>>,
@@ -67,11 +87,18 @@ const startLiveDeploy = async (
   ) =>
     | 'hang'
     | 'unavailable'
-    | { readonly status: number; readonly retryAfter?: string; readonly after?: number }
-    | { readonly after: number }
+    | {
+        readonly status: number;
+        readonly retryAfter?: string;
+        readonly after?: Promise<unknown>;
+        readonly onAnswered?: () => void;
+      }
+    | { readonly after: Promise<unknown> }
     | undefined = () => undefined,
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
+  // The answers held back by `after`, tracked rather than fired and forgotten.
+  const held = new Set<Promise<void>>();
   const server: Server = createServer((request, response) => {
     const path = decodeURIComponent((request.url ?? '/').slice(1));
     requests.push(path);
@@ -83,18 +110,24 @@ const startLiveDeploy = async (
       response.writeHead(503).end();
       return;
     }
-    // `after` holds the answer back, so a test can order the answers it races.
+    // `after` holds the answer until an event the test names, and `onAnswered` reports one, so a test can order
+    // the answers it races.
     const answer = (): void => {
       if (typeof fault === 'object' && 'status' in fault) {
         response
           .writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter })
-          .end();
+          .end(fault.onAnswered);
         return;
       }
       serve(path, response);
     };
     if (typeof fault === 'object' && fault.after !== undefined) {
-      setTimeout(answer, fault.after);
+      const gate = fault.after;
+      const answerAfterGate = async (): Promise<void> => {
+        await gate;
+        answer();
+      };
+      held.add(answerAfterGate());
       return;
     }
     answer();
@@ -545,40 +578,49 @@ describe('retainPreviousAssets', () => {
     });
 
     it('should still fail the deploy when a later download fails its integrity after a fast 403', async () => {
+      const forbidden = Promise.withResolvers<void>();
       const live = await startLiveDeploy(
         { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'tampered' },
         indexOf([
           { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
           { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
         ]),
-        // The 403 answers at once; the tampered bytes arrive after it, while the fallback would already be chosen.
+        // The tampered bytes are held until the 403 has been sent, so the fallback would already be chosen.
         (path) =>
           path === 'assets/route-OLD1.js'
-            ? { status: 403 }
+            ? { status: 403, onAnswered: forbidden.resolve }
             : path === 'assets/route-OLD2.js'
-              ? { after: 100 }
+              ? { after: forbidden.promise }
               : undefined,
       );
       const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
       const warnings: string[] = [];
 
-      await expect(
-        retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings)),
-      ).rejects.toThrow();
+      let failure: unknown;
+      try {
+        await retainOrShipWithout({ clientDirectory: client, origin: live.origin, wait: noWait }, shipping(warnings));
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(messagesOf(failure)).toContainEqual(expect.stringMatching(/route-OLD2\.js does not match its integrity/u));
       expect(warnings).toStrictEqual([]);
     });
 
     it('should drop what the failed pass retained before shipping without retention', async () => {
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
       const live = await startLiveDeploy(
         { 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
         indexOf([
           { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
           { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 0 },
         ]),
-        // OLD1 is written before OLD2's 403 arrives, so the failed pass has retained a file when the fallback starts.
-        (path) => (path === 'assets/route-OLD2.js' ? { status: 403, after: 100 } : undefined),
+        // OLD2's 403 is held until OLD1 is on disk, so the failed pass has retained a file when the fallback starts.
+        (path) =>
+          path === 'assets/route-OLD2.js'
+            ? { status: 403, after: untilFile(join(client, 'assets/route-OLD1.js')) }
+            : undefined,
       );
-      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
       const warnings: string[] = [];
 
       const result = await retainOrShipWithout(

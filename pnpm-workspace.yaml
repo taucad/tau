@@ -519,6 +519,7 @@ patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.75': tools/pnpm/patches/@anthropic-ai__sandbox-runtime@0.0.75.patch
   react-router@8.5.1: tools/pnpm/patches/react-router@8.5.1.patch
   '@react-router/fs-routes@8.5.1': tools/pnpm/patches/@react-router__fs-routes@8.5.1.patch
+  '@react-router/dev@8.5.1': tools/pnpm/patches/@react-router__dev@8.5.1.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2

@@ -43,7 +43,7 @@ type Literal = { text: string; pattern: RegExp | undefined; title: boolean };
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`);
 
 const unescapeLiteral = (body: string): string =>
-  body.replaceAll(/\\(u\{[\dA-Fa-f]+\}|u[\dA-Fa-f]{4}|x[\dA-Fa-f]{2}|.)/gs, (_match, escape: string) => {
+  body.replaceAll(/\\(u{[\dA-Fa-f]+}|u[\dA-Fa-f]{4}|x[\dA-Fa-f]{2}|.)/gs, (_match, escape: string) => {
     if (escape.startsWith('u{')) {
       return String.fromCodePoint(Number.parseInt(escape.slice(2, -1), 16));
     }
@@ -54,7 +54,7 @@ const unescapeLiteral = (body: string): string =>
   });
 
 /** Placeholders Vitest fills in a test name: template expressions, `each` formats and `$name` fields. */
-const placeholderPattern = /\$\{[^}]*\}|%[#$%cdfijos]|\$[A-Za-z_][\w.]*/g;
+const placeholderPattern = /\${[^}]*}|%[#$%cdfijos]|\$[A-Z_a-z][\w.]*/g;
 
 /**
  * A test is titled by the first argument of `it(…)`, `test.concurrent(…)`, `it.each([…])(…)` or `it.runIf(…)(…)`; the
@@ -114,7 +114,7 @@ export const testLiterals = (source: string): Literal[] => {
     } else if (character === "'" || character === '"' || character === '`') {
       const end = skipString(source, index);
       const text = unescapeLiteral(source.slice(index + 1, end - 1));
-      const placeholders = character === '`' || /%[#$cdfijos]|\$[A-Za-z_]/.test(text);
+      const placeholders = character === '`' || /%[#$cdfijos]|\$[A-Z_a-z]/.test(text);
       const parts = text.split(placeholderPattern);
       literals.push({
         text,
@@ -144,7 +144,7 @@ const literalMatches = (literal: Literal, segment: string): boolean =>
  */
 export const resolvesTest = (literals: readonly Literal[], name: string): boolean => {
   const segments = name.split(testSeparator);
-  // reachable[i]: the first i segments split into literal parts.
+  // Entry i is true when the first i segments split into literal parts.
   const reachable = Array.from({ length: segments.length + 1 }, (_, index) => index === 0);
   for (let end = 1; end <= segments.length; end += 1) {
     for (let start = 0; start < end && !reachable[end]; start += 1) {

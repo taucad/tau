@@ -1,3 +1,4 @@
+/* oxlint-disable no-template-curly-in-string -- The fixtures are test sources whose template literals are text here. */
 import { describe, expect, it } from 'vitest';
 
 import type { QuarantineSource } from '#validate-quarantine.js';

@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest';
+
 // One test that fails its first attempt and passes its retry: a flake event.
 let attempts = 0;
 

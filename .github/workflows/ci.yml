@@ -1663,6 +1663,41 @@ jobs:
           if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
           if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
 
+      # Testing policy § 16.2, RT-4 (CI flake quarantine blueprint FQ-4): more than five retried passes in one run
+      # fail it. Each task's `@taucad/vitest-ci` reporter caps its own (three) and fails a retried pass in a file
+      # the change touches; only this gate sees the whole run, so it counts the `flaky` rows of every lane's
+      # `test-outcomes-*` artifact. Rows a cache replay restored carry the id of the run that executed them and
+      # were counted there, so only this run's rows count.
+      - name: Download test outcomes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-outcomes-*
+          path: ${{ runner.temp }}/test-outcomes
+      - name: Check the run's retried passes
+        env:
+          RUN_BUDGET: 5
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/test-outcomes"
+          retried="$RUNNER_TEMP/retried-passes.json"
+          if [ -d "$dir" ]; then
+            find "$dir" -name '*.outcomes.jsonl' -print0 | xargs -0 -r cat \
+              | jq -s --argjson run "$GITHUB_RUN_ID" \
+                '[.[] | select(.kind == "test" and .flaky == true and .run == $run) | .id] | sort' > "$retried"
+          else
+            echo '[]' > "$retried"
+          fi
+          count=$(jq length "$retried")
+          {
+            echo "### Retried passes in this run: $count (budget $RUN_BUDGET)"
+            jq -r '.[] | "- " + .' "$retried"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -gt "$RUN_BUDGET" ]; then
+            echo "::error title=Retry policy::$count retried passes in this run, over the budget of $RUN_BUDGET (testing policy § 16.2, RT-4): a broken environment or change"
+            exit 1
+          fi
+          echo "$count retried passes in this run, within the budget of $RUN_BUDGET."
+
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed
   # run concludes. `Validate workspace` failed about 3 min into a run while the gate waited 25–35 min for

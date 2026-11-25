@@ -5,7 +5,7 @@
  * check-run annotation), adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
  * cache replay restores the original run's rows, and ends with the {@link RetryPolicyReporter}, which reads that file
  * at the end of the run (testing policy § 16.2). A change to how every config reports is one change here.
- * `testRetry` (re-exported here) is the `retry` every config sets beside it.
+ * {@link testRetry} is the `retry` every config sets beside it.
  *
  * The outcome recorder is imported through the package's own subpath, not a `#` alias, because the configs that
  * import this module are type-checked under other projects' compiler options, some with a `#*` path alias. The list
@@ -16,7 +16,8 @@ import process from 'node:process';
 
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import type { OutcomeEnvironment } from '@taucad/vitest-ci/outcome-reporter';
-import { RetryPolicyReporter } from '@taucad/vitest-ci/retry-policy';
+import { onCi, RetryPolicyReporter, retryBudget, underVerification } from '@taucad/vitest-ci/retry-policy';
+import type { RetryEnvironment } from '@taucad/vitest-ci/retry-policy';
 import type { BuiltinReporters } from 'vitest/node';
 
 /**
@@ -49,4 +50,20 @@ export const testReporters = (
   ];
 };
 
-export { testRetry } from '@taucad/vitest-ci/retry-policy';
+/**
+ * The `retry` of a Tau Vitest config (RT-1): one in-process retry in CI, none locally or under the flake harness.
+ *
+ * @param env - The environment to read. Defaults to `process.env`.
+ * @returns `1` on CI outside the flake harness, else `0`.
+ *
+ * @example <caption>Every config</caption>
+ * ```typescript
+ * import { testReporters, testRetry } from '@taucad/vitest-ci';
+ * import { defineConfig } from 'vitest/config';
+ *
+ * export default defineConfig({ test: { reporters: testReporters('verbose'), retry: testRetry() } });
+ * ```
+ * @public
+ */
+export const testRetry = (env: RetryEnvironment = process.env): number =>
+  onCi(env) && !underVerification(env) ? retryBudget.retries : 0;

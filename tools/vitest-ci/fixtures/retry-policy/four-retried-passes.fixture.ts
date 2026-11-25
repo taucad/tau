@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest';
+
 // Four tests that each fail their first attempt and pass their retry: over a task's budget of three.
 const attempts = new Map<string, number>();
 

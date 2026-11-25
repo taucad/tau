@@ -3,8 +3,8 @@ import process from 'node:process';
 import { describe, expect, it } from 'vitest';
 
 import { OutcomeReporter } from '#outcome-reporter.js';
-import { RetryPolicyReporter, testRetry as policyRetry } from '#retry-policy.js';
-import { testReporters, testRetry } from '#test-reporters.js';
+import { RetryPolicyReporter } from '#retry-policy.js';
+import { testReporters } from '#test-reporters.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 
@@ -27,10 +27,6 @@ describe('testReporters', () => {
     expect(reporters[0]).toBe('default');
     expect(reporters.at(-1)).toBeInstanceOf(RetryPolicyReporter);
     expect(reporters).toHaveLength(process.env['GITHUB_ACTIONS'] === 'true' ? 4 : 3);
-  });
-
-  it('re-exports the retry every config sets', () => {
-    expect(testRetry).toBe(policyRetry);
   });
 });
 

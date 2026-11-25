@@ -1,10 +1,11 @@
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['src/rolldown-capability.browser.test.ts'],
     browser: {
       enabled: true,

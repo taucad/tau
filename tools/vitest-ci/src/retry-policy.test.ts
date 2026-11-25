@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,9 +14,9 @@ import {
   readChangedFiles,
   retryBudget,
   RetryPolicyReporter,
-  testRetry,
   underVerification,
 } from '#retry-policy.js';
+import { testRetry } from '#test-reporters.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 
@@ -24,7 +24,11 @@ const packageRoot = dirname(import.meta.dirname);
 const fixtures = join(packageRoot, 'fixtures', 'retry-policy');
 
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
 
 /** A temporary repository with a base commit; returns its directory. */
 const repository = (): string => {
@@ -42,7 +46,11 @@ const commitAll = (directory: string, message: string): string => {
   return git(directory, 'rev-parse', 'HEAD');
 };
 
-const pass = (file: string, name = 'suite > retried'): RetriedPass => ({ file, name, retryCount: 1 });
+const pass = (file: string, name = 'suite > retried'): RetriedPass => ({
+  file,
+  name,
+  retryCount: 1,
+});
 
 describe('testRetry', () => {
   it('gives one retry on CI and none locally', () => {
@@ -80,7 +88,9 @@ describe('readChangedFiles', () => {
 
   it('is none without NX_BASE', () => {
     expect(readChangedFiles({}, directory)).toEqual({ kind: 'none' });
-    expect(readChangedFiles({ NX_BASE: '' }, directory)).toEqual({ kind: 'none' });
+    expect(readChangedFiles({ NX_BASE: '' }, directory)).toEqual({
+      kind: 'none',
+    });
   });
 
   it('lists the files changed from the merge base, a rename as its new path, as absolute paths', () => {
@@ -101,13 +111,17 @@ describe('readChangedFiles', () => {
     );
     // NX_HEAD defaults to HEAD.
     expect(readChangedFiles({ NX_BASE: base }, directory)).toEqual(changed);
+    // On GitHub, a pull request and a merge-queue entry have a change; a push or a schedule does not.
+    expect(readChangedFiles({ NX_BASE: base, GITHUB_EVENT_NAME: 'merge_group' }, directory)).toEqual(changed);
+    expect(readChangedFiles({ NX_BASE: base, GITHUB_EVENT_NAME: 'pull_request' }, directory)).toEqual(changed);
+    expect(readChangedFiles({ NX_BASE: base, GITHUB_EVENT_NAME: 'push' }, directory)).toEqual({ kind: 'none' });
+    expect(readChangedFiles({ NX_BASE: base, GITHUB_EVENT_NAME: 'schedule' }, directory)).toEqual({ kind: 'none' });
   });
 
   it('is unknown when git cannot answer, with the first line of the error', () => {
-    expect(readChangedFiles({ NX_BASE: 'no-such-revision' }, directory)).toMatchObject({
-      kind: 'unknown',
-      reason: expect.stringContaining('Command failed: git merge-base'),
-    });
+    const missing = readChangedFiles({ NX_BASE: 'no-such-revision' }, directory);
+    expect(missing.kind).toBe('unknown');
+    expect(missing.kind === 'unknown' ? missing.reason : '').toMatch(/^Command failed: git merge-base [^\n]+$/u);
     const fails = (thrown: unknown) => () => {
       throw thrown;
     };
@@ -135,12 +149,20 @@ describe('judgeRetries', () => {
     });
     expect(verdict.passes).toEqual([{ ...pass('/w/a.test.ts'), credit: true, reason: '' }]);
     expect(verdict.failures).toEqual([]);
-    expect(judgeRetries({ passes: [pass('/w/a.test.ts')], taskCount: 1, overRetried: [], changed: none, verifying: false }).failures).toEqual([]);
+    expect(
+      judgeRetries({
+        passes: [pass('/w/a.test.ts')],
+        taskCount: 1,
+        overRetried: [],
+        changed: none,
+        verifying: false,
+      }).failures,
+    ).toEqual([]);
   });
 
   it('gives no credit to a retried pass in a changed file (RT-3), with unknown changes, or under verification (RT-5)', () => {
     const changed = judgeRetries({
-      passes: [pass('C:\\w\\a.test.ts'), pass('/w/b.test.ts')],
+      passes: [pass(String.raw`C:\w\a.test.ts`), pass('/w/b.test.ts')],
       taskCount: 2,
       overRetried: [],
       changed: { kind: 'known', files: new Set(['C:/w/a.test.ts']) },
@@ -175,7 +197,13 @@ describe('judgeRetries', () => {
   });
 
   it('fails a task over its budget (RT-4) and a test retried more than once (RT-1)', () => {
-    const atBudget = judgeRetries({ passes: [], taskCount: 3, overRetried: [], changed: none, verifying: false });
+    const atBudget = judgeRetries({
+      passes: [],
+      taskCount: 3,
+      overRetried: [],
+      changed: none,
+      verifying: false,
+    });
     expect(atBudget.failures).toEqual([]);
     const over = judgeRetries({
       passes: [],
@@ -248,13 +276,38 @@ describe('RetryPolicyReporter', () => {
   it('records a credited retried pass as a warning annotation and a summary row, and leaves the task green', () => {
     const summary = join(workspace, 'summary.md');
     const { reporter, lines, fail, changedFiles } = reporterWith(
-      { GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: workspace, GITHUB_STEP_SUMMARY: summary, NX_BASE: 'base' },
-      { kind: 'known', files: new Set([join(workspace, 'src', 'other.test.ts')]) },
+      {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_WORKSPACE: workspace,
+        GITHUB_STEP_SUMMARY: summary,
+        NX_BASE: 'base',
+      },
+      {
+        kind: 'known',
+        files: new Set([join(workspace, 'src', 'other.test.ts')]),
+      },
     );
-    reporter.onTestCaseResult(fakeCase({ moduleId: join(workspace, 'src', 'a.test.ts'), fullName: 'plain' }));
-    reporter.onTestCaseResult(fakeCase({ moduleId: 'virtual', fullName: 'no diagnostic', noDiagnostic: true }));
     reporter.onTestCaseResult(
-      fakeCase({ moduleId: 'virtual', fullName: 'failed', state: 'failed', retryCount: 1, flaky: false }),
+      fakeCase({
+        moduleId: join(workspace, 'src', 'a.test.ts'),
+        fullName: 'plain',
+      }),
+    );
+    reporter.onTestCaseResult(
+      fakeCase({
+        moduleId: 'virtual',
+        fullName: 'no diagnostic',
+        noDiagnostic: true,
+      }),
+    );
+    reporter.onTestCaseResult(
+      fakeCase({
+        moduleId: 'virtual',
+        fullName: 'failed',
+        state: 'failed',
+        retryCount: 1,
+        flaky: false,
+      }),
     );
     reporter.onTestCaseResult(retried('suite > a, b: 100% | done'));
     reporter.onTestRunEnd();
@@ -272,7 +325,7 @@ describe('RetryPolicyReporter', () => {
         '',
         '| File | Test | Verdict |',
         '| --- | --- | --- |',
-        '| src/a.test.ts | suite > a, b: 100% \\| done | flake event, credited |',
+        String.raw`| src/a.test.ts | suite > a, b: 100% \| done | flake event, credited |`,
         '',
         '',
       ].join('\n'),
@@ -283,7 +336,11 @@ describe('RetryPolicyReporter', () => {
     const file = join(workspace, 'src', 'a.test.ts');
     const summary = join(workspace, 'summary.md');
     const { reporter, lines, fail } = reporterWith(
-      { GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: workspace, GITHUB_STEP_SUMMARY: summary },
+      {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_WORKSPACE: workspace,
+        GITHUB_STEP_SUMMARY: summary,
+      },
       { kind: 'known', files: new Set([file]) },
     );
     reporter.onTestCaseResult(retried('changed'));
@@ -315,7 +372,10 @@ describe('RetryPolicyReporter', () => {
       { kind: 'module', flaky: true },
       { kind: 'test', flaky: true },
     ];
-    writeFileSync(outcomeFile, `${rows.map((row) => JSON.stringify(row)).join('\n')}\nnot json\n\n{"kind":"test","flaky":true}\n`);
+    writeFileSync(
+      outcomeFile,
+      `${rows.map((row) => JSON.stringify(row)).join('\n')}\nnot json\n\n{"kind":"test","flaky":true}\n`,
+    );
     const { reporter, lines, fail } = reporterWith({}, { kind: 'none' }, outcomeFile);
     reporter.onTestCaseResult(retried('one'));
     reporter.onTestRunEnd();
@@ -343,7 +403,12 @@ describe('RetryPolicyReporter', () => {
       { kind: 'none' },
     );
     reporter.onTestCaseResult(
-      fakeCase({ moduleId: join(workspace, 'b.test.ts'), fullName: 'thrice', state: 'failed', retryCount: 2 }),
+      fakeCase({
+        moduleId: join(workspace, 'b.test.ts'),
+        fullName: 'thrice',
+        state: 'failed',
+        retryCount: 2,
+      }),
     );
     reporter.onTestRunEnd();
     expect(lines).toEqual([
@@ -352,17 +417,36 @@ describe('RetryPolicyReporter', () => {
     ]);
     expect(changedFiles).not.toHaveBeenCalled();
     expect(fail).toHaveBeenCalledOnce();
-    expect(readFileSync(summary, 'utf8')).toContain('### Retried passes (0 in this task, budget 3)\n\n- **Task failed:**');
+    expect(readFileSync(summary, 'utf8')).toContain(
+      '### Retried passes (0 in this task, budget 3)\n\n- **Task failed:**',
+    );
 
     const github = reporterWith({ GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: workspace }, { kind: 'none' });
-    github.reporter.onTestCaseResult(fakeCase({ moduleId: join(workspace, 'b.test.ts'), fullName: 'x', retryCount: 2 }));
+    github.reporter.onTestCaseResult(
+      fakeCase({
+        moduleId: join(workspace, 'b.test.ts'),
+        fullName: 'x',
+        retryCount: 2,
+      }),
+    );
     github.reporter.onTestRunEnd();
     expect(github.lines[0]).toBe('::error file=b.test.ts,title=Retry over policy::x ran 3 attempts; CI allows 2');
 
     const local = reporterWith({}, { kind: 'none' });
-    local.reporter.onTestCaseResult(fakeCase({ moduleId: join(workspace, 'b.test.ts'), fullName: 'x', retryCount: 2 }));
+    local.reporter.onTestCaseResult(
+      fakeCase({
+        moduleId: join(workspace, 'b.test.ts'),
+        fullName: 'x',
+        retryCount: 2,
+      }),
+    );
     local.reporter.onTestRunEnd();
-    expect(local.reporter.verdict).toEqual({ passes: [], taskCount: 0, overRetried: [], failures: [] });
+    expect(local.reporter.verdict).toEqual({
+      passes: [],
+      taskCount: 0,
+      overRetried: [],
+      failures: [],
+    });
     expect(local.fail).not.toHaveBeenCalled();
   });
 
@@ -425,6 +509,7 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
       GITHUB_ACTIONS: 'true',
       GITHUB_WORKSPACE: directory,
       GITHUB_STEP_SUMMARY: summary,
+      GITHUB_EVENT_NAME: 'merge_group',
       NX_BASE: base,
       NX_HEAD: head,
       NX_WORKSPACE_ROOT: directory,
@@ -444,12 +529,24 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
     } catch {
       // No summary: the task had no retried pass.
     }
-    return { status: child.status, output: `${child.stdout}\n${child.stderr}`, summary: summaryText };
+    return {
+      status: child.status,
+      output: `${child.stdout}\n${child.stderr}`,
+      summary: summaryText,
+    };
   };
 
+  /** Copies a fixture in; the repository's untracked `node_modules/vitest` links to this package's Vitest. */
   const place = (fixture: string): void => {
     copyFileSync(join(fixtures, fixture), join(directory, fixture));
   };
+
+  beforeEach(() => {
+    const require = createRequire(import.meta.url);
+    mkdirSync(join(directory, 'node_modules'));
+    symlinkSync(dirname(require.resolve('vitest/package.json')), join(directory, 'node_modules', 'vitest'), 'dir');
+    writeFileSync(join(directory, '.gitignore'), 'node_modules/\nout/\n');
+  });
 
   it('a retried pass exits 0 with a warning', () => {
     place('one-retried-pass.fixture.ts');
@@ -462,7 +559,9 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
     expect(task.output).toContain(
       '::warning file=one-retried-pass.fixture.ts,title=Retried pass (flake event)::one retried pass > passes on the retry passed on its retry',
     );
-    expect(task.summary).toContain('| one-retried-pass.fixture.ts | one retried pass > passes on the retry | flake event, credited |');
+    expect(task.summary).toContain(
+      '| one-retried-pass.fixture.ts | one retried pass > passes on the retry | flake event, credited |',
+    );
     const rows = readFileSync(join(directory, 'out', 'test-results', 'fixture', 'test.outcomes.jsonl'), 'utf8');
     expect(rows).toContain('"flaky":true');
   }, 60_000);

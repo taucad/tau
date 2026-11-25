@@ -1,7 +1,8 @@
 /**
  * The recorded retry of testing policy § 16.2 (CI flake quarantine blueprint, D6 rules RT-1 to RT-5).
  *
- * - RT-1: {@link testRetry} is the `retry` of every Vitest config: one in-process retry in CI, none elsewhere.
+ * - RT-1: `testRetry` (`@taucad/vitest-ci`) is the `retry` of every Vitest config: one in-process retry in CI, none
+ *   elsewhere; this reporter fails a test that ran more attempts.
  * - RT-2: {@link RetryPolicyReporter} prints every retried pass as a warning annotation and a job summary row; the
  *   outcome row (`flaky: true`) is the flake event the ledger counts.
  * - RT-3: a retried pass of a test in a file the change touches (the diff from the merge base of `NX_BASE` and
@@ -57,26 +58,8 @@ export const underVerification = (env: RetryEnvironment): boolean =>
   nonEmpty(env['TAU_FLAKE_REPRO_SEED']) !== undefined || nonEmpty(env['TAU_FLAKE_REPRO_ATTEMPT']) !== undefined;
 
 /**
- * The `retry` of a Tau Vitest config (RT-1): one in-process retry in CI, none locally or under the flake harness.
- *
- * @param env - The environment to read. Defaults to `process.env`.
- * @returns `1` on CI outside the flake harness, else `0`.
- *
- * @example <caption>Every config</caption>
- * ```typescript
- * import { testReporters, testRetry } from '@taucad/vitest-ci';
- * import { defineConfig } from 'vitest/config';
- *
- * export default defineConfig({ test: { reporters: testReporters('verbose'), retry: testRetry() } });
- * ```
- * @public
- */
-export const testRetry = (env: RetryEnvironment = process.env): number =>
-  onCi(env) && !underVerification(env) ? retryBudget.retries : 0;
-
-/**
- * The files the change under test touches: `none` when there is no change to compare (no `NX_BASE`, as on a
- * nightly), `known` with absolute POSIX paths, or `unknown` when `NX_BASE` is set and git cannot answer.
+ * The files the change under test touches: `none` when there is no change to compare (no `NX_BASE`, or a push or
+ * scheduled run), `known` with absolute POSIX paths, or `unknown` when `NX_BASE` is set and git cannot answer.
  *
  * @public
  */
@@ -85,29 +68,38 @@ export type ChangedFiles =
   | { readonly kind: 'known'; readonly files: ReadonlySet<string> }
   | { readonly kind: 'unknown'; readonly reason: string };
 
-/** Runs git in `cwd` and returns its standard output. */
+/** Runs git in `cwd` and returns its standard output. @public */
 export type GitRunner = (args: readonly string[], cwd: string) => string;
 
 const runGit: GitRunner = (args, cwd) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
 const toPosix = (path: string): string => path.replaceAll('\\', '/');
 
 const absolutePosix = (path: string, base: string): string => toPosix(resolve(base, path));
 
+/** The GitHub events whose run tests one change: a pull request and a merge-queue entry. */
+const changeEvents: ReadonlySet<string> = new Set(['pull_request', 'merge_group']);
+
 /**
  * The files the change touches: the diff from the merge base of `NX_BASE` and `NX_HEAD` (default `HEAD`) to
- * `NX_HEAD`, the same comparison as `nx affected` and the burn-in plan. A rename is an added path.
+ * `NX_HEAD`, the same comparison as `nx affected` and the burn-in plan. A rename is an added path. A push or a
+ * scheduled run tests no single change, so on GitHub only a pull request or a merge-queue entry has one.
  *
  * @param env - The environment to read `NX_BASE` and `NX_HEAD` from.
  * @param cwd - A directory inside the repository.
  * @param git - The git runner; tests replace it.
- * @returns The changed files, `none` without `NX_BASE`, or `unknown` when git fails.
+ * @returns The changed files, `none` without `NX_BASE` or a change, or `unknown` when git fails.
  * @public
  */
 export const readChangedFiles = (env: RetryEnvironment, cwd: string, git: GitRunner = runGit): ChangedFiles => {
   const base = nonEmpty(env['NX_BASE']);
-  if (base === undefined) {
+  const event = nonEmpty(env['GITHUB_EVENT_NAME']);
+  if (base === undefined || (event !== undefined && !changeEvents.has(event))) {
     return { kind: 'none' };
   }
   const head = nonEmpty(env['NX_HEAD']) ?? 'HEAD';
@@ -117,11 +109,17 @@ export const readChangedFiles = (env: RetryEnvironment, cwd: string, git: GitRun
     const names = git(['diff', '--name-only', '--no-renames', '-z', mergeBase, head], cwd)
       .split('\0')
       .filter((name) => name !== '');
-    return { kind: 'known', files: new Set(names.map((name) => absolutePosix(name, top))) };
+    return {
+      kind: 'known',
+      files: new Set(names.map((name) => absolutePosix(name, top))),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const newline = message.indexOf('\n');
-    return { kind: 'unknown', reason: newline === -1 ? message : message.slice(0, newline) };
+    return {
+      kind: 'unknown',
+      reason: newline === -1 ? message : message.slice(0, newline),
+    };
   }
 };
 
@@ -133,7 +131,10 @@ export type RetriedPass = {
 };
 
 /** A retried pass and whether it earns the retry's credit; `reason` says why not, and is empty with credit. @public */
-export type JudgedPass = RetriedPass & { readonly credit: boolean; readonly reason: string };
+export type JudgedPass = RetriedPass & {
+  readonly credit: boolean;
+  readonly reason: string;
+};
 
 /** The task's retry verdict. @public */
 export type RetryVerdict = {
@@ -163,7 +164,11 @@ export const judgeRetries = (input: {
 }): RetryVerdict => {
   const passes = input.passes.map((pass): JudgedPass => {
     if (input.verifying) {
-      return { ...pass, credit: false, reason: 'the flake harness verifies a test by its unretried run (RT-5)' };
+      return {
+        ...pass,
+        credit: false,
+        reason: 'the flake harness verifies a test by its unretried run (RT-5)',
+      };
     }
     if (input.changed.kind === 'unknown') {
       return {
@@ -173,7 +178,11 @@ export const judgeRetries = (input: {
       };
     }
     if (input.changed.kind === 'known' && input.changed.files.has(toPosix(pass.file))) {
-      return { ...pass, credit: false, reason: 'its file is changed by this change (RT-3)' };
+      return {
+        ...pass,
+        credit: false,
+        reason: 'its file is changed by this change (RT-3)',
+      };
     }
     return { ...pass, credit: true, reason: '' };
   });
@@ -192,7 +201,12 @@ export const judgeRetries = (input: {
       `${input.overRetried.length} ${input.overRetried.length === 1 ? 'test was' : 'tests were'} retried more than ${retryBudget.retries} time (RT-1): no suite sets a higher retry`,
     );
   }
-  return { passes, taskCount: input.taskCount, overRetried: input.overRetried, failures };
+  return {
+    passes,
+    taskCount: input.taskCount,
+    overRetried: input.overRetried,
+    failures,
+  };
 };
 
 /** Escapes a GitHub workflow command's message. */
@@ -211,7 +225,9 @@ type TestCaseLike = {
 };
 
 /** Structural view of the Vitest instance the reporter reads in `onInit`. */
-type VitestLike = { readonly config: { readonly root: string; readonly watch?: boolean } };
+type VitestLike = {
+  readonly config: { readonly root: string; readonly watch?: boolean };
+};
 
 /** Options for {@link RetryPolicyReporter}; every field defaults from the process. @public */
 export type RetryPolicyReporterOptions = {
@@ -225,6 +241,11 @@ export type RetryPolicyReporterOptions = {
   write?: (line: string) => void;
   /** Fails the process. Defaults to setting `process.exitCode` to 1. */
   fail?: () => void;
+};
+
+/** Fails the Vitest process without ending it: Vitest exits with `process.exitCode` once its reporters finish. */
+const failProcess = (): void => {
+  process.exitCode = 1;
 };
 
 /** Retried passes recorded in an outcome file: `kind: "test"` rows with `flaky: true`. */
@@ -289,7 +310,11 @@ export class RetryPolicyReporter implements Reporter {
     if (diagnostic === undefined) {
       return;
     }
-    const pass = { file: testCase.module.moduleId, name: testCase.fullName, retryCount: diagnostic.retryCount };
+    const pass = {
+      file: testCase.module.moduleId,
+      name: testCase.fullName,
+      retryCount: diagnostic.retryCount,
+    };
     if (diagnostic.retryCount > retryBudget.retries && onCi(this.#env)) {
       this.#overRetried.push(pass);
     }
@@ -305,7 +330,12 @@ export class RetryPolicyReporter implements Reporter {
     const passes = this.#passes.splice(0);
     const overRetried = this.#overRetried.splice(0);
     if (passes.length === 0 && overRetried.length === 0) {
-      this.#verdict = { passes: [], taskCount: 0, overRetried: [], failures: [] };
+      this.#verdict = {
+        passes: [],
+        taskCount: 0,
+        overRetried: [],
+        failures: [],
+      };
       return;
     }
     const env = this.#env;
@@ -320,16 +350,12 @@ export class RetryPolicyReporter implements Reporter {
     this.#verdict = verdict;
     this.#report(verdict);
     if (verdict.failures.length > 0) {
-      (this.#options.fail ?? RetryPolicyReporter.#failProcess)();
+      (this.#options.fail ?? failProcess)();
     }
   }
 
   get #env(): RetryEnvironment {
     return this.#options.env ?? process.env;
-  }
-
-  static #failProcess(): void {
-    process.exitCode = 1;
   }
 
   #report(verdict: RetryVerdict): void {
@@ -366,7 +392,7 @@ export class RetryPolicyReporter implements Reporter {
   }
 
   #summary(verdict: RetryVerdict, display: (file: string) => string): string {
-    const cell = (text: string): string => text.replaceAll('|', '\\|').replaceAll('\n', ' ');
+    const cell = (text: string): string => text.replaceAll('|', String.raw`\|`).replaceAll('\n', ' ');
     const rows = verdict.passes.map(
       (pass) =>
         `| ${cell(display(pass.file))} | ${cell(pass.name)} | ${pass.credit ? 'flake event, credited' : cell(`no credit: ${pass.reason}`)} |`,

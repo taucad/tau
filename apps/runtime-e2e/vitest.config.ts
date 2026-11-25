@@ -1,4 +1,4 @@
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 /*
@@ -24,6 +24,7 @@ export default defineConfig({
     },
     maxWorkers: 4,
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     projects: [
       {
         extends: true,

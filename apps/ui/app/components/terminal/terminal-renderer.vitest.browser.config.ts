@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const testEntries = [
@@ -25,6 +25,7 @@ export default defineConfig({
   optimizeDeps: { entries: testEntries, include: ['@aurigax-ai/ghostty-web'] },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: testEntries,
     fileParallelism: false,
     browser: {

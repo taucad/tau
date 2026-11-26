@@ -1031,9 +1031,24 @@ describe('projectAgentHostEvent', () => {
     ],
     ['running', [{ type: 'start-step' }]],
     ['paused', [{ type: 'finish-step' }]],
-    ['completed', [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }]],
-    ['failed', [{ type: 'error', errorText: 'gateway refused' }]],
-    ['cancelled', [{ type: 'abort', reason: 'cancelled' }]],
+    [
+      'completed',
+      [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success', endedAt: 1_788_220_800_000 } }],
+    ],
+    [
+      'failed',
+      [
+        { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
+        { type: 'error', errorText: 'gateway refused' },
+      ],
+    ],
+    [
+      'cancelled',
+      [
+        { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
+        { type: 'abort', reason: 'cancelled' },
+      ],
+    ],
   ] as const)('projects the %s lifecycle', (state, expected) => {
     expect(
       projectAgentHostEvent({
@@ -1065,12 +1080,12 @@ describe('projectAgentHostEvent', () => {
       category: 'overloaded',
     },
   ] as const)('projects typed $code failure as a persistent ChatError', ({ code, status, message, category }) => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code, message, status },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1089,7 +1104,7 @@ describe('projectAgentHostEvent', () => {
       availableCreditAtoms: '300000',
       routeId: 'anthropic-claude-astra-5',
     };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
@@ -1099,7 +1114,7 @@ describe('projectAgentHostEvent', () => {
         message: 'Insufficient Tau credit for this model request.',
         details,
       },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1124,7 +1139,7 @@ describe('projectAgentHostEvent', () => {
    * refused, and the card is keyed on that code. */
   it('should project a provider-account refusal as overloaded with its details, whatever the status', () => {
     const details = { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
@@ -1134,7 +1149,7 @@ describe('projectAgentHostEvent', () => {
         message: "The model provider's account is unavailable.",
         details,
       },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1170,12 +1185,12 @@ describe('projectAgentHostEvent', () => {
     { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'overloaded' },
     { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'overloaded' },
   ])('should project $code behind HTTP $status as the $category card', ({ code, status, category }) => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code, status, message: 'Resource exhausted. Please try again later.' },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1187,12 +1202,12 @@ describe('projectAgentHostEvent', () => {
       agentId: 'codex',
       failure: { category: 'limit', title: "You've hit your usage limit.", actions: [] },
     };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit.", details },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1214,12 +1229,12 @@ describe('projectAgentHostEvent', () => {
    * projection's to claim.
    */
   it('should project a detail-less agent limit as a generic card', () => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit." },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1232,12 +1247,12 @@ describe('projectAgentHostEvent', () => {
   });
 
   it('should carry a host failure code that has no status or details', () => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'NO_EVICTABLE_HISTORY', message: 'Context is oversized but has no safe history to evict.' },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1258,6 +1273,7 @@ describe('projectAgentHostEvent', () => {
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {
     expect(projectAgentHostEvent({ ...base, type: 'run.lifecycle', state: 'failed' })).toEqual([
+      { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
       { type: 'error', errorText: 'The agent host failed.' },
     ]);
   });

@@ -45,6 +45,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { TurnRevisionLog } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import {
   agentApprovalToolName,
+  endedChunk,
+  reopenedChunk,
   parseAgentHostApproval,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
@@ -421,6 +423,12 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/** The metadata chunk that states when an answer's work ended; a reopened run restates it as `null`. */
+const isEndedChunk = (chunk: UIMessageChunk): boolean =>
+  chunk.type === 'message-metadata' &&
+  isRecord(chunk.messageMetadata) &&
+  typeof chunk.messageMetadata['endedAt'] === 'number';
 
 /**
  * Cut the active segment's dropped messages (the host reducer's prefix cut, at message granularity).
@@ -803,7 +811,8 @@ const foldRunViews = (
             ...(previous?.segments ?? []),
             {
               user: previous?.steering ?? previous?.user,
-              chunks: previous?.chunks ?? [],
+              // The steering input ends the sealed answer's work, as a terminal row ends a run's.
+              chunks: [...chunksOf(previous?.chunks), endedChunk(Date.parse(row.recordedAt))],
               providerIds: previous?.providerIds,
               messages: previous?.messages,
             },
@@ -812,9 +821,15 @@ const foldRunViews = (
       sealedSegment?.chunks ??
       (steering === undefined
         ? reopened
-          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type))
+          ? [...chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type)), reopenedChunk]
           : (previous?.chunks ?? [])
-        : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk]);
+        : [
+            {
+              type: 'start',
+              messageId: segmentId,
+              messageMetadata: { createdAt: Date.parse(row.recordedAt) },
+            } satisfies UIMessageChunk,
+          ]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
     const { terminal: _terminal, ...prior } = previous ?? {};
@@ -943,9 +958,16 @@ const foldLiveRow = (
   }
   const blocks = copyBlocks(live.blocks);
   const chunks = projectAgentHostEvent(row, blocks);
+  // A reopened run has not ended: the watch replays these chunks, so it states that, as the run's view does.
+  const isEnding = (chunk: UIMessageChunk): boolean => terminalChunks.has(chunk.type) || isEndedChunk(chunk);
+  const reopens =
+    row.type === 'run.lifecycle' &&
+    row.state === 'running' &&
+    // A run's ending is its last two chunks at most: the end time, then its terminal chunk.
+    [...chunksSince(live.chunks, Math.max(0, live.chunks.length - 2))].some((chunk) => isEnding(chunk));
   return {
     runId: live.runId,
-    chunks: appendChunks(live.chunks, chunks),
+    chunks: appendChunks(live.chunks, reopens ? [reopenedChunk, ...chunks] : chunks),
     blocks: Object.fromEntries(blocks),
   };
 };

@@ -174,6 +174,12 @@
 \* FW1 over C1 (2026-11-26): `project-library-commands.ts` re-reviewed with both changes in it, C1's name request
 \* started ahead of a kernel create and FW1's scan-free commands and permanent-delete precheck; they touch different
 \* commands and merged without overlap. No action or correspondence changes.
+\* FW1 review (2026-11-26): the permanent-delete precheck counts a route verification as proof of another copy only
+\* when the directory it read, which the verification now names (an older authority names none: no proof), is the
+\* copy the precheck chose and not the target; a "Use this folder" that moves the route in between leaves `copy`
+\* unset, the stricter Trash check. Overlapping `refreshListingRows` calls of one pass publish only the latest call's
+\* listing. Both sit before `MutationJournaled` or outside the gate, which are unchanged. No action or correspondence
+\* changes.
 \* Fast-path FW2 (2026-11-26, the discovery index; index-contract review A1 and A6): a pass reads the authority's
 \* index, which may lag storage. `stale` holds the projects whose presence the index has wrong, flipped by a change no
 \* evidence reported (`EnvChangedUnheard`) and cleared by evidence (`EvidenceArrived`, the environment's, with no

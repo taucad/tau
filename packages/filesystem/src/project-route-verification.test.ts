@@ -57,6 +57,13 @@ describe('selected project route verification', () => {
     ).toBe(true);
     expect(writes).not.toHaveBeenCalled();
     expect(scan).not.toHaveBeenCalled();
+    // It names the directory it read, as discovery locates that directory, so a caller can tell which copy it proved.
+    const discovery = await context.service.listProjectManifests();
+    const discovered = discovery.entries.find((entry) => 'projectId' in entry && entry.projectId === projectId);
+    expect(result).toMatchObject({
+      storageRootKey: discovered?.locator.storageRootKey,
+      providerBasePath: discovered?.locator.relativeDirectory,
+    });
   });
 
   it('should require discovery rather than fall through to the parent mount', async () => {

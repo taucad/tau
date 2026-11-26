@@ -4690,6 +4690,8 @@ describe('useProjectManager.createProject', () => {
       mockVerifyProjectRoute.mockResolvedValue({
         status: 'verified',
         project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+        storageRootKey: fakeLocator.storageRootKey,
+        providerBasePath: fakeLocator.relativeDirectory,
       });
       mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pending]);
       const rendered = renderHook(() => useProjectManager(), { wrapper: createWrapper() });

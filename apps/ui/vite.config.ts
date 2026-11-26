@@ -12,7 +12,7 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defaultClientConditions, defaultServerConditions, defineConfig } from 'vite';
 import type { EnvironmentOptions, Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
@@ -791,6 +791,7 @@ export default defineConfig(({ command, mode }) => {
       },
       setupFiles: ['./vitest.setup.ts'],
       reporters: testReporters('verbose'),
+      retry: testRetry(),
       coverage: {
         reportsDirectory: '../../out/reports/coverage/apps/ui',
         provider: 'v8',

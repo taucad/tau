@@ -25,11 +25,10 @@ import {
  * window, or a remount no longer stops or restarts it.
  */
 
-/** The facts a chat's visible failure is read from: the host log's projection and the SDK's live and saved errors. */
+/** The facts a chat's visible failure is read from: the host log's projection and the chat's saved error. */
 export type VisibleFailureSource = Readonly<{
   projection?: ChatProjection | undefined;
   attachmentStatus?: 'unknown' | 'attached' | 'lost' | 'refused' | undefined;
-  error?: Error | undefined;
   persistedError?: NormalizedChatError | undefined;
 }>;
 
@@ -109,10 +108,6 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
       return undefined;
     }
     return { error: refusal, id: `refusal:${refusal.requestId}` };
-  }
-  if (state.error) {
-    const error = parseErrorForPersistence(state.error);
-    return { error, id: refusalId(error) ?? liveErrorId(state.error) };
   }
   const persisted = state.persistedError;
   return persisted === undefined ? undefined : { error: persisted, id: refusalId(persisted) ?? liveErrorId(persisted) };

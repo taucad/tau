@@ -5,7 +5,8 @@
  * Reads the ledger state from the `flake-ledger` branch, lists the completed `ci.yml` runs of the merge queue and of
  * pushes to `--branch` from the last `--lookback-hours` that it has not ingested at their current attempt (or the
  * runs named by `--runs`), downloads each run's `test-outcomes-*` artifacts, counts their outcome rows into the state,
- * confirms lineage pairs through compares, and writes the state back as one commit on the branch. A run it did not
+ * confirms lineage pairs through compares, counts the shadow rows' runs (FQ-13, `ci-shadow-rows.ts`; the rows are read
+ * from the `project.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
  * reach (`--max-runs`, the request budget) is left for the next invocation, which looks back over the same hours, so
  * a `workflow_run` the concurrency group dropped is caught up by the next one or by the daily schedule.
  *
@@ -14,7 +15,7 @@
  *
  * Usage: node scripts/src/ci-flake-ledger-ingest-cli.ts [--runs "<id> <id>"] [--lookback-hours 72] [--max-runs 40]
  *          [--workflow ci.yml] [--branch main] [--state-branch flake-ledger] [--state-file <path>]
- *          [--ledger scripts/src/flake-ledger.json] [--summary <file>] [--max-requests 4000]
+ *          [--ledger scripts/src/flake-ledger.json] [--root .] [--summary <file>] [--max-requests 4000]
  * `--state-file` reads and writes a local file instead of the branch (a replay; nothing is written to GitHub).
  * Env: GITHUB_TOKEN (`actions: read`; `contents: write` to update the branch), GITHUB_REPOSITORY (default
  * taucad/tau), GITHUB_API_URL.
@@ -49,6 +50,7 @@ import {
 } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
+import { countShadowRun, readShadowRegistry, renderShadowMarkdown, retainShadowRows } from '#ci-shadow-rows.js';
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
 export const artifactPrefix = 'test-outcomes-';
@@ -207,6 +209,7 @@ const main = async (args: readonly string[]): Promise<number> => {
         'state-branch': { type: 'string', default: stateBranch },
         'state-file': { type: 'string', default: '' },
         ledger: { type: 'string', default: 'scripts/src/flake-ledger.json' },
+        root: { type: 'string', default: '.' },
         summary: { type: 'string', default: process.env['GITHUB_STEP_SUMMARY'] ?? '' },
         'max-requests': { type: 'string', default: '4000' },
       },
@@ -244,6 +247,7 @@ const main = async (args: readonly string[]): Promise<number> => {
     return 2;
   }
   const aliases = ledger.aliases ?? [];
+  const shadow = await readShadowRegistry(resolve(values.root));
   const repository = process.env['GITHUB_REPOSITORY'] ?? 'taucad/tau';
   const api = process.env['GITHUB_API_URL'] ?? 'https://api.github.com';
   const github = client({ api, token, repository, maxRequests });
@@ -294,6 +298,8 @@ const main = async (args: readonly string[]): Promise<number> => {
       const { artifacts, rows, problems } = read;
       const rejected = problems.length;
       rejectedLines.push(...problems.slice(0, 20));
+      // Before `ingestRun`, which records the attempt as ingested.
+      countShadowRun(state, { run, rows, registry: shadow.rows });
       const result = ingestRun(state, { run, rows, artifacts, rejected, aliases });
       events.push(...result.events);
       for (const candidate of result.candidates) {
@@ -314,6 +320,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
 
   pruneState(state, now);
+  retainShadowRows(state, shadow.rows);
   if (!existing || ingested.length > 0 || folded.length > 0) {
     state.updatedAt = now.toISOString();
     const message = [
@@ -330,6 +337,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   const batchFrom = batch[0]?.updated_at ?? now.toISOString();
   const markdown = [
     renderLedgerMarkdown(summarizeLedger(state, { from: batchFrom, to: now.toISOString() })),
+    renderShadowMarkdown(state, shadow),
     `This invocation: ${ingested.length} of ${pending.length} pending runs ingested, ${events.length} new events` +
       `${folded.length > 0 ? `, ${folded.length} renamed identities folded` : ''}.`,
     ...events

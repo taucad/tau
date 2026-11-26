@@ -71,7 +71,8 @@ describe('boot watchdog rules (T-R12.5)', () => {
     const died = host();
     died.watchdog.start();
     died.watchdog.windowCreated();
-    died.watchdog.rendererGone();
+    /* It owns that death, so the reload policy leaves it alone. */
+    expect(died.watchdog.rendererGone()).toBe(true);
     expect(died.openRecovery).toHaveBeenCalledExactlyOnceWith('load-failed');
 
     /* After the load the renderer's deaths are the reload policy's (WP8), not a failed first load. */
@@ -79,7 +80,7 @@ describe('boot watchdog rules (T-R12.5)', () => {
     later.watchdog.start();
     later.watchdog.windowCreated();
     later.watchdog.windowLoaded();
-    later.watchdog.rendererGone();
+    expect(later.watchdog.rendererGone()).toBe(false);
     later.watchdog.loadFailed({ isMainFrame: true, errorCode: -6 });
     expect(later.openRecovery).not.toHaveBeenCalled();
   });

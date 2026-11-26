@@ -485,9 +485,16 @@ export const reduceChunks = (
         // The ledger owns failure; neither changes a part.
         continue;
       }
-      case 'tool-input-error':
-      case 'tool-output-denied':
       case 'message-metadata': {
+        // A run's end time (`endedChunk`, `reopenedChunk` in `agent-host-event-projection.ts`).
+        if (isRecord(chunk.messageMetadata)) {
+          metadata = mergeMetadata(metadata, chunk.messageMetadata);
+          write();
+        }
+        continue;
+      }
+      case 'tool-input-error':
+      case 'tool-output-denied': {
         // Not in the projection's vocabulary (`agent-host-event-projection.ts`).
         fits = false;
         break;

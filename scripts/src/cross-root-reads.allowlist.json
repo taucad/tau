@@ -550,6 +550,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/ui/app/machines/chat-projection.transcript.test.ts",
+    "target": "packages/agent-host/specs/ChatLog/recorded/kinetic-regenerate-resume.jsonl",
+    "reason": "conformance or recorded corpus read from another project's specs"
+  },
+  {
     "file": "apps/ui/app/services/chat-session-store.test.ts",
     "target": "packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl",
     "reason": "conformance or recorded corpus read from another project's specs"

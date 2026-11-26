@@ -14,7 +14,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import { providerPermissionResolutionSchema } from '@taucad/agent-host/wire';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -28,6 +28,7 @@ import {
   groupAssistantParts,
   findLastMeaningfulPartIndex,
   isActivityPartActive,
+  splitWorkingNarrative,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
 import { AtReferenceChip } from '@taucad/chat-surfaces/components/chat/at-reference-chip';
 import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
@@ -36,6 +37,7 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup, ChatActivityRow } from '@taucad/chat-ui/components/chat-activity-group';
+import { ChatWorkedFold } from '@taucad/chat-ui/components/chat-worked-fold';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
 import { reportTourAction } from '#components/tour/tour-actions.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -52,6 +54,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '@taucad/ui-core/utils/da
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { formatElapsed } from '#components/chat/chat-activity-status.js';
 import { chatInputTextClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
@@ -744,37 +747,138 @@ const AssistantActivityGroup = memo(function AssistantActivityGroup({
   });
 });
 
+/** The wall-clock time a settled turn worked, from its request's admission to its run's end; none under a second. */
+const workedFor = (createdAt: number | undefined, endedAt: number | undefined): string | undefined => {
+  const elapsed = createdAt === undefined || endedAt === undefined ? Number.NaN : endedAt - createdAt;
+  return Number.isFinite(elapsed) && elapsed >= 1000 ? formatElapsed(elapsed) : undefined;
+};
+
+/*
+ * Turns the reader opened a line in while they ran. Kept outside the component so a turn the virtualized list unmounts
+ * and mounts again still waits for the next request to fold.
+ */
+const readerOpenedTurns = new Set<string>();
+/* A disclosure trigger, not a menu or popover trigger, which also carries `aria-expanded`. */
+const closedDisclosure = '[aria-expanded="false"]:not([aria-haspopup])';
+
 function AssistantParts({
   parts,
   messageId,
+  isPastTurn,
+  createdAt,
+  endedAt,
 }: {
   readonly parts: readonly MyMessagePart[];
   readonly messageId: string;
+  readonly isPastTurn: boolean;
+  readonly createdAt: number | undefined;
+  readonly endedAt: number | undefined;
 }): React.JSX.Element {
   const groups = useMemo(() => groupAssistantParts(parts), [parts]);
   const lastGroupIndex = groups.length - 1;
   const isMessageActive = useChatSelector(
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
+  /* A line the reader opened before the turn folded stays theirs: the turn waits for the next request to fold. */
+  const [readerOpened, setReaderOpened] = useState(() => readerOpenedTurns.has(messageId));
+  const elapsed = workedFor(createdAt, endedAt);
+  /* Folded once the turn has finished (its run recorded an end) or a later request follows it, never while it is read
+   * live. A one-line narrative folds only when the line adds the time worked. */
+  const fold = useMemo(() => {
+    const settled = isPastTurn || (endedAt !== undefined && !readerOpened);
+    const split = settled && !isMessageActive ? splitWorkingNarrative(groups) : undefined;
+    return split !== undefined && (split.narrative.length > 1 || elapsed !== undefined) ? split : undefined;
+  }, [groups, isPastTurn, isMessageActive, endedAt, readerOpened, elapsed]);
+  const noteOpening = (event: React.MouseEvent): void => {
+    if (
+      fold === undefined &&
+      !readerOpened &&
+      event.target instanceof Element &&
+      event.target.closest(closedDisclosure) !== null
+    ) {
+      readerOpenedTurns.add(messageId);
+      setReaderOpened(true);
+    }
+  };
+  /* Folding unmounts the narrative; if it held keyboard focus, focus lands on the fold's line instead of the page. */
+  const containerRef = useRef<HTMLDivElement>(null);
+  const focusedRef = useRef<Element | undefined>(undefined);
+  const noteFocus = (event: React.FocusEvent): void => {
+    focusedRef.current = event.target;
+  };
+  const noteBlur = (event: React.FocusEvent): void => {
+    const { target } = event;
+    if (event.relatedTarget !== null) {
+      focusedRef.current = undefined;
+      return;
+    }
+    // Focus left for the page, or the window lost it. Only a click away leaves the node here and unfocused.
+    queueMicrotask(() => {
+      if (target.isConnected && document.activeElement !== target && focusedRef.current === target) {
+        focusedRef.current = undefined;
+      }
+    });
+  };
+  const wasFolded = useRef(false);
+  useLayoutEffect(() => {
+    const folding = fold !== undefined && !wasFolded.current;
+    wasFolded.current = fold !== undefined;
+    const focused = focusedRef.current;
+    if (focused === undefined || focused.isConnected) {
+      return;
+    }
+    focusedRef.current = undefined;
+    const active = document.activeElement;
+    if (!folding || (active !== null && active !== document.body)) {
+      return;
+    }
+    containerRef.current
+      ?.querySelector<HTMLElement>('[data-slot="worked-fold"] button')
+      ?.focus({ preventScroll: true });
+  }, [fold]);
+  const groupIndices = useMemo(() => new Map(groups.map((group, index) => [group, index])), [groups]);
+  const renderGroup = (group: ActivityGroup): React.JSX.Element => {
+    const groupIndex = groupIndices.get(group)!;
+    return (
+      <AssistantActivityGroup
+        key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
+        group={group}
+        groupIndex={groupIndex}
+        messageId={messageId}
+        isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
+        isMessageActive={isMessageActive}
+      />
+    );
+  };
 
+  /* One parent in both shapes, so the answer's groups keep their keys, and stay mounted, as the narrative folds. */
   return (
-    <>
-      {groups.map((group, groupIndex) => (
-        <AssistantActivityGroup
-          key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
-          group={group}
-          groupIndex={groupIndex}
-          messageId={messageId}
-          isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
-          isMessageActive={isMessageActive}
-        />
-      ))}
-    </>
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- observes the disclosures' own clicks (keyboard activation included) and focus; it handles nothing itself
+    <div
+      ref={containerRef}
+      className='contents'
+      onClickCapture={noteOpening}
+      onFocusCapture={noteFocus}
+      onBlurCapture={noteBlur}
+    >
+      {fold === undefined
+        ? groups.map((group) => renderGroup(group))
+        : [
+            ...fold.leading.map((group) => renderGroup(group)),
+            <ChatWorkedFold key='worked-fold' summary={fold.summary} elapsed={elapsed} shortfall={fold.shortfall}>
+              {fold.narrative.map((group) => renderGroup(group))}
+            </ChatWorkedFold>,
+            ...fold.kept.map((group) => renderGroup(group)),
+            ...fold.answer.map((group) => renderGroup(group)),
+          ]}
+    </div>
   );
 }
 
 type ChatMessageProperties = {
   readonly messageId: string;
+  /** A later request follows this message's turn, so its working narrative folds to one line whatever the reader opened. */
+  readonly isPastTurn?: boolean;
   /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
   readonly footer?: React.ReactNode;
 };
@@ -814,7 +918,11 @@ function ChatMessageTimestamp({
 }
 
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
-export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
+export const ChatMessage = memo(function ({
+  messageId,
+  footer,
+  isPastTurn = false,
+}: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
   const userMessagePreviewCharacterLimit = 220 * (userMessageCollapseRowThreshold + 1);
@@ -1038,7 +1146,13 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                   ))}
                 </div>
               ) : (
-                <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
+                <AssistantParts
+                  parts={inlineParts}
+                  messageId={displayMessage.id}
+                  isPastTurn={isPastTurn}
+                  createdAt={displayMessage.metadata?.createdAt}
+                  endedAt={displayMessage.metadata?.endedAt ?? undefined}
+                />
               )}
             </ChatMessageSurface>
           </When>

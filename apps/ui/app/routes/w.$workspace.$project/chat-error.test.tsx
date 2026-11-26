@@ -9,9 +9,9 @@ import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { chatTurnNotStartedCode } from '@taucad/chat-ui/utils/error.utils';
+import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
-import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
+import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -103,7 +103,7 @@ vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
 const persisted = (error: ChatErrorPayload): void => {
   machine.waiting = undefined;
   vi.mocked(useChatSelector).mockImplementation((selector) =>
-    selector({ error: undefined, persistedError: error } as unknown as CombinedChatState),
+    selector({ persistedError: error } as unknown as CombinedChatState),
   );
 };
 
@@ -134,7 +134,6 @@ const projectedFailure = (error: ChatErrorPayload): CombinedChatState => {
     },
   });
   const state = {
-    error: undefined,
     persistedError: error,
     projection: projection.getSnapshot().context,
     attachmentStatus: 'attached',
@@ -212,7 +211,6 @@ describe('ChatError', () => {
     const projection = createActor(chatProjectionLogic).start();
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: { category: errorCategory.generic, title: 'Something went wrong', ...failure },
         projection: projection.getSnapshot().context,
         // Before the host log catches up, as when the host never opened.
@@ -240,7 +238,6 @@ describe('ChatError', () => {
     let attachmentStatus: CombinedChatState['attachmentStatus'] = 'lost';
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: legacy,
         projection: projection.getSnapshot().context,
         attachmentStatus,
@@ -258,43 +255,6 @@ describe('ChatError', () => {
     projection.stop();
   });
 
-  it('keeps a current projected run failure visible after a healthy attachment replaces a stale SDK error', () => {
-    const projection = createActor(chatProjectionLogic).start();
-    projection.send({
-      type: 'batch',
-      answer: {
-        status: 'batch',
-        cursor: 0,
-        nextCursor: 3,
-        endCursor: 3,
-        events: [
-          lifecycleRow(0, 'admitted'),
-          lifecycleRow(1, 'running'),
-          logRow(2, {
-            type: 'run.lifecycle',
-            state: 'failed',
-            attempt: 1,
-            detail: { message: 'Current provider failure' },
-          }),
-        ],
-      },
-    });
-    expect(selectCurrentRun(projection.getSnapshot().context)?.lifecycle).toBe('failed');
-    expect(selectRunFailure(projection.getSnapshot().context, 'run_1')).toContain('Current provider failure');
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: new Error('Old socket failure'),
-        persistedError: undefined,
-        projection: projection.getSnapshot().context,
-        attachmentStatus: 'attached',
-      } as CombinedChatState),
-    );
-    render(<ChatErrorBanner />);
-    expect(screen.getByText(/Current provider failure/u)).toBeInTheDocument();
-    expect(screen.queryByText('Old socket failure')).not.toBeInTheDocument();
-    projection.stop();
-  });
-
   it('retires a refused Start after another device admits a later healthy run', () => {
     const projection = createActor(chatProjectionLogic).start();
     const oldRefusal: ChatErrorPayload = {
@@ -305,7 +265,6 @@ describe('ChatError', () => {
     };
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: oldRefusal,
         projection: projection.getSnapshot().context,
         attachmentStatus: 'attached',
@@ -354,7 +313,6 @@ describe('ChatError', () => {
       },
     });
     const state = {
-      error: undefined,
       persistedError: undefined,
       projection: projection.getSnapshot().context,
       attachmentStatus: 'attached',
@@ -395,7 +353,6 @@ describe('ChatError', () => {
     });
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: { category: errorCategory.generic, title: 'Start refused', message: 'No.', requestId: 'req_9' },
         projection: projection.getSnapshot().context,
         attachmentStatus: 'attached',
@@ -420,7 +377,6 @@ describe('ChatError', () => {
     });
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: {
           category: errorCategory.generic,
           title: 'Resume refused',
@@ -1202,7 +1158,6 @@ describe('ChatError', () => {
     };
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: networkError,
       } as unknown as CombinedChatState),
     );
@@ -1220,7 +1175,6 @@ describe('ChatError', () => {
     };
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: serverError,
       } as unknown as CombinedChatState),
     );
@@ -1243,7 +1197,6 @@ describe('ChatError', () => {
     };
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: genericError,
       } as unknown as CombinedChatState),
     );
@@ -1267,7 +1220,6 @@ describe('ChatError', () => {
     } as unknown as ChatErrorPayload;
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: undefined,
         persistedError: unknownError,
       } as unknown as CombinedChatState),
     );
@@ -1357,7 +1309,7 @@ describe('ChatError', () => {
         details: { requiredCreditAtoms: '3084332', availableCreditAtoms: '2960000', routeId: 'openai-gpt-6-astra' },
       }),
     );
-    const state = { error: runtimeError, persistedError: undefined } as unknown as CombinedChatState;
+    const state = { persistedError: parseErrorForPersistence(runtimeError) } as unknown as CombinedChatState;
     const snapshots: Array<[unknown, unknown]> = [];
     vi.mocked(useChatSelector).mockImplementation((selector) => {
       const value = selector(state);
@@ -1417,8 +1369,9 @@ describe('ChatError', () => {
   it('renders decoded Google provider errors instead of opaque byte lists', () => {
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`),
-        persistedError: undefined,
+        persistedError: parseErrorForPersistence(
+          new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`),
+        ),
       } as unknown as CombinedChatState),
     );
 

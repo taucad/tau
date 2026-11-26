@@ -29,6 +29,11 @@
 # owner issues and `pull-requests: write` opens the entry pull request. Outcome rows come from pull-request code in
 # the queue: they are parsed as data, field by field, and never executed; test names and errors reach the issues only
 # as inert text.
+#
+# Shadow rows (FQ-13): the suites a project lists in its `test:e2e:shadow` target are counted from the same outcome
+# rows, so every `project.json` is checked out too. The count against the Q1 bar (100 consecutive passing runs) is kept
+# in the state, and `shadow-row-promotion.yml` proposes the promotion of a row that meets it. A test's flake events in
+# a shadow row never count toward the quarantine entry rule: the row gates nothing.
 name: Flake ledger
 
 on:
@@ -80,6 +85,7 @@ jobs:
             scripts/src/ci-flake-ledger-store.ts
             scripts/src/ci-github-client.ts
             scripts/src/ci-queue-health.ts
+            scripts/src/ci-shadow-rows.ts
             scripts/src/flake-ledger.json
             scripts/src/ci-flake-quarantine-entry.ts
             scripts/src/ci-flake-quarantine-entry-cli.ts

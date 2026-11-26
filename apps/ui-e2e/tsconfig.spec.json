@@ -19,6 +19,7 @@
     "scripts/**/*.mts",
     "global-setup.ts",
     "production-server.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vitest.node.config.ts"
   ]
 }

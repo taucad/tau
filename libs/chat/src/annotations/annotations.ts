@@ -103,3 +103,50 @@ export const annotatedImageOf = (
   annotations: MessageAnnotations | undefined,
   url: string,
 ): AnnotatedImage | undefined => annotations?.images.find((image) => image.attachment === url);
+
+/**
+ * A record without one image and the comments pinned on it: a pin and its picture go together.
+ *
+ * @param annotations - The record.
+ * @param matches - Picks the image to remove.
+ * @returns The record without that image, or the same record when no image matches.
+ * @public
+ */
+export function withoutAnnotatedImage(
+  annotations: MessageAnnotations | undefined,
+  matches: (image: AnnotatedImage) => boolean,
+): MessageAnnotations | undefined {
+  const removed = annotations?.images.filter((image) => matches(image)) ?? [];
+  if (annotations === undefined || removed.length === 0) {
+    return annotations;
+  }
+  const ids = new Set(removed.map((image) => image.id));
+  return {
+    ...annotations,
+    images: annotations.images.filter((image) => !ids.has(image.id)),
+    comments: annotations.comments.filter((comment) => comment.image === undefined || !ids.has(comment.image)),
+  };
+}
+
+/**
+ * A record whose image `id` names its stored attachment.
+ *
+ * @param annotations - The record.
+ * @param id - The annotated image's id.
+ * @param attachment - The stored image part's URL.
+ * @returns The updated record, or `undefined` when the record no longer holds that image.
+ * @public
+ */
+export function withImageAttachment(
+  annotations: MessageAnnotations | undefined,
+  id: string,
+  attachment: string,
+): MessageAnnotations | undefined {
+  if (annotations?.images.some((image) => image.id === id) !== true) {
+    return undefined;
+  }
+  return {
+    ...annotations,
+    images: annotations.images.map((image) => (image.id === id ? { ...image, attachment } : image)),
+  };
+}

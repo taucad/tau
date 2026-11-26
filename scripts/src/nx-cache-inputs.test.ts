@@ -309,6 +309,19 @@ describe('nx cache inputs', () => {
     expect(excludedFromContext(rules, 'node_modules/nx/package.json')).toBe(true);
   });
 
+  /*
+   * A project's quarantine.json (testing policy § 16.3) decides its own test verdict and nothing else: it is an input
+   * of that project's test tasks, so a cached "passed with a quarantined failure" cannot outlive the entry, and it is
+   * out of `production`, so an entry re-runs no dependent's tests and no build.
+   */
+  it("should key a project's quarantine.json into its own test hash only", () => {
+    expect(nx.targetDefaults['test']?.inputs).toEqual(
+      expect.arrayContaining(['default', '{projectRoot}/quarantine.json']),
+    );
+    expect(nx.namedInputs['default']).toContain('{projectRoot}/**/*');
+    expect(nx.namedInputs['production']).toContain('!{projectRoot}/quarantine.json');
+  });
+
   it('should declare every environment value ci.yml gives a test task as an input of the test default', () => {
     expect(nx.targetDefaults['test']?.inputs).toContain('serviceEnvironment');
     const undeclared = [...testEnvironment()].filter(

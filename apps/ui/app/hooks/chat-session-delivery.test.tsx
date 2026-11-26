@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react';
 import { createActor } from 'xstate';
-import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -82,18 +81,12 @@ const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
 const { useChatSelector } = await import('#hooks/use-chat.js');
 
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 it('should deliver a reply through the retained active session without a sidebar observation', async () => {
   let store: ChatSessionStore | undefined;
   function Transcript(): React.JSX.Element {
     store = useChatSessionStore();
     useChatSession('mounted', 'project');
-    const messages = useChatSessionSnapshot('mounted', (session) => session?.chat.messages);
+    const messages = useChatSessionSnapshot('mounted', (session) => session?.messages);
     return (
       <div data-testid='transcript'>
         {messages
@@ -189,7 +182,7 @@ it('should deliver a reply through the retained active session without a sidebar
     await vi.waitFor(() => {
       expect(screen.getByTestId('transcript')).toHaveTextContent('hi|Unique mounted reply');
     });
-    expect(current.get('mounted')?.chat).toBe(session.chat);
+    expect(current.get('mounted')).toBe(session);
     expect(hostCommand).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(1);
     const releaseSidebar = current.observe('mounted', 'project');
@@ -357,7 +350,7 @@ it('should publish the first held live reasoning chunk through the actual SDK be
       expect.objectContaining({ type: 'reasoning', text: 'Unique mounted held reasoning' }),
     );
     expect(current.getLivenessSnapshot().chats['mounted']?.phase).toBe('running');
-    expect(current.get('mounted')?.chat).toBe(session.chat);
+    expect(current.get('mounted')).toBe(session);
     expect(hostCommand).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(1);
     const releaseSidebar = current.observe('mounted', 'project');

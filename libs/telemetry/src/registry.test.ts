@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(212);
+    expect(metrics).toHaveLength(215);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -682,6 +682,29 @@ describe('TauMetrics', () => {
       TauMetrics.agentReasoningOmittedBlocks.attributes.safeParse({ 'agent.id': 'tau', 'prefix_break.cause': 'tools' })
         .success,
     ).toBe(true);
+  });
+
+  it('should declare the tool-result delivery and admission-phase instruments with bounded labels (B4, C3)', () => {
+    expect(TauMetrics.agentToolResults.name).toBe('tau.agent.tool_results');
+    expect(TauMetrics.agentToolResultDelay.unit).toBe('s');
+    expect(TauMetrics.agentAdmissionDelay.unit).toBe('s');
+    const phase = {
+      'agent.id': 'tau',
+      'agent.placement': 'browser',
+      phase: 'host',
+      'host.start': 'warm',
+      'chat.state': 'unreported',
+      'deployment.refetched': 'true',
+    };
+    expect(TauMetrics.agentAdmissionDelay.attributes.safeParse(phase).success).toBe(true);
+    expect(TauMetrics.agentAdmissionDelay.attributes.safeParse({ ...phase, phase: 'model' }).success).toBe(false);
+    expect(
+      TauMetrics.agentToolResults.attributes.safeParse({
+        'agent.id': 'tau',
+        'agent.placement': 'browser',
+        delivery: 'lost',
+      }).success,
+    ).toBe(false);
   });
 
   it('should expose the prompt-section-size histogram with the canonical OTEL name', () => {

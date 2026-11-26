@@ -764,4 +764,22 @@ export const usageCoverage = [
     by: 'tool_name',
     panel: 'agent',
   },
+  {
+    dimension: 'agent tool-result delivery: timed, excluded and unsettled results (B4)',
+    series: 'tau_agent_tool_results_total',
+    by: 'delivery',
+    panel: 'agent',
+  },
+  {
+    dimension: 'agent tool-result delay, slowest timed result per turn (B4)',
+    series: 'tau_agent_tool_result_delay_bucket',
+    by: 'agent_placement',
+    panel: 'agent',
+  },
+  {
+    dimension: 'agent admission delay by phase, host start, chat state and deployment refetch (C3)',
+    series: 'tau_agent_admission_delay_bucket',
+    by: 'phase',
+    panel: 'agent',
+  },
 ] as const satisfies ReadonlyArray<Readonly<{ dimension: string; series: string; by: string; panel: number | string }>>;

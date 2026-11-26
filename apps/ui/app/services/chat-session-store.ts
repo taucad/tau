@@ -2,7 +2,7 @@
  * ChatSessionStore
  *
  * Vanilla, dual-lifetime store that owns the long-lived per-chat objects:
- * the AI SDK `Chat` instance, the `chatPersistenceMachine` actor, and the
+ * the chat's log projection and session actor, the `chatPersistenceMachine` actor, and the
  * `draftMachine` actor. React components subscribe but never own — every
  * lifetime survives subtree unmount/remount cycles, eliminating the class of
  * "headless component reuse" races that plagued the prior `<ChatInstance>`
@@ -12,8 +12,8 @@
  * Lifetime ownership:
  * - `acquire(chatId, projectId)` / `release(chatId)` track React views only; the
  *   caller names the chat's project (PV-S4).
- * - An active projection watch retains the session independently of a view,
- *   so navigation cannot stop its SDK transcript consumer.
+ * - An active run retains the session independently of a view, so navigation
+ *   cannot release a run this session dispatched.
  * - A session is disposed only when its final view and active run are both
  *   released.
  *
@@ -79,7 +79,6 @@ import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
-import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -106,21 +105,20 @@ import {
   selectRunFailure,
   selectRunElsewhereAwaitsPull,
   selectRunPhase,
+  selectTranscript,
   selectTranscriptSource,
   selectToolsInFlight,
-  materializeTranscript,
   chunksSince,
 } from '#machines/chat-projection.logic.js';
 import type {
   ChatProjection,
   ChatProjectionReadAnswer,
+  TranscriptProjection,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
 import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
-import type { RowKey } from '@taucad/agent-host';
+import type { AgentLiveEvent, RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
-import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
-import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import {
   composerTraysOf,
@@ -137,21 +135,10 @@ import type {
 import { createChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import type { ChatMessageQueueActor, QueueAdvanceResult } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
-import {
-  isTransientPresentationFailure,
-  logFacts,
-  presentationErrorFacts,
-  warnPresentation,
-} from '#services/chat-presentation-diagnostics.js';
-import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
-import type { ChatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
-import { DeferredChat } from '#services/deferred-chat.js';
-import type { ChatView } from '#services/deferred-chat.js';
+import { logFacts, presentationErrorFacts } from '#services/chat-presentation-diagnostics.js';
+import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 
 /** Retries of a transiently failed watch or transcript before it is latched as failed, per run. */
-const presentationRetryLimit = 3;
-/** The first presentation retry's delay, doubling for each later one (250, 500, 1000 ms). Milliseconds. */
-const presentationRetryDelay = 250;
 
 /** Framing can exist even when no assistant content reached the person. */
 const nonOutputChunkTypes: ReadonlySet<string> = new Set([
@@ -281,8 +268,6 @@ const placeChat = (chat: ChatEntity, placement: TauAgentHostId | undefined): Cha
 
 export type ChatSession = {
   readonly chatId: string;
-  /** The chat's AI SDK `Chat`, which loads on demand behind an ordered event queue (PL1). */
-  readonly chat: ChatView;
   readonly persistenceActorRef: Actor<typeof chatPersistenceMachine>;
   readonly draftActorRef: Actor<typeof draftMachine>;
   /**
@@ -292,7 +277,11 @@ export type ChatSession = {
    */
   readonly composerRecordRef: ComposerRecordRef;
   readonly messageQueueRef: ChatMessageQueueActor;
-  /** Coherent visible transcript; the SDK array may be reconstructing a cumulative stream. */
+  /**
+   * The displayed transcript: the fold of the chat's log, with the accepted gesture and the unsent seed (T2). While a
+   * D-UI-10 announcement is pending it is the transcript last announced, so a reader woken by another topic (the
+   * projection's) sees it change at most every 50 ms.
+   */
   readonly messages: readonly MyUIMessage[];
   /**
    * The transcript's load state (I21): `loaded` with the turns it shows, `empty` only once its load has settled with
@@ -307,7 +296,7 @@ export type ChatSession = {
   /**
    * This chat's state in the agent-state vocabulary (D32, S45).
    *
-   * The store keeps the AI SDK `Chat`, its transport and its persistence; the
+   * The store keeps the chat's projection and its persistence; the
    * machine is the one derivation of what the person is told — every row of
    * the architecture's agent-state table is one of its states. The sidebar
    * (W20) and the Agents pane read this, never the flags behind it.
@@ -336,56 +325,86 @@ type MessagePresentation = {
   readonly agentInvocations: string;
 };
 
-type CachedMessagePresentation = MessagePresentation & {
-  readonly messagesById: Map<string, MyUIMessage>;
-  readonly length: number;
-  readonly lastId: string | undefined;
-  readonly lastRole: MyUIMessage['role'] | undefined;
-  readonly prefixInvocations: ReadonlySet<string>;
-  readonly lastParts: MyUIMessage['parts'] | undefined;
-  readonly lastMessage: MyUIMessage | undefined;
-  readonly lastRawMessage: MyUIMessage | undefined;
-  readonly firstMessage: MyUIMessage | undefined;
+export type CachedMessagePresentation = MessagePresentation & {
+  /** The transcript this index was built from; the fold keeps a message's identity while it is unchanged. */
+  readonly messages: readonly MyUIMessage[];
 };
 
-/** Compare mutable SDK values against retained snapshots without changing equal renderer parts. */
-const equalPartValue = (left: unknown, right: unknown): boolean => {
-  if (Object.is(left, right)) {
-    return true;
+/** A gesture the host accepted (`durable`) before the page folded its run's first row (T2, accepted gesture). */
+type AcceptedGesture = Readonly<{
+  runId: string;
+  request: Extract<ChatRequest, { kind: 'send' | 'edit' | 'regenerate' }>;
+}>;
+
+/**
+ * Show an accepted gesture the log does not hold yet, as a pure step over the folded transcript: a send appends its
+ * message, an edit truncates at its message and replaces it, a regenerate truncates after the last user message.
+ *
+ * @param messages - The folded transcript.
+ * @param request - The accepted gesture.
+ * @returns The transcript with the gesture applied.
+ */
+const applyAcceptedGesture = (
+  messages: readonly MyUIMessage[],
+  request: AcceptedGesture['request'],
+): readonly MyUIMessage[] => {
+  switch (request.kind) {
+    case 'send': {
+      return messages.some((message) => message.id === request.message.id) ? messages : [...messages, request.message];
+    }
+    case 'edit': {
+      const index = messages.findIndex((message) => message.id === request.messageId);
+      return index === -1 ? messages : [...messages.slice(0, index), editedMessage(messages[index]!, request)];
+    }
+    case 'regenerate': {
+      return messages.slice(0, messages.findLastIndex((message) => message.role === 'user') + 1);
+    }
   }
-  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
-    return false;
-  }
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => equalPartValue(value, right[index]))
-    );
-  }
-  const first = left as Record<string, unknown>;
-  const second = right as Record<string, unknown>;
-  const keys = Object.keys(first);
-  return (
-    keys.length === Object.keys(second).length &&
-    keys.every((key) => Object.hasOwn(second, key) && equalPartValue(first[key], second[key]))
-  );
 };
 
-const shareMessageParts = (previous: MyUIMessage | undefined, current: MyUIMessage): MyUIMessage => {
-  if (previous?.id !== current.id || previous.role !== current.role) {
-    return structuredClone(current);
+const noViews: ChatProjection['views'] = Object.freeze({});
+const noMessages: readonly MyUIMessage[] = Object.freeze([]);
+const invocationsByMessage = new WeakMap<MyUIMessage, ReadonlySet<string>>();
+
+/**
+ * Index a displayed transcript for its renderers, keeping the previous index's order and invocations while they are
+ * equal. Keyed on the transcript's identity: the fold returns a new transcript whenever a message changes.
+ *
+ * @param messages - The displayed transcript.
+ * @param cached - The index of the previous transcript.
+ * @returns The index of this one.
+ * @internal
+ */
+export const presentMessages = (
+  messages: readonly MyUIMessage[],
+  cached?: CachedMessagePresentation,
+): CachedMessagePresentation => {
+  if (cached?.messages === messages) {
+    return cached;
   }
-  const parts = current.parts.map((part, index) =>
-    equalPartValue(previous.parts[index], part) ? previous.parts[index]! : structuredClone(part),
-  );
-  const unchanged =
-    parts.length === previous.parts.length && parts.every((part, index) => part === previous.parts[index]);
-  if (unchanged && equalPartValue(previous.metadata, current.metadata)) {
-    return previous;
+  const order = messages.map((message) => message.id);
+  const invocations = new Set<string>();
+  for (const message of messages) {
+    let own = invocationsByMessage.get(message);
+    if (own === undefined) {
+      own = invocationsOf([message]);
+      invocationsByMessage.set(message, own);
+    }
+    for (const invocation of own) {
+      invocations.add(invocation);
+    }
   }
-  return { ...current, metadata: structuredClone(current.metadata), parts: unchanged ? previous.parts : parts };
+  const agentInvocations = [...invocations].join('\n');
+  return {
+    messages,
+    messagesById: new Map(messages.map((message) => [message.id, message])),
+    order:
+      cached !== undefined && cached.order.length === order.length && cached.order.every((id, at) => id === order[at])
+        ? cached.order
+        : order,
+    groups: buildTurnGroups(messages),
+    agentInvocations: cached?.agentInvocations === agentInvocations ? cached.agentInvocations : agentInvocations,
+  };
 };
 
 export type ChatHistoricalUsage = Readonly<{
@@ -482,35 +501,6 @@ const usageOf = (messages: readonly MyUIMessage[]): ChatHistoricalUsage => {
   };
 };
 
-/** Compare a reconstructing SDK prefix without requiring its transient part state to have settled. */
-const includesPresentedPrefix = (
-  messages: readonly MyUIMessage[],
-  prefix: readonly MyUIMessage[],
-  offset: number,
-): boolean =>
-  prefix.every((message, index) => {
-    const next = messages[offset + index];
-    if (next === message) {
-      return true;
-    }
-    return (
-      next?.id === message.id &&
-      message.parts.every((part, partIndex) => {
-        const candidate = next.parts[partIndex];
-        if (candidate?.type !== part.type) {
-          return false;
-        }
-        if (
-          (part.type === 'text' || part.type === 'reasoning') &&
-          (candidate.type === 'text' || candidate.type === 'reasoning')
-        ) {
-          return candidate.text.startsWith(part.text);
-        }
-        return equalPartValue(candidate, part);
-      })
-    );
-  });
-
 const emptyMessagePresentation: MessagePresentation = {
   messagesById: new Map(),
   order: Object.freeze([]),
@@ -575,8 +565,6 @@ type InternalSession = ChatSession & {
   readonly messageQueueStore: ChatMessageQueueStore;
   readonly messageQueueObservation: ObservationService<void>;
   dispatchTask: Promise<void> | undefined;
-  /** One SDK stream slot per chat; an armed watch cannot belong to a different chat. */
-  readonly transport: BrowserPlacementChatTransport<MyUIMessage>;
   /** The chat's machine as the root this store started; `stateActorRef` is the same actor. */
   readonly chatRoot: Actor<typeof chatSessionMachine>;
   /** React/view consumers currently observing this session. */
@@ -596,48 +584,43 @@ type InternalSession = ChatSession & {
   observationRelease: (() => void) | undefined;
   /** Durable seed waiting for the focused admission and project connector to publish. */
   pendingSeedGesture: ChatTurnGesture | undefined;
-  /** The one command being dispatched, and the SDK watch following its projected run. */
+  /** The one command being dispatched, and the run this session holds while it is open. */
   activeCommand: HostCommand | undefined;
   commandAbort: AbortController | undefined;
-  watch: Actor<typeof sdkWatch> | undefined;
   watchedRunId: string | undefined;
-  watchedSegmentId: string | undefined;
-  watchedStreamVersion: number | undefined;
-  /** Bounded derived presentation retained only while the same source replays its cumulative prefix. */
-  presentationHold:
-    | Readonly<{
-        messages: readonly MyUIMessage[];
-        prefixOffset: number;
-        prefix: readonly MyUIMessage[];
-        runId: string;
-        segmentId: string | undefined;
-        streamVersion: number;
-        sourceGeneration: string | undefined;
-      }>
-    | undefined;
-  materializeVersion: number;
-  transcriptMaterialization: Promise<void> | undefined;
-  /** A materialization of the log applied (or failed) for this session: an empty transcript is now settled (I21). */
+  /** The attempt a dispatched Resume continues: its run awaits a later one, or this one running again. */
+  resumedAttempt: number | undefined;
+  /**
+   * The displayed source (T2): this device's views and overlay as of the last projection caught up with its read
+   * answered, and other devices' views as of their last completed scan. Each advances on its own authority.
+   */
+  displayedOwn: ChatProjection | undefined;
+  displayedRemote: ChatProjection['remote'];
+  /** The fold of the displayed source, and the transcript shown from it with the gesture and seed. */
+  displayedFold: readonly MyUIMessage[];
+  displayedMessages: Readonly<{
+    fold: readonly MyUIMessage[];
+    gesture: AcceptedGesture | undefined;
+    seed: MyUIMessage | undefined;
+    messages: readonly MyUIMessage[];
+  }>;
+  acceptedGesture: AcceptedGesture | undefined;
+  /** The transcript last announced, the one subscribers last heard, and the D-UI-10 throttle that announces the next. */
+  announcedMessages: readonly MyUIMessage[];
+  publishedMessages: readonly MyUIMessage[];
+  announceTimer: ReturnType<typeof setTimeout> | undefined;
+  announcePending: boolean;
+  /** The log's transcript shown with authority (or its read failed) for this session: an empty one is settled (I21). */
   transcriptSettled: boolean;
   /** An empty transcript applied while the scan of other devices' history was pending; it settles once that scan has. */
   transcriptAwaitsForeignScan: boolean;
   /** {@link ChatSession.rememberedComposerTrays}: this device's memory until the transcript settles. */
   composerTrays: readonly ComposerTray[];
-  recoveredRunId: string | undefined;
-  blockedPresentationRunId: string | undefined;
-  /** Transient watch or transcript failures retried for {@link InternalSession.presentationRetryRunId}. */
-  presentationRetries: number;
-  presentationRetryRunId: string | undefined;
-  presentationRetry: ReturnType<typeof setTimeout> | undefined;
-  recoveringPresentation: boolean;
-  failedTranscriptProjection: ChatProjection | undefined;
-  transcriptSource: ChatProjection | undefined;
-  transcriptSourceVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
   /** What asked for the pending stop; logged with the cancel it sends. */
   stopOrigin: StopOrigin | undefined;
-  /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
+  /** A storage invalidation waits for host settlement. */
   refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
   /** The live run this page saw before it had model text, so its first text can be timed (T10). */
@@ -733,11 +716,6 @@ const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): 
 export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     chatSession?: typeof chatSessionMachine;
-    /**
-     * Where each session's AI SDK `Chat` loads from (PL1): the app runtime composes the loader beside the session
-     * loaders (D5). The chat's one source by default.
-     */
-    chatSdk?: ChatSdkSource;
     /**
      * The closures the store calls, given at construction (A2): the app runtime passes the project library's ports.
      * Without them the store's defaults throw until `setDependencies`.
@@ -909,7 +887,6 @@ export class ChatSessionStore {
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
-  readonly #chatSdk: ChatSdkSource;
   readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
   /** The last revision facts each project reported, replayed to a chat root created after them. */
   readonly #revisionFacts = new Map<string, ChatRevisionFacts>();
@@ -958,14 +935,7 @@ export class ChatSessionStore {
   readonly #unreadTopic = new Topic<void>({ name: 'ChatSessionStore.unread' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #messagePresentations = new Map<string, CachedMessagePresentation>();
-  readonly #historicalUsage = new Map<
-    string,
-    {
-      projection: ChatProjection;
-      pending?: Promise<ChatHistoricalUsage>;
-      result?: ChatHistoricalUsage;
-    }
-  >();
+  readonly #historicalUsage = new Map<string, Readonly<{ projection: ChatProjection; result: ChatHistoricalUsage }>>();
   #foreignReadsActive = 0;
   readonly #foreignReadWaiters: Array<() => void> = [];
   /** Readers of one chat's projection (PV-S9). */
@@ -1011,16 +981,7 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const {
-      chatSession,
-      dependencies,
-      files,
-      focusedProject,
-      projectSessions,
-      chatSdk = chatSdkSource,
-      ...rootOptions
-    } = options;
-    this.#chatSdk = chatSdk;
+    const { chatSession, dependencies, files, focusedProject, projectSessions, ...rootOptions } = options;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -1067,7 +1028,7 @@ export class ChatSessionStore {
       });
     }
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
-    // debug-only makes a liveness failure report the store's SDK/cache facts
+    // debug-only makes a liveness failure report the store's cache facts
     // and the project actors' run sets instead of guessing from labels.
     if (Reflect.has(globalThis, 'window') && ENV.TAU_DEBUG) {
       (globalThis as ChatSessionLivenessDebugGlobal).__TAU_CHAT_SESSION_LIVENESS__ = () => this.getLivenessSnapshot();
@@ -1554,17 +1515,12 @@ export class ChatSessionStore {
       projection !== undefined &&
       selectCaughtUp(projection) &&
       !retainsLiveRun(selectRunPhase(projection)) &&
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- SDK callbacks can mutate status while the storage await is pending.
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- A dispatch can change status while the storage await is pending.
       session.status === 'ready' &&
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- Admission can begin while the storage await is pending.
       !session.commandInFlight
     ) {
-      session.transcriptMaterialization = this.#applyProjectedTranscript(
-        session,
-        projection,
-        ++session.materializeVersion,
-      );
-      await session.transcriptMaterialization;
+      this.#presentTranscript(session, projection);
     }
   }
 
@@ -1648,17 +1604,6 @@ export class ChatSessionStore {
           ...presentationErrorFacts(error),
         });
       }
-      return;
-    }
-    // Observe the existing owner, never start a competing materialization/version producer.
-    let pending = session.transcriptMaterialization;
-    while (!signal.aborted && this.#sessions.get(chatId) === session && pending !== undefined) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Follow the task that superseded this materialization, never parallel producers.
-      await pending;
-      if (pending === session.transcriptMaterialization) {
-        return;
-      }
-      pending = session.transcriptMaterialization;
     }
   }
 
@@ -1682,80 +1627,27 @@ export class ChatSessionStore {
     return this.#sessions.get(chatId);
   }
 
-  /** Replace the SDK transcript after invalidating indexes that may include a changed middle message. */
-  public replaceMessages(chatId: string, messages: MyUIMessage[]): void {
+  /**
+   * The chat's transcript as the fold has it now, ahead of the throttled `messages` subscribers see (D-UI-10). For a
+   * gesture's admission and checks, which must not act on a transcript up to one throttle window old.
+   *
+   * @param chatId - A chat with a live session.
+   * @returns Its folded transcript, or none without a session.
+   * @public
+   */
+  public getCurrentTranscript(chatId: string): readonly MyUIMessage[] {
     const session = this.#sessions.get(chatId);
-    if (session === undefined) {
-      return;
-    }
-    session.presentationHold = undefined;
-    this.#messagePresentations.delete(chatId);
-    session.chat.messages = messages;
+    return session === undefined ? [] : this.#displayedTranscript(session);
   }
 
-  /** Stable structural and command selections; streaming text only inspects the current tail. */
+  /** Stable structural and command selections, rebuilt from message identity: any message the fold changed is new. */
   public getMessagePresentation(chatId: string): MessagePresentation {
     const messages = this.#sessions.get(chatId)?.messages;
     if (messages === undefined) {
       return emptyMessagePresentation;
     }
-    const last = messages.at(-1);
     const cached = this.#messagePresentations.get(chatId);
-    if (
-      cached?.length === messages.length &&
-      cached.lastId === last?.id &&
-      cached.lastRole === last?.role &&
-      (messages.length === 1 || cached.firstMessage === messages[0])
-    ) {
-      const selected = last === undefined ? undefined : shareMessageParts(cached.lastMessage, last);
-      if (last !== undefined) {
-        // The map is an index over the authoritative SDK array, not another transcript.
-        cached.messagesById.set(last.id, selected!);
-      }
-      const agentInvocations =
-        cached.lastParts === selected?.parts
-          ? cached.agentInvocations
-          : [
-              ...new Set([...cached.prefixInvocations, ...invocationsOf(selected === undefined ? [] : [selected])]),
-            ].join('\n');
-      const next = {
-        ...cached,
-        agentInvocations,
-        lastParts: selected?.parts,
-        lastMessage: selected,
-        lastRawMessage: last,
-      };
-      this.#messagePresentations.set(chatId, next);
-      return next;
-    }
-    const prefixInvocations = invocationsOf(messages.slice(0, -1));
-    const agentInvocations = [
-      ...new Set([...prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])]),
-    ].join('\n');
-    const selected = last === undefined ? undefined : shareMessageParts(undefined, last);
-    const next: CachedMessagePresentation = {
-      messagesById: new Map(
-        messages.map((message) => [
-          message.id,
-          message === last
-            ? selected!
-            : message === cached?.lastRawMessage
-              ? shareMessageParts(cached.lastMessage, message)
-              : message,
-        ]),
-      ),
-      order: messages.map((message) => message.id),
-      groups: buildTurnGroups(messages),
-      agentInvocations,
-      length: messages.length,
-      lastId: last?.id,
-      lastRole: last?.role,
-      prefixInvocations,
-      lastParts: selected?.parts,
-      lastMessage: selected,
-      lastRawMessage: last,
-      firstMessage: messages[0],
-    };
+    const next = presentMessages(messages, cached);
     this.#messagePresentations.set(chatId, next);
     return next;
   }
@@ -1783,7 +1675,10 @@ export class ChatSessionStore {
     return this.#projectionContext(chatId);
   }
 
-  /** Derive exact usage from the merged host log, cached per projected snapshot. */
+  /**
+   * Derive exact usage from the merged host log's fold (T3), cached per projected snapshot. The fold is synchronous, so
+   * a summary is the log's as of this call; a deleted chat has none.
+   */
   public async getHistoricalUsage(chatId: string): Promise<ChatHistoricalUsage> {
     const actor = this.#projections.get(chatId);
     if (actor !== undefined && this.#deletedProjections.has(actor)) {
@@ -1791,54 +1686,19 @@ export class ChatSessionStore {
     }
     const projection = this.#projectionContext(chatId);
     if (projection === undefined || !selectCaughtUp(projection)) {
-      return usageOf(this.#sessions.get(chatId)?.chat.messages ?? []);
+      return usageOf(this.#sessions.get(chatId)?.messages ?? []);
     }
     const cached = this.#historicalUsage.get(chatId);
-    const sameSource = (left: ChatProjection, right: ChatProjection): boolean =>
-      left.views === right.views && left.remote?.digest === right.remote?.digest;
-    if (cached !== undefined) {
-      const unchanged = sameSource(cached.projection, projection);
-      if (!unchanged) {
-        cached.projection = projection;
-        cached.result = undefined;
-      }
-      if (cached.pending !== undefined) {
-        return cached.pending;
-      }
-      if (unchanged && cached.result !== undefined) {
-        return cached.result;
-      }
+    if (
+      cached !== undefined &&
+      cached.projection.views === projection.views &&
+      cached.projection.remote?.digest === projection.remote?.digest
+    ) {
+      return cached.result;
     }
-    const entry = cached ?? { projection };
-    const pending = (async (): Promise<ChatHistoricalUsage> => {
-      for (;;) {
-        const target = entry.projection;
-        // oxlint-disable-next-line eslint/no-await-in-loop -- One chat's projections serialize; a later snapshot replaces the target after this read.
-        const result = usageOf(await materializeTranscript(target));
-        if (this.#projections.get(chatId) !== actor || this.#historicalUsage.get(chatId) !== entry) {
-          throw new Error('Chat usage projection superseded.');
-        }
-        const latest = this.#projectionContext(chatId);
-        if (latest !== undefined && selectCaughtUp(latest) && !sameSource(target, latest)) {
-          entry.projection = latest;
-        }
-        if (entry.projection === target) {
-          entry.result = result;
-          entry.pending = undefined;
-          return result;
-        }
-      }
-    })();
-    entry.pending = pending;
-    this.#historicalUsage.set(chatId, entry);
-    try {
-      return await pending;
-    } catch (error) {
-      if (this.#historicalUsage.get(chatId) === entry) {
-        this.#historicalUsage.delete(chatId);
-      }
-      throw error;
-    }
+    const result = usageOf(selectTranscript(projection));
+    this.#historicalUsage.set(chatId, { projection, result });
+    return result;
   }
 
   /** Fold one host read answer; the attachment and deterministic test readers share this projection ingress. @internal */
@@ -1876,6 +1736,7 @@ export class ChatSessionStore {
       if (answer.reason === 'unreadable' && session !== undefined) {
         // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
         this.#latchUnreadTranscript(session);
+        this.#releaseRefusedRun(session);
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -1886,6 +1747,11 @@ export class ChatSessionStore {
       this.#unreadTopic.emit();
     }
     this.startPendingSeed(chatId);
+  }
+
+  /** Fold one live model event as the host attachment does; the ingress for deterministic readers. @internal */
+  public receiveHostLiveEvent(chatId: string, event: AgentLiveEvent): void {
+    this.#projectionOf(chatId).send({ type: 'live', event });
   }
 
   /** The current read-only host attachment's verified state, never a run lifecycle. @public */
@@ -2105,16 +1971,13 @@ export class ChatSessionStore {
     }
     if (selectTranscriptSource(projection).some((view) => view.user !== undefined)) {
       const { seedRequestId } = session;
-      const seedMessageId = session.seedMessage?.id;
       session.pendingSeedGesture = undefined;
       session.seedRequestId = undefined;
       session.seedMessage = undefined;
-      this.#messagePresentations.delete(session.chatId);
-      session.chat.messages = session.chat.messages.filter((message) => message.id !== seedMessageId);
       if (seedRequestId !== undefined) {
         void this.#clearAcceptedSeed(chatId, seedRequestId);
       }
-      this.#materializeProjectedTranscript(session, projection);
+      this.#presentTranscript(session, projection);
       return;
     }
     if (chatTurnAdmit(chatId) === undefined || this.#projectHostConnectors.get(session.projectId) === undefined) {
@@ -2236,7 +2099,7 @@ export class ChatSessionStore {
    *
    * *Stop* in the sidebar and *Stop* in the composer use the same projected run
    * identity and send a keyed host cancel. The host log confirms its outcome;
-   * stopping a local SDK watch alone never settles the run.
+   * nothing local settles the run.
    *
    * @param chatId - The chat whose run should stop.
    * @param origin - The gesture that asked, logged with the cancel.
@@ -2250,12 +2113,22 @@ export class ChatSessionStore {
     session.stopRequested = true;
     session.stopOrigin = origin;
     this.#chatTopics.get(chatId)?.emit();
-    session.watch?.stop();
-    session.watch = undefined;
-    void session.chat.stop();
     if (!session.commandInFlight) {
       void this.#cancelSessionRun(session);
     }
+  }
+
+  /**
+   * The chat's status (T3): its run phase, else the command this page sent and whose run its log does not hold yet.
+   * Subscribers of {@link ChatSessionStore.subscribeChat} hear each change.
+   *
+   * @param chatId - The chat.
+   * @returns `submitted`, `streaming` or `ready`.
+   * @public
+   */
+  public getChatStatus(chatId: string): ChatStatus {
+    const session = this.#sessions.get(chatId);
+    return selectVisibleChatStatus(this.#projectionContext(chatId), session !== undefined && this.#awaitsRun(session));
   }
 
   /** A user Stop is awaiting its host-confirmed terminal row. @public */
@@ -2814,13 +2687,7 @@ export class ChatSessionStore {
         return;
       }
       // Present what the scan brought: a new materialization settles the transcript, with or without turns.
-      const started = session.materializeVersion;
-      session.transcriptSource = undefined;
-      session.failedTranscriptProjection = undefined;
-      this.#materializeProjectedTranscript(session, projection);
-      if (session.materializeVersion !== started) {
-        return;
-      }
+      this.#presentTranscript(session, projection);
     }
     session.transcriptAwaitsForeignScan = false;
     this.#latchTranscriptSettled(session);
@@ -2836,7 +2703,7 @@ export class ChatSessionStore {
     if (
       session === undefined ||
       session.transcriptSettled ||
-      session.messages.length > 0 ||
+      this.#displayedTranscript(session).length > 0 ||
       !this.#answeredLogReads.has(chatId) ||
       this.#foreignScanState(chatId) !== 'failed'
     ) {
@@ -3037,14 +2904,10 @@ export class ChatSessionStore {
               void this.#showHostLoadFailure(session, event.error);
             }
           }
-          if (session?.watchedRunId !== undefined) {
-            session.watch?.stop();
-            session.watch = undefined;
-            session.watchedRunId = undefined;
-          }
           if (event.type === 'attachment.refused') {
             if (session !== undefined) {
               this.#latchUnreadTranscript(session);
+              this.#releaseRefusedRun(session);
             }
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
@@ -3273,8 +3136,8 @@ export class ChatSessionStore {
   /**
    * Carry out what the chat's session actor admitted.
    *
-   * The turn is the actor's; the *request* — one AI SDK stream, its retries and
-   * its stop — stays the persistence machine's. This is the one wire between
+   * The turn is the actor's; the *request* — one host command and its stop —
+   * is this store's. This is the one wire between
    * them, so a dispatch can no longer originate anywhere else.
    *
    * @param session - The chat whose actor was just (re)bound.
@@ -3342,7 +3205,6 @@ export class ChatSessionStore {
       const source = {
         projection: this.getProjection(chatId),
         attachmentStatus: this.getAttachmentStatus(chatId),
-        error: session.chat.error,
         persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
       };
       const plan = canResume() ? autoResumePlanOf(source, Date.now()) : undefined;
@@ -3453,7 +3315,7 @@ export class ChatSessionStore {
     }
   }
 
-  /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
+  /** Dispatch one admitted command; its run reaches the transcript through the projection alone (T3). */
   async #dispatchTurn(session: InternalSession, request: ChatRequest): Promise<void> {
     if (request.queueId !== undefined && session.messageQueueRef.getSnapshot().status !== 'active') {
       return;
@@ -3469,14 +3331,12 @@ export class ChatSessionStore {
       return;
     }
     session.runHeld = true;
-    session.recoveredRunId = undefined;
-    session.blockedPresentationRunId = undefined;
-    session.failedTranscriptProjection = undefined;
     session.activeCommand = command;
     session.watchedRunId = command.payload.runId;
-    session.watchedStreamVersion = 0;
+    session.resumedAttempt = this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId]?.attempt;
     session.commandInFlight = true;
     session.stopRequested = false;
+    this.#refreshStatus(session);
     session.commandAbort?.abort();
     const abort = new AbortController();
     session.commandAbort = abort;
@@ -3513,11 +3373,16 @@ export class ChatSessionStore {
         return;
       }
       session.commandInFlight = false;
+      this.#refreshStatus(session);
       if (answer.status === 'refused') {
         throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
       }
       if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {
         return;
+      }
+      if (command.type === 'start' && request.kind !== 'continue') {
+        session.acceptedGesture = { runId: command.payload.runId, request };
+        this.#presentTranscript(session, this.#projectionContext(session.chatId));
       }
       if (request.queueId !== undefined) {
         await session.messageQueueStore.acknowledge(request.queueId, command.commandId, acceptingPlacement);
@@ -3531,10 +3396,8 @@ export class ChatSessionStore {
         session.seedRequestId = undefined;
         session.pendingSeedGesture = undefined;
         if (session.seedMessage?.id !== command.payload.message.id) {
-          const seedMessageId = session.seedMessage?.id;
           session.seedMessage = undefined;
-          this.#messagePresentations.delete(session.chatId);
-          session.chat.messages = session.chat.messages.filter((message) => message.id !== seedMessageId);
+          this.#presentTranscript(session, this.#projectionContext(session.chatId));
         }
         void this.#clearAcceptedSeed(session.chatId, seedRequestId);
       }
@@ -3544,56 +3407,28 @@ export class ChatSessionStore {
         await this.#cancelSessionRun(session);
         return;
       }
-      session.watch?.stop();
       if (command.type === 'resume') {
-        // The accepted command can answer before the follower folds its new running row.
-        // Watching the old terminal attempt would replay its error into the SDK.
-        session.watch = undefined;
-        session.watchedRunId = undefined;
+        // The accepted command can answer before the follower folds its new running row: its run stays held.
         this.#syncProjection(session.chatId, 'none');
         return;
       }
-      const via =
-        request.kind === 'send' && !session.chat.messages.some((message) => message.id === request.message.id)
-          ? 'send'
-          : request.kind === 'continue'
-            ? 'resume'
-            : 'regenerate';
-      if (request.kind === 'edit') {
-        const index = session.chat.messages.findIndex((message) => message.id === request.messageId);
-        if (index === -1) {
-          throw new Error('That message is no longer in this chat, so it cannot be edited.');
-        }
-        this.#messagePresentations.delete(session.chatId);
-        session.chat.messages = [
-          ...session.chat.messages.slice(0, index),
-          editedMessage(session.chat.messages[index]!, request),
-        ];
+      if (
+        request.kind === 'edit' &&
+        !this.#displayedTranscript(session).some((message) => message.id === request.messageId)
+      ) {
+        throw new Error('That message is no longer in this chat, so it cannot be edited.');
       }
-      const watchInput: SdkWatchInput = {
-        runId: command.payload.runId,
-        getProjection: () => this.#projectionContext(session.chatId),
-        subscribe: (listener) => this.subscribeProjection(session.chatId, listener),
-        transport: session.transport,
-        chat: session.chat,
-        ...(via === 'send' && request.kind === 'send'
-          ? { via, message: request.message }
-          : { via: via === 'send' ? 'regenerate' : via }),
-      };
-      const watch = createActor(sdkWatch, {
-        input: watchInput,
-        ...this.#rootOptions,
-      });
-      session.watch = watch;
-      watch.start();
     } catch (error) {
       if (abort.signal.aborted || session.commandAbort !== abort) {
         return;
       }
-      session.watch?.stop();
-      session.watch = undefined;
       session.watchedRunId = undefined;
       session.activeCommand = undefined;
+      this.#refreshStatus(session);
+      if (session.acceptedGesture?.runId === command.payload.runId) {
+        session.acceptedGesture = undefined;
+        this.#presentTranscript(session, this.#projectionContext(session.chatId));
+      }
       const parsed = parseErrorForPersistence(error instanceof Error ? error : new Error(String(error)));
       session.persistenceActorRef.send({
         type: 'setPersistedError',
@@ -3613,7 +3448,13 @@ export class ChatSessionStore {
       if (session.commandAbort === abort) {
         session.commandInFlight = false;
         session.commandAbort = undefined;
-        this.#scheduleRunReleaseIfTerminal(session);
+        if (this.#observed.get(session.chatId)?.status === 'refused') {
+          /* A command answered after its chat's log read was refused: nothing will fold its run here. */
+          this.#releaseRefusedRun(session);
+        } else {
+          this.#refreshStatus(session);
+          this.#scheduleRunReleaseIfTerminal(session);
+        }
       }
     }
   }
@@ -3737,57 +3578,17 @@ export class ChatSessionStore {
     if (session === undefined || projection === undefined) {
       return;
     }
-    const hold = session.presentationHold;
-    const heldView = hold === undefined ? undefined : projection.views[hold.runId];
-    if (
-      hold !== undefined &&
-      (heldView === undefined ||
-        heldView.retired === true ||
-        heldView.segmentId !== hold.segmentId ||
-        (heldView.streamVersion ?? 0) !== hold.streamVersion ||
-        projection.ledger.position.sourceGeneration !== hold.sourceGeneration)
-    ) {
-      session.presentationHold = undefined;
-      this.#messagePresentations.delete(chatId);
-    }
+    this.#refreshStatus(session);
     if (!retainsLiveRun(selectRunPhase(projection))) {
       this.refreshMessageQueue(chatId);
     }
+    this.#presentTranscript(session, projection);
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
     const view = run === undefined ? undefined : projection.views[run.runId];
-    if (
-      session.watchedRunId === run?.runId &&
-      (session.watchedSegmentId !== view?.segmentId ||
-        (session.watchedStreamVersion ?? 0) !== (view?.streamVersion ?? 0)) &&
-      !session.commandInFlight
-    ) {
-      session.watch?.stop();
-      session.watch = undefined;
-      session.watchedRunId = undefined;
-      session.materializeVersion++;
-      void session.chat.stop();
-    }
-    if (
-      run !== undefined &&
-      session.watchedRunId !== undefined &&
-      session.watchedRunId !== run.runId &&
-      !session.commandInFlight
-    ) {
-      session.watch?.stop();
-      session.watch = undefined;
-      session.watchedRunId = undefined;
-      session.materializeVersion++;
-    }
-    if (selectCaughtUp(projection)) {
-      this.#materializeProjectedTranscript(session, projection);
-    }
     if (run !== undefined && view !== undefined && opensRun(phase) && !run.opaque) {
-      this.#timePresentation(session, run.runId, [
-        view.chunks,
-        ...(projection.live?.runId === run.runId ? [projection.live.chunks] : []),
-      ]);
+      this.#timePresentation(session, run.runId);
     }
     if (
       run?.lifecycle === 'cancelled' &&
@@ -3808,21 +3609,6 @@ export class ChatSessionStore {
       session.stopRequested = false;
       this.#chatTopics.get(chatId)?.emit();
     }
-    if (
-      run !== undefined &&
-      opensRun(phase) &&
-      view?.user !== undefined &&
-      session.watch === undefined &&
-      session.watchedRunId === undefined &&
-      !session.commandInFlight &&
-      !session.stopRequested &&
-      !session.persistenceActorRef.getSnapshot().context.isLoadingChat &&
-      session.status === 'ready' &&
-      !session.recoveringPresentation &&
-      session.blockedPresentationRunId !== run.runId
-    ) {
-      session.transcriptMaterialization = this.#watchProjectedRun(session, projection, run.runId);
-    }
     if (run !== undefined && present !== 'none' && (present !== 'open' || opensRun(phase) || phase === 'paused')) {
       if (present === 'reopened' && session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })) {
         /* A dispatched `continue` names no run, so it waits to see its run open again before an end is its own
@@ -3832,16 +3618,15 @@ export class ChatSessionStore {
       }
       this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
     }
-    if (session.watchedRunId !== undefined && session.watchedRunId === run?.runId && !opensRun(phase)) {
-      // The SDK stream closes on pause; ACP can continue the same attempt after approval.
-      session.watch?.stop();
-      session.watch = undefined;
+    if (
+      session.watchedRunId !== undefined &&
+      run !== undefined &&
+      (session.watchedRunId !== run.runId || !opensRun(phase)) &&
+      !this.#awaitsRun(session)
+    ) {
+      /* The held run ended, paused (ACP can continue the same attempt after approval) or another run is current. */
       session.watchedRunId = undefined;
-      this.#materializeProjectedTranscript(session, projection);
       this.#scheduleRunReleaseIfTerminal(session);
-    }
-    if (session.status === 'error') {
-      this.#recoverPresentation(session);
     }
     if (
       session.refreshDeferred &&
@@ -3855,21 +3640,22 @@ export class ChatSessionStore {
   }
 
   /**
-   * Time when the page first shows a live run's model text (T10): the frame after the projection first carries text,
-   * while the page is visible. This is the UI's clock, kept apart from the API's model-text time; it reads the
-   * projection, not any one component, and a run that was already streaming or ended before this page saw it is not
-   * timed, so replayed history never counts as shown.
+   * Time when the page first shows a live run's model text (T10): the frame after the displayed transcript first shows
+   * text in the run's answer, while the page is visible. This is the UI's clock, kept apart from the API's model-text
+   * time; it reads the fold (T3), not any one component, and a run that was already streaming or ended before this
+   * page saw it is not timed, so replayed history never counts as shown.
    */
-  #timePresentation(
-    session: InternalSession,
-    runId: string,
-    sources: ReadonlyArray<Parameters<typeof chunksSince>[0]>,
-  ): void {
+  #timePresentation(session: InternalSession, runId: string): void {
     if (session.presentedRunId === runId) {
       return;
     }
-    const hasText = sources.some((chunks) =>
-      [...chunksSince(chunks)].some((chunk) => chunk.type === 'text-delta' && chunk.delta !== ''),
+    /* The run's answer is its tail: the segment a steering input opened, else the run's own message. */
+    const answerId = this.#projectionContext(session.chatId)?.views[runId]?.segmentId ?? runId;
+    const hasText = this.#displayedTranscript(session).some(
+      (message) =>
+        message.id === answerId &&
+        message.role === 'assistant' &&
+        message.parts.some((part) => part.type === 'text' && part.text !== ''),
     );
     if (!hasText) {
       session.presentationWatch = runId;
@@ -3890,190 +3676,95 @@ export class ChatSessionStore {
     });
   }
 
-  /** Reattach a viewed live run through its projection, never through the old host stream. */
-  async #watchProjectedRun(session: InternalSession, projection: ChatProjection, runId: string): Promise<void> {
-    session.watchedRunId = runId;
-    session.watchedSegmentId = projection.views[runId]?.segmentId;
-    session.watchedStreamVersion = projection.views[runId]?.streamVersion ?? 0;
-    const version = ++session.materializeVersion;
-    try {
-      const [messages, presentation] = await Promise.all([
-        materializeTranscript(projection, runId),
-        materializeTranscript(projection),
-      ]);
-      const current = this.#projectionContext(session.chatId);
-      if (
-        this.#sessions.get(session.chatId) !== session ||
-        session.watchedRunId !== runId ||
-        session.materializeVersion !== version ||
-        session.status !== 'ready' ||
-        current === undefined ||
-        !selectCaughtUp(current) ||
-        selectCurrentRun(current)?.runId !== runId ||
-        !opensRun(selectRunPhase(current))
-      ) {
-        if (session.watchedRunId === runId && session.materializeVersion === version) {
-          session.watchedRunId = undefined;
-          if (current !== undefined && selectCaughtUp(current)) {
-            this.#materializeProjectedTranscript(session, current);
-          }
-        }
-        return;
+  /**
+   * The displayed transcript (T2, I-1): the fold of the displayed source, plus the accepted gesture the log does not
+   * hold yet, plus the unsent seed. Each source advances only on its own authority, so a reset, a reread or a cold
+   * read in pages shows the last displayed source until its successor has authority, and no content is compared.
+   */
+  #displayedTranscript(session: InternalSession): readonly MyUIMessage[] {
+    const projection = this.#projectionContext(session.chatId);
+    if (projection !== undefined && this.#sessions.get(session.chatId) === session) {
+      /* A display validated before a release stays displayable while a fresh capture is held. */
+      const validated = this.#hasDisplayAuthority(session.chatId, projection);
+      if (selectCaughtUp(projection) && (validated || this.#hasTranscriptAuthority(session.chatId, projection))) {
+        session.displayedOwn = projection;
       }
-      session.presentationHold = {
-        messages: this.#retainSeedUntilLogged(session, presentation),
-        prefixOffset: messages.length,
-        prefix: presentation.slice(messages.length),
-        runId,
-        segmentId: session.watchedSegmentId,
-        streamVersion: session.watchedStreamVersion,
-        sourceGeneration: projection.ledger.position.sourceGeneration,
-      };
-      this.#messagePresentations.delete(session.chatId);
-      session.chat.messages = this.#retainSeedUntilLogged(session, messages);
-      const watch = createActor(sdkWatch, {
-        input: {
-          runId,
-          getProjection: () => this.#projectionContext(session.chatId),
-          subscribe: (listener) => this.subscribeProjection(session.chatId, listener),
-          transport: session.transport,
-          chat: session.chat,
-          via: 'resume',
-        },
-        ...this.#rootOptions,
-      });
-      session.watch = watch;
-      session.runHeld = true;
-      watch.start();
-      this.#settlePresentationRetries(session, runId);
-    } catch (error) {
-      if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
-        return;
+      if (validated || this.#foreignDisplayReady(session.chatId, projection)) {
+        session.displayedRemote = projection.remote;
       }
-      if (session.watchedRunId === runId) {
-        session.watchedRunId = undefined;
-      }
-      const retry = isTransientPresentationFailure(error) ? this.#retryPresentation(session, runId) : undefined;
-      if (retry === undefined) {
-        session.blockedPresentationRunId = runId;
-        session.failedTranscriptProjection = projection;
-      }
-      warnPresentation('[ChatSessionStore] projected run could not be watched', {
-        chatId: session.chatId,
-        runId,
-        status: session.status,
-        cursor: projection.ledger.position.cursor,
-        ...presentationErrorFacts(error),
-        ...(retry === undefined ? {} : { retry }),
-      });
     }
+    const own = session.displayedOwn;
+    const source: TranscriptProjection = {
+      views: own?.views ?? noViews,
+      ...(own?.live === undefined ? {} : { live: own.live }),
+      ...(session.displayedRemote === undefined ? {} : { remote: session.displayedRemote }),
+    };
+    const fold = selectTranscript(source, session.displayedFold);
+    session.displayedFold = fold;
+    const gesture =
+      session.acceptedGesture !== undefined && own?.views[session.acceptedGesture.runId] === undefined
+        ? session.acceptedGesture
+        : undefined;
+    const seed = session.seedMessage;
+    const shown = session.displayedMessages;
+    if (shown.fold === fold && shown.gesture === gesture && shown.seed === seed) {
+      return shown.messages;
+    }
+    let messages = gesture === undefined ? fold : applyAcceptedGesture(fold, gesture.request);
+    if (seed !== undefined && !messages.some((message) => message.role === 'user')) {
+      messages = [...messages, seed];
+    }
+    session.displayedMessages = { fold, gesture, seed, messages };
+    return messages;
   }
 
   /**
-   * Read a transiently failed watch or transcript again once its connection is back, from the projection, which
-   * holds every row since the last one shown: bounded per run, and only while this session is still the chat's.
-   *
-   * A sync in the meantime (the attachment answering again, a new row) also retries; a failure while a retry is
-   * already scheduled spends nothing more, so the bound counts backoff rounds, not one connection's echoes.
-   *
-   * @returns The attempt scheduled, or `undefined` once the run has spent its retries.
+   * Announce the displayed transcript when it changed, leading and trailing at most every 50 ms (D-UI-10), and settle
+   * its load state from authority (I21): once this device's log is caught up with its read answered, or other
+   * devices' history is all the chat has.
    */
-  #retryPresentation(session: InternalSession, runId: string | undefined): number | undefined {
-    if (session.presentationRetryRunId !== runId) {
-      session.presentationRetryRunId = runId;
-      session.presentationRetries = 0;
-    } else if (session.presentationRetry !== undefined) {
-      return session.presentationRetries;
+  #presentTranscript(session: InternalSession, projection: ChatProjection | undefined): void {
+    const messages = this.#displayedTranscript(session);
+    if (
+      session.acceptedGesture !== undefined &&
+      session.displayedOwn?.views[session.acceptedGesture.runId] !== undefined
+    ) {
+      session.acceptedGesture = undefined;
     }
-    if (session.presentationRetries >= presentationRetryLimit) {
-      return undefined;
+    if (
+      projection !== undefined &&
+      session.displayedOwn === projection &&
+      this.#hasDisplayAuthority(session.chatId, projection)
+    ) {
+      /* The seed is the startup request's until the current log holds a user turn (T3): the fold of the projection
+       * with authority says, never one kept from before a reset. */
+      if (session.seedMessage !== undefined && session.displayedFold.some((message) => message.role === 'user')) {
+        session.seedMessage = undefined;
+      }
+      this.#settleTranscript(session, messages);
     }
-    session.presentationRetries += 1;
-    const attempt = session.presentationRetries;
-    clearTimeout(session.presentationRetry);
-    const presentationRetry = setTimeout(
-      () => {
-        if (session.presentationRetry !== presentationRetry) {
-          return;
-        }
-        session.presentationRetry = undefined;
-        if (this.#sessions.get(session.chatId) === session) {
-          this.#syncProjection(session.chatId, 'none');
-        }
-      },
-      presentationRetryDelay * 2 ** (attempt - 1),
-    );
-    session.presentationRetry = presentationRetry;
-    return attempt;
-  }
-
-  /** A watch that opened ends its run's transient retries: the run is presented live again. */
-  #settlePresentationRetries(session: InternalSession, runId: string | undefined): void {
-    if (session.presentationRetryRunId === runId) {
-      session.presentationRetries = 0;
-      clearTimeout(session.presentationRetry);
-      session.presentationRetry = undefined;
-    }
-  }
-
-  /** Retire a failed consumer after the SDK has finished its error transition; never execute a host command. */
-  #recoverPresentation(session: InternalSession): void {
-    const { watch, watchedRunId } = session;
-    const current = this.#projectionContext(session.chatId);
-    const runId = watchedRunId ?? (current === undefined ? undefined : selectCurrentRun(current)?.runId);
-    if (runId === undefined || session.recoveringPresentation) {
+    if (messages === session.announcedMessages) {
       return;
     }
-    queueMicrotask(() => {
-      const latest = this.#projectionContext(session.chatId);
-      if (
-        this.#sessions.get(session.chatId) !== session ||
-        (latest !== undefined && selectCurrentRun(latest)?.runId !== runId) ||
-        session.watch !== watch ||
-        session.watchedRunId !== watchedRunId ||
-        session.status !== 'error'
-      ) {
-        return;
-      }
-      const repeated = session.recoveredRunId === runId;
-      session.recoveredRunId = runId;
-      session.blockedPresentationRunId = repeated ? runId : undefined;
-      session.recoveringPresentation = true;
-      session.materializeVersion++;
-      watch?.stop();
-      session.watch = undefined;
-      session.watchedRunId = undefined;
-      this.#projections.get(session.chatId)?.send({ type: 'clear-live', runId });
-      const projection = this.#projectionContext(session.chatId);
-      warnPresentation('[ChatSessionStore] presentation recovery', {
-        chatId: session.chatId,
-        runId,
-        status: session.status,
-        ...presentationErrorFacts(session.chat.error),
-        cursor: projection?.ledger.position.cursor,
-        mode:
-          repeated || projection === undefined || !opensRun(selectRunPhase(projection))
-            ? 'durable-only'
-            : 'retry-watch',
-        phase: projection === undefined ? 'unknown' : selectRunPhase(projection),
-      });
-      session.chat.clearError();
-      session.recoveringPresentation = false;
-      this.#syncProjection(session.chatId, 'none');
-    });
+    session.announcedMessages = messages;
+    this.#announce(session);
   }
 
-  /** A startup request is chat-record-owned only while the host log has no user turn. */
-  #retainSeedUntilLogged(session: InternalSession, messages: MyUIMessage[]): MyUIMessage[] {
-    const seed = session.seedMessage;
-    if (seed === undefined) {
-      return messages;
+  /** Wake the chat's subscribers, leading and trailing at most every 50 ms (D-UI-10). */
+  #announce(session: InternalSession): void {
+    if (session.announceTimer !== undefined) {
+      session.announcePending = true;
+      return;
     }
-    if (messages.some((message) => message.role === 'user')) {
-      session.seedMessage = undefined;
-      return messages;
-    }
-    return [...messages, seed];
+    session.publishedMessages = session.announcedMessages;
+    this.#chatTopics.get(session.chatId)?.emit();
+    session.announceTimer = setTimeout(() => {
+      session.announceTimer = undefined;
+      if (session.announcePending) {
+        session.announcePending = false;
+        this.#announce(session);
+      }
+    }, chatMessagesThrottle);
   }
 
   /** Initial empty cursors prove nothing; foreign history requires its completed authoritative scan. */
@@ -4138,77 +3829,6 @@ export class ChatSessionStore {
     );
   }
 
-  /** Version async SDK materialization so only the newest caught-up log can replace a ready transcript. */
-  #materializeProjectedTranscript(session: InternalSession, projection: ChatProjection): void {
-    if (
-      !this.#hasDisplayAuthority(session.chatId, projection) ||
-      (session.status !== 'ready' && session.status !== 'error') ||
-      session.watchedRunId !== undefined ||
-      session.recoveringPresentation ||
-      (session.failedTranscriptProjection?.views === projection.views &&
-        session.failedTranscriptProjection.remote?.views === projection.remote?.views) ||
-      (session.transcriptSource?.views === projection.views &&
-        session.transcriptSource.remote?.views === projection.remote?.views &&
-        session.transcriptSourceVersion === session.materializeVersion)
-    ) {
-      return;
-    }
-    const version = ++session.materializeVersion;
-    session.transcriptSource = projection;
-    session.transcriptSourceVersion = version;
-    session.transcriptMaterialization = this.#applyProjectedTranscript(session, projection, version);
-  }
-
-  async #applyProjectedTranscript(
-    session: InternalSession,
-    projection: ChatProjection,
-    version: number,
-  ): Promise<void> {
-    try {
-      const messages = await materializeTranscript(projection);
-      if (
-        this.#sessions.get(session.chatId) === session &&
-        this.#hasDisplayAuthority(session.chatId, projection) &&
-        (session.status === 'ready' || session.status === 'error') &&
-        session.watchedRunId === undefined &&
-        session.materializeVersion === version
-      ) {
-        session.presentationHold = undefined;
-        const retained = this.#retainSeedUntilLogged(session, messages);
-        const previous = session.chat.messages;
-        if (previous.length !== retained.length || retained.some((message, index) => message !== previous[index])) {
-          this.#messagePresentations.delete(session.chatId);
-          session.chat.messages = retained;
-        }
-        session.failedTranscriptProjection = undefined;
-        this.#settleTranscript(session, retained);
-      }
-    } catch (error) {
-      if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
-        return;
-      }
-      const runId = selectCurrentRun(projection)?.runId;
-      const retry = isTransientPresentationFailure(error) ? this.#retryPresentation(session, runId) : undefined;
-      if (retry === undefined) {
-        session.failedTranscriptProjection = projection;
-      } else {
-        // Nothing was read: the same log is materialized again when the retry syncs.
-        session.transcriptSource = undefined;
-      }
-      // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive. What the
-      // device remembers of the trays stays, since nothing was read.
-      this.#latchUnreadTranscript(session);
-      warnPresentation('[ChatSessionStore] projected transcript could not be materialized', {
-        chatId: session.chatId,
-        runId,
-        status: session.status,
-        cursor: projection.ledger.position.cursor,
-        ...presentationErrorFacts(error),
-        ...(retry === undefined ? {} : { retry }),
-      });
-    }
-  }
-
   /**
    * Mark the transcript settled and remember its trays (I21, U10). Views read both in the snapshot that carries the
    * applied turns, so a change that leaves the turns as they were still notifies.
@@ -4245,7 +3865,7 @@ export class ChatSessionStore {
    * turns: then it waits for that scan (I21). The device keeps what it remembers of the trays.
    */
   #latchUnreadTranscript(session: InternalSession): void {
-    if (session.messages.length === 0 && this.#foreignScanState(session.chatId) === 'pending') {
+    if (this.#displayedTranscript(session).length === 0 && this.#foreignScanState(session.chatId) === 'pending') {
       session.transcriptAwaitsForeignScan = true;
       return;
     }
@@ -4513,12 +4133,12 @@ export class ChatSessionStore {
   }
 
   #createSession(chatId: string, projectId: string): InternalSession {
-    // Defensive aliases so closures bound to the AI SDK's internal scheduler
-    // always read through `this.#deps` (the latest provider snapshot).
+    // Defensive alias so actor closures always read through `this.#deps` (the latest provider snapshot).
     const depsRef = (): ChatSessionDeps => this.#deps;
 
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
+    const displayed = (): readonly MyUIMessage[] => this.#displayedTranscript(session);
 
     /* The project is the caller's (PV-S4), so the composer binds now; only a released predecessor's drain is awaited. */
     const { client } = depsRef();
@@ -4676,37 +4296,15 @@ export class ChatSessionStore {
               }
 
               if (!loadedChat) {
-                if (session.chat.messages.length === 0) {
-                  this.#messagePresentations.delete(session.chatId);
-                  session.chat.messages = [];
-                }
                 session.draftActorRef.send({ type: 'initializeFromChat' });
 
                 return { chat: undefined };
               }
 
-              /* Splice, never replace and never skip. The live `Chat` may already
-               * hold messages this load never saw — a brand-new chat that is
-               * already in-flight, a host reattach that rebuilt from the log, a
-               * reconciled durable user row — and overwriting them is the classic
-               * "load wipes in-flight messages" race. But *skipping* the load when
-               * they are there loses the other side: a session recreated by the
-               * shell's remount starts with an empty `Chat` and reads its history
-               * asynchronously, so a submit landing inside that read dropped every
-               * earlier turn for good — nothing reads the row twice, and a
-               * browser-placed chat has no reattach to rebuild it from the log.
-               * Ids are shared with the log's own derivation (P26), so keeping the
-               * row's messages this transcript does not already name can only add
-               * history, never a second copy of it. */
-              const inFlight = session.chat.messages;
-              const inFlightIds = new Set(inFlight.map((message) => message.id));
-              this.#messagePresentations.delete(session.chatId);
-              session.chat.messages = [
-                ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
-                ...inFlight,
-              ];
-
-              const lastMessage = session.chat.messages.at(-1);
+              /* The record holds no transcript (P26), only the startup request's pending user row. Whether the log
+               * already holds that turn is for a fresh read of the log to say (`startPendingSeed`), never for a fold
+               * this session may have shown from an earlier projection (T4). */
+              const lastMessage = loadedChat.messages.at(-1);
               const { startupRequest } = loadedChat;
               const isEligibleStartupRequest =
                 startupRequest !== undefined &&
@@ -4724,6 +4322,9 @@ export class ChatSessionStore {
                 session.seedRemoteReadVersion = undefined;
                 session.seedLocalLogEmpty = false;
                 session.seedLocalLogCheck = undefined;
+                /* Nor can a fold this session showed from it: the seed shows alone until the fresh read has authority. */
+                session.displayedOwn = undefined;
+                session.displayedRemote = undefined;
                 this.#projectionOf(input.chatId).send({ type: 'reset' });
                 if (observed !== undefined) {
                   this.#startObservedAttachment(input.chatId, observed);
@@ -4740,6 +4341,7 @@ export class ChatSessionStore {
                 session.pendingSeedGesture = seedGesture;
                 session.seedRequestId = startupRequest.id;
                 session.seedMessage = lastMessage;
+                this.#presentTranscript(session, this.#projectionContext(input.chatId));
                 void this.#refreshRemoteSegmentsSafely(input.chatId, session.projectId);
                 this.startPendingSeed(input.chatId);
                 return { chat: { ...loadedChat, error: undefined }, heldPlacement };
@@ -4858,57 +4460,6 @@ export class ChatSessionStore {
       draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
     });
 
-    const transport = new BrowserPlacementChatTransport<MyUIMessage>();
-    /* PL1: the SDK loads now (at once when an earlier chat loaded it), so the chat is the real one well before a host
-     * answers a send; until then it queues. */
-    const chat = new DeferredChat({
-      chatId,
-      transport,
-      sdk: this.#chatSdk,
-      /* The SDK closes a view stream; only the projected host log ends a run. */
-      onFinish: () => undefined,
-      // SDK watch errors are presentation-local. The host log owns durable
-      // run failure; a retired stream callback must not rewrite chat.error.
-      onError: () => undefined,
-    });
-    chat.load();
-
-    // Wire the AI SDK Chat's snapshot callbacks into per-chatId subscriber
-    // sets. `~registerMessagesCallback` etc. are public (the `~` prefix is
-    // the AI SDK's "internal-but-intended-for-subscribers" marker — see
-    // node_modules/@ai-sdk/react/dist/index.d.ts).
-    // Message changes are throttled (leading and trailing, D-UI-10): a stream
-    // writes one snapshot per chunk, and every subscriber re-rendered on each.
-    // Status and error callbacks stay immediate.
-    const unregisterMessages = chat['~registerMessagesCallback'](() => {
-      if (
-        session.presentationHold !== undefined &&
-        includesPresentedPrefix(chat.messages, session.presentationHold.prefix, session.presentationHold.prefixOffset)
-      ) {
-        session.presentationHold = undefined;
-      }
-      this.#chatTopics.get(chatId)?.emit();
-    }, chatMessagesThrottle);
-    const unregisterStatus = chat['~registerStatusCallback'](() => {
-      const next = chat.status;
-      if (session.status !== next) {
-        session.status = next;
-        if (next === 'error') {
-          this.#recoverPresentation(session);
-        }
-        if (next === 'ready') {
-          const projection = this.#projectionContext(chatId);
-          if (projection !== undefined && selectCaughtUp(projection)) {
-            this.#syncProjection(chatId, 'none');
-          }
-        }
-      }
-      this.#chatTopics.get(chatId)?.emit();
-    });
-    const unregisterError = chat['~registerErrorCallback'](() => {
-      this.#chatTopics.get(chatId)?.emit();
-    });
-
     persistenceActorRef.start();
     draftActorRef.start();
     composerRecordRef.start();
@@ -4972,9 +4523,9 @@ export class ChatSessionStore {
     const chatRoot = createActor(this.#chatSessionLogic, { ...this.#rootOptions, input: { chatId, projectId } });
     session = {
       chatId,
-      chat,
       get messages() {
-        return session.presentationHold?.messages ?? chat.messages;
+        // ponytail: an idle read refolds, so a change no announcement covers still shows (as before D-UI-10 reads).
+        return session.announceTimer === undefined ? displayed() : session.publishedMessages;
       },
       get transcript() {
         return transcriptOf(session);
@@ -4982,7 +4533,6 @@ export class ChatSessionStore {
       get rememberedComposerTrays() {
         return session.composerTrays;
       },
-      transport,
       projectId,
       chatRoot,
       stateActorRef: chatRoot,
@@ -5006,25 +4556,20 @@ export class ChatSessionStore {
       pendingSeedGesture: undefined,
       activeCommand: undefined,
       commandAbort: undefined,
-      watch: undefined,
       watchedRunId: undefined,
-      watchedSegmentId: undefined,
-      watchedStreamVersion: undefined,
-      presentationHold: undefined,
-      materializeVersion: 0,
-      transcriptMaterialization: undefined,
+      resumedAttempt: undefined,
+      displayedOwn: undefined,
+      displayedRemote: undefined,
+      displayedFold: noMessages,
+      displayedMessages: { fold: noMessages, gesture: undefined, seed: undefined, messages: noMessages },
+      acceptedGesture: undefined,
+      announcedMessages: noMessages,
+      publishedMessages: noMessages,
+      announceTimer: undefined,
+      announcePending: false,
       transcriptSettled: this.#createdEmpty.delete(chatId),
       transcriptAwaitsForeignScan: false,
       composerTrays: readRememberedComposerTrays(chatId),
-      recoveredRunId: undefined,
-      blockedPresentationRunId: undefined,
-      presentationRetries: 0,
-      presentationRetryRunId: undefined,
-      presentationRetry: undefined,
-      recoveringPresentation: false,
-      failedTranscriptProjection: undefined,
-      transcriptSource: undefined,
-      transcriptSourceVersion: 0,
       commandInFlight: false,
       stopRequested: false,
       stopOrigin: undefined,
@@ -5032,14 +4577,13 @@ export class ChatSessionStore {
       restoredStoppedRunId: undefined,
       presentationWatch: undefined,
       presentedRunId: undefined,
-      status: chat.status,
+      status: 'ready',
       turnSubscriptions: [],
       offerChatWaits: () => undefined,
       dispose: () => {
         unsubscribeReachability?.();
         heldSubscription.unsubscribe();
         messageQueueRef.stop();
-        session.presentationHold = undefined;
         session.observationRelease?.();
         session.observationRelease = undefined;
         for (const subscription of session.turnSubscriptions) {
@@ -5048,14 +4592,9 @@ export class ChatSessionStore {
         session.turnSubscriptions = [];
         recordLoadedSubscription.unsubscribe();
         session.commandAbort?.abort();
-        session.watch?.stop();
-        clearTimeout(session.presentationRetry);
-        session.presentationRetry = undefined;
+        clearTimeout(session.announceTimer);
+        session.announceTimer = undefined;
         lifecycleSubscription?.unsubscribe();
-        unregisterMessages();
-        unregisterStatus();
-        unregisterError();
-        chat.dispose();
       },
     };
 
@@ -5080,6 +4619,56 @@ export class ChatSessionStore {
     return session;
   }
 
+  /**
+   * A command this page sent that its log does not show as a run yet: in flight, a Start whose run is unfolded, or a
+   * Resume whose run has not reopened (a later attempt, or its attempt running again after a native pause).
+   */
+  #awaitsRun(session: InternalSession): boolean {
+    const command = session.activeCommand;
+    if (session.commandInFlight) {
+      return true;
+    }
+    /* A refused read folds nothing more, so the run a command waits for would never arrive. */
+    if (
+      (command?.type !== 'start' && command?.type !== 'resume') ||
+      this.#observed.get(session.chatId)?.status === 'refused'
+    ) {
+      return false;
+    }
+    const run = this.#projectionContext(session.chatId)?.ledger.runs[command.payload.runId];
+    if (command.type === 'start') {
+      return run === undefined;
+    }
+    return (
+      run !== undefined &&
+      run.attempt === session.resumedAttempt &&
+      run.lifecycle !== 'admitted' &&
+      run.lifecycle !== 'running'
+    );
+  }
+
+  /** Tell the chat's subscribers when its status moved (T3): the status callback of a stream no longer does. */
+  #refreshStatus(session: InternalSession): void {
+    const status = this.getChatStatus(session.chatId);
+    if (session.status !== status) {
+      session.status = status;
+      this.#chatTopics.get(session.chatId)?.emit();
+    }
+  }
+
+  /**
+   * Let go of the run a command holds once the chat's log read is refused for good: that log folds nothing more, so
+   * the run would never arrive, and the held session could never be disposed (a later reattach must not revive it).
+   */
+  #releaseRefusedRun(session: InternalSession): void {
+    session.watchedRunId = undefined;
+    if (!session.commandInFlight) {
+      session.activeCommand = undefined;
+    }
+    this.#refreshStatus(session);
+    this.#scheduleRunReleaseIfTerminal(session);
+  }
+
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {
     queueMicrotask(() => {
       if (!session.runHeld || session.watchedRunId !== undefined || session.commandInFlight) {
@@ -5087,6 +4676,7 @@ export class ChatSessionStore {
       }
       session.runHeld = false;
       session.activeCommand = undefined;
+      this.#refreshStatus(session);
       this.#disposeIfUnreferenced(session);
     });
   }

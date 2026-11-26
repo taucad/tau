@@ -9,15 +9,15 @@ name: Release gate
 # - Sweep: every project's `lint`, `typecheck`, `build` (with `size` and `check-desktop-payload`),
 #   package checks and `test`, in the `ci.yml` affected lanes' shards, with `--skip-nx-cache` and no
 #   remote cache server. `test` excludes `tag:scope:api` (it needs PostgreSQL and MinIO, which only the
-#   `ci.yml` API job provides) and `tag:ci:quarantined`, as the `ci.yml` lanes do.
+#   `ci.yml` API job provides) and `tag:ci:nightly-only`, as the `ci.yml` lanes do.
 # - Formal matrix: `formal-nightly.yml` for every `formal:nightly` project and target, seeded by this run's
 #   id, so each gate run explores a fresh seed and prints it for replay.
 # - Cross-root reads: `scripts:validate-cross-root-reads`, which also runs in every `ci.yml` workspace job.
-# - API tests (C2a): every `tag:scope:api` project's `test` (without `tag:ci:quarantined`) against the PostgreSQL,
+# - API tests (C2a): every `tag:scope:api` project's `test` (without `tag:ci:nightly-only`) against the PostgreSQL,
 #   Redis and MinIO containers `ci.yml`'s API job starts, after the protected migration job. Their credentials
 #   are the local development values in `apps/api/.env.example`; no secret is read.
 # - End-to-end (C2b): every ratcheted suite, one row per entry of a `test:e2e:queue` target's `dependsOn`, run as
-#   `ci.yml`'s `e2e-queue` rows run them, for every project instead of the affected ones. `tag:ci:quarantined`
+#   `ci.yml`'s `e2e-queue` rows run them, for every project instead of the affected ones. `tag:ci:nightly-only`
 #   projects are left out, as the sweep leaves out their `test`.
 #
 # Every workflow the gate calls takes an `uncached` input, and the gate passes `true`: a caller's workflow-level
@@ -172,7 +172,7 @@ jobs:
             typecheck) pnpm nx run-many -t typecheck --graph="$graph" > /dev/null ;;
             build) pnpm nx run-many -t build size check-desktop-payload --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
-            test-*) pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$graph" > /dev/null ;;
             cross-root-reads) exit 0 ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -226,11 +226,11 @@ jobs:
               pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$shard" --parallel=3
               ;;
             test-*)
-              pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
               projects=$(jq -c '
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
-                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:nightly-only") | not))' "$RUNNER_TEMP/test-graph.json")
               shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3 \
                 --graph "$RUNNER_TEMP/test-graph.json" --targets test)
               if [ -z "$shard" ]; then
@@ -294,7 +294,7 @@ jobs:
       - name: Run API suites (real PostgreSQL + MinIO)
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
-        run: pnpm nx run-many -t test --projects tag:scope:api --exclude tag:ci:quarantined --parallel=1 --outputStyle=static
+        run: pnpm nx run-many -t test --projects tag:scope:api --exclude tag:ci:nightly-only --parallel=1 --outputStyle=static
 
   # C2b: one row per ratcheted end-to-end suite of every project, read from the graph as `ci.yml`'s plan reads
   # the affected ones, with the same refusals: an entry that is not a target of its project, or a suite that
@@ -330,7 +330,7 @@ jobs:
             .graph.nodes as $nodes
             | [$nodes | keys[] as $project
                 | $nodes[$project].data as $data
-                | select($data.tags // [] | index(["ci:quarantined"]) | not)
+                | select($data.tags // [] | index(["ci:nightly-only"]) | not)
                 | $data.targets as $targets
                 | select($targets["test:e2e:queue"] != null)
                 | $targets["test:e2e:queue"].dependsOn // [] | .[]

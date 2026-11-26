@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Browser acceptance shares the application's native-module aliases.
@@ -55,6 +55,7 @@ export default defineConfig({
   },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['app/hooks/attachment-image.browser.test.ts'],
     fileParallelism: false,
     testTimeout: 60_000,

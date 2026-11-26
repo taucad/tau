@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChannelClosedError } from '@taucad/agent-host/channel-client';
 import type { ReadAnswer } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
@@ -159,20 +158,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
+describe('ChatSessionStore approval cycles through the displayed fold (T3)', () => {
   it('should surface every approval card while the agent host reconnects as a request arrives', async () => {
     const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const host = createHost();
     const store = createStore();
-    /* While the owner's connection is being replaced, reading the run through it fails with the channel's close. */
-    let reconnecting = false;
-    const materialize = Projection.materializeTranscript;
-    vi.spyOn(Projection, 'materializeTranscript').mockImplementation(async (...parameters) => {
-      if (reconnecting) {
-        throw new ChannelClosedError({ origin: 'remote', code: 'PEER_GONE' });
-      }
-      return materialize(...parameters);
-    });
     host.rows.push(
       {
         ...lifecycleRow(0, 'admitted'),
@@ -180,17 +170,17 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       },
       lifecycleRow(1, 'running'),
     );
-    const { chat } = store.acquire('chat', 'project');
+    const session = store.acquire('chat', 'project');
     const unobserve = store.observe('chat', 'project');
     const unpublish = store.publishProjectHostConnector('project', host.connect);
     const cardIds = (): string[] =>
-      pendingApprovals(chat.messages, Projection.selectOpenApprovals(store.getProjection('chat')!)).map(
+      pendingApprovals(session.messages, Projection.selectOpenApprovals(store.getProjection('chat')!)).map(
         (approval) => approval.interruptId,
       );
     try {
       await vi.waitFor(() => {
-        expect(chat.messages[0]?.id).toBe('u');
-        expect(['submitted', 'streaming']).toContain(chat.status);
+        expect(session.messages[0]?.id).toBe('u');
+        expect(['submitted', 'streaming']).toContain(store.getChatStatus('chat'));
       });
       const cycles = 8;
       /* One request, its pause, its answer and the resumed attempt's tool result. */
@@ -212,7 +202,7 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
           }),
         );
         await vi.waitFor(() => {
-          expect(chat.messages.at(-1)?.parts).toContainEqual(
+          expect(session.messages.at(-1)?.parts).toContainEqual(
             expect.objectContaining({ type: 'text', text: `Step ${cycle}` }),
           );
         });
@@ -236,27 +226,10 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
           lifecycleRow(host.rows.length + 1, 'paused'),
         ];
         if (cycle === 7) {
-          /* The seventh request lands while the concern reconnects: the open watch and the transcript read both meet
-           * the dropped connection, and the attachment redials. */
-          reconnecting = true;
+          /* The seventh request lands while the concern reconnects: the attachment redials, and the transcript is a
+           * fold of what it reads, so nothing about the dropped connection reaches it (T3). */
           host.drop();
-          host.append(request[0]!);
-          await vi.waitFor(() => {
-            expect(
-              diagnostic.mock.calls.some(
-                ([label]) => label === '[ChatSessionStore] projected run could not be watched',
-              ),
-            ).toBe(true);
-          });
-          host.append(request[1]!);
-          await vi.waitFor(() => {
-            expect(
-              diagnostic.mock.calls.some(
-                ([label]) => label === '[ChatSessionStore] projected transcript could not be materialized',
-              ),
-            ).toBe(true);
-          });
-          reconnecting = false;
+          host.append(...request);
         } else {
           host.append(...request);
         }
@@ -264,7 +237,7 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
           expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('paused');
           // The card the banner draws, and the transcript the person reads, both name the open request.
           expect(cardIds()).toEqual([interruptId]);
-          expect(pendingAgentHostApprovals(chat.messages).map((approval) => approval.interruptId)).toEqual([
+          expect(pendingAgentHostApprovals(session.messages).map((approval) => approval.interruptId)).toEqual([
             interruptId,
           ]);
         }, retryWindow);
@@ -272,10 +245,10 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
         expect(await store.respondToProjectedApproval('chat', interruptId, { approved: true, optionId: 'allow' })).toBe(
           true,
         );
-        // Not latched: every resume, the seventh's too, is watched live again.
+        // Not latched: every resume, the seventh's too, streams again.
         await vi.waitFor(() => {
           expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('running');
-          expect(['submitted', 'streaming']).toContain(chat.status);
+          expect(['submitted', 'streaming']).toContain(store.getChatStatus('chat'));
         });
         host.append(
           logRow(host.rows.length, {
@@ -301,7 +274,7 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       await cyclesFrom(1);
       host.append(lifecycleRow(host.rows.length, 'completed'));
       await vi.waitFor(() => {
-        expect(chat.status).toBe('ready');
+        expect(store.getChatStatus('chat')).toBe('ready');
         expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('completed');
       });
       expect(cardIds()).toEqual([]);
@@ -309,19 +282,9 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       expect(resolutions).toHaveLength(cycles);
       // Every command dialled a connection of its own, beside the attachment's first one and its one redial.
       expect(host.connects()).toBeGreaterThanOrEqual(2 + host.hostCommand.mock.calls.length);
-      const watched = diagnostic.mock.calls.flatMap(([label, facts]) =>
-        label === '[ChatSessionStore] projected run could not be watched' && typeof facts === 'string'
-          ? [JSON.parse(facts) as Record<string, unknown>]
-          : [],
-      );
-      expect(watched[0]).toMatchObject({
-        chatId: 'chat',
-        runId: 'run_1',
-        errorName: 'ChannelClosedError',
-        errorCode: 'PEER_GONE',
-        errorMessage: 'Channel closed',
-        retry: 1,
-      });
+      expect(
+        diagnostic.mock.calls.filter(([label]) => typeof label === 'string' && label.includes('could not be')),
+      ).toEqual([]);
     } finally {
       unpublish();
       unobserve();
@@ -340,16 +303,15 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       },
       lifecycleRow(1, 'running'),
     );
-    const { chat } = store.acquire('chat', 'project');
+    const session = store.acquire('chat', 'project');
     const unobserve = store.observe('chat', 'project');
     const unpublish = store.publishProjectHostConnector('project', host.connect);
-    const session = store.get('chat')!;
     /* What the composer offers Stop on (`useChatTextareaLogic`'s `canStop`) beside a streaming status. */
     const stopOffered = (): boolean =>
       session.stateActorRef.getSnapshot().context.pendingApprovalCount > 0 || store.isStopping('chat');
     try {
       await vi.waitFor(() => {
-        expect(['submitted', 'streaming']).toContain(chat.status);
+        expect(['submitted', 'streaming']).toContain(store.getChatStatus('chat'));
       });
       host.append(
         logRow(host.rows.length, {
@@ -372,8 +334,8 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       );
       await vi.waitFor(() => {
         expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('paused');
-        // The SDK stream closed with the pause: the status alone would offer Send.
-        expect(chat.status).toBe('ready');
+        // A paused run is not streaming: the status alone would offer Send.
+        expect(store.getChatStatus('chat')).toBe('ready');
         expect(stopOffered()).toBe(true);
       });
 
@@ -385,8 +347,8 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
       });
       expect(stopOffered()).toBe(false);
       expect(Projection.selectOpenApprovals(store.getProjection('chat')!)).toEqual([]);
-      expect(pendingAgentHostApprovals(chat.messages)).toEqual([]);
-      expect(chat.status).toBe('ready');
+      expect(pendingAgentHostApprovals(session.messages)).toEqual([]);
+      expect(store.getChatStatus('chat')).toBe('ready');
       const cancels = host.hostCommand.mock.calls.filter(([command]) => command.type === 'cancel');
       expect(cancels.map(([command]) => command.payload)).toEqual([{ chatId: 'chat', runId: 'run_1' }]);
       // The cancel's facts are logged as JSON text, which the desktop log keeps whole.

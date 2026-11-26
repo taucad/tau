@@ -92,6 +92,8 @@ jobs:
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
       e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
+      e2e-shadow: ${{ steps.plan.outputs.e2e-shadow }}
+      e2e-shadow-suites: ${{ steps.plan.outputs.e2e-shadow-suites }}
       pkgcheck: ${{ steps.plan.outputs.pkgcheck }}
       pkgcheck-shards: ${{ steps.plan.outputs.pkgcheck-shards }}
       node-floor: ${{ steps.plan.outputs.node-floor }}
@@ -175,6 +177,10 @@ jobs:
           # is affected. That target's `dependsOn` lists the project's end-to-end suites that passed five consecutive
           # e2e-nightly runs (two before 2026-11-17, when merge-queue defect MQ-3 raised the bar); `e2e-queue-suites`
           # names one row per suite, and e2e-nightly.yml leaves them out.
+          # Shadow rows (`e2e-shadow`, operator ruling Q1, CI flake quarantine blueprint FQ-13): a project with a
+          # `test:e2e:shadow` target is affected. Its `dependsOn` lists the suites on probation for `test:e2e:queue`;
+          # `e2e-shadow-suites` names one row per suite, in the merge queue and on a push to `main` the queue did not
+          # prove, never on a pull request, and no row is required.
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -212,6 +218,7 @@ jobs:
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
              "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"},
+             "e2e-shadow": {"targets": ["test:e2e:shadow"], "pr": "queue"},
              "compute-qualify": {"targets": ["compute-qualify-ci"]},
              "node-floor": {"tags": ["type:package"], "targets": ["test"], "pr": "touched"}}
           QUEUE_HUBS: '["agent-host", "host"]'
@@ -449,6 +456,22 @@ jobs:
                   elif ($targets[.].metadata.shards // 1) > 1 then
                     error("\($project):\(.) declares shards; the e2e-queue lane runs a suite as one job")
                   else {project: $project, target: ., label: "\($project) \(.)", slug: ("\($project)-\(.)" | gsub(":"; "-"))} end]' <<< "$lanes")
+          e2e_shadow=$(flag e2e-shadow)
+          # One row per shadow suite of the selected projects, checked as the ratchet's rows are, and never a suite its
+          # project also lists in `test:e2e:queue` (a suite gates or is on probation, never both). `browsers` is what the
+          # row installs: the suite's `metadata.browsers`, else all three, as an `e2e-queue` row.
+          e2e_shadow_suites=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" '
+            $graph[0].graph.nodes as $nodes
+            | [."e2e-shadow"[] as $project | $nodes[$project].data.targets as $targets
+                | $targets["test:e2e:shadow"].dependsOn // [] | .[]
+                | if type != "string" or ($targets[.] == null) then
+                    error("\($project):test:e2e:shadow depends on \(tojson), which is not a target of \($project)")
+                  elif (. as $suite | $targets["test:e2e:queue"].dependsOn // [] | index([$suite])) != null then
+                    error("\($project):\(.) is in both test:e2e:shadow and test:e2e:queue")
+                  elif ($targets[.].metadata.shards // 1) > 1 then
+                    error("\($project):\(.) declares shards; the e2e-shadow lane runs a suite as one job")
+                  else {project: $project, target: ., label: "\($project) \(.)", slug: ("\($project)-\(.)" | gsub(":"; "-")),
+                    browsers: ($targets[.].metadata.browsers // ["chromium", "firefox", "webkit"] | join(" "))} end]' <<< "$lanes")
           # Package checks (`pkgcheck`): every affected project with a `pkgcheck`, `audit-public-surface` or
           # `readme-quickstart` target, under no pull-request or merge-queue rule (as the lane ran them before it
           # waited for this plan), dealt by measured seconds into one shard per 600 s, at most four. A push that
@@ -500,6 +523,8 @@ jobs:
             echo "shell-projects=$shell_projects"
             echo "e2e-queue=$e2e_queue"
             echo "e2e-queue-suites=$e2e_queue_suites"
+            echo "e2e-shadow=$e2e_shadow"
+            echo "e2e-shadow-suites=$e2e_shadow_suites"
             echo "pkgcheck=$(if [ "$pkgcheck_shards" = '[]' ]; then echo false; else echo true; fi)"
             echo "pkgcheck-shards=$pkgcheck_shards"
             echo "node-floor=$(if [ "$node_floor_shards" = '[]' ]; then echo false; else echo true; fi)"
@@ -704,7 +729,7 @@ jobs:
             typecheck-*) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
             # shellcheck disable=SC2086 # BUILD_TARGETS is a word list
             build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;
-            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
           node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
@@ -812,16 +837,16 @@ jobs:
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
-              # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
+              # this runner. `ci:nightly-only` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
-              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
               # The task graph also holds the tasks `test` depends on (builds and the like),
               # so keep the `test` tasks, and drop an excluded tag again in case another
               # project's `test` ever depends on one of theirs.
               projects=$(jq -c '
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
-                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:nightly-only") | not))' "$RUNNER_TEMP/test-graph.json")
               # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
               # tasks, every one of them, in place of the project; the rest enter as projects.
               units=$(jq -c --argjson projects "$projects" '
@@ -1515,6 +1540,151 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Shadow rows (operator ruling Q1, option C; CI decomposition global review ruling 8; CI flake quarantine blueprint
+  # FQ-13, "Probation and quarantine are one mechanism"): a suite on probation for the end-to-end ratchet. A project
+  # lists it in its `test:e2e:shadow` target's `dependsOn`, and the plan turns each into one row here, set up as an
+  # `e2e-queue` row is (after `queue-builds`, with only the browsers the suite's `metadata.browsers` names), whenever its
+  # project is affected, in the merge queue and on a push to `main` the queue did not prove; never on a pull request.
+  # No row gates anything: the required gate does not need this job, no `Fail fast` job watches it, a failed row cancels
+  # no sibling, and `continue-on-error` keeps a failure out of the run's conclusion, the colour of `main` that
+  # `main-ci-success` reads. The suite step continues on error too, so the job ends green and the queue-health report
+  # sees no failed lane; the row's result is in its job summary and a warning, and its count is the flake ledger's,
+  # from the `test-outcomes-shadow-*` artifact. An invalidated merge group's run is cancelled with its rows (the queue's
+  # own cancel-stale), and a row that was cancelled leaves its count as it was. At 100 consecutive passing runs
+  # `shadow-row-promotion.yml` proposes moving the suite to `test:e2e:queue`.
+  e2e-shadow:
+    name: Shadow end-to-end (${{ matrix.suite.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    # `queue-builds` only to start after it, never for its result, as `e2e-queue`.
+    needs: [plan, queue-builds]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-shadow == 'true' }}
+    continue-on-error: true
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.e2e-shadow-suites) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # Global review ruling 5: a row installs only the browsers its suite's Vitest instances launch.
+      - name: Install browsers for Vitest Browser (system dependencies)
+        uses: ./.github/actions/apt-install
+        with:
+          playwright-browsers: ${{ matrix.suite.browsers }}
+      - name: Install browsers for Vitest Browser
+        env:
+          BROWSERS: ${{ matrix.suite.browsers }}
+        run: |
+          read -r -a browsers <<< "$BROWSERS"
+          ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install "${browsers[@]}"
+
+      - name: Install Pandoc for reference conversion
+        run: |
+          ./.github/actions/apt-install/download.sh pandoc-download \
+            https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb \
+            "$RUNNER_TEMP/pandoc.deb" sha256:91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372
+          sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Install a software Vulkan driver for native rendering
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      # The `e2e-queue` row's command, so a promoted suite runs as it ran here.
+      - name: Run the end-to-end suite
+        id: suite
+        continue-on-error: true
+        timeout-minutes: 60
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+          PROJECT: ${{ matrix.suite.project }}
+          TARGET: ${{ matrix.suite.target }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
+
+      # Field trace validation, as an `e2e-queue` row does, over whatever chat logs the suite captured. A suite that
+      # captured none is named in the summary: it joins `SUITES_WITHOUT_CHAT` when it is promoted.
+      - name: Setup formal toolchains
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        id: chat-logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: |
+          if find "out/test-results/chat-logs/$PROJECT" -name '*.jsonl' -print -quit 2> /dev/null | grep -q .; then
+            pnpm nx run-many -t formal:logs --projects "$PROJECT"
+          else
+            echo "captured=none" >> "$GITHUB_OUTPUT"
+            echo "The suite captured no chat log."
+          fi
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-shadow-diagnostics-${{ matrix.suite.slug }}
+          path: |
+            out/test-results/vitest-browser
+            out/test-results/chat-logs
+            out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # FQ-1 and FQ-13: the rows `@taucad/vitest-ci` wrote, which the flake ledger counts against the shadow bar. The
+      # `shadow` prefix keeps them out of the required gate's retried-pass budget; the ledger reads every
+      # `test-outcomes-*` artifact.
+      - name: Upload test outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-outcomes-shadow-${{ matrix.suite.slug }}
+          path: out/test-results/*/*.outcomes.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Report the shadow row
+        if: always()
+        env:
+          LABEL: ${{ matrix.suite.label }}
+          SUITE: ${{ steps.suite.outcome }}
+          CHAT_LOGS: ${{ steps.chat-logs.outcome }}
+          CAPTURED: ${{ steps.chat-logs.outputs.captured }}
+        run: |
+          {
+            echo "### Shadow row $LABEL: suite $SUITE (not required)"
+            echo "Chat log validation: $CHAT_LOGS${CAPTURED:+ (captured none)}. The flake ledger counts this row's runs against the 100-run bar."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SUITE" != success ] || [ "$CHAT_LOGS" = failure ]; then
+            echo "::warning title=Shadow row::$LABEL: suite $SUITE, chat log validation $CHAT_LOGS. A shadow row gates nothing; a failed test resets its count."
+          fi
+
   # Compute reuse qualification (audit R5): the cheap subset of the Replicad qualification matrix, run whenever the
   # plan's input check selects it. It asserts reuse-off GLB hashes, byte parity with reuse on across cache histories,
   # multi-thread WASM parity and the per-step work counts pinned in
@@ -1662,6 +1832,43 @@ jobs:
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
           if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
           if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
+
+      # Testing policy § 16.2, RT-4 (CI flake quarantine blueprint FQ-4): more than five retried passes in one run
+      # fail it. Each task's `@taucad/vitest-ci` reporter caps its own (three) and fails a retried pass in a file
+      # the change touches; only this gate sees the whole run, so it counts the `flaky` rows of every lane's
+      # `test-outcomes-*` artifact. Rows a cache replay restored carry the id of the run that executed them and
+      # were counted there, so only this run's rows count. A shadow row's (`test-outcomes-shadow-*`) never count: it gates
+      # nothing, and its retried passes are the flake ledger's to count.
+      - name: Download test outcomes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-outcomes-*
+          path: ${{ runner.temp }}/test-outcomes
+      - name: Check the run's retried passes
+        env:
+          RUN_BUDGET: 5
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/test-outcomes"
+          retried="$RUNNER_TEMP/retried-passes.json"
+          rm -rf "$dir"/test-outcomes-shadow-*
+          if [ -d "$dir" ]; then
+            find "$dir" -name '*.outcomes.jsonl' -print0 | xargs -0 -r cat \
+              | jq -s --argjson run "$GITHUB_RUN_ID" \
+                '[.[] | select(.kind == "test" and .flaky == true and .run == $run) | .id] | sort' > "$retried"
+          else
+            echo '[]' > "$retried"
+          fi
+          count=$(jq length "$retried")
+          {
+            echo "### Retried passes in this run: $count (budget $RUN_BUDGET)"
+            jq -r '.[] | "- " + .' "$retried"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -gt "$RUN_BUDGET" ]; then
+            echo "::error title=Retry policy::$count retried passes in this run, over the budget of $RUN_BUDGET (testing policy § 16.2, RT-4): a broken environment or change"
+            exit 1
+          fi
+          echo "$count retried passes in this run, within the budget of $RUN_BUDGET."
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed

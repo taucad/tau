@@ -7,26 +7,46 @@ import type { AutoInstallState } from '#main/update-auto-install.js';
 
 type Signal = { readonly fingerprint: readonly string[]; readonly tags: Record<string, string> };
 
-const setup = (options: { mode?: LaunchMode; blockedTarget?: string; recoveryShowing?: boolean } = {}) => {
+const setup = (
+  options: {
+    mode?: LaunchMode;
+    blockedTarget?: string;
+    recoveryShowing?: boolean;
+    /** The recovery window cannot show (its native fallback replaces it), so no Cancel is on screen. */
+    recoveryFails?: boolean;
+    /** Whether `install()` reports that the restart into the update went ahead, or throws. */
+    installProceeds?: boolean | 'throws';
+  } = {},
+) => {
   let recoveryShowing = options.recoveryShowing ?? false;
+  let quitting = false;
   const calls: string[] = [];
   const noteAutoInstall = vi.fn((target: string) => {
     calls.push(`note:${target}`);
   });
-  const install = vi.fn(async () => {
+  const withdrawAutoInstall = vi.fn((target: string) => {
+    calls.push(`withdraw:${target}`);
+  });
+  const install = vi.fn(async (): Promise<boolean> => {
     calls.push('install');
+    if (options.installProceeds === 'throws') {
+      throw new Error('prepare failed');
+    }
+    return options.installProceeds ?? true;
   });
   const published: Array<AutoInstallState | undefined> = [];
   const report = vi.fn<(signal: Signal) => void>();
   const showCountdown = vi.fn(() => {
-    recoveryShowing = true;
+    recoveryShowing = options.recoveryFails !== true;
   });
   const autoInstall = createAutoInstall({
     mode: options.mode ?? 'safe-auto',
     blockedTarget: options.blockedTarget,
     recoveryShowing: () => recoveryShowing,
+    quitting: () => quitting,
     showCountdown,
     noteAutoInstall,
+    withdrawAutoInstall,
     install,
     publish: (state) => {
       published.push(state);
@@ -44,8 +64,18 @@ const setup = (options: { mode?: LaunchMode; blockedTarget?: string; recoverySho
     report,
     outcomes,
     showCountdown,
+    withdrawAutoInstall,
     openRecovery: () => {
       recoveryShowing = true;
+      autoInstall.reevaluate();
+    },
+    /* The person closed the recovery window, or it failed and its native fallback replaced it. */
+    closeRecovery: () => {
+      recoveryShowing = false;
+      autoInstall.reevaluate();
+    },
+    startQuitting: () => {
+      quitting = true;
       autoInstall.reevaluate();
     },
   };
@@ -178,6 +208,71 @@ describe('automatic install of a downloaded update on a broken launch (N1)', () 
     expect(published.at(-1)).toBeUndefined();
     await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds);
     expect(install).not.toHaveBeenCalled();
+  });
+  it('should stop the countdown, and not install, when the recovery window that shows Cancel closes', async () => {
+    const { autoInstall, install, noteAutoInstall, published, showCountdown, closeRecovery, openRecovery } = setup();
+    autoInstall.updateChanged(ready);
+    await vi.advanceTimersByTimeAsync(3000);
+    closeRecovery();
+    expect(published.at(-1)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds * 2);
+    expect(install).not.toHaveBeenCalled();
+    expect(noteAutoInstall).not.toHaveBeenCalled();
+    /* Closing it is a refusal for this launch: the window is not reopened to count down again. */
+    autoInstall.updateChanged(ready);
+    expect(showCountdown).toHaveBeenCalledOnce();
+    openRecovery();
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('should not install behind the native fallback, which has no Cancel', async () => {
+    const { autoInstall, install, noteAutoInstall, published, showCountdown } = setup({ recoveryFails: true });
+    autoInstall.updateChanged(ready);
+    expect(showCountdown).toHaveBeenCalledOnce();
+    expect(published.at(-1)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds * 2);
+    expect(install).not.toHaveBeenCalled();
+    expect(noteAutoInstall).not.toHaveBeenCalled();
+    autoInstall.updateChanged(ready);
+    expect(showCountdown).toHaveBeenCalledOnce();
+  });
+
+  it('should neither start nor finish a countdown while Tau is quitting or restarting', async () => {
+    const running = setup({ mode: 'normal', recoveryShowing: true });
+    running.autoInstall.updateChanged(ready);
+    expect(running.published.at(-1)).toEqual(expect.objectContaining({ status: 'counting' }));
+    running.startQuitting();
+    expect(running.published.at(-1)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds * 2);
+    expect(running.install).not.toHaveBeenCalled();
+
+    const restarting = setup({ mode: 'normal' });
+    restarting.startQuitting();
+    restarting.autoInstall.updateChanged(ready);
+    restarting.openRecovery();
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds * 2);
+    expect(restarting.published).toEqual([]);
+    expect(restarting.showCountdown).not.toHaveBeenCalled();
+    expect(restarting.install).not.toHaveBeenCalled();
+  });
+
+  it('should withdraw the ledger record when the install did not go ahead, so the target is not blocked', async () => {
+    const refused = setup({ installProceeds: false });
+    refused.autoInstall.updateChanged(ready);
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds);
+    expect(refused.calls).toEqual(['note:1.15.1', 'install', 'withdraw:1.15.1']);
+
+    const failed = setup({ installProceeds: 'throws' });
+    failed.autoInstall.updateChanged(ready);
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds);
+    expect(failed.calls).toEqual(['note:1.15.1', 'install', 'withdraw:1.15.1']);
+
+    const proceeded = setup();
+    proceeded.autoInstall.updateChanged(ready);
+    await vi.advanceTimersByTimeAsync(autoInstallCountdownMilliseconds);
+    expect(proceeded.calls).toEqual(['note:1.15.1', 'install']);
+    expect(proceeded.withdrawAutoInstall).not.toHaveBeenCalled();
   });
 });
 /* eslint-enable @typescript-eslint/naming-convention -- End snake_case tags. */

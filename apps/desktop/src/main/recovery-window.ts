@@ -257,9 +257,26 @@ export const createRecoveryWindowController = (host: {
   readonly devTools?: boolean;
   /** Keep the window hidden (the e2e harness's hidden windows). */
   readonly hidden?: boolean;
+  /**
+   * The window stopped showing: the person closed it, it failed and the native fallback replaced it, or it could not
+   * be created. Anything shown in it, such as the automatic install's Cancel (N1), is gone.
+   */
+  readonly closed?: () => void;
 }): RecoveryWindowController => {
   let window: RecoveryWindowLike | undefined;
   let dialogShowing = false;
+  /* The windows main was already told are gone: Electron emits `closed` after a failed window is destroyed. */
+  const gone = new WeakSet<RecoveryWindowLike>();
+  const closed = (opened: RecoveryWindowLike): void => {
+    if (window === opened) {
+      window = undefined;
+    }
+    if (gone.has(opened)) {
+      return;
+    }
+    gone.add(opened);
+    host.closed?.();
+  };
 
   const showFallback = async (trigger: RecoveryTrigger): Promise<void> => {
     if (dialogShowing) {
@@ -318,13 +335,11 @@ export const createRecoveryWindowController = (host: {
   ): void => {
     const { reason, detail } = failure;
     host.log('error', 'main.recovery-window-failed', { reason, detail });
-    if (window === opened) {
-      window = undefined;
-    }
     /* A window whose page failed would otherwise linger, blank, behind the dialog that replaces it. */
     if (!opened.isDestroyed()) {
       opened.destroy();
     }
+    closed(opened);
     void showFallback(trigger);
   };
 
@@ -355,6 +370,7 @@ export const createRecoveryWindowController = (host: {
       });
     } catch (error) {
       host.log('error', 'main.recovery-window-failed', { reason: 'create', detail: String(error) });
+      host.closed?.();
       void showFallback(trigger);
       return;
     }
@@ -372,9 +388,7 @@ export const createRecoveryWindowController = (host: {
       fail(opened, trigger, { reason: 'renderer-gone', detail: { reason } });
     });
     opened.once('closed', () => {
-      if (window === opened) {
-        window = undefined;
-      }
+      closed(opened);
     });
     // async-iife: bootstrap -- a rejected load falls back to the native dialog.
     void (async (): Promise<void> => {

@@ -1,7 +1,7 @@
 /**
  * The outcome recorder: one JSON line per test execution in `out/test-results/<project>/<target>.outcomes.jsonl`.
  *
- * It only records. Retry policy and the quarantine verdict belong to later work and are not here. A config adds it
+ * It only records. The quarantine verdict (`QuarantineVerdict`) reads what it wrote; retry policy is not here. A config adds it
  * through `testReporters` (`@taucad/vitest-ci`), never by hand.
  *
  * Every Vitest config in the workspace imports this module, and some are type-checked under other projects'
@@ -77,6 +77,21 @@ export type OutcomeRow = {
   durationMs: number;
   errors: string[];
 } & OutcomeExecution;
+
+/**
+ * Where a recorder writes and what it records under: the outcome file, the workspace and project roots (absolute), the
+ * project, the target and the execution identifiers.
+ *
+ * @public
+ */
+export type OutcomeRecording = {
+  file: string;
+  workspaceRoot: string;
+  projectRoot: string;
+  project: string;
+  target: string;
+  execution: OutcomeExecution;
+};
 
 /** The environment the recorder reads. @public */
 export type OutcomeEnvironment = Readonly<Record<string, string | undefined>>;
@@ -227,6 +242,7 @@ export class OutcomeReporter implements Reporter {
   #enabled = false;
   #wrote = false;
   #file: string | undefined;
+  #workspaceRoot = '';
   #project = '';
   #target = '';
   #projectRoot = '';
@@ -245,6 +261,20 @@ export class OutcomeReporter implements Reporter {
     return this.#file;
   }
 
+  /** Where this reporter records, once `onInit` has run and recording is on; the quarantine verdict reads it. */
+  public get recording(): OutcomeRecording | undefined {
+    return this.#file === undefined
+      ? undefined
+      : {
+          file: this.#file,
+          workspaceRoot: this.#workspaceRoot,
+          projectRoot: this.#projectRoot,
+          project: this.#project,
+          target: this.#target,
+          execution: this.#execution,
+        };
+  }
+
   public onInit(vitest: VitestLike): void {
     const env = this.#options.env ?? process.env;
     const underNx = nonEmpty(env['NX_TASK_TARGET_PROJECT']) !== undefined;
@@ -260,6 +290,7 @@ export class OutcomeReporter implements Reporter {
       nonEmpty(env['NX_WORKSPACE_ROOT']) ??
       findAncestor(configDirectory, undefined, ['nx.json']) ??
       vitest.config.root;
+    this.#workspaceRoot = workspaceRoot;
     this.#projectRoot =
       this.#options.projectRoot ??
       findAncestor(configDirectory, workspaceRoot, ['project.json', 'package.json']) ??

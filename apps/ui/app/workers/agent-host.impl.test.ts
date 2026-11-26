@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
-import { browserHostLabels, closeParameterActors, hostBuildOf, swappable } from '#workers/agent-host.impl.js';
+import { Topic } from '@taucad/events';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
+import {
+  browserHostLabels,
+  closeParameterActors,
+  hostBuildOf,
+  keepDeploymentFresh,
+  swappable,
+} from '#workers/agent-host.impl.js';
 
 /* W6.r2 M1 (D15): a parameter actor's close is bounded; one past the bound or left uncertain is stopped, and a
  * retried close passes a stopped actor instead of waiting the bound again. */
@@ -233,5 +241,95 @@ describe('swappable', () => {
       expect(vi.getTimerCount()).toBe(0);
       await closed;
     });
+  });
+});
+
+/* C7: an open host keeps the deployment answer fresh, so admission waits only on a request already in flight. */
+describe('keepDeploymentFresh', () => {
+  const api = 'https://api.example.test';
+  const answer = {
+    version: 1,
+    edition: 'cloud',
+    billing: { funded: true, environment: 'staging' },
+    maxAgeSeconds: 300,
+  };
+
+  const openHost = () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(answer), { status: 200 }));
+    const resolver = createDeploymentModeResolver({ fetch });
+    const visibility = new Topic<boolean>();
+    const composerFocus = new Topic<undefined>();
+    const stop = keepDeploymentFresh(resolver, api, {
+      visibility: { visible: () => true, subscribe: (listener) => visibility.subscribe(listener) },
+      composerFocus: { subscribe: (listener) => composerFocus.subscribe(listener) },
+    });
+    return { fetch, resolver, visibility, composerFocus, stop };
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should make no request at an admission after expiry while its timers run', async () => {
+    const { fetch, resolver, stop } = openHost();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(301_000);
+    const calls = fetch.mock.calls.length;
+
+    await expect(resolver.resolve(api)).resolves.toMatchObject({ state: 'known', source: 'cache' });
+    expect(fetch).toHaveBeenCalledTimes(calls);
+    stop();
+  });
+
+  it('should start one request on composer focus after a clock jump, which the admission awaits as a refetch', async () => {
+    const { fetch, resolver, composerFocus, stop } = openHost();
+    await vi.advanceTimersByTimeAsync(0);
+    /* The device slept: the clock moved past expiry and no timer fired. */
+    vi.setSystemTime(Date.now() + 600_000);
+    let answerNow: () => void = () => undefined;
+    fetch.mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          answerNow = () => {
+            resolve(new Response(JSON.stringify(answer), { status: 200 }));
+          };
+        }),
+    );
+
+    composerFocus.emit(undefined);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const admission = resolver.resolve(api);
+    answerNow();
+
+    /* `network`, not `cache`: the admission waited on the refetch, which its `deployment.refetched` label reports. */
+    await expect(admission).resolves.toMatchObject({ state: 'known', source: 'network' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('should refresh an expired answer when the page is shown again, and not when it is hidden', async () => {
+    const { fetch, visibility, stop } = openHost();
+    await vi.advanceTimersByTimeAsync(0);
+    vi.setSystemTime(Date.now() + 600_000);
+
+    visibility.emit(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    visibility.emit(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('should stop refreshing once the host closes', async () => {
+    const { fetch, composerFocus, stop } = openHost();
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+
+    vi.setSystemTime(Date.now() + 600_000);
+    composerFocus.emit(undefined);
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

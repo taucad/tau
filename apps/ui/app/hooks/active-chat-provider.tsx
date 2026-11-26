@@ -41,7 +41,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { ChatView } from '#services/deferred-chat.js';
+import type { ChatStatus } from 'ai';
 import { isResumableRun } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
@@ -60,7 +60,6 @@ import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
@@ -89,8 +88,6 @@ import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '@taucad/chat-ui/hooks/use-composer-record-toasts';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
-
-type ChatInstance = ChatView;
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -180,7 +177,6 @@ export type ActiveChatKernel = {
  */
 export type ActiveChatSessionContextValue = {
   activeChatId: string;
-  chat: ChatView;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
   /** This chat's composer record on this device: whether it is read yet decides whether a painted draft hint is taken. */
@@ -206,9 +202,9 @@ export type ChatComposerContextValue = {
   kernel: ActiveChatKernel;
   /**
    * Live chat status. `'ready'` under the composer provider (no session to
-   * stream); reflects the AI SDK `Chat.status` under the session provider.
+   * stream); the run phase, else the command in flight, under the session provider (T3).
    */
-  status: ChatInstance['status'];
+  status: ChatStatus;
   /** User-facing activity for the selected execution target. */
   agentActivity: ChatAgentActivity;
   /**
@@ -497,12 +493,11 @@ function ActiveChatSessionProvider({
   const sessionValue = useMemo<ActiveChatSessionContextValue>(
     () => ({
       activeChatId: chatId,
-      chat: session.chat,
       persistenceActorRef: session.persistenceActorRef,
       draftActorRef: session.draftActorRef,
       composerRecordRef: session.composerRecordRef,
     }),
-    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
+    [chatId, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
   );
 
   const composerValue = useMemo<ChatComposerContextValue>(
@@ -813,16 +808,24 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
 }
 
 /**
- * One visible status for both composer controls: host projection takes precedence when a reattached run outlives the
- * SDK request. Returns `'ready'` while the session is mounting (and under the composer-only provider).
+ * One visible status for both composer controls: the run phase, else the command in flight (T3). Returns `'ready'`
+ * while the session is mounting (and under the composer-only provider).
  */
-function useSessionStatus(chatId: string): ChatInstance['status'] {
-  const sdkStatus = useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+function useSessionStatus(chatId: string): ChatStatus {
   const store = useChatSessionStore();
-  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
-  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
-  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return selectVisibleChatStatus(sdkStatus, projection);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeChat = store.subscribeChat(chatId, listener);
+      const unsubscribeProjection = store.subscribeProjection(chatId, listener);
+      return () => {
+        unsubscribeChat();
+        unsubscribeProjection();
+      };
+    },
+    [chatId, store],
+  );
+  const snapshot = useCallback(() => store.getChatStatus(chatId), [chatId, store]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
@@ -882,8 +885,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
       turn === undefined &&
       persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
       !persistence.context.isLoadingChat &&
-      session.chat.status !== 'submitted' &&
-      session.chat.status !== 'streaming'
+      store.getChatStatus(chatId) === 'ready'
     );
   };
   const resume = useCallback(() => {
@@ -957,7 +959,7 @@ function useSessionContextUsage(chatId: string): ContextUsageData | undefined {
     if (!s) {
       return undefined;
     }
-    const { messages } = s.chat;
+    const { messages } = s;
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i]!;
       for (let j = message.parts.length - 1; j >= 0; j--) {

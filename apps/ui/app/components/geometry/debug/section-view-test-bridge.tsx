@@ -556,11 +556,13 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             : undefined;
         let drawCalls = 0;
         let triangles = 0;
+        const warmup = options.warmup ?? 20;
+        const frames = warmup + (options.samples ?? 120);
         state.setFrameloop('never');
         renderer.info.autoReset = false;
         try {
           // oxlint-disable-next-line no-await-in-loop -- serialize frames so completion covers this frame alone.
-          for (let index = 0; index < 140; index++) {
+          for (let index = 0; index < frames; index++) {
             // Three advances its FRAME node cache on RAF; exclude pacing from the measured work.
             // oxlint-disable-next-line no-await-in-loop -- each sample must render a fresh scene pass.
             await new Promise<void>((resolve) => {
@@ -595,7 +597,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             const completedAt = performance.now();
             // oxlint-disable-next-line no-await-in-loop -- resolve all passes from this frame before the next.
             const gpuDuration = await timer.resolve();
-            if (index >= 20) {
+            if (index >= warmup) {
               gpu.push(gpuDuration);
               submission.push(submittedAt - startedAt);
               completion.push(completedAt - startedAt);

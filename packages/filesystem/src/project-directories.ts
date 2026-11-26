@@ -381,7 +381,10 @@ const freshnessWindow = (channels: DiscoveryRootChannels | undefined): number =>
     return 5 * 60_000;
   }
   if (channels?.snapshot === true) {
-    return Math.max(3 * (channels.pollPeriodMilliseconds ?? 10_000), 30_000);
+    /* The page polls an unobserved folder every 2 s, or every 10 s while blurred; a longer gap between two polls (a
+     * hidden tab) never stretches the window (review m3). */
+    const pollPeriod = Math.min(Math.max(channels.pollPeriodMilliseconds ?? 10_000, 2000), 10_000);
+    return Math.max(3 * pollPeriod, 30_000);
   }
   return discoveryAuditIntervalMilliseconds;
 };
@@ -473,6 +476,8 @@ export class ProjectDirectories {
   private readonly _onAuditChange: (storageRootKey: string) => void;
   /** When each root's audit cycle began. */
   private readonly _auditCycles = new Map<string, number>();
+  /** When each root's audit last completed a whole cycle. */
+  private readonly _auditCompleted = new Map<string, number>();
 
   /**
    * Create the project-directory lifecycle over the authority's collaborators.
@@ -652,12 +657,17 @@ export class ProjectDirectories {
     const sweep = async (): Promise<ProjectAbsence> => {
       workerTimings.count('discovery.identitySweep');
       const locators: ProjectLocator[] = [];
-      /* oxlint-disable eslint/no-await-in-loop -- Roots are swept one after another, as a pass reads them. */
-      for (const { root, scope, storageRootKey } of this._discoveryRoots()) {
+      const roots = this._discoveryRoots();
+      /* Every root must be available, or the answer is unknown: checked before any I/O, so a lost folder costs the
+       * other roots no read (review M4). */
+      for (const { storageRootKey } of roots) {
         const state = this._rootState(storageRootKey);
         if (state !== undefined && state !== 'available') {
           return { status: 'unknown', reason: `root ${state}` };
         }
+      }
+      /* oxlint-disable eslint/no-await-in-loop -- Roots are swept one after another, as a pass reads them. */
+      for (const { root, scope, storageRootKey } of roots) {
         let provider: FileSystemProvider;
         try {
           provider = await this._registry.getProvider(scope);
@@ -682,7 +692,11 @@ export class ProjectDirectories {
         const swept = names.filter(
           (name) => options?.except?.storageRootKey !== storageRootKey || options.except.providerBasePath !== name,
         );
-        await provider.refresh?.(swept);
+        try {
+          await provider.refresh?.(swept);
+        } catch (error) {
+          return { status: 'unknown', reason: errorMessage(error) };
+        }
         for (let offset = 0; offset < swept.length; offset += manifestProbeConcurrency) {
           const ids = await Promise.all(
             swept.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
@@ -722,8 +736,12 @@ export class ProjectDirectories {
    * as a whole from when the cycle began.
    *
    * @param share - The share of each root's directories to re-read, from 0 to 1; a whole cycle when omitted.
+   * @returns When every warm root last completed a whole cycle (the oldest of them), or undefined while one has not
+   *   completed one yet. The rolling audit reports its own cycles, so the caller runs an overdue whole cycle only when
+   *   the rolling one fell behind (review M3).
    */
-  public async auditDiscovery(share?: number): Promise<void> {
+  public async auditDiscovery(share?: number): Promise<number | undefined> {
+    let oldestCycle = Number.POSITIVE_INFINITY;
     /* oxlint-disable eslint/no-await-in-loop -- The audit is background work: one directory batch at a time. */
     for (const { scope, storageRootKey } of this._discoveryRoots()) {
       const view = this._index.view(storageRootKey);
@@ -731,68 +749,10 @@ export class ProjectDirectories {
       if (view?.currency !== 'warm' || (state !== undefined && state !== 'available')) {
         continue;
       }
-      let provider: FileSystemProvider;
-      try {
-        provider = await this._registry.getProvider(scope);
-      } catch {
-        continue;
-      }
-      const channels = this._rootChannels(storageRootKey);
-      const kind =
-        provider.capabilities.externallyEdited === true
-          ? channels?.native === true
-            ? 'observed'
-            : 'polled'
-          : 'exclusive';
-      let mismatched = false;
-      if (!this._auditCycles.has(storageRootKey)) {
-        this._auditCycles.set(storageRootKey, this._index.now());
-        const namesVersion = this._index.namesVersion(storageRootKey);
-        const names = await this._listNames(provider);
-        if (!Array.isArray(names)) {
-          this._auditCycles.delete(storageRootKey);
-          continue;
-        }
-        if (view.namesListed && names.join('\0') !== view.names.join('\0')) {
-          mismatched = true;
-          this._index.countAuditMismatch(kind);
-        }
-        this._index.installNames(storageRootKey, namesVersion, names);
-      }
-      const count = share === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.ceil(view.names.length * share));
-      const batch = this._index.auditBatch(storageRootKey, count);
-      const dirty = new Set(this._index.view(storageRootKey)?.dirty);
-      const audited = batch.names.filter((name) => !dirty.has(name));
-      workerTimings.count('discovery.auditRead', audited.length);
-      for (let offset = 0; offset < audited.length; offset += manifestProbeConcurrency) {
-        const outcomes = await Promise.all(
-          audited.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
-            const version = this._index.version(storageRootKey, name);
-            const { reading, determined } = await this._readDirectory({
-              provider,
-              scope,
-              storageRootKey,
-              directory: assertRootedPath(name),
-            });
-            return this._index.install(storageRootKey, name, { version, reading, determined });
-          }),
-        );
-        for (const outcome of outcomes) {
-          if (outcome.status === 'installed' && outcome.changed) {
-            mismatched = true;
-            this._index.countAuditMismatch(kind);
-          }
-        }
-      }
-      if (batch.wrapped) {
-        this._index.validated(storageRootKey, this._auditCycles.get(storageRootKey) ?? this._index.now());
-        this._auditCycles.delete(storageRootKey);
-      }
-      if (mismatched) {
-        this._onAuditChange(storageRootKey);
-      }
+      oldestCycle = Math.min(oldestCycle, await this._auditRoot({ scope, storageRootKey, view }, share));
     }
     /* oxlint-enable eslint/no-await-in-loop -- End audit. */
+    return Number.isFinite(oldestCycle) ? oldestCycle : undefined;
   }
 
   /**
@@ -1257,6 +1217,89 @@ export class ProjectDirectories {
   }
 
   /**
+   * One root's share of the audit.
+   *
+   * @param root - The root, its scope and its index view.
+   * @param share - The share of its directories to re-read; all when omitted.
+   * @returns When the root last completed a whole cycle, or `-Infinity` while it has not completed one.
+   */
+  private async _auditRoot(
+    root: Readonly<{
+      scope: WorkspaceScope;
+      storageRootKey: string;
+      view: NonNullable<ReturnType<ProjectDirectoryIndex<ProjectDirectoryReading>['view']>>;
+    }>,
+    share: number | undefined,
+  ): Promise<number> {
+    const { scope, storageRootKey, view } = root;
+    {
+      let provider: FileSystemProvider;
+      try {
+        provider = await this._registry.getProvider(scope);
+      } catch {
+        return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+      }
+      const channels = this._rootChannels(storageRootKey);
+      const kind =
+        provider.capabilities.externallyEdited === true
+          ? channels?.native === true
+            ? 'observed'
+            : 'polled'
+          : 'exclusive';
+      let mismatched = false;
+      if (!this._auditCycles.has(storageRootKey)) {
+        this._auditCycles.set(storageRootKey, this._index.now());
+        const namesVersion = this._index.namesVersion(storageRootKey);
+        const names = await this._listNames(provider);
+        if (!Array.isArray(names)) {
+          this._auditCycles.delete(storageRootKey);
+          return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+        }
+        if (view.namesListed && names.join('\0') !== view.names.join('\0')) {
+          mismatched = true;
+          this._index.countAuditMismatch(kind);
+        }
+        this._index.installNames(storageRootKey, namesVersion, names);
+      }
+      const count = share === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.ceil(view.names.length * share));
+      const batch = this._index.auditBatch(storageRootKey, count);
+      const dirty = new Set(this._index.view(storageRootKey)?.dirty);
+      const audited = batch.names.filter((name) => !dirty.has(name));
+      workerTimings.count('discovery.auditRead', audited.length);
+      for (let offset = 0; offset < audited.length; offset += manifestProbeConcurrency) {
+        // oxlint-disable-next-line no-await-in-loop -- One bounded batch of directories at a time.
+        const outcomes = await Promise.all(
+          audited.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
+            const version = this._index.version(storageRootKey, name);
+            const { reading, determined } = await this._readDirectory({
+              provider,
+              scope,
+              storageRootKey,
+              directory: assertRootedPath(name),
+            });
+            return this._index.install(storageRootKey, name, { version, reading, determined });
+          }),
+        );
+        for (const outcome of outcomes) {
+          if (outcome.status === 'installed' && outcome.changed) {
+            mismatched = true;
+            this._index.countAuditMismatch(kind);
+          }
+        }
+      }
+      if (batch.wrapped) {
+        this._index.validated(storageRootKey, this._auditCycles.get(storageRootKey) ?? this._index.now());
+        this._auditCycles.delete(storageRootKey);
+        this._auditCompleted.set(storageRootKey, this._index.now());
+      }
+      if (mismatched) {
+        this._onAuditChange(storageRootKey);
+      }
+      return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+    }
+  }
+
+  /**
    * One root's part of a pass (FW2). A root with no warm index (never read, reset since, past the bounds, or written by
    * other programs with no channel to report them) is read in full. Otherwise a root other programs write is validated
    * first when it is past its freshness window (A3), its child names are listed again when evidence unlisted them, and
@@ -1289,7 +1332,10 @@ export class ProjectDirectories {
         view = undefined;
       }
     }
-    if (view?.currency !== 'warm' || (externallyEdited && channels === undefined)) {
+    if (
+      view?.currency !== 'warm' ||
+      (externallyEdited && (channels === undefined || (!channels.snapshot && !channels.native)))
+    ) {
       const startedAt = this._index.now();
       const namesVersion = this._index.beginColdRead(storageRootKey);
       workerTimings.count('discovery.fullRead');
@@ -1310,8 +1356,10 @@ export class ProjectDirectories {
       if (!Array.isArray(listed)) {
         return { status: 'inaccessible', reason: errorMessage(listed.error) };
       }
-      this._index.installNames(storageRootKey, namesVersion, listed);
-      names = listed;
+      /* A listing that evidence overtook is not installed; this pass lists it with the names own writes added since. */
+      names = this._index.installNames(storageRootKey, namesVersion, listed)
+        ? listed
+        : [...new Set([...listed, ...(this._index.view(storageRootKey)?.names ?? [])])].sort();
     }
     const dirty = new Set(this._index.view(storageRootKey)?.dirty);
     const read = new Map(

@@ -1,22 +1,23 @@
 {
   "alphabet": [],
   "sources": {
-    "external-change-ingest.ts": "4159591ca163377aa7d140d86eed1f9eb6fd4401b9b094d6e343f81f99dd4ce8",
-    "project-directories.ts": "879b31d3b8795466f21c6d40534d59a86e029f0803269ea7eb45ce90e3b42cf4",
-    "project-directory-index.ts": "1d9fade83df900978f2fc17582fc4e2e2982d7d2f74da43ff983d22856bf13fc",
+    "external-change-ingest.ts": "c34f57a9aadcd0fce9a3862ff942ac27dd8b8a15bc382dfff926b828fd05c560",
+    "project-directories.ts": "ea60be1af3213100151961f994c6d4a35d1d995da2efa988dfbf3909ee32f007",
+    "project-directory-index.ts": "4514ce5260e419649b3fc788f85e93b00c5d2a387d6bb0e7bbaf50b8dcd9c2c8",
     "provider-registry.ts": "0bc12d4951d4c65464f05475827b383ae1d98d17dda0b34099605da19e888d4a",
     "remote-changes.ts": "ebc68b16410668908d6db6ec1de960ce9be0f95f8943f8d3bc16793dc125538d"
   },
   "specs": {
-    "DiscoveryIndex.tla": "f025d9def0c288133d8076816cb1e9e74d1ec29484e1b120ef2f30d978815476"
+    "DiscoveryIndex.tla": "49ef7581eea1a38fd66bd8f7ca49be5dc07b76fcef60166f2848e1baaacc09aa"
   },
   "tables": {
-    "DiscoveryIndex.clear-unconditional.cfg": "1e926e59bfd267fc3cc174b4002ce6977d3417076768b74959dcde43a88ebb71",
-    "DiscoveryIndex.no-audit.cfg": "134abec4b010d35382d1bbb4869a465e76824e52b6bd744ad501ce94601462d6",
-    "DiscoveryIndex.read-before-arm.cfg": "bda6d298d9108f503be28c6c4c7fdaa519f1fda6ab9bc800edbafddff3d7afbc",
-    "DiscoveryIndex.tap-after-write.cfg": "26ea88da3e4841a985c17d9fba64374062ed6922532b7c241f14b430919a0a2e",
-    "DiscoveryIndex.target-lost.cfg": "165576d2f3f003be668a73b76880da7bd66ad366f5bc3a12a6950ba2afda83b7",
-    "DiscoveryIndex.target.cfg": "031c9452bbeeae31c53e8fe59a3d316759a8d815c5b6f26d16d991895e16cf1d",
-    "expected.json": "c1800ea109a7a69437fb6cbfa436b64e8be57cfeb75367ae9be518f53b2ddcd2"
+    "DiscoveryIndex.clear-unconditional.cfg": "ae5f8ccff48d6df9915b53466edc6f3ddd04d478ebbbf77950d9007feb3b82f2",
+    "DiscoveryIndex.no-audit.cfg": "93553bad917926ed21ea07369134f18f089d5e6c9806f4a099075c21fb41b500",
+    "DiscoveryIndex.read-before-arm.cfg": "fd7c540f3ec5869e5f419f2ee14d8a180012cf08a1e480aaa9576417c2679b4d",
+    "DiscoveryIndex.reset-on-install.cfg": "0c0904329886cce1b59b09dd50fa23352a80371b5efd3b68faf25089261891fa",
+    "DiscoveryIndex.tap-after-write.cfg": "25a15c3bad3fd0fdc243d83ba25c661b9394299cb7dc392f5b10b024deaa063a",
+    "DiscoveryIndex.target-lost.cfg": "8eceb896c7953809aa979c9e982983d8fd7c3c29b007d0f66ba8bd3e4e0fcb05",
+    "DiscoveryIndex.target.cfg": "a568ad95c6d58406d8fd744f503aeaada05b41059840ff174622325f3b67d662",
+    "expected.json": "14f961290ec0b07fafc53c7e85266cd908d986440226d4b2955e640bed0c2953"
   }
 }

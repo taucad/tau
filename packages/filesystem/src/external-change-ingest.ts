@@ -1243,7 +1243,9 @@ export class ExternalChangeIngest {
       const row = `${relative}\0file\0${file.size}\0${file.lastModified}`;
       /* Only the discovery-wide walk: its rows are the declarations discovery reads. A rooted poll feeds the Project
        * Index, which keeps its own racy guard. */
-      if (providerBasePath === undefined && file.lastModified > capturedAt - racyTimestampMilliseconds) {
+      /* Inside the window on either side of the capture: a file dated later than that is not settling, and reporting it
+       * on every poll would never let it settle (review m4). */
+      if (providerBasePath === undefined && Math.abs(file.lastModified - capturedAt) < racyTimestampMilliseconds) {
         unsettled.push(relative);
         this._racyRows += 1;
         /* A row no later capture can equal, so the next poll reports it changed again. */

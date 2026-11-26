@@ -1562,9 +1562,11 @@ export class WorkspaceFileService {
     // async-iife: bootstrap -- the audit is background work on its own timer, never a caller's.
     void (async () => {
       try {
-        await this._projectDirectories.auditDiscovery(overdue ? undefined : share);
-        if (overdue) {
-          this._audit.cycledAt = Date.now();
+        /* The audit reports when every warm root last completed a whole cycle, rolling or not, so an overdue cycle runs
+         * only when the rolling one fell behind (review M3). */
+        const cycledAt = await this._projectDirectories.auditDiscovery(overdue ? undefined : share);
+        if (cycledAt !== undefined) {
+          this._audit.cycledAt = Math.max(this._audit.cycledAt, cycledAt);
         }
       } catch {
         /* A failed audit leaves its directories as they were; the next tick tries again. */

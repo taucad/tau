@@ -329,7 +329,8 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     this._bytes += bytes;
     root.entries.set(name, previous !== undefined && !changed ? previous : { reading, bytes });
     root.dirty.delete(name);
-    root.evidenceAt.delete(name);
+    /* The directory's counter stays where it is: lowered, it would let a slower reader that took an older value
+     * install the older bytes it read (review M1). */
     root.names.add(name);
     this._gauge();
     return { status: 'installed', changed };
@@ -355,7 +356,6 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
       return false;
     }
     this._forget(root, name);
-    root.evidenceAt.delete(name);
     return true;
   }
 
@@ -508,10 +508,10 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
    * @returns Call when the write settles, whether it resolved or rejected.
    */
   public beginWrite(storageRootKey: string, paths: readonly string[]): () => void {
-    const root = this._roots.get(storageRootKey);
-    if (root === undefined) {
-      return () => undefined;
-    }
+    /* A root the index has not opened is opened, cold: a cold read that starts while the write is in flight must see
+     * it (the module's `WriteIssued` marks whatever the index holds). */
+    this.open(storageRootKey);
+    const root = this._roots.get(storageRootKey)!;
     const names = new Set<string>();
     let nameWrites = 0;
     for (const path of paths) {
@@ -602,7 +602,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
       if (source === 'foreign') {
         this._unlistNames(root);
       } else {
-        root.names.add(name);
+        this._addOwnName(root, name);
       }
       this._dirty(root, name);
       return true;
@@ -619,7 +619,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
         if (source === 'foreign') {
           this._unlistNames(root);
         } else {
-          root.names.add(name);
+          this._addOwnName(root, name);
         }
       }
       this._dirty(root, name);
@@ -627,9 +627,24 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     return true;
   }
 
+  /**
+   * This authority wrote a top-level entry: the root's names hold it without a new listing, and the names counter
+   * moves, so a listing taken before the write cannot install without it (review M2).
+   */
+  private _addOwnName(root: RootIndex<Reading>, name: string): void {
+    root.names.add(name);
+    root.namesAt = this._tick();
+  }
+
   private _dirty(root: RootIndex<Reading>, name: string): void {
     root.dirty.add(name);
     root.evidenceAt.set(name, this._tick());
+    /* Counters never fall, so their memory is bounded another way: past twice the root's entries, every counter rises
+     * to one new floor, which refuses every read in flight on the root and keeps every clean entry. */
+    if (root.evidenceAt.size > 2 * Math.max(root.names.size, root.entries.size, 64)) {
+      root.resetAt = this._tick();
+      root.evidenceAt.clear();
+    }
   }
 
   private _unlistNames(root: RootIndex<Reading>): void {

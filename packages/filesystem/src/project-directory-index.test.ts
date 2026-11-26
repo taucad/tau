@@ -11,8 +11,8 @@ import {
 } from '#testing/discovery-profile.js';
 import type { DiscoveryProfile, DiscoveryProfileShape } from '#testing/discovery-profile.js';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
-import { racyTimestampMilliseconds } from '#external-change-ingest.js';
-import { discoveryAuditIntervalMilliseconds } from '#project-directories.js';
+import { ExternalChangeIngest, racyTimestampMilliseconds } from '#external-change-ingest.js';
+import { ProjectDirectories, discoveryAuditIntervalMilliseconds } from '#project-directories.js';
 import type { ProjectDirectoryReading, ProjectDiscoveryEntry } from '#project-directories.js';
 import { workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
@@ -169,6 +169,38 @@ describe('A1: the index nominates and storage decides', () => {
     );
   }, 120_000);
 
+  /* Review M4: every root's state is checked before any read, so a lost folder costs the sweep no I/O. */
+  it('should answer unknown before reading any root when a later root is not available', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const [, workspace] = await profile.service.getRootStatuses();
+    const { rootState } = ExternalChangeIngest.prototype;
+    vi.spyOn(ExternalChangeIngest.prototype, 'rootState').mockImplementation(function (
+      this: ExternalChangeIngest,
+      storageRootKey: string,
+    ) {
+      return storageRootKey === workspace!.storageRootKey ? 'notFound' : rootState.call(this, storageRootKey);
+    });
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.verifyAbsent(discoveryProfileHomeId(90)),
+    );
+
+    expect(result).toMatchObject({ status: 'unknown' });
+    expect(cost.providers.home.total + cost.providers.workspace.total).toBe(0);
+  });
+
+  /* Review M4: a refresh that fails is uncertainty, not a rejection. */
+  it('should answer unknown when a root refuses to refresh the handles of its sweep', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    vi.spyOn(profile.providers.workspace, 'refresh').mockRejectedValue(new Error('The folder went away.'));
+
+    await expect(profile.service.verifyAbsent(discoveryProfileHomeId(90))).resolves.toMatchObject({
+      status: 'unknown',
+    });
+  });
+
   it('should answer unknown, never absent, when a root is not available or a read fails', async () => {
     const profile = await profileOf();
     await profile.service.listProjectManifests();
@@ -217,6 +249,61 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
 
     expect(outcome.status).toBe('dirty');
     expect(index.view('root')?.dirty).toEqual(['a']);
+  });
+
+  /* Review M1: an install never lowers a counter, so a slower reader of older bytes cannot install after a faster one. */
+  it('should refuse a slower reader of older bytes after a faster reader installed newer ones', () => {
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
+    index.beginColdRead('root');
+    index.installNames('root', index.namesVersion('root'), ['d']);
+    const old: ProjectDirectoryReading = { kind: 'not-a-project' };
+    index.install('root', 'd', { version: index.version('root', 'd'), reading: old, determined: true });
+    const slow = index.version('root', 'd');
+    index.note('root', ['d/tau.json']);
+    const fresh: ProjectDirectoryReading = { kind: 'invalid', issue: { code: 'manifest-missing' } };
+
+    expect(
+      index.install('root', 'd', { version: index.version('root', 'd'), reading: fresh, determined: true }),
+    ).toMatchObject({ status: 'installed' });
+    expect(index.install('root', 'd', { version: slow, reading: old, determined: true }).status).toBe('dirty');
+    expect(index.entry('root', 'd')?.reading).toEqual(fresh);
+  });
+
+  /* Review M2: an own write that creates a top-level directory moves the names counter, so an older listing is refused. */
+  it('should refuse a listing taken before this authority created a directory', () => {
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
+    index.beginColdRead('root');
+    index.installNames('root', index.namesVersion('root'), ['a']);
+    const listing = index.namesVersion('root');
+
+    index.beginWrite('root', ['b'])();
+    index.beginWrite('root', ['b/tau.json'])();
+    index.install('root', 'b', {
+      version: index.version('root', 'b'),
+      reading: { kind: 'not-a-project' },
+      determined: true,
+    });
+
+    expect(index.installNames('root', listing, ['a'])).toBe(false);
+    expect(index.view('root')).toMatchObject({ names: ['a', 'b'], namesListed: true });
+  });
+
+  /* Review m1: the provider tap opens a root it has not seen, so a cold read that starts during a write cannot install. */
+  it('should mark a write on a root the index has not opened yet', () => {
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
+    const settle = index.beginWrite('root', ['d/tau.json']);
+    index.beginColdRead('root');
+    index.installNames('root', index.namesVersion('root'), ['d']);
+
+    const outcome = index.install('root', 'd', {
+      version: index.version('root', 'd'),
+      reading: { kind: 'not-a-project' },
+      determined: true,
+    });
+    settle();
+
+    expect(outcome.status).toBe('dirty');
+    expect(index.view('root')?.dirty).toEqual(['d']);
   });
 
   it('should refuse an install on a directory while this authority writes it', () => {
@@ -344,6 +431,65 @@ describe('A3: freshness is bounded by the authority', () => {
     expect(again.cost.browserCalls).toBe(0);
   });
 
+  /* Review m2: a root other programs write with no live channel at all is read in full on every pass. */
+  it('should read a shared root in full when neither a snapshot nor an observer reports it', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const [, workspace] = await profile.service.getRootStatuses();
+    const { channels } = ExternalChangeIngest.prototype;
+    vi.spyOn(ExternalChangeIngest.prototype, 'channels').mockImplementation(function (
+      this: ExternalChangeIngest,
+      storageRootKey: string,
+    ) {
+      return storageRootKey === workspace!.storageRootKey
+        ? { snapshot: false, native: false }
+        : channels.call(this, storageRootKey);
+    });
+
+    const { cost } = await profile.measure(async () => profile.service.listProjectManifests());
+
+    expect(cost.providers.workspace.fileReads).toBe(2 * small.workspace);
+  });
+
+  /* Review m3: a long gap between polls never stretches the freshness window past the cadence the page polls at. */
+  it('should validate a polled root past 30 s even when its polls were an hour apart', async () => {
+    const profile = await profileOf();
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    now += 2 * racyTimestampMilliseconds;
+    await profile.service.pollExternalChanges();
+    now += 60 * 60_000;
+    await profile.service.pollExternalChanges();
+    await profile.service.listProjectManifests();
+    const validate = vi.spyOn(ExternalChangeIngest.prototype, 'validate');
+
+    now += 60_000;
+    await profile.service.listProjectManifests();
+
+    expect(validate).toHaveBeenCalledOnce();
+  });
+
+  /* Review m4: a file dated in the future is not inside the racy window of every poll. */
+  it('should report a future-dated declaration once, not on every poll', async () => {
+    const profile = await profileOf();
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    now += 60 * 60_000;
+    await profile.writeBehind('workspace', 'folder-001/tau.json', manifest('From the future'));
+    now -= 60 * 60_000 - 2 * racyTimestampMilliseconds;
+    await profile.service.pollExternalChanges();
+    await profile.service.listProjectManifests();
+    now += 2 * racyTimestampMilliseconds;
+    await profile.service.pollExternalChanges();
+    await profile.service.listProjectManifests();
+    now += 2 * racyTimestampMilliseconds;
+    await profile.service.pollExternalChanges();
+
+    const { cost } = await profile.measure(async () => profile.service.listProjectManifests());
+
+    expect(cost.providers.workspace.fileReads).toBe(0);
+  });
+
   it('should list a same-size rewrite inside the racy window after the next poll', async () => {
     const profile = await profileOf({ ...small, timestampGranularity: 2000 });
     const directory = `folder-002/${projectIdentityPath}`;
@@ -379,6 +525,31 @@ describe('A4: the audit', () => {
     expect(counter('discovery.auditMismatch.exclusive') - before.exclusive).toBe(1);
     expect(profile.index.entry(homeKey, 'home-005')?.reading).toMatchObject({ projectId: discoveryProfileHomeId(66) });
     expect(listedIds(await listedEntries(profile)).get('opfs:home-005')).toBe(discoveryProfileHomeId(66));
+  });
+});
+
+describe('the audit schedule (review M3)', () => {
+  it('should run no overdue full cycle while the rolling audit completes every cycle in time', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const profile = await profileOf();
+      const audit = vi.spyOn(ProjectDirectories.prototype, 'auditDiscovery');
+      await profile.service.listProjectManifests();
+
+      for (let elapsed = 0; elapsed < 2 * discoveryAuditIntervalMilliseconds; elapsed += 15_000) {
+        // oxlint-disable-next-line no-await-in-loop -- One audit tick at a time, as the timer fires them.
+        await vi.advanceTimersByTimeAsync(15_000);
+        // oxlint-disable-next-line no-await-in-loop -- The tick's audit settles before the next.
+        await vi.waitFor(() => {
+          expect(audit.mock.results.every((result) => result.type !== 'incomplete')).toBe(true);
+        });
+      }
+
+      expect(audit.mock.calls.length).toBeGreaterThan(0);
+      expect(audit.mock.calls.filter(([share]) => share === undefined)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

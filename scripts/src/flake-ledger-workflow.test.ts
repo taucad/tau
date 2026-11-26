@@ -122,5 +122,7 @@ describe('flake ledger workflow', () => {
     expect(sparse).toEqual(expect.arrayContaining(['project.json', 'quarantine.json']));
     const entry = steps.find((step) => step.run?.includes('node scripts/src/ci-flake-quarantine-entry-cli.ts'));
     expect(entry?.run).toContain('ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci');
+    // Entries are planned only from a complete ingestion.
+    expect((entry as { if?: string } | undefined)?.if).toBe(`\${{ steps.ingest.outcome == 'success' }}`);
   });
 });

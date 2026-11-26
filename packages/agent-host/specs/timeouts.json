@@ -914,6 +914,14 @@
       "owner": "host attachment reliability HA1"
     },
     {
+      "id": "HA1-OWN-READ-POLL",
+      "bound": "While a chat's own run is unsettled or a shrink is suspect, the page re-reads its own segment from the file every unsettledReadPollMilliseconds (1 s) while visible; the same pass judges the HA-I5 stale span (2 x runHeartbeatMilliseconds past foreignRunStaleMilliseconds) and the 30 s shrink refusal (readRefusalMilliseconds)",
+      "site": "apps/ui/app/services/chat-own-segment-source.ts",
+      "token": "poll = setTimeout(wake, unsettledReadPollMilliseconds)",
+      "class": "Liveness",
+      "owner": "host attachment reliability HA1"
+    },
+    {
       "id": "HA0-READ-LOSS",
       "bound": "Report-only: a lost or refused chat read (not a leadership handoff) that lasts 10 s (chatReadLossBoundMilliseconds) reports chat.read.cold-hidden and run.unsettled.own; an attach clears it",
       "site": "apps/ui/app/services/chat-session-store.ts",

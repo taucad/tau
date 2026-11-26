@@ -64,6 +64,8 @@ A `wait` refusal that says the chat's writer cannot take a command now but will 
 
 A reload between a send's outbox write and its composer clear restored the queued message as a draft (PERF-8). The composer lets go of a restored draft that an unheld outbox entry composes, with the same text and attachments, unless the person touched it first; a draft equal to a held entry is kept, because that entry may be on its way into the composer. No action changes for this.
 
+A model or host pick made while the chat's own run is admitted, running or paused waits, whole, until the run settles (HA1, 2026-11-27, HA-I7). Until then the stored records keep naming the run's executor, and the outbox holds its head with the `pick-deferred` reason. The queue wakes only after the pick's writes and route restart are done. This hold refines `Ready`, as the gate's other ordering holds do, and no action changes.
+
 ## Final runtime guard reconciliation
 
 `Acknowledge` requires membership in `Accepted`, which represents durable acceptance. The service now explicitly checks `answer.effect === 'durable'` on both initial dispatch and prepared replay before deleting an item. An `applied` answer with `not-applied` effect retains the original prepared command; it corresponds to stuttering, not `Acknowledge`. Reconciliation from `ledger.applied` uses the authoritative durable log. The model does not equate a successful transport response with acceptance.

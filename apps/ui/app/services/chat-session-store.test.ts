@@ -1209,7 +1209,12 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         };
       });
       await vi.waitFor(() => {
-        expect(subscribe).toHaveBeenCalledOnce();
+        /* A zero-byte own log is read from the file (HA1): the host carries only the live overlay, no read. */
+        if (localLogFile === 'zero-byte') {
+          expect(reloaded.getAttachmentStatus('chat_seed_waiting_ack')).toBe('attached');
+        } else {
+          expect(subscribe).toHaveBeenCalledOnce();
+        }
       });
       expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual(['chat_seed_waiting_ack']);
       reloaded.startPendingSeed('chat_seed_waiting_ack');
@@ -1785,16 +1790,15 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         close: vi.fn(async () => undefined),
       }),
     );
-    await settle();
-    expect(hostCommand).toHaveBeenCalledTimes(2);
-    publishLogPage(reloaded, chatId, manualRows.slice(0, 2), { cursor: 0, endCursor: 3 });
-    await settle();
-    expect(hostCommand).toHaveBeenCalledTimes(2);
-    expect(reloadedSession.messages).toContainEqual(seed);
-    publishLogPage(reloaded, chatId, manualRows.slice(2), { cursor: 2, endCursor: 3 });
-    await vi.waitFor(() => {
-      expect(deps.consumeChatStartupRequest).toHaveBeenCalledTimes(2);
-    });
+    /* HA1: the reloaded page reads its own log from the file whole, never a page at a time, so the durable manual
+     * turn supersedes the seed as soon as it is read, and the seed is never replayed. The bound covers the source's
+     * first, on-demand module load. */
+    await vi.waitFor(
+      () => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 5000 },
+    );
     expect(deps.consumeChatStartupRequest).toHaveBeenLastCalledWith(chatId, 'req_seed_superseded');
     await settle();
     expect(reloadedSession.messages.some((message) => message.id === seed.id)).toBe(false);

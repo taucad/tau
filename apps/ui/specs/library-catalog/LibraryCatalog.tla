@@ -158,6 +158,10 @@
 \* this tab's or another tab's, now removes the root or leaves it (`Applied`), and `Ops` needs no third operation. The
 \* gate (`MutationJournaled`, `HeldActive`), the journal-then-apply order and recovery are unchanged; every invariant
 \* and property is unchanged and is checked over the larger set of behaviours.
+\* Name ahead C1 (2026-11-26): a kernel create starts its name request before the worker, storage and template
+\* awaits and awaits it at directory allocation, before anything is journaled; `namingImageUrls` is exported. The
+\* journal, apply and gate order is unchanged. A caller's `projectName` may be a promise, awaited at the same point.
+\* No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

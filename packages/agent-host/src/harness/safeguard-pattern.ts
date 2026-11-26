@@ -25,7 +25,7 @@ const prefixed: readonly AnomalyPattern[] = [
  * The family of a recorded `safeguard.recorded` row, read from its `safeguardId`.
  *
  * The id is the detection's signature (`safeguards.ts`): four families prefix it with their pattern, an identical call
- * ends it with `:any-result`, an identical error is the bare `tool:args:error` triple, and the output-limit recovery
+ * ends it with `:same-result` (`:any-result` in rows recorded before it also matched the answer), an identical error is the bare `tool:args:error` triple, and the output-limit recovery
  * prefixes `output-limit:` (`session.ts`). Change a signature there and this reading with it.
  *
  * @param safeguardId - The row's `safeguardId`.
@@ -40,5 +40,7 @@ export const safeguardPatternOf = (safeguardId: string): SafeguardPattern => {
   if (pattern !== undefined) {
     return pattern;
   }
-  return safeguardId.endsWith(':any-result') ? anomalyPattern.identicalCall : anomalyPattern.identicalError;
+  return safeguardId.endsWith(':same-result') || safeguardId.endsWith(':any-result')
+    ? anomalyPattern.identicalCall
+    : anomalyPattern.identicalError;
 };

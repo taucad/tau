@@ -2268,12 +2268,10 @@
               "posthog-js/*",
               "@sentry/react"
             ],
-            // Reached only through a dynamic import: the chat's AI SDK (PL1), the editor, the viewer tier, the printer
+            // Reached only through a dynamic import: the editor, the viewer tier, the printer
             // viewer and the part visuals (PL5), the viewer's loaders and debug tools, the language services, the
             // conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
-              "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
-              "apps/libs/chat-ui/src/services/chat-sdk.ts",
               "apps/libs/editor-ui/src/components/code/code-editor-view.client.tsx",
               "apps/libs/editor-ui/src/components/code/editor-definition.ts",
               "apps/libs/editor-ui/src/components/code/editor-language-features.ts",

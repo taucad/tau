@@ -74,6 +74,14 @@ export const ownerOf = (nodes: GraphNodes, file: string): string | undefined => 
 };
 
 /**
+ * Whether a project, target or file name may reach a burn-in run. The run passes names to Vitest as arguments, never
+ * through a shell, so `$` (React Router's route folders, `w.$workspace.$project`) is as plain as a letter; the rest
+ * still keeps a name to path characters and out of parent directories.
+ */
+export const isRunnableName = (value: unknown): value is string =>
+  typeof value === 'string' && /^[\w@.:/$-]+$/u.test(value) && !value.includes('..');
+
+/**
  * Map a pull request's added and modified files to the targets that burn them in. Non-test files are ignored; each
  * test file joins its owner's `test` target unless the project is excluded, has no such target, the target is not a
  * plain Vitest command, or the target's own file list leaves the file out.
@@ -82,6 +90,10 @@ export const planBurnIn = (files: readonly string[], nodes: GraphNodes, workspac
   const byProject = new Map<string, string[]>();
   const skipped: Skipped[] = [];
   for (const file of [...new Set(files.filter((path) => isTestFile(path)))].toSorted()) {
+    if (!isRunnableName(file)) {
+      skipped.push({ file, reason: 'its path has characters a burn-in run does not accept' });
+      continue;
+    }
     const project = ownerOf(nodes, file);
     const node = project === undefined ? undefined : nodes[project];
     if (project === undefined || node === undefined) {

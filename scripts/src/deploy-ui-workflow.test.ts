@@ -175,8 +175,10 @@ describe('UI deploy PicoGK browser host', () => {
 
   it('should neither build nor download the host, which the browser loads by digest from the mirror', () => {
     // Charter picogk-interim-digest-consumer W3: a UI deploy never builds, uploads or embeds the host.
-    expect(Object.keys(jobs)).toEqual(['deploy']);
+    // The only other job is the post-deploy data-request alert (L5), which runs after the deploy and builds nothing.
+    expect(Object.keys(jobs)).toEqual(['deploy', 'alert-route-data']);
     expect(jobs['deploy']?.needs).toBeUndefined();
+    expect(jobs['alert-route-data']?.needs).toBe('deploy');
     expect(raw).not.toContain('picogk-browser-host.yml');
     expect(raw).not.toContain('PICOGK_BROWSER_ASSETS_ROOT');
     expect(raw).not.toMatch(/download-artifact/u);

@@ -9,6 +9,7 @@ import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
+import { replayBlockSelector } from '#lib/replay-content.lib.js';
 import { connectRemoteFlags, disconnectRemoteFlags, failRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
 import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
 import {
@@ -111,10 +112,12 @@ function PostHogLifecycle({
   isActive,
   options,
   isReplayEnabled,
+  isReplayContentAllowed,
 }: {
   readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
+  readonly isReplayContentAllowed: boolean | undefined;
 }): undefined {
   const { data: sessionData, isPending } = useSession(authClient);
   const user = sessionData?.user;
@@ -229,7 +232,13 @@ function PostHogLifecycle({
   }, [isActive, options]);
 
   useEffect(() => {
-    if (!isActive || !isReplayEnabled || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
+    if (
+      !isActive ||
+      !isReplayEnabled ||
+      isReplayContentAllowed === undefined ||
+      admittedGeneration !== decision.current ||
+      sdk?.__loaded !== true
+    ) {
       return undefined;
     }
     const posthog = sdk;
@@ -237,11 +246,22 @@ function PostHogLifecycle({
       posthog.stopSessionRecording();
       return undefined;
     }
+    const recording = posthog.config.session_recording;
+    const blockSelector = replayBlockSelector(recording.blockSelector ?? undefined, isReplayContentAllowed);
+    if (recording.blockSelector !== blockSelector) {
+      /* The recorder (rrweb) reads its block selector once, when it starts, and keeps what it already serialised. A
+         changed decision therefore ends the running recording and starts a new one, whose full snapshot follows the
+         new selector. */
+      posthog.set_config({ session_recording: { ...recording, blockSelector } });
+      if (posthog.sessionRecordingStarted()) {
+        posthog.stopSessionRecording();
+      }
+    }
     // Started outside the critical rendering path; a second start on an already-running recorder is a no-op.
     return whenIdle(() => {
       posthog.startSessionRecording();
     });
-  }, [isActive, isReplayEnabled, admittedGeneration, isCredentialAddress]);
+  }, [isActive, isReplayEnabled, isReplayContentAllowed, admittedGeneration, isCredentialAddress]);
 
   useEffect(() => {
     if (!isActive || isPending || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
@@ -278,18 +298,21 @@ export const admittedAnalytics: Analytics = {
  * running only while `isActive`. `isActive` is `undefined` while the host cannot know its decision yet (the hydration
  * render of a server-rendered document); nothing is started, withdrawn or published then.
  *
- * @param props - The host's decision, its SDK options and whether to start session replay.
+ * @param props - The host's decision, its SDK options, whether to start session replay and whether that replay may
+ *   record the chat transcript and code (`undefined` while the host is still reading it: replay waits).
  * @returns The analytics context around `children`.
  */
 export function PostHogAnalyticsProvider({
   isActive,
   options,
   isReplayEnabled,
+  isReplayContentAllowed,
   children,
 }: {
   readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
+  readonly isReplayContentAllowed?: boolean | undefined;
   readonly children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -298,6 +321,7 @@ export function PostHogAnalyticsProvider({
         isActive={posthogConfig.apiKey === '' ? false : isActive}
         options={options}
         isReplayEnabled={isReplayEnabled}
+        isReplayContentAllowed={isReplayContentAllowed}
       />
       {children}
     </AnalyticsContextProvider>

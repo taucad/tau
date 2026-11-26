@@ -58,6 +58,7 @@ import {
 } from '#machines/cad.machine.js';
 import { useViewerPartMenu } from '@taucad/workbench-panes/component-menu/use-viewer-part-menu';
 import type { ViewerPartMenuDecorator } from '@taucad/workbench-panes/component-menu/use-viewer-part-menu';
+import { ViewerCommentHeads, ViewerComments } from '#components/comments/viewer-comments.js';
 import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { ExactMeasurementProvider } from '@taucad/viewer/graphics/three/react/exact-measurement';
@@ -368,7 +369,11 @@ function useViewerEntryAbsence({
   isDirectory: boolean;
   isMissing: boolean;
   isFilesWait: boolean;
-}>): Readonly<{ absence: ViewerEntryAbsence; renderedPath: string; followTarget: string | undefined }> {
+}>): Readonly<{
+  absence: ViewerEntryAbsence;
+  renderedPath: string;
+  followTarget: string | undefined;
+}> {
   const [followedMain, setFollowedMain] = useState(mainEntryPath);
   const [settled, setSettled] = useState<Readonly<{ entryPath: string | undefined; absence: ViewerEntryAbsence }>>();
   const renderedPath = entryPath ?? '';
@@ -393,7 +398,13 @@ function useViewerEntryAbsence({
       followTarget,
     };
   }
-  const absence = settledAbsence({ entryPath, mainEntryPath, hasWaited, isDirectory, isMissing });
+  const absence = settledAbsence({
+    entryPath,
+    mainEntryPath,
+    hasWaited,
+    isDirectory,
+    isMissing,
+  });
   if (settled === undefined || settled.entryPath !== entryPath || settled.absence !== absence) {
     setSettled({ entryPath, absence });
   }
@@ -786,11 +797,19 @@ const ViewerContent = memo(function ({
   // graphics yet shows none (`undefined`).
   const enableLines = useOptionalGraphicsSelector((state) => state.context.enableLines, undefined);
   useEffect(() => {
-    cadRef?.send({ type: 'setViewerEdges', viewerId: viewId, shown: enableLines });
+    cadRef?.send({
+      type: 'setViewerEdges',
+      viewerId: viewId,
+      shown: enableLines,
+    });
   }, [cadRef, viewId, enableLines]);
   useEffect(
     () => () => {
-      cadRef?.send({ type: 'setViewerEdges', viewerId: viewId, shown: undefined });
+      cadRef?.send({
+        type: 'setViewerEdges',
+        viewerId: viewId,
+        shown: undefined,
+      });
     },
     [cadRef, viewId],
   );
@@ -811,7 +830,10 @@ const ViewerContent = memo(function ({
   const savedOptions = selectedState?.options;
   useEffect(() => {
     if (liveOptions !== undefined && offeredViewId !== undefined) {
-      settleLiveViewOptions(viewId, liveOptions, { viewId: offeredViewId, options: savedOptions ?? {} });
+      settleLiveViewOptions(viewId, liveOptions, {
+        viewId: offeredViewId,
+        options: savedOptions ?? {},
+      });
     }
   }, [viewId, offeredViewId, savedOptions, liveOptions]);
   const localInstance = useLocalInstanceChoice(viewId);
@@ -1081,151 +1103,164 @@ const ViewerContent = memo(function ({
   }, [closePartMenu, isGeometryUnitClosed]);
 
   return (
-    <ViewerStage
-      graphicsRef={graphicsActor}
-      regionId={`viewport-gizmo-container-${viewId}`}
-      data-testid='chat-viewer-layout'
-      partMenu={graphicsActor === undefined ? undefined : partMenu}
-      decoratePartMenu={decoratePartMenu}
-      isModelShown={!isGeometryUnitClosed && Boolean(artifact && presentedArtifact)}
-      status={stageStatus(waitFailure, overlayFailureMessage)}
-      /* The canvas is still to come once a wait ends before the project is loaded here and the graphics arrive. */
-      isWaiting={isRunningViewerWait(wait) || (wait === undefined && graphicsActor === undefined)}
-      statusExtra={
-        <>
-          <StageWaitStatus wait={wait} />
-          {unavailable && profile !== 'editor' ? (
-            <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>
-              <p>{unavailable}</p>
-              <Button size='sm' variant='outline' className='mt-2' onClick={restoreDefaultView}>
-                Use default view
-              </Button>
-            </div>
-          ) : null}
-        </>
-      }
-      onKeyDown={(event) => {
-        if (
-          event.altKey ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.nativeEvent.isComposing ||
-          evaluation?.success !== true ||
-          evaluation.views.length < 2
-        ) {
-          return;
+    <ViewerComments
+      isOffered={profile === 'editor'}
+      entryPath={entryPath}
+      kernelView={offeredViewId}
+      instance={localForView && !localExpired ? localForView.instanceId : selectedState?.authoredInstance}
+      captureRendering={captureRendering}
+    >
+      <ViewerStage
+        graphicsRef={graphicsActor}
+        regionId={`viewport-gizmo-container-${viewId}`}
+        data-testid='chat-viewer-layout'
+        partMenu={graphicsActor === undefined ? undefined : partMenu}
+        decoratePartMenu={decoratePartMenu}
+        isModelShown={!isGeometryUnitClosed && Boolean(artifact && presentedArtifact)}
+        status={stageStatus(waitFailure, overlayFailureMessage)}
+        /* The canvas is still to come once a wait ends before the project is loaded here and the graphics arrive. */
+        isWaiting={isRunningViewerWait(wait) || (wait === undefined && graphicsActor === undefined)}
+        statusExtra={
+          <>
+            <StageWaitStatus wait={wait} />
+            {unavailable && profile !== 'editor' ? (
+              <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>
+                <p>{unavailable}</p>
+                <Button size='sm' variant='outline' className='mt-2' onClick={restoreDefaultView}>
+                  Use default view
+                </Button>
+              </div>
+            ) : null}
+          </>
         }
-        const { target } = event;
-        if (
-          !(target instanceof HTMLElement) ||
-          target.isContentEditable ||
-          target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor')
-        ) {
-          return;
-        }
-        const index = Number(event.key) - 1;
-        const next = Number.isInteger(index) && index >= 0 && index < 3 ? evaluation.views[index] : undefined;
-        if (!next) {
-          return;
-        }
-        event.preventDefault();
-        setLocalInstanceChoice(viewId, undefined);
-        void viewCommands.edit(viewId, (current) => ({
-          ...(current ?? newViewRecord(entryPath)),
-          selectedKernelView: next.id,
-        }));
-      }}
-      /* The canvas stays while the unit is closed or not created yet, so a unit that follows the files (an entry other
+        onKeyDown={(event) => {
+          if (
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.nativeEvent.isComposing ||
+            evaluation?.success !== true ||
+            evaluation.views.length < 2
+          ) {
+            return;
+          }
+          const { target } = event;
+          if (
+            !(target instanceof HTMLElement) ||
+            target.isContentEditable ||
+            target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor')
+          ) {
+            return;
+          }
+          const index = Number(event.key) - 1;
+          const next = Number.isInteger(index) && index >= 0 && index < 3 ? evaluation.views[index] : undefined;
+          if (!next) {
+            return;
+          }
+          event.preventDefault();
+          setLocalInstanceChoice(viewId, undefined);
+          void viewCommands.edit(viewId, (current) => ({
+            ...(current ?? newViewRecord(entryPath)),
+            selectedKernelView: next.id,
+          }));
+        }}
+        /* The canvas stays while the unit is closed or not created yet, so a unit that follows the files (an entry other
          than main gets its unit only once they settle) draws into the same canvas (A15e; C11). While the project is
          still opening the stage draws no canvas, so no camera move is written into a checkout not landed yet; nor does it
          before the view's graphics arrive. */
-      renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) =>
-        isProjectOpening || graphicsActor === undefined ? null : (
-          <CadViewer
-            enableZoom
-            enablePan
-            secondaryMouseButtonMode='camera-pan'
-            enableGizmo={enableGizmo}
-            enableGrid={enableGrid}
-            enableAxes={enableAxes}
-            enableSurfaces={enableSurfaces}
-            enableLines={enableLines}
-            enableMatcap={enableMatcap}
-            upDirection={upDirection}
-            artifact={artifact ? presentedArtifact : undefined}
-            artifactHash={presentedArtifactKey}
-            sourceFile={presentedSourceFile}
-            // Keep R3F on default offsetX/Y compute; eventPrefix='client'
-            // is window-relative and mis-rays docked panels.
-            eventSource={eventSource}
-            gizmoContainer={gizmoContainer}
-            onModelComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
-            cameraInput={cameraInput}
-            gizmoStyle={gizmoStyle}
-          />
-        )
-      }
-      /* Bottom controls: the bar is centred on the last line and grows upward as tools start. In the editor it starts
+        renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) =>
+          isProjectOpening || graphicsActor === undefined ? null : (
+            <CadViewer
+              enableZoom
+              enablePan
+              secondaryMouseButtonMode='camera-pan'
+              enableGizmo={enableGizmo}
+              enableGrid={enableGrid}
+              enableAxes={enableAxes}
+              enableSurfaces={enableSurfaces}
+              enableLines={enableLines}
+              enableMatcap={enableMatcap}
+              upDirection={upDirection}
+              artifact={artifact ? presentedArtifact : undefined}
+              artifactHash={presentedArtifactKey}
+              sourceFile={presentedSourceFile}
+              // Keep R3F on default offsetX/Y compute; eventPrefix='client'
+              // is window-relative and mis-rays docked panels.
+              eventSource={eventSource}
+              gizmoContainer={gizmoContainer}
+              onModelComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
+              cameraInput={cameraInput}
+              gizmoStyle={gizmoStyle}
+            />
+          )
+        }
+        /* Bottom controls: the bar is centred on the last line and grows upward as tools start. In the editor it starts
          with the view menus and the build status, and the issues list unfolds above its controls. Capability-gated mobile AR shares the controls row. In a pane narrower than the bar, the
          bar starts at the left edge, keeping the grid readout and Section in view. */
-      controls={
-        graphicsActor === undefined ? undefined : profile === 'editor' ? (
-          <ViewerIssues
-            entryPath={entryPath}
-            notice={
-              unavailable
-                ? {
-                    message: unavailable,
-                    actionLabel: 'Use default view',
-                    onAct: restoreDefaultView,
+        controls={
+          graphicsActor === undefined ? undefined : profile === 'editor' ? (
+            <ViewerIssues
+              entryPath={entryPath}
+              notice={
+                unavailable
+                  ? {
+                      message: unavailable,
+                      actionLabel: 'Use default view',
+                      onAct: restoreDefaultView,
+                    }
+                  : undefined
+              }
+            >
+              {({ segment, list }) => (
+                <ChatViewerControls
+                  mobileAction={<ArButton artifact={artifact} />}
+                  captureRendering={captureRendering}
+                  kernelSettings={
+                    cadRef ? (
+                      <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
+                    ) : undefined
                   }
-                : undefined
-            }
-          >
-            {({ segment, list }) => (
-              <ChatViewerControls
-                mobileAction={<ArButton artifact={artifact} />}
-                captureRendering={captureRendering}
-                kernelSettings={
-                  cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
-                }
-                leading={
-                  <>
-                    {cadRef ? <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : null}
-                    {segment}
-                  </>
-                }
-                aboveControls={list}
-                viewFields={viewFields}
-              />
-            )}
-          </ViewerIssues>
-        ) : (
-          <ChatViewerControls
-            mobileAction={<ArButton artifact={artifact} />}
-            shouldEnableCapture={false}
-            captureRendering={captureRendering}
-          />
-        )
-      }
-    >
-      {!artifact && !overlayFailureMessage ? <GeometryStatus isEmpty={emptyModel} /> : null}
-      {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
-      {isGeometryUnitClosed && (
-        <div className='pointer-events-none absolute inset-0 z-20 flex items-center justify-center'>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            className='pointer-events-auto shadow-lg'
-            onClick={handleReopenRenderer}
-          >
-            <PlayCircle />
-            Reopen renderer
-          </Button>
-        </div>
-      )}
-    </ViewerStage>
+                  leading={
+                    <>
+                      {cadRef ? (
+                        <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
+                      ) : null}
+                      {segment}
+                    </>
+                  }
+                  aboveControls={list}
+                  viewFields={viewFields}
+                />
+              )}
+            </ViewerIssues>
+          ) : (
+            <ChatViewerControls
+              mobileAction={<ArButton artifact={artifact} />}
+              shouldEnableCapture={false}
+              captureRendering={captureRendering}
+            />
+          )
+        }
+      >
+        {!artifact && !overlayFailureMessage ? <GeometryStatus isEmpty={emptyModel} /> : null}
+        {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
+        {isGeometryUnitClosed && (
+          <div className='pointer-events-none absolute inset-0 z-20 flex items-center justify-center'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='pointer-events-auto shadow-lg'
+              onClick={handleReopenRenderer}
+            >
+              <PlayCircle />
+              Reopen renderer
+            </Button>
+          </div>
+        )}
+        <ViewerCommentHeads />
+      </ViewerStage>
+    </ViewerComments>
   );
 });
 

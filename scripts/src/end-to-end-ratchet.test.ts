@@ -78,9 +78,10 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
   ];
   /**
    * Suites admitted after the first batch, each on five consecutive green nightlies. The adaptive web tier ran as its
-   * own nightly job, not a matrix row, so its admission deleted that job (global review 2026-11-24, ruling 11).
+   * own nightly job, not a matrix row, so its admission deleted that job (global review 2026-11-24, ruling 11). `ui`'s
+   * Chromium suites are admitted as one row, the `test:e2e` aggregate, not one per config (DC-24, nightlies M to Q).
    */
-  const laterAdmissions = ['ui:test:e2e:attachment-image-engines', 'ui-e2e:test:e2e:adaptive'];
+  const laterAdmissions = ['ui:test:e2e:attachment-image-engines', 'ui-e2e:test:e2e:adaptive', 'ui:test:e2e'];
 
   it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
     expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
@@ -194,7 +195,7 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
 
   it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {
     const oracles = consumers.flatMap(({ oracles: list }) => list).filter((oracle) => oracle.kind === 'job');
-    for (const suite of firstBatch) {
+    for (const suite of [...firstBatch, ...laterAdmissions]) {
       const name = `Browser end-to-end (${suite.replace(':', ' ')})`;
       for (const oracle of oracles.filter(({ job }) => job === name)) {
         // `main` scope follows a reused push to the merge-queue run on the same commit (#2296).
@@ -305,6 +306,59 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
       'ui test:e2e',
       'ui-e2e test:e2e:browser-host',
     ]);
+  });
+
+  it('should leave every shadow row out of the nightly matrix, since its shadow row runs it (ruling 8)', () => {
+    const { status, stderr, labels } = planNightly({
+      'ui-e2e': {
+        name: 'ui-e2e',
+        data: {
+          targets: {
+            'test:e2e:development': target(),
+            'test:e2e:service-worker': target(),
+            'test:e2e:browser-host': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:development'] }),
+            'test:e2e:shadow': target({ dependsOn: ['test:e2e:service-worker'] }),
+          },
+        },
+      },
+    });
+    expect(status, stderr).toBe(0);
+    expect(labels).toEqual(['ui-e2e test:e2e:browser-host']);
+  });
+
+  it('should keep desktop-e2e test:e2e and ui-e2e browser-host whole in the nightly and add no DC-27 row to it', () => {
+    const targetsOf = (file: string): Record<string, unknown> =>
+      (JSON.parse(read(file)) as { readonly targets: Record<string, unknown> }).targets;
+    const { status, stderr, labels } = planNightly({
+      'desktop-e2e': { name: 'desktop-e2e', data: { targets: targetsOf('apps/desktop-e2e/project.json') } },
+      'ui-e2e': { name: 'ui-e2e', data: { targets: targetsOf('apps/ui-e2e/project.json') } },
+    });
+    expect(status, stderr).toBe(0);
+    // The split rows run their files in the shadow lane; the whole suites still run every file, red ones included,
+    // for an owner who dispatches the nightly to prove a fix.
+    expect(labels).toContain('desktop-e2e test:e2e');
+    expect(labels).toContain('ui-e2e test:e2e:browser-host');
+    for (const row of [
+      'desktop-e2e test:e2e:onboarding',
+      'desktop-e2e test:e2e:chat',
+      'desktop-e2e test:e2e:project',
+      'desktop-e2e test:e2e:print',
+      'ui-e2e test:e2e:browser-host-chat',
+    ]) {
+      expect(labels, row).not.toContain(row);
+    }
+  });
+
+  it('should run ui test:e2e in one place, its merge-queue row, never the nightly (global review ruling 7)', () => {
+    const uiProject = JSON.parse(read('apps/ui/project.json')) as {
+      readonly targets: Record<string, { readonly metadata?: { readonly shards?: number } }>;
+    };
+    // One unsharded row: the e2e-queue plan refuses a suite that declares shards.
+    expect(uiProject.targets['test:e2e']?.metadata?.shards).toBeUndefined();
+    const { status, stderr, labels } = planNightly({ ui: { name: 'ui', data: { targets: uiProject.targets } } });
+    expect(status, stderr).toBe(0);
+    expect(labels).not.toContain('ui test:e2e');
   });
 
   it('should fail the plan when a job-per-dependency aggregate names no target of its project', () => {

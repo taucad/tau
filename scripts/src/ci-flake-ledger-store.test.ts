@@ -30,7 +30,7 @@ const fakeClient = (answers: Record<string, unknown>): { github: Client; calls: 
       return answer('GET', path) as string;
     },
     getBytes: async (): Promise<Uint8Array<ArrayBuffer>> => new Uint8Array(),
-    send: async <T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> => {
+    send: async <T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<T> => {
       calls.push({ method, path, body });
       return answer(method, path) as T;
     },

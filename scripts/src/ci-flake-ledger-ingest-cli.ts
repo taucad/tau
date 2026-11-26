@@ -6,7 +6,8 @@
  * pushes to `--branch` from the last `--lookback-hours` that it has not ingested at their current attempt (or the
  * runs named by `--runs`), downloads each run's `test-outcomes-*` artifacts, counts their outcome rows into the state,
  * confirms lineage pairs through compares, counts the shadow rows' runs (FQ-13, `ci-shadow-rows.ts`; the rows are read
- * from the `project.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
+ * from the `project.json` files under `--root`), counts each quarantined test's gating executions toward its release
+ * bar (FQ-9, `ci-flake-quarantine-release.ts`; the entries are the `quarantine.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
  * reach (`--max-runs`, the request budget) is left for the next invocation, which looks back over the same hours, so
  * a `workflow_run` the concurrency group dropped is caught up by the next one or by the daily schedule.
  *
@@ -19,6 +20,8 @@
  * `--state-file` reads and writes a local file instead of the branch (a replay; nothing is written to GitHub).
  * Env: GITHUB_TOKEN (`actions: read`; `contents: write` to update the branch), GITHUB_REPOSITORY (default
  * taucad/tau), GITHUB_API_URL.
+ * With `GITHUB_OUTPUT` set it writes `complete`: `true` when every pending run of the lookback was counted (never for
+ * `--runs`), which the release step needs before it releases anything.
  * Exit codes: 0 ingested, or nothing to ingest; 1 API failure (what was counted before it is still written), or the
  * branch moved while this ran; 2 usage, or an
  * invalid `flake-ledger.json`; 3 state written, but outcome lines were rejected (unknown schema or malformed).
@@ -50,12 +53,28 @@ import {
 } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
+import { readWorkspace } from '#ci-flake-quarantine-entry-cli.js';
+import {
+  countQuarantineRun,
+  openQuarantineTracks,
+  quarantinedTests,
+  retainQuarantineTracks,
+} from '#ci-flake-quarantine-release.js';
 import { countShadowRun, readShadowRegistry, renderShadowMarkdown, retainShadowRows } from '#ci-shadow-rows.js';
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
 export const artifactPrefix = 'test-outcomes-';
+/** The outcome artifacts of the non-gating shadow rows (DC-25): `test-outcomes-shadow-<suite>`. */
+export const shadowArtifactPrefix = `${artifactPrefix}shadow-`;
 /** The largest unzipped outcome text one artifact may hold. */
 const maximumArtifactBytes = 512 * 1024 * 1024;
+
+/**
+ * The rows of one artifact as the ledger counts them: a shadow row (DC-25) gates nothing, so its rows are marked and
+ * their events never count toward the entry rule (FQ-6).
+ */
+export const artifactRows = (name: string, rows: readonly OutcomeRow[]): OutcomeRow[] =>
+  name.startsWith(shadowArtifactPrefix) ? rows.map((row) => ({ ...row, shadow: true })) : [...rows];
 
 type Artifact = { readonly id: number; readonly name: string; readonly expired: boolean };
 
@@ -111,7 +130,7 @@ const readRun = async (github: Client, runId: number, directory: string): Promis
   for (const artifact of artifacts) {
     // oxlint-disable-next-line no-await-in-loop -- one artifact at a time keeps memory to one zip
     const parsed = parseOutcomes(await readArtifact(github, artifact, directory), `${runId}/${artifact.name}`);
-    rows.push(...parsed.rows);
+    rows.push(...artifactRows(artifact.name, parsed.rows));
     problems.push(...parsed.problems);
   }
   return { artifacts: artifacts.length, rows, problems };
@@ -239,6 +258,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   const aliases = ledger.aliases ?? [];
   const shadow = await readShadowRegistry(resolve(values.root));
+  const shadowTargets = new Set(shadow.rows.map((row) => `${row.project}:${row.target}`));
   const repository = process.env['GITHUB_REPOSITORY'] ?? 'taucad/tau';
   const api = process.env['GITHUB_API_URL'] ?? 'https://api.github.com';
   const github = client({ api, token, repository, maxRequests });
@@ -246,10 +266,14 @@ const main = async (args: readonly string[]): Promise<number> => {
     ? fileStore(resolve(values['state-file']))
     : branchStore(github, values['state-branch']);
   const now = new Date();
+  // The entries on `main` whose gating executions count toward the release bar (FQ-9).
+  const quarantined = quarantinedTests(await readWorkspace(resolve(values.root)), now.toISOString().slice(0, 10));
 
   const existing = await store.read();
   const state = existing ?? emptyState(now);
   const folded = applyAliases(state, aliases);
+  // An entry seen on `main` for the first time counts only runs created from now on.
+  const openedTracks = openQuarantineTracks(state, quarantined, now.toISOString());
   const listed = await runsToIngest(github, {
     workflow: values.workflow,
     branch: values.branch,
@@ -291,6 +315,10 @@ const main = async (args: readonly string[]): Promise<number> => {
       rejectedLines.push(...problems.slice(0, 20));
       // Before `ingestRun`, which records the attempt as ingested.
       countShadowRun(state, { run, rows, registry: shadow.rows });
+      // Only the gating runs the discovery would list count toward a release bar: a `--runs` backfill may name others.
+      if (run.event === 'merge_group' || (run.event === 'push' && run.head_branch === values.branch)) {
+        countQuarantineRun(state, { run, rows, tests: quarantined, shadowTargets, unreadable: rejected > 0 });
+      }
       const result = ingestRun(state, { run, rows, artifacts, rejected, aliases });
       events.push(...result.events);
       for (const candidate of result.candidates) {
@@ -312,7 +340,8 @@ const main = async (args: readonly string[]): Promise<number> => {
 
   pruneState(state, now);
   retainShadowRows(state, shadow.rows);
-  if (!existing || ingested.length > 0 || folded.length > 0) {
+  const droppedTracks = retainQuarantineTracks(state, quarantined);
+  if (!existing || ingested.length > 0 || folded.length > 0 || droppedTracks.length > 0 || openedTracks.length > 0) {
     state.updatedAt = now.toISOString();
     const message = [
       `chore(flake-ledger): Ingest ${ingested.length} CI runs`,
@@ -342,6 +371,13 @@ const main = async (args: readonly string[]): Promise<number> => {
   console.log(markdown);
   if (values.summary) {
     await appendFile(values.summary, `${markdown}\n`);
+  }
+  // Whether every pending run was counted: the release step releases nothing on a partial count, which may miss a
+  // newer failure of a test it would release (FQ-9).
+  // A `--runs` backfill is never complete: a newer run it did not name may hold a failure.
+  const complete = !failed && runIds.length === 0 && ingested.length === pending.length;
+  if (process.env['GITHUB_OUTPUT']) {
+    await appendFile(process.env['GITHUB_OUTPUT'], `complete=${String(complete)}\n`);
   }
   if (failed) {
     return 1;

@@ -6,7 +6,7 @@ import type { InputCountCapability } from '#billable-model-input-count.js';
 
 const validPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const body = {
-  model: 'gpt-5.6-luna',
+  model: 'gpt-6-luna',
   instructions: 'Inspect the synthetic fixture.',
   input: [
     { type: 'reasoning', id: 'rs_fixture', summary: [], encrypted_content: 'opaque-fixture' },
@@ -94,7 +94,7 @@ const invalidCapabilities: ReadonlyArray<readonly [string, Partial<CountInput>]>
 ];
 
 describe('countBillableModelInput', () => {
-  it.each(['gpt-6.1-terra', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'])(
+  it.each(['gpt-6.1-terra', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'])(
     'preserves every count-affecting native field and pins exact create/count digests for %s',
     async (model) => {
       const createBody = { ...body, model };

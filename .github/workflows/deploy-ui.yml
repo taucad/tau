@@ -81,6 +81,8 @@ jobs:
     concurrency:
       group: deploy-ui-${{ inputs.environment }}
       cancel-in-progress: false
+    outputs:
+      route-data: ${{ steps.route-data.outcome }}
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
@@ -300,3 +302,42 @@ jobs:
         env:
           URL: ${{ steps.site.outputs.url }}
         run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"
+
+      # Data requests must reach the React Router function. A routing rule that answers one with the static
+      # shell's HTML makes the page fail with "Unable to decode turbo-stream response" (chat observability
+      # program L5, defect D3; launch audit N-3). A failure turns this deploy red and the job below pushes an alert.
+      - name: Check data requests answer data
+        id: route-data
+        if: steps.superseded.outputs.superseded != 'true'
+        env:
+          URL: ${{ steps.site.outputs.url }}
+        run: node scripts/src/check-route-data.ts "$URL"
+
+  # The deploy job's environment cannot read the alert webhook, which lives on the `main`-only `ci-alerts`
+  # environment, so a separate job sends one non-paging Grafana IRM push. A production deploy runs at a release
+  # tag, which `ci-alerts` refuses: there the red release run is the signal.
+  alert-route-data:
+    name: Alert on data requests answering HTML
+    needs: deploy
+    if: always() && needs.deploy.outputs.route-data == 'failure' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ci-alerts
+    steps:
+      - name: Push the alert
+        env:
+          CI_ALERT_WEBHOOK_URL: ${{ secrets.CI_ALERT_WEBHOOK_URL }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$CI_ALERT_WEBHOOK_URL" ]; then
+            echo "::error::CI_ALERT_WEBHOOK_URL is not set on ci-alerts: nothing was delivered."
+            exit 1
+          fi
+          jq -n --arg env "$ENVIRONMENT" --arg run "$RUN_URL" --arg sha "$GITHUB_SHA" '{
+            alert_uid: ("tau-route-data-" + $env + "-" + $sha),
+            title: ("Tau UI on " + $env + " answers data requests with HTML"),
+            state: "alerting",
+            link_to_upstream_details: $run,
+            message: ("The deploy of " + $sha + " to " + $env + " answers a React Router data request with HTML. Pages that make that request show the error page. Runbook: launch audit N-3; roll back the UI deploy.")
+          }' | curl --fail --silent --show-error --retry 3 --header 'content-type: application/json' --data @- --output /dev/null "$CI_ALERT_WEBHOOK_URL"

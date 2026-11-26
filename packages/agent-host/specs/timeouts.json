@@ -622,6 +622,14 @@
       "owner": "W10"
     },
     {
+      "id": "E42",
+      "bound": "ACP lent turn drain: busy.flushing, then busy.recording, each bounded; past it the turn ends from closed after the close ladder (launch audit E-1)",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpDrainTimeout",
+      "class": "External edge",
+      "owner": "launch audit E-1 (taucad/tau#2815)"
+    },
+    {
       "id": "E23",
       "bound": "ACP text checkpoint",
       "site": "packages/host/src/acp/session.ts",
@@ -873,12 +881,20 @@
       "owner": "use_skill startup latency T2"
     },
     {
-      "id": "D17b",
-      "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
+      "id": "D-UI-11",
+      "bound": "A taken-back request's outbox write asked again while the composer holds new text (250 ms doubling, 3 retries), then the person is told",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "const presentationRetry = setTimeout",
+      "token": "setTimeout(resolve, takeBackRetryDelay",
       "class": "Backoff",
-      "owner": "W9"
+      "owner": "chat UX F2"
+    },
+    {
+      "id": "D-UI-12",
+      "bound": "A prepared send its host refused with an owner wait (RH-R17) is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "this.#hostWaitRanOut(session, timer)",
+      "class": "Backoff",
+      "owner": "PERF-5"
     },
     {
       "id": "D19",
@@ -1154,6 +1170,14 @@
       "token": "retirements.get(chatId)",
       "class": "Debounce",
       "owner": "filesystem-projection-performance-charter / N2 N3"
+    },
+    {
+      "id": "RH-DRIVERLESS-RETRY",
+      "bound": "Wait before the launcher asks again for the claim of a chat whose log still shows a run no driver holds: 1 s, doubling to at most 32 s (driverlessRetryMilliseconds, driverlessRetryCeiling); its end wakes the chat's parked reads, whose next pass asks; cleared when the run has a driver or an ending, and on close; unref'd",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "entry.waiting = setTimeout(",
+      "class": "Backoff",
+      "owner": "chat launch audit H-2 H-3"
     },
     {
       "id": "D26",

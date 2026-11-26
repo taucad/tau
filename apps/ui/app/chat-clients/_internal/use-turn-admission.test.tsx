@@ -4,6 +4,9 @@ import { renderHook } from '@testing-library/react';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { ModelCatalog } from '@taucad/chat-ui/utils/new-chat-execution';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
+import { publishIdentityState } from '#lib/identity-answer.js';
+import { parseAdmissionFailureForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 
 const harness = vi.hoisted(() => {
   const state: { catalog: ModelCatalog } = { catalog: { status: 'loading' } };
@@ -100,6 +103,7 @@ beforeEach(() => {
   harness.syncState = 'pending';
   harness.canOpen = true;
   harness.hasClient = true;
+  publishIdentityState('unknown');
 });
 
 describe('useTurnAdmission', () => {
@@ -123,7 +127,7 @@ describe('useTurnAdmission', () => {
 
     harness.cloudOpenPending = false;
     notify(harness.intentListeners);
-    await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as string });
     expect(listening()).toBe(0);
   });
 
@@ -196,7 +200,7 @@ describe('useTurnAdmission', () => {
 
   it('should admit a Tau turn once the awaited catalog offers its model', async () => {
     harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
-    await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as string });
     expect(harness.creditPreflight).toHaveBeenCalledWith('anthropic-claude-opus-4.8', 'anthropic-claude-opus-4.8');
   });
 
@@ -212,5 +216,57 @@ describe('useTurnAdmission', () => {
     });
     expect(harness.awaitAvailability).not.toHaveBeenCalled();
     expect(harness.creditPreflight).not.toHaveBeenCalled();
+  });
+
+  /* Launch audit N-5: the gateway was the first to ask for a session, seconds after the page had started the run and
+   * drawn it as working. */
+  describe('a Tau turn this document would host for a signed-out person', () => {
+    beforeEach(() => {
+      harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
+    });
+
+    it('should refuse it with the gateway’s own sign-in refusal, before the credit check', async () => {
+      publishIdentityState('signed-out');
+
+      const refusal = await admit(opus).catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(Error);
+      const parsed = parseAdmissionFailureForPersistence(refusal as Error);
+      expect(parsed).toMatchObject({
+        code: 'UNAUTHENTICATED',
+        httpStatus: 401,
+        message: 'Sign in to use anthropic-claude-opus-4.8.',
+      });
+      expect(cardOf(parsed.code, parsed.category).category).toBe('auth');
+      expect(harness.creditPreflight).not.toHaveBeenCalled();
+    });
+
+    it('should read who is signed in when the turn is admitted, not when it was asked for', async () => {
+      harness.cloudOpenPending = true;
+      const admitted = admit(opus);
+      await Promise.resolve();
+
+      publishIdentityState('signed-out');
+      harness.cloudOpenPending = false;
+      notify(harness.intentListeners);
+
+      await expect(admitted).rejects.toThrow('UNAUTHENTICATED');
+    });
+
+    it.each(['verified', 'unverified', 'unknown'] as const)(
+      'should leave a turn to the gateway while the identity is %s',
+      async (state) => {
+        publishIdentityState(state);
+
+        await expect(admit(opus)).resolves.toEqual({ hostId: expect.any(String) as string });
+        expect(harness.creditPreflight).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('should not ask an external agent’s turn for a Tau session', async () => {
+      publishIdentityState('signed-out');
+
+      await expect(admit({ kind: 'acp', hostId: 'origin', agentId: 'codex' })).resolves.toEqual({ hostId: 'origin' });
+    });
   });
 });

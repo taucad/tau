@@ -1,9 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-/* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
@@ -56,145 +54,8 @@ import type { LiveProjectSessions } from '#services/chat-session-store.js';
 /** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
 const liveSessions = projectSessionsStandIn();
 
-// ---------------------------------------------------------------------------
-// Hoisted test harness
-//
-// Mocks the AI SDK's `Chat` class so the tests can drive snapshot callbacks
-// (`~registerMessagesCallback`, `~registerStatusCallback`,
-// `~registerErrorCallback`) deterministically and assert that
-// `ChatSessionStore` mirrors them into per-chat subscriptions.
-//
-// Each `new Chat({ id, ... })` records the constructor input and is exposed
-// via `harness.created` so the test can drive callbacks per chat instance.
-// ---------------------------------------------------------------------------
-
-type FakeChatInstance = {
-  id: string;
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
-  error: Error | undefined;
-  messages: MyUIMessage[];
-  sendMessage: ReturnType<typeof vi.fn>;
-  regenerate: ReturnType<typeof vi.fn>;
-  resumeStream: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  makeRequest: ReturnType<typeof vi.fn>;
-  finish: (
-    options?: Partial<{
-      isAbort: boolean;
-      isError: boolean;
-      isDisconnect: boolean;
-    }>,
-  ) => void;
-  // Test driver — invoke any registered messages callback
-  emitMessagesChange: () => void;
-  emitStatusChange: () => void;
-  emitErrorChange: () => void;
-  '~registerMessagesCallback': (onChange: () => void) => () => void;
-  '~registerStatusCallback': (onChange: () => void) => () => void;
-  '~registerErrorCallback': (onChange: () => void) => () => void;
-};
-
-/**
- * Finish a run that streamed a reply: the status walk the AI SDK makes before `onFinish`.
- *
- * @param chat - The chat whose request ends.
- */
-function finishRun(chat: FakeChatInstance): void {
-  for (const status of ['submitted', 'streaming', 'ready'] as const) {
-    chat.status = status;
-    chat.emitStatusChange();
-  }
-  chat.finish();
-}
-
 const harness = vi.hoisted(() => ({
-  created: [] as FakeChatInstance[],
   envApi: 'http://test.local',
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id: string;
-    public status: 'submitted' | 'streaming' | 'ready' | 'error' = 'ready';
-    public error: Error | undefined = undefined;
-    public messages: MyUIMessage[] = [];
-    public sendMessage = vi.fn().mockResolvedValue(undefined);
-    public regenerate = vi.fn().mockResolvedValue(undefined);
-    public resumeStream = vi.fn().mockResolvedValue(undefined);
-    public stop = vi.fn().mockResolvedValue(undefined);
-    public makeRequest = vi.fn().mockResolvedValue(undefined);
-    readonly #messagesListeners = new Set<() => void>();
-    readonly #statusListeners = new Set<() => void>();
-    readonly #errorListeners = new Set<() => void>();
-
-    constructor(init: {
-      id: string;
-      messages?: MyUIMessage[];
-      onFinish?: (input: {
-        messages: MyUIMessage[];
-        isAbort: boolean;
-        isError: boolean;
-        isDisconnect: boolean;
-      }) => void;
-    }) {
-      this.id = init.id;
-      this.messages = init.messages ?? [];
-      const fake: FakeChatInstance = Object.assign(this, {
-        emitMessagesChange: () => {
-          for (const listener of this.#messagesListeners) {
-            listener();
-          }
-        },
-        emitStatusChange: () => {
-          for (const listener of this.#statusListeners) {
-            listener();
-          }
-        },
-        emitErrorChange: () => {
-          for (const listener of this.#errorListeners) {
-            listener();
-          }
-        },
-        finish: (
-          options?: Partial<{
-            isAbort: boolean;
-            isError: boolean;
-            isDisconnect: boolean;
-          }>,
-        ) => {
-          init.onFinish?.({
-            messages: this.messages,
-            isAbort: options?.isAbort ?? false,
-            isError: options?.isError ?? false,
-            isDisconnect: options?.isDisconnect ?? false,
-          });
-        },
-      });
-      harness.created.push(fake);
-    }
-
-    public '~registerMessagesCallback' = (onChange: () => void): (() => void) => {
-      this.#messagesListeners.add(onChange);
-      return () => {
-        this.#messagesListeners.delete(onChange);
-      };
-    };
-
-    public '~registerStatusCallback' = (onChange: () => void): (() => void) => {
-      this.#statusListeners.add(onChange);
-      return () => {
-        this.#statusListeners.delete(onChange);
-      };
-    };
-
-    public '~registerErrorCallback' = (onChange: () => void): (() => void) => {
-      this.#errorListeners.add(onChange);
-      return () => {
-        this.#errorListeners.delete(onChange);
-      };
-    };
-  },
 }));
 
 vi.mock('ai', async (importOriginal) => ({
@@ -238,6 +99,16 @@ type StubDeps = {
     | 'pullRemote'
   >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
+
+/** The facts each `queue held` line logged, parsed from the JSON text the store writes. */
+/** The ids of a transcript's user messages, in order. */
+const userMessageIds = (messages: readonly MyUIMessage[]): string[] =>
+  messages.filter((message) => message.role === 'user').map((message) => message.id);
+
+const loggedHolds = (calls: ReadonlyArray<readonly unknown[]>): unknown[] =>
+  calls
+    .filter(([label]) => label === '[ChatSessionStore] queue held')
+    .map(([, facts]) => JSON.parse(String(facts)) as unknown);
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
@@ -393,12 +264,6 @@ function publishAdmission(
     request: await request(gesture),
   }));
 }
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   // An SDK watch requires a visible admitted input; lifecycle-only logs cannot
@@ -603,7 +468,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     }
   });
 
-  it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
+  it('should show an external run streaming again when its approval resumes the same attempt, arming no SDK stream', async () => {
     const store = createStore();
     const chatId = 'chat_external_approval';
     const runId = 'run_external_approval';
@@ -616,20 +481,19 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       { ...lifecycleRow(0, 'admitted', runId), admission: { kind: 'external', turnId: message.id, message } },
       lifecycleRow(1, 'running', runId),
     ]);
-    const chat = harness.created.find((entry) => entry.id === chatId)!;
-    await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
-    });
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    expect(session.messages.map((shown) => shown.id)).toContain(message.id);
     publishLogRows(store, chatId, [lifecycleRow(2, 'paused', runId)], 2);
+    expect(store.getChatStatus(chatId)).toBe('ready');
     publishLogRows(store, chatId, [lifecycleRow(3, 'running', runId)], 3);
-    await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
-    });
+    expect(store.getChatStatus(chatId)).toBe('streaming');
     publishLogRows(store, chatId, [lifecycleRow(4, 'completed', runId)], 4);
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    await settle();
     store.release(chatId);
   });
 
-  it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
+  it('should keep a projected run streaming after live delivery drops, rereading without another durable row or command', async () => {
     const store = createStore();
     const chatId = 'chat_live_drop';
     const projectId = 'project_live_drop';
@@ -680,9 +544,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const session = store.acquire(chatId, projectId);
     const unobserve = store.observe(chatId, projectId);
     const unpublish = store.publishProjectHostConnector(projectId, connect);
-    const chat = harness.created.find((entry) => entry.id === chatId)!;
     await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
+      expect(store.getChatStatus(chatId)).toBe('streaming');
     });
     deliverLive?.(chatId, {
       sourceGeneration: 'writer-live-drop',
@@ -705,12 +568,12 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       { timeout: 2000 },
     );
     await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
+      expect(subscribe.mock.calls.map(([input]) => input.cursor)).toEqual([0, 2]);
     });
-    expect(subscribe.mock.calls.map(([input]) => input.cursor)).toEqual([0, 2]);
     expect(store.getProjection(chatId)?.ledger.runs['run_live_drop']?.lifecycle).toBe('running');
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    expect(session.messages.some((shown) => shown.role === 'user')).toBe(true);
     expect(hostCommand).not.toHaveBeenCalled();
-    expect(session.chat).toBeDefined();
     unpublish();
     unobserve();
     store.release(chatId);
@@ -746,10 +609,12 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       3,
     );
     await Promise.all([prepared, alsoPrepared]);
-    expect(session.chat.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([
-      'old-message',
-      'new-message',
-    ]);
+    await vi.waitFor(() => {
+      expect(session.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([
+        'old-message',
+        'new-message',
+      ]);
+    });
     store.release(session.chatId);
     expect(store.get(session.chatId)).toBeUndefined();
   });
@@ -957,7 +822,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
 
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+      expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
     });
 
     await client.writeFile(
@@ -968,7 +833,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
-      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+      expect(JSON.stringify(session.messages)).toContain('Browser host verified the workspace change.');
     });
     expect(hostCommand).not.toHaveBeenCalled();
     store.release(chatId);
@@ -976,7 +841,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
-  it('materializes a turn logged during a foreign segment rescan once the rescan finds nothing new', async () => {
+  /* T2/T4: this device's log advances on its own authority, so its turn shows while other devices' scan is out; the
+   * SDK materialization waited for that scan. */
+  it('shows a turn logged during a foreign segment rescan at once, and still once the rescan finds nothing new', async () => {
     const projectId = 'project_foreign_rescan';
     const chatId = 'chat_foreign_rescan';
     const directory = `/projects/${projectId}/.tau/chats/${chatId}/events`;
@@ -1010,13 +877,13 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       const rescan = store.refreshRemoteSegments(chatId, projectId);
       publishLogRows(store, chatId, rows);
       await settle();
-      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(false);
+      expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
 
       // The rescan ends with the same (empty) foreign history, so the projection itself does not change.
       scan.resolve([]);
       await rescan;
       await vi.waitFor(() => {
-        expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+        expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
       });
     } finally {
       store.release(chatId);
@@ -1053,7 +920,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages).toContainEqual(seed);
+      expect(session.messages).toContainEqual(seed);
     });
     expect(deps.getChat).toHaveBeenCalledWith(chatId, projectId);
     store.release(chatId);
@@ -1141,7 +1008,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages).toContainEqual(seed);
+      expect(session.messages).toContainEqual(seed);
       expect(remoteReadCount).toBe(1);
     });
     const newerRefresh = store.refreshRemoteSegments(chatId, projectId);
@@ -1162,7 +1029,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
     expect(hostCommand).not.toHaveBeenCalled();
     await vi.waitFor(() => {
-      expect(session.chat.messages.filter((message) => message.id === seed.id)).toHaveLength(1);
+      expect(session.messages.filter((message) => message.id === seed.id)).toHaveLength(1);
     });
     store.release(chatId);
     unobserve();
@@ -1196,7 +1063,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       first.setDependencies(deps);
       first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
       await vi.waitFor(() => {
-        expect(first.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+        expect(first.get('chat_seed_waiting_ack')?.messages).toContainEqual(seed);
       });
       expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
 
@@ -1213,7 +1080,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual([]);
       reloaded.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
       await vi.waitFor(() => {
-        expect(reloaded.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+        expect(reloaded.get('chat_seed_waiting_ack')?.messages).toContainEqual(seed);
       });
       expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
       expect(
@@ -1360,7 +1227,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       });
       const session = store.acquire(chatId, projectId);
       await vi.waitFor(() => {
-        expect(session.chat.messages).toContainEqual(seed);
+        expect(session.messages).toContainEqual(seed);
       });
       await settle();
       expect(hostCommand).not.toHaveBeenCalled();
@@ -1529,13 +1396,13 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const releaseSidebar = store.observe(chatId, projectId);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages).toContainEqual(seed);
+      expect(session.messages).toContainEqual(seed);
     });
     expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
     store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'identity-mismatch' });
     publishLogRows(store, chatId, []);
     await settle();
-    expect(session.chat.messages).toContainEqual(seed);
+    expect(session.messages).toContainEqual(seed);
     expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
     store.release(chatId);
     await vi.waitFor(() => {
@@ -1573,13 +1440,13 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages).toContainEqual(seed);
+      expect(session.messages).toContainEqual(seed);
     });
 
     publishLogRows(store, chatId, []);
     await settle();
 
-    expect(session.chat.messages).toContainEqual(seed);
+    expect(session.messages).toContainEqual(seed);
     expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
 
     publishLogRows(store, chatId, [
@@ -1592,7 +1459,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(2, 'completed', 'req_seed_before_start'),
     ]);
     await settle();
-    expect(session.chat.messages.filter((message) => message.id === seed.id)).toHaveLength(1);
+    expect(session.messages.filter((message) => message.id === seed.id)).toHaveLength(1);
     store.release(chatId);
     expect(store.observedChatIdsOf(projectId)).toEqual([]);
   });
@@ -1621,10 +1488,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await settle();
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+      expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
     });
     await store.refreshFromStorage(chatId);
-    expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
     await client.writeFile(
       segmentPath,
       new TextEncoder().encode(
@@ -1633,7 +1500,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
     await store.refreshFromStorage(chatId);
     await vi.waitFor(() => {
-      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+      expect(JSON.stringify(session.messages)).toContain('Browser host verified the workspace change.');
     });
     store.release(chatId);
   });
@@ -1662,11 +1529,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await settle();
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+      expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
     });
-    const fake = harness.created.find((entry) => entry.id === chatId)!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    publishLogRows(store, chatId, runningRows('run_local_mid_run'));
+    expect(store.getChatStatus(chatId)).toBe('streaming');
     await client.writeFile(
       segmentPath,
       new TextEncoder().encode(
@@ -1675,12 +1541,11 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
 
     await store.refreshFromStorage(chatId);
-    expect(JSON.stringify(session.chat.messages)).not.toContain('Browser host verified the workspace change.');
+    expect(JSON.stringify(session.messages)).not.toContain('Browser host verified the workspace change.');
 
-    fake.status = 'ready';
-    fake.emitStatusChange();
+    publishLogRows(store, chatId, [lifecycleRow(2, 'completed', 'run_local_mid_run')], 2);
     await vi.waitFor(() => {
-      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+      expect(JSON.stringify(session.messages)).toContain('Browser host verified the workspace change.');
     });
     store.release(chatId);
   });
@@ -1739,7 +1604,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages).toContainEqual(seed);
+      expect(session.messages).toContainEqual(seed);
     });
     publishLogRows(store, chatId, []);
     const unpublishAdmission = publishChatTurnAdmission(chatId, async (gesture) => {
@@ -1823,8 +1688,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     ];
     publishLogRows(store, chatId, manualRows);
     await settle();
-    expect(session.chat.messages.some((message) => message.id === seed.id)).toBe(false);
-    expect(session.chat.messages.filter((message) => message.id === manual.id)).toHaveLength(1);
+    expect(session.messages.some((message) => message.id === seed.id)).toBe(false);
+    expect(session.messages.filter((message) => message.id === manual.id)).toHaveLength(1);
 
     // The durable manual Start has written the local log even though this reloaded reader has not caught up to it.
     await deps.client.writeFile(
@@ -1835,7 +1700,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     reloaded.setDependencies(deps);
     const reloadedSession = reloaded.acquire(chatId, projectId);
     await vi.waitFor(() => {
-      expect(reloadedSession.chat.messages).toContainEqual(seed);
+      expect(reloadedSession.messages).toContainEqual(seed);
     });
     const unpublishReloadConnector = reloaded.publishProjectHostConnector(projectId, async () =>
       mock<AgentHostClient>({
@@ -1850,15 +1715,15 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     publishLogPage(reloaded, chatId, manualRows.slice(0, 2), { cursor: 0, endCursor: 3 });
     await settle();
     expect(hostCommand).toHaveBeenCalledTimes(2);
-    expect(reloadedSession.chat.messages).toContainEqual(seed);
+    expect(reloadedSession.messages).toContainEqual(seed);
     publishLogPage(reloaded, chatId, manualRows.slice(2), { cursor: 2, endCursor: 3 });
     await vi.waitFor(() => {
       expect(deps.consumeChatStartupRequest).toHaveBeenCalledTimes(2);
     });
     expect(deps.consumeChatStartupRequest).toHaveBeenLastCalledWith(chatId, 'req_seed_superseded');
     await settle();
-    expect(reloadedSession.chat.messages.some((message) => message.id === seed.id)).toBe(false);
-    expect(reloadedSession.chat.messages.filter((message) => message.id === manual.id)).toHaveLength(1);
+    expect(reloadedSession.messages.some((message) => message.id === seed.id)).toBe(false);
+    expect(reloadedSession.messages.filter((message) => message.id === manual.id)).toHaveLength(1);
     expect(hostCommand).toHaveBeenCalledTimes(2);
     consumeGate.resolve();
     await vi.waitFor(() => {
@@ -1871,7 +1736,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublishAdmission();
   });
 
-  it('dispatches one admitted Start before the SDK watches its projected run', async () => {
+  it('should show one admitted Start as submitted from dispatch until its run folds, arming no SDK stream (T3)', async () => {
     const store = createStore();
     const chatId = 'chat_live_command';
     const projectId = 'project_live_command';
@@ -1911,14 +1776,136 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await vi.waitFor(() => {
       expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
     });
-    const chat = harness.created.find((entry) => entry.id === chatId)!;
-    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(store.getChatStatus(chatId)).toBe('submitted');
     reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
     await requested;
-    await vi.waitFor(() => {
-      expect(chat.sendMessage).toHaveBeenCalledTimes(1);
-    });
+    await settle();
+    /* Accepted, and its run not folded yet: still submitted, and the accepted message is shown. */
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    expect(store.get(chatId)?.messages.map((message) => message.id)).toEqual(['msg_live_command']);
+    publishLogRows(store, chatId, runningRows('req_live_command'));
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    publishLogRows(store, chatId, [lifecycleRow(2, 'completed', 'req_live_command')], 2);
+    expect(store.getChatStatus(chatId)).toBe('ready');
     expect(close).toHaveBeenCalledTimes(1);
+    unpublish();
+  });
+
+  it('should stop showing an accepted Start as submitted once its log read is refused for good (T3 review)', async () => {
+    const store = createStore();
+    const chatId = 'chat_refused_command';
+    const projectId = 'project_refused_command';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: 'req_live_command',
+      payload: {
+        chatId,
+        runId: 'req_live_command',
+        message: { id: 'msg_live_command', role: 'user', content: 'Make a cube' },
+        trigger: 'submit',
+      },
+    };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn(async () => reply.promise);
+    const close = vi.fn(async () => undefined);
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({
+        catchUp: writerOwnedCatchUp,
+        hostCommand,
+        close,
+        subscribe: () => () => undefined,
+        subscribeLive: () => () => undefined,
+      }),
+    );
+    startTurnOwner(store, projectId);
+    store.acquire(chatId, projectId);
+    publishAdmission(chatId, () => ({
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+      command,
+    }));
+    const requested = store.requestTurn(chatId, {
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+    });
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+    });
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
+    await requested;
+    await settle();
+    /* Accepted, and its run not folded yet: still submitted, and the accepted message is shown. */
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    expect(store.get(chatId)?.messages.map((message) => message.id)).toEqual(['msg_live_command']);
+    /* Nothing will fold the run from an unreadable log: the composer is not left busy until a reload. */
+    store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    /* The refusal let go of the Start for good: a later readable reattach that still lacks its run does not revive it. */
+    store.receiveHostReadAnswer(chatId, {
+      status: 'batch',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+      cursor: 0,
+      nextCursor: 0,
+      endCursor: 0,
+      events: [],
+    });
+    await settle();
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    /* Nothing holds the session once its view goes. */
+    store.release(chatId);
+    await settle();
+    expect(store.get(chatId)).toBeUndefined();
+    unpublish();
+  });
+
+  it('should neither send nor hold a Start requested after its log read was refused for good (T4 review)', async () => {
+    const store = createStore();
+    const chatId = 'chat_refused_before_command';
+    const projectId = 'project_refused_before_command';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: 'req_live_command',
+      payload: {
+        chatId,
+        runId: 'req_live_command',
+        message: { id: 'msg_live_command', role: 'user', content: 'Make a cube' },
+        trigger: 'submit',
+      },
+    };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn(async () => reply.promise);
+    const close = vi.fn(async () => undefined);
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({
+        catchUp: writerOwnedCatchUp,
+        hostCommand,
+        close,
+        subscribe: () => () => undefined,
+        subscribeLive: () => () => undefined,
+      }),
+    );
+    startTurnOwner(store, projectId);
+    store.acquire(chatId, projectId);
+    store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'unreadable' });
+    publishAdmission(chatId, () => ({
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+      command,
+    }));
+    const requested = store.requestTurn(chatId, {
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+    });
+    await settle();
+    /* No run will fold from a log this page cannot read: nothing is sent, busy or held. */
+    expect(hostCommand).not.toHaveBeenCalled();
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
+    store.release(chatId);
+    await requested;
+    await settle();
+    expect(store.get(chatId)).toBeUndefined();
     unpublish();
   });
 
@@ -1996,13 +1983,12 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           expect(hostCommand).toHaveBeenCalledTimes(2);
           expect(hostCommand).toHaveBeenLastCalledWith(secondCommand);
         });
-        const chat = harness.created.find((entry) => entry.id === chatId)!;
         if (successor === 'watching') {
           acknowledgeSecond();
           await vi.waitFor(() => {
-            expect(chat.regenerate).toHaveBeenCalledOnce();
+            expect(close).toHaveBeenCalledOnce();
           });
-          expect(unsubscribeWatches).toHaveLength(1);
+          expect(store.getChatStatus(chatId)).toBe('submitted');
         }
         if (outcome === 'acknowledgement') {
           firstReply.resolve({
@@ -2026,20 +2012,22 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           publishLogRows(store, chatId, runningUserRows(secondCommand.payload.runId));
           store.stopRun(chatId, 'stop-button');
           await settle();
-          expect(chat.regenerate).not.toHaveBeenCalled();
-          expect(chat.resumeStream).not.toHaveBeenCalled();
           expect(hostCommand).toHaveBeenCalledTimes(2);
           acknowledgeSecond();
           await vi.waitFor(() => {
             expect(hostCommand).toHaveBeenCalledTimes(3);
           });
           expect(hostCommand).toHaveBeenLastCalledWith(
-            expect.objectContaining({ type: 'cancel', payload: { chatId, runId: secondCommand.payload.runId } }),
+            expect.objectContaining({
+              type: 'cancel',
+              payload: { chatId, runId: secondCommand.payload.runId, withdraw: true },
+            }),
           );
           expect(unsubscribeWatches).toEqual([]);
         } else {
-          expect(unsubscribeWatches).toHaveLength(1);
-          expect(unsubscribeWatches[0]).not.toHaveBeenCalled();
+          /* B's run is still awaited: A's late answer neither ends it nor arms a stream. */
+          expect(store.getChatStatus(chatId)).toBe('submitted');
+          expect(unsubscribeWatches).toEqual([]);
           expect(hostCommand).toHaveBeenCalledTimes(2);
         }
       } finally {
@@ -2060,7 +2048,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   );
 
   for (const runningBeforeAck of [false, true]) {
-    it(`should watch a resumed attempt only after its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
+    it(`should hold a resumed attempt submitted until its running row folds, then show it streaming (${runningBeforeAck ? 'already folded' : 'arrives later'})`, async () => {
       const store = createStore();
       const chatId = `chat_retry_watch_${runningBeforeAck}`;
       const projectId = `project_retry_watch_${runningBeforeAck}`;
@@ -2083,7 +2071,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       });
       publishLogRows(store, chatId, [...runningUserRows(runId), lifecycleRow(2, 'failed', runId)]);
       expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('failed');
-      const chat = harness.created.find((entry) => entry.id === chatId)!;
       const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
         runId,
         leaseTurnId: undefined,
@@ -2106,18 +2093,64 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         await new Promise<void>((resolve) => {
           setTimeout(resolve, 0);
         });
-        expect(chat.resumeStream).not.toHaveBeenCalled();
+        /* Accepted, its run not reopened yet: still submitted, so the Resume gate stays shut. */
+        expect(store.getChatStatus(chatId)).toBe('submitted');
         publishLogRows(store, chatId, [reopened], 3);
       }
-      await vi.waitFor(() => {
-        expect(chat.resumeStream).toHaveBeenCalledOnce();
-      });
+      expect(store.getChatStatus(chatId)).toBe('streaming');
       expect(hostCommand).toHaveBeenCalledOnce();
       unpublishAdmission();
       unpublish();
       store.release(chatId);
     });
   }
+
+  it('should cancel a resume the person stopped while the host answered, not mistake its last attempt for its end', async () => {
+    const store = createStore();
+    const chatId = 'chat_resume_stopped';
+    const projectId = 'project_resume_stopped';
+    const runId = 'req_resume_stopped';
+    const command: HostCommand = { type: 'resume', commandId: 'req_resume_stopped_cmd', payload: { chatId, runId } };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async (sent) =>
+      sent.type === 'resume'
+        ? reply.promise
+        : { commandId: sent.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 5 },
+    );
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
+    );
+    startTurnOwner(store, projectId);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    publishLogRows(store, chatId, [...runningUserRows(runId), lifecycleRow(2, 'failed', runId)]);
+    const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
+      runId,
+      leaseTurnId: undefined,
+      request: { kind: 'continue', command },
+    }));
+    try {
+      const requested = store.requestTurn(chatId, { kind: 'continue' });
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+      });
+      store.stopRun(chatId, 'stop-button');
+      expect(store.isStopping(chatId)).toBe(true);
+      /* Accepted before this page's log shows the new attempt: the failed one is all it has. */
+      reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 4 });
+      await requested;
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledTimes(2);
+      });
+      expect(hostCommand.mock.calls[1]![0]).toMatchObject({ type: 'cancel', payload: { chatId, runId } });
+    } finally {
+      unpublishAdmission();
+      unpublish();
+      store.release(chatId);
+    }
+  });
 
   it('should end a resumed attempt whose running and failed rows fold in one read', async () => {
     const store = createStore();
@@ -2234,7 +2267,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       });
       const visibleError = () =>
         selectVisibleChatError({
-          error: session.chat.error,
           persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
           projection: store.getProjection(chatId),
           attachmentStatus: store.getAttachmentStatus(chatId),
@@ -2245,7 +2277,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       await vi.waitFor(() => {
         expect(store.getAttachmentStatus(chatId)).toBe('attached');
         expect(
-          session.chat.messages.some((message) =>
+          session.messages.some((message) =>
             message.parts.some((part) => part.type === 'text' && part.text === 'Resumed output'),
           ),
         ).toBe(true);
@@ -2385,7 +2417,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
     const visibleError = () =>
       selectVisibleChatError({
-        error: undefined,
         persistedError: undefined,
         projection: store.getProjection(chatId),
         attachmentStatus: store.getAttachmentStatus(chatId),
@@ -2944,7 +2975,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           expect(read).toHaveBeenCalledOnce();
           expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
         });
-        const { messages } = session.chat;
+        const { messages } = session;
         // T2: the displayed transcript is the fold, so the retained message is the displayed one.
         const first = session.messages[0];
         reset.resolve();
@@ -2953,7 +2984,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           expect(store.historicalUsageReady(chatId, projectId)).toBe(false);
         });
         // Existing store/SDK boundary control: revoking authority must not overwrite mounted messages.
-        expect(session.chat.messages).toBe(messages);
+        expect(session.messages).toBe(messages);
         expect(session.messages[0]).toBe(first);
         expect(store.getAttachmentStatus(chatId)).not.toBe('attached');
         expect(await store.steerProjectedRun(chatId, 'must not target the retired run')).toBe(false);
@@ -2962,7 +2993,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           expect(catchUp).toHaveBeenCalledTimes(2);
         });
         await caughtReplacement.promise;
-        expect(session.chat.messages).toBe(messages);
+        expect(session.messages).toBe(messages);
         expect(store.getProjection(chatId)?.ledger.runs[runId]).toBeUndefined();
         expect(read).toHaveBeenCalledOnce();
         validation.resolve();
@@ -3104,7 +3135,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
-        const { messages } = session.chat;
+        const { messages } = session;
         const snapshots: Array<{ current: boolean; attached: boolean }> = [];
         unsubscribe = store.subscribeProjection(chatId, () => {
           snapshots.push({
@@ -3122,7 +3153,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         expect.soft(store.historicalUsageReady(chatId, projectId)).toBe(false);
         expect.soft(liveSignal?.aborted).toBe(false);
         expect.soft(close).not.toHaveBeenCalled();
-        expect.soft(session.chat.messages).toBe(messages);
+        expect.soft(session.messages).toBe(messages);
         expect.soft(read).toHaveBeenCalledOnce();
         unsubscribe();
         validation.resolve();
@@ -3253,7 +3284,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         expect(JSON.stringify(replacement.messages)).not.toContain('Canonical warm reply');
       });
       expect(replacement.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-      expect(JSON.stringify(replacement.chat.messages)).toContain('Fresh validated warm reply');
+      expect(JSON.stringify(replacement.messages)).toContain('Fresh validated warm reply');
       expect(read).toHaveBeenCalledExactlyOnceWith({
         chatId,
         cursor: rows.length,
@@ -3433,10 +3464,6 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
     });
-    const fake = harness.created.find((entry) => entry.id === 'chat_reloaded')!;
-    fake.status = 'error';
-    fake.error = new Error('the model refused');
-
     /* The chat's row lands: that is when its persisted failure is known (PV-S5). */
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
@@ -3465,14 +3492,11 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
     });
-    const fake = harness.created.find((entry) => entry.id === 'chat_streaming')!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
-    fake.error = new Error('an error from the turn before');
-
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
+    publishLogRows(store, 'chat_streaming', runningRows('run_streaming'));
+    expect(store.getChatStatus('chat_streaming')).toBe('streaming');
 
     expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
     store.release('chat_streaming');
@@ -3482,7 +3506,6 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
 
 describe('ChatSessionStore', () => {
   beforeEach(() => {
-    harness.created = [];
     resetChatTurnServices();
   });
 
@@ -3762,30 +3785,27 @@ describe('ChatSessionStore', () => {
       expect(store.getProjection(chatId)).toBeUndefined();
     });
 
-    it('refuses an obsolete usage summary without clearing a reacquired summary', async () => {
+    it('should answer usage from the fold as of its call, and a reacquired chat from its own log (T3)', async () => {
       const store = createStore();
       const release = store.observe('usage_replaced', 'project_retention');
       publishLogRows(store, 'usage_replaced', completedRows('Old answer'));
-      const oldSummary = store.getHistoricalUsage('usage_replaced');
-      const rejected = expect(oldSummary).rejects.toThrow(/superseded/iu);
+      const oldSummary = await store.getHistoricalUsage('usage_replaced');
       release();
       const releaseCurrent = store.observe('usage_replaced', 'project_retention');
       publishLogRows(store, 'usage_replaced', [logRow(4, { type: 'unrecognized.future-event' })], 4);
-      const current = store.getHistoricalUsage('usage_replaced');
-      await rejected;
-      const summary = await current;
+      const summary = await store.getHistoricalUsage('usage_replaced');
+      expect(summary).toEqual(oldSummary);
       expect(await store.getHistoricalUsage('usage_replaced')).toBe(summary);
       releaseCurrent();
     });
 
-    it('refuses an in-flight usage summary when its observed chat is deleted', async () => {
+    it('should refuse usage once its observed chat is deleted', async () => {
       const store = createStore();
       const release = store.observe('usage_deleted', 'project_retention');
       publishLogRows(store, 'usage_deleted', completedRows());
-      const pending = store.getHistoricalUsage('usage_deleted');
-      const rejected = expect(pending).rejects.toThrow(/superseded/iu);
+      await expect(store.getHistoricalUsage('usage_deleted')).resolves.toMatchObject({ parts: 0 });
       await store.removeChat('usage_deleted');
-      await rejected;
+      await expect(store.getHistoricalUsage('usage_deleted')).rejects.toThrow(/superseded/iu);
       release();
       expect(store.getProjection('usage_deleted')).toBeUndefined();
     });
@@ -3848,6 +3868,10 @@ describe('ChatSessionStore', () => {
         12,
       );
       await store.preparePresentation(chatId, new AbortController().signal);
+      /* The correction shows with the next transcript announcement (D-UI-10). */
+      await vi.waitFor(() => {
+        expect(session.messages).not.toBe(original);
+      });
 
       expect(session.messages).toHaveLength(original.length);
       expect(session.messages[0]).toBe(original[0]);
@@ -4202,9 +4226,9 @@ describe('ChatSessionStore', () => {
       expect(store.isUnread('chat_approval')).toBe(true);
     });
 
-    /* L3 D1: an empty resume appends no row. With W0.2's guard reverted the SDK finishes that request, and a store
-     * that marked unread on the request's finish marked a chat nothing ran in. */
-    it('never marks unread for an empty resume, even when the SDK finishes its request', async () => {
+    /* L3 D1: an empty resume appends no row, and a store that marked unread on a request's end marked a chat nothing
+     * ran in. No SDK request exists since T4; the replayed end alone is the case. */
+    it('never marks unread for an empty resume', async () => {
       const { store } = storeInProject();
       store.acquire('chat_opened', projectId);
       store.focusChat('chat_opened');
@@ -4213,9 +4237,8 @@ describe('ChatSessionStore', () => {
       store.focusChat('chat_next');
       store.blurChat('chat_opened');
 
-      /* The resume replays the rows the projection already holds, then the SDK walks submitted → ready. */
+      /* The resume replays the rows the projection already holds. */
       ended(store, 'chat_opened', 'completed');
-      finishRun(harness.created[0]!);
       await settle();
 
       expect(store.isUnread('chat_opened')).toBe(false);
@@ -4380,10 +4403,8 @@ describe('ChatSessionStore', () => {
       const session = store.acquire('chat_a', 'project_test');
 
       expect(session.chatId).toBe('chat_a');
-      expect(session.chat.id).toBe('chat_a');
       expect(session.persistenceActorRef).toBeDefined();
       expect(session.draftActorRef).toBeDefined();
-      expect(harness.created).toHaveLength(1);
     });
 
     it('returns the same session on subsequent acquires for the same chatId', () => {
@@ -4392,10 +4413,8 @@ describe('ChatSessionStore', () => {
       const second = store.acquire('chat_a', 'project_test');
 
       expect(second).toBe(first);
-      expect(second.chat).toBe(first.chat);
       expect(second.persistenceActorRef).toBe(first.persistenceActorRef);
       expect(second.draftActorRef).toBe(first.draftActorRef);
-      expect(harness.created).toHaveLength(1);
     });
 
     it('keeps the session live until the final release', () => {
@@ -4450,8 +4469,6 @@ describe('ChatSessionStore', () => {
 
       const second = store.acquire('chat_a', 'project_test');
       expect(second).not.toBe(first);
-      expect(second.chat).not.toBe(first.chat);
-      expect(harness.created).toHaveLength(2);
     });
   });
 
@@ -4465,10 +4482,8 @@ describe('ChatSessionStore', () => {
       const a = store.acquire('chat_a', 'project_test');
       const b = store.acquire('chat_b', 'project_test');
 
-      expect(a.chat).not.toBe(b.chat);
       expect(a.persistenceActorRef).not.toBe(b.persistenceActorRef);
       expect(a.draftActorRef).not.toBe(b.draftActorRef);
-      expect(harness.created).toHaveLength(2);
     });
 
     it('releasing one session does not affect the other', () => {
@@ -4567,40 +4582,47 @@ describe('ChatSessionStore', () => {
   // ===========================================================================
 
   describe('subscribeChat', () => {
-    it('fires when the underlying chat messages change', () => {
+    it('fires when the chat changes (its transcript settles)', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
 
-      fake.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
-    it('fires when the underlying chat status changes', () => {
+    it('should fire when the chat status moves with its run phase', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
+      expect(store.getChatStatus('chat_a')).toBe('ready');
 
-      fake.emitStatusChange();
-      expect(listener).toHaveBeenCalledTimes(1);
+      publishLogRows(store, 'chat_a', [lifecycleRow(0, 'admitted')]);
+      expect(store.getChatStatus('chat_a')).toBe('submitted');
+      const heard = listener.mock.calls.length;
+      expect(heard).toBeGreaterThan(0);
+
+      publishLogRows(store, 'chat_a', [lifecycleRow(1, 'running')], 1);
+      expect(store.getChatStatus('chat_a')).toBe('streaming');
+      expect(listener.mock.calls.length).toBeGreaterThan(heard);
+
+      publishLogRows(store, 'chat_a', [lifecycleRow(2, 'completed')], 2);
+      expect(store.getChatStatus('chat_a')).toBe('ready');
     });
 
     it('does not wake subscribers from a different chatId', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
       store.acquire('chat_b', 'project_test');
-      const fakeA = harness.created[0]!;
 
       const listenerA = vi.fn();
       const listenerB = vi.fn();
       store.subscribeChat('chat_a', listenerA);
       store.subscribeChat('chat_b', listenerB);
 
-      fakeA.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
       expect(listenerA).toHaveBeenCalledTimes(1);
       expect(listenerB).not.toHaveBeenCalled();
     });
@@ -4611,8 +4633,7 @@ describe('ChatSessionStore', () => {
       store.subscribeChat('chat_a', listener);
 
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
-      fake.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
 
       expect(listener).toHaveBeenCalledTimes(1);
     });
@@ -4620,12 +4641,11 @@ describe('ChatSessionStore', () => {
     it('stops invoking listeners after unsubscribe', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
       const listener = vi.fn();
       const unsubscribe = store.subscribeChat('chat_a', listener);
       unsubscribe();
 
-      fake.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
       expect(listener).not.toHaveBeenCalled();
     });
   });
@@ -4645,7 +4665,6 @@ describe('ChatSessionStore', () => {
         expect(session.draftActorRef.getSnapshot().status).toBe('active');
       }
       expect([...store.list()].sort()).toEqual([...ids].sort());
-      expect(harness.created).toHaveLength(ids.length);
     });
 
     it("releasing one chat does not stop another chat's actors or unsubscribe its listeners", () => {
@@ -4664,8 +4683,7 @@ describe('ChatSessionStore', () => {
       expect(b.persistenceActorRef.getSnapshot().status).toBe('active');
       expect(b.draftActorRef.getSnapshot().status).toBe('active');
 
-      const fakeB = harness.created.find((chat) => chat.id === 'chat_b')!;
-      fakeB.emitMessagesChange();
+      store.noteCreatedEmpty('chat_b');
       expect(listenerB).toHaveBeenCalledTimes(1);
       expect(listenerA).not.toHaveBeenCalled();
 
@@ -4676,14 +4694,13 @@ describe('ChatSessionStore', () => {
     it('fans out a single chat event to every subscriber bound to that chatId', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
 
       const listeners = [vi.fn(), vi.fn(), vi.fn()];
       for (const listener of listeners) {
         store.subscribeChat('chat_a', listener);
       }
 
-      fake.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
       for (const listener of listeners) {
         expect(listener).toHaveBeenCalledTimes(1);
       }
@@ -4698,13 +4715,12 @@ describe('ChatSessionStore', () => {
       store.release('chat_a');
       unsubscribeStale();
 
-      // Second lifecycle: a brand-new Chat instance + a new subscriber.
+      // Second lifecycle: a brand-new session + a new subscriber.
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created.at(-1)!;
       const fresh = vi.fn();
       store.subscribeChat('chat_a', fresh);
 
-      fake.emitMessagesChange();
+      store.noteCreatedEmpty('chat_a');
 
       expect(fresh).toHaveBeenCalledTimes(1);
       expect(stale).not.toHaveBeenCalled();
@@ -4720,7 +4736,6 @@ describe('ChatSessionStore', () => {
       store.release('chat_a');
 
       store.acquire('chat_a', 'project_test');
-      const replacement = harness.created.at(-1)!;
       const fresh = vi.fn();
       const freshProjection = vi.fn();
       const unsubscribeFresh = store.subscribeChat('chat_a', fresh);
@@ -4728,7 +4743,7 @@ describe('ChatSessionStore', () => {
       try {
         unsubscribeStale();
         unsubscribeStaleProjection();
-        replacement.emitMessagesChange();
+        store.noteCreatedEmpty('chat_a');
         expect(fresh).toHaveBeenCalledTimes(1);
         publishLogRows(store, 'chat_a', runningRows());
         expect(freshProjection).toHaveBeenCalledTimes(1);
@@ -5491,6 +5506,1438 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    describe('a send with nothing running (chat UX F1, F2)', () => {
+      const pending = <T>() => {
+        let resolve!: (value: T) => void;
+        const promise = new Promise<T>((_resolve) => {
+          resolve = _resolve;
+        });
+        return { promise, resolve };
+      };
+
+      it('should show a send in the thread, not the queue, while the host has not answered', async () => {
+        const chatId = 'departing_send';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          expect(store.departingSendOf(chatId)).toBe('first');
+          expect(session.messages.at(-1)?.id).toBe('first');
+          expect(session.transcript).toBe('loaded');
+          answer.resolve({ commandId: 'req_first', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          /* Handed over: still the thread's request, once, until its run's own rows take over. */
+          expect(store.departingSendOf(chatId)).toBe('first');
+          expect(session.messages.filter((message) => message.id === 'first')).toHaveLength(1);
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'completed', 'req_first')],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should show a handed-over send once, even when a later request reaches the thread before it ends', async () => {
+        const chatId = 'departing_once';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(store.departingSendOf(chatId)).toBe('first');
+          /* The log took the request, and a later one (a steer) arrived behind it before the run ended. */
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              logRow(4, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+              lifecycleRow(5, 'running', 'req_first'),
+              lifecycleRow(6, 'admitted', 'req_nudge'),
+              logRow(7, {
+                runId: 'req_nudge',
+                type: 'message.appended',
+                message: { id: 'nudge', role: 'user', content: [{ type: 'text', text: 'nudge' }] },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(userMessageIds(session.messages)).toEqual(['first', 'nudge']);
+          });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a send queued, and out of the thread, while a run is live', async () => {
+        const chatId = 'departing_behind_live';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          session.stateActorRef.send({ type: 'runLifecycle', phase: 'running', runId: 'live' });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          const queuedIds = (): string[] => session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id);
+          await vi.waitFor(() => {
+            expect(queuedIds()).toEqual(['behind']);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messages.some((message) => message.id === 'behind')).toBe(false);
+          // The wait names its gate once, so a queue held with nothing visibly running says why.
+          await vi.waitFor(() => {
+            expect(loggedHolds(info.mock.calls)).toContainEqual(
+              expect.objectContaining({ chatId, reason: 'run-not-ended', runId: 'live', phase: 'running' }),
+            );
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+        } finally {
+          info.mockRestore();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should put a send stopped during admission back in the composer, with nothing sent or left behind', async () => {
+        const chatId = 'departing_withdrawn';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('withdrawn'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          expect(session.messages.at(-1)?.id).toBe('withdrawn');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+
+          store.stopRun(chatId, 'stop-button');
+
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messages.some((message) => message.id === 'withdrawn')).toBe(false);
+          expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+          /* Stop stays pressed until the removal is confirmed; only then is the message back in the composer. */
+          expect(store.isStopping(chatId)).toBe(true);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('withdrawn');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* PERF-5: a `wait` refusal (RH-R17) was drawn as a failure whose own sentence says the message will be sent. */
+      const writerLocked = (commandId: string): Awaited<ReturnType<AgentHostClient['hostCommand']>> => ({
+        commandId,
+        generation: 1,
+        status: 'refused',
+        effect: 'not-applied',
+        code: 'WRITER_LOCKED',
+        message: 'This chat is still open for writing in a tab that is paused.',
+      });
+
+      it('should hold a send its host refuses with a wait, and send it again by its key until it is taken', async () => {
+        const chatId = 'departing_host_wait';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockResolvedValueOnce(writerLocked('req_waits')).mockResolvedValueOnce(writerLocked('req_waits'));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('waits'));
+          await vi.waitFor(() => {
+            expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+          });
+          /* Not failed: the send is in the thread, the chat reads as on its way, and nothing offers Try again. */
+          expect(store.departingSendOf(chatId)).toBe('waits');
+          expect(store.getChatStatus(chatId)).toBe('submitted');
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: 'waits', command: { commandId: 'req_waits' } }],
+          });
+          /* Sent again after 250 ms, then 500 ms, with the same key, until the host takes it. */
+          await vi.waitFor(
+            () => {
+              expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+            },
+            { timeout: 3000 },
+          );
+          expect(hostCommand.mock.calls.map(([command]) => command.commandId)).toEqual([
+            'req_waits',
+            'req_waits',
+            'req_waits',
+          ]);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should take a send that waits for its host back to the composer on Stop, with no cancel sent', async () => {
+        const chatId = 'departing_host_wait_stopped';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('stopped'));
+          await vi.waitFor(() => {
+            expect(store.hostWaitOf(chatId)).toBeDefined();
+          });
+          expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+
+          store.stopRun(chatId, 'stop-button');
+
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('stopped');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(store.getChatStatus(chatId)).toBe('ready');
+          expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+          expect(hostCommand.mock.calls.every(([command]) => command.type === 'start')).toBe(true);
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          /* The backoff that was running sends nothing more. */
+          const sent = hostCommand.mock.calls.length;
+          await new Promise((resolve) => {
+            setTimeout(resolve, 600);
+          });
+          expect(hostCommand).toHaveBeenCalledTimes(sent);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should still show a refusal that is not a wait as undelivered, sent once', async () => {
+        const chatId = 'departing_host_refusal';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockResolvedValueOnce({
+          commandId: 'req_refused_host',
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'HOST_MODEL_UNAVAILABLE',
+          message: 'No model is configured.',
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused_host'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+          });
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should return a refused send to the composer instead of holding it as undelivered', async () => {
+        const chatId = 'departing_refused';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const unadmit = publishChatTurnAdmission(chatId, async () => {
+          throw new Error('You have no credits left.');
+        });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused'));
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('refused');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should not send a cancel, or stay stopping, when Stop finds no live run', async () => {
+        const chatId = 'stop_without_run';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it.each(['refused', 'thrown'] as const)(
+        'should offer Stop again when the cancel is %s (audit A-5)',
+        async (outcome) => {
+          const chatId = `stop_${outcome}`;
+          const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+          hostCommand.mockImplementation(async (command) => {
+            if (outcome === 'thrown') {
+              throw new Error('host closed');
+            }
+            return {
+              commandId: command.commandId,
+              generation: 1,
+              status: 'refused',
+              effect: 'not-applied',
+              code: 'HOST_CLOSED',
+              message: 'The host closed',
+            };
+          });
+          try {
+            publishLogRows(store, chatId, runningRows('live'));
+            store.stopRun(chatId, 'stop-button');
+            await vi.waitFor(() => {
+              expect(hostCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'cancel' }));
+              expect(store.isStopping(chatId)).toBe(false);
+            });
+          } finally {
+            unpublish();
+            store.release(chatId);
+          }
+        },
+      );
+
+      it('should send a Stop pressed before the host attached once it attaches (audit A-5)', async () => {
+        const chatId = 'stop_owed';
+        const projectId = 'departing_project';
+        const { store, hostCommand, unpublish } = await open(chatId, projectId);
+        unpublish();
+        publishLogRows(store, chatId, runningRows('live'));
+        store.stopRun(chatId, 'stop-button');
+        expect(store.isStopping(chatId)).toBe(true);
+        expect(hostCommand).not.toHaveBeenCalled();
+        const client = { hostCommand, close: vi.fn(async () => undefined) } as unknown as AgentHostClient;
+        const reattach = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledWith(
+              expect.objectContaining({ type: 'cancel', payload: { chatId, runId: 'live', withdraw: true } }),
+            );
+          });
+        } finally {
+          reattach();
+          store.release(chatId);
+        }
+      });
+      it('should hold work queued behind a send taken back with Stop until Send now', async () => {
+        const chatId = 'departing_withdrawn_behind';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const admit = vi.fn(async () => admission.promise);
+        const unadmit = publishChatTurnAdmission(chatId, admit);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('first');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'behind', held: true }],
+            });
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          /* Like work behind a stopped run, it waits for the person: no second admission, nothing sent. */
+          expect(admit).toHaveBeenCalledOnce();
+          expect(hostCommand).not.toHaveBeenCalled();
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['behind']);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should let a send go out when its chat is closed, rather than take it back', async () => {
+        const chatId = 'departing_closed';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('closing'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          store.stopRun(chatId, 'close-chat');
+          expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['closing']);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a refused send in its place when others wait behind it', async () => {
+        const chatId = 'departing_refused_behind';
+        const projectId = 'departing_project';
+        const { store, session, deps, unpublish } = await open(chatId, projectId);
+        let refuse: (error: Error) => void = () => undefined;
+        const refusal = new Promise<never>((_resolve, reject) => {
+          refuse = reject;
+        });
+        const unadmit = publishChatTurnAdmission(chatId, async () => refusal);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          await store.requestTurn(chatId, queuedGesture('behind'));
+          refuse(new Error('You have no credits left.'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toMatch(/wasn’t sent/u);
+          });
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: 'refused' }, { id: 'behind' }],
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should send a Stop once, however often the host attaches again', async () => {
+        const chatId = 'stop_once';
+        const projectId = 'departing_project';
+        const { store, hostCommand, unpublish } = await open(chatId, projectId);
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        publishLogRows(store, chatId, runningRows('live'));
+        store.stopRun(chatId, 'stop-button');
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledOnce();
+        });
+        unpublish();
+        const client = mock<AgentHostClient>({ hostCommand, close: vi.fn(async () => undefined) });
+        const reattach = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(hostCommand).toHaveBeenCalledOnce();
+          expect(store.isStopping(chatId)).toBe(true);
+          answer.resolve({ commandId: 'cancel', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+        } finally {
+          reattach();
+          store.release(chatId);
+        }
+      });
+
+      it('should send a Stop again without `withdraw` to a host that cannot read it', async () => {
+        const chatId = 'stop_older_host';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementationOnce(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'COMMAND_UNREADABLE',
+          message: 'Unrecognized key: "withdraw"',
+        }));
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          const [first, second] = hostCommand.mock.calls.map(([command]) => command);
+          expect(first).toMatchObject({ type: 'cancel', payload: { chatId, runId: 'live', withdraw: true } });
+          expect(second).toEqual({ ...first, payload: { chatId, runId: 'live' } });
+          expect(store.isStopping(chatId)).toBe(true);
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* A stopped send is never lost, and never in two places. */
+      it('should keep a send stopped during admission held in its place when the composer holds new text', async () => {
+        const chatId = 'departing_kept';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('kept'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+
+          store.stopRun(chatId, 'stop-button');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'kept', held: true }],
+            });
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.messages.some((message) => message.id === 'kept')).toBe(false);
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should take back a send that was steered in, like any other departing send', async () => {
+        const chatId = 'departing_steered';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('old'));
+          await store.requestTurn(chatId, queuedGesture('later'));
+          await store.requestTurn(chatId, queuedGesture('urgent'));
+          await store.steerQueuedMessage(chatId, 'urgent');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBe('urgent');
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+
+          store.stopRun(chatId, 'stop-button');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('urgent');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'later', held: true }],
+            });
+          });
+          /* Only the steer's cancel went out: the taken-back send never started a run. */
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should park a steered send taken back into a busy composer, so only Send now takes it out', async () => {
+        const chatId = 'departing_steered_kept';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('old'));
+          await store.requestTurn(chatId, queuedGesture('urgent'));
+          await store.steerQueuedMessage(chatId, 'urgent');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'cancelled', 'old')]);
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+
+          store.stopRun(chatId, 'stop-button');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'urgent', held: true }],
+            });
+          });
+          /* Its steer was spent on the run it already ended: kept, it would read as Send now and go out on its own. */
+          expect(
+            (deps.client.json(chatMessageQueuePath(projectId, chatId)) as { items: Array<Record<string, unknown>> })
+              .items[0],
+          ).not.toHaveProperty('steer');
+          store.refreshMessageQueue(chatId);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should stop plainly, keeping the request in the thread, when the composer holds new text', async () => {
+        const chatId = 'stop_with_draft';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          expect(hostCommand.mock.calls[0]![0]).toMatchObject({ type: 'cancel', payload: { chatId, runId: 'live' } });
+          expect(hostCommand.mock.calls[0]![0].payload).not.toHaveProperty('withdraw');
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should let go of a Stop quietly when its run ended before the cancel arrived', async () => {
+        const chatId = 'stop_run_ended';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementationOnce(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'RUN_NOT_LIVE',
+          message: 'This run is not live.',
+        }));
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          /* Nothing went wrong: no banner, no warning. */
+          expect(warn.mock.calls.some(([label]) => label === '[ChatSessionStore] stop did not reach the host')).toBe(
+            false,
+          );
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a send the host took back in the outbox, held, when the composer took new text first', async () => {
+        const chatId = 'withdrawn_into_draft';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        try {
+          publishLogRows(store, chatId, [
+            ...runningRows('taken'),
+            logRow(2, {
+              runId: 'taken',
+              type: 'message.appended',
+              message: { id: 'msg_taken', role: 'user', content: [{ type: 'text', text: 'Take me back' }] },
+            }),
+          ]);
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          expect(hostCommand.mock.calls[0]![0]).toMatchObject({ payload: { withdraw: true } });
+          /* The person starts typing before the host's answer reaches the log. */
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, {
+                runId: 'taken',
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                attempt: 1,
+                detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ held: true, message: { parts: [{ type: 'text', text: 'Take me back' }] } }],
+            });
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(session.messages.some((message) => message.id === 'msg_taken')).toBe(false);
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* The host's take-back, for each way a return to the composer can fail. */
+      const takenBackRows = (parts: ReadonlyArray<Record<string, unknown>>) => [
+        ...runningRows('taken'),
+        logRow(2, {
+          runId: 'taken',
+          type: 'message.appended',
+          message: { id: 'msg_taken', role: 'user', content: parts },
+        }),
+      ];
+      const takenBackEnd = logRow(3, {
+        runId: 'taken',
+        type: 'run.lifecycle',
+        state: 'cancelled',
+        attempt: 1,
+        detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+      });
+
+      it('should ask the outbox again for a request the host took back while the composer holds new text', async () => {
+        const chatId = 'withdrawn_write_retried';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const write = deps.client.writeFile.bind(deps.client);
+        let failures = 1;
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            failures > 0 &&
+            path === chatMessageQueuePath(projectId, chatId) &&
+            new TextDecoder().decode(bytes).includes('Take me back')
+          ) {
+            failures -= 1;
+            throw new Error('EIO');
+          }
+          await write(path, bytes);
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, takenBackRows([{ type: 'text', text: 'Take me back' }]));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ held: true, message: { parts: [{ type: 'text', text: 'Take me back' }] } }],
+            });
+          });
+          expect(failures).toBe(0);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a taken-back request parked when its attachment cannot be copied to the composer', async () => {
+        const chatId = 'withdrawn_copy_failed';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        /* The chat's copy of the image is missing, so the composer cannot take its own. */
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(
+            store,
+            chatId,
+            takenBackRows([
+              { type: 'text', text: 'Keep my image' },
+              { type: 'file-ref', path: pngUrl, mimeType: 'image/png' },
+            ]),
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ held: true, message: { parts: [{ type: 'text', text: 'Keep my image' }, { type: 'file' }] } }],
+            });
+            expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a taken-back request parked until the composer record holds it', async () => {
+        const chatId = 'withdrawn_draft_unsaved';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (path === composerPath(projectId, chatId)) {
+            throw new Error('EIO');
+          }
+          await write(path, bytes);
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, takenBackRows([{ type: 'text', text: 'Take me back' }]));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          });
+          /* The composer shows it but could not save it: the outbox keeps its durable copy, held for Send now. */
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ held: true, message: { parts: [{ type: 'text', text: 'Take me back' }] } }],
+          });
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should leave a parked send queued when another page sends it while it returns to the composer', async () => {
+        const chatId = 'withdrawn_sent_elsewhere';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
+        const copying = pending<undefined>();
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (path.startsWith(draftAttachmentsDirectory(projectId, chatId))) {
+            await copying.promise;
+          }
+          await write(path, bytes);
+        });
+        try {
+          publishLogRows(
+            store,
+            chatId,
+            takenBackRows([
+              { type: 'text', text: 'Send me from there' },
+              { type: 'file-ref', path: pngUrl, mimeType: 'image/png' },
+            ]),
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          const parked = await vi.waitFor(() => {
+            const [entry] = session.messageQueueRef.getSnapshot().context.items;
+            expect(entry?.held).toBe(true);
+            return entry!;
+          });
+          /* Send now, as another page would press it, while this page still copies the image. */
+          await store.steerQueuedMessage(chatId, parked.id);
+          copying.resolve(undefined);
+          await vi.waitFor(() => {
+            expect(deps.client.files.has(`${draftAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toBe(true);
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          /* It went out from there, so it does not come back here as well. */
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: parked.id, steer: { type: 'cancel' } }],
+          });
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should not send a Stop again without `withdraw` once that Stop has settled', async () => {
+        const chatId = 'stop_older_host_settled';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          /* The run ends, and the Stop with it, before the older host's refusal arrives. */
+          publishLogRows(store, chatId, [lifecycleRow(2, 'cancelled', 'live')], 2);
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          answer.resolve({
+            commandId: hostCommand.mock.calls[0]![0].commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'COMMAND_UNREADABLE',
+            message: 'Unrecognized key: "withdraw"',
+          });
+          await Promise.resolve();
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should stop calling a handed-over send departing once the log has its request', async () => {
+        const chatId = 'departing_logged';
+        const { store, session, unpublish } = await open(chatId, 'departing_project');
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(store.departingSendOf(chatId)).toBe('first');
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              lifecycleRow(4, 'running', 'req_first'),
+              logRow(5, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+            ],
+            3,
+          );
+          /* Still running, but its own rows describe it now: the cue reads the run, and the request can be edited. */
+          await vi.waitFor(() => {
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
+          expect(session.messages.filter((message) => message.id === 'first')).toHaveLength(1);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should return a send the host took back even when its Stop was let go first', async () => {
+        const chatId = 'withdrawn_after_release';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockRejectedValueOnce(new Error('Channel closed'));
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, [
+            ...runningRows('taken'),
+            logRow(2, {
+              runId: 'taken',
+              type: 'message.appended',
+              message: { id: 'msg_taken', role: 'user', content: [{ type: 'text', text: 'Take me back' }] },
+            }),
+          ]);
+          store.stopRun(chatId, 'stop-button');
+          /* The answer was lost, so the Stop is offered again; the keyed cancel had still landed. */
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, {
+                runId: 'taken',
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                attempt: 1,
+                detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(session.messages.some((message) => message.id === 'msg_taken')).toBe(false);
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should finish a take-back as it started when Stop is pressed again', async () => {
+        const chatId = 'departing_stopped_twice';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('twice'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+
+          store.stopRun(chatId, 'stop-button');
+          store.stopRun(chatId, 'stop-button');
+          /* The send is neither departing nor queued while it goes back. */
+          expect(store.isStopping(chatId)).toBe(true);
+          expect(store.unqueuedSendOf(chatId)).toBe('twice');
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('twice');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a send taken back during admission held when the composer takes new text before it returns', async () => {
+        const chatId = 'departing_raced';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admission = pending<never>();
+        const unadmit = publishChatTurnAdmission(chatId, async () => admission.promise);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('raced'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+
+          store.stopRun(chatId, 'stop-button');
+          /* The person types before the outbox has let go of the send. */
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'raced', held: true }],
+            });
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          expect(hostCommand).not.toHaveBeenCalled();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should hold the sends queued behind a turn the host took back until Send now', async () => {
+        const chatId = 'withdrawn_followers';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        try {
+          publishLogRows(store, chatId, [
+            ...runningRows('taken'),
+            logRow(2, {
+              runId: 'taken',
+              type: 'message.appended',
+              message: { id: 'msg_taken', role: 'user', content: [{ type: 'text', text: 'Take me back' }] },
+            }),
+          ]);
+          await store.requestTurn(chatId, queuedGesture('later'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, {
+                runId: 'taken',
+                type: 'run.lifecycle',
+                state: 'cancelled',
+                attempt: 1,
+                detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+              }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ id: 'later', held: true }],
+            });
+          });
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should let go of a Stop once its own run ended, even when a later run is already current', async () => {
+        const chatId = 'stop_aimed_run';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'running', 'req_first')],
+            3,
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          expect(store.isStopping(chatId)).toBe(true);
+          /* One catch-up batch: the stopped run's end, then another page's run already under way. */
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(5, 'cancelled', 'req_first'),
+              lifecycleRow(6, 'admitted', 'other'),
+              lifecycleRow(7, 'running', 'other'),
+            ],
+            5,
+          );
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should never let a late answer to an earlier cancel settle a later Stop of the same run', async () => {
+        const chatId = 'stop_stale_answer';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const first = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => first.promise);
+        const second = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => second.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          /* The run ends, then resumes under the same id, and the person stops it again. */
+          publishLogRows(store, chatId, [lifecycleRow(2, 'cancelled', 'live')], 2);
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          publishLogRows(
+            store,
+            chatId,
+            [
+              logRow(3, { runId: 'live', type: 'run.lifecycle', state: 'admitted', attempt: 2 }),
+              logRow(4, { runId: 'live', type: 'run.lifecycle', state: 'running', attempt: 2 }),
+            ],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(store.getProjection(chatId)?.ledger.runs['live']?.lifecycle).toBe('running');
+          });
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          first.resolve({
+            commandId: 'first',
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'RUN_NOT_LIVE',
+            message: 'This run is not live.',
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.isStopping(chatId)).toBe(true);
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should not call a send departing when the log ended its run while its acceptance was written', async () => {
+        const chatId = 'handoff_ended_during_ack';
+        const projectId = 'departing_project';
+        const { store, deps, unpublish } = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        const acknowledging = pending<undefined>();
+        const written = pending<undefined>();
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            path === chatMessageQueuePath(projectId, chatId) &&
+            new TextDecoder().decode(bytes).includes('"afterRunId":"req_first"')
+          ) {
+            written.resolve(undefined);
+            await acknowledging.promise;
+          }
+          await write(path, bytes);
+        });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await written.promise;
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              lifecycleRow(4, 'running', 'req_first'),
+              logRow(5, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+              lifecycleRow(6, 'completed', 'req_first'),
+            ],
+            3,
+          );
+          acknowledging.resolve(undefined);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should still stop a run the host accepted when this page could not record the acceptance', async () => {
+        const chatId = 'stop_ack_failed';
+        const { store, deps, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        const unadmit = queueAdmission(chatId);
+        /* The acknowledgement's write, which hands the run over and lets go of the entry, fails once. */
+        const write = deps.client.writeFile.bind(deps.client);
+        let failures = 1;
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            failures > 0 &&
+            path === chatMessageQueuePath('departing_project', chatId) &&
+            new TextDecoder().decode(bytes).includes('"afterRunId":"req_first"')
+          ) {
+            failures -= 1;
+            throw new Error('Disk full');
+          }
+          await write(path, bytes);
+        });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          store.stopRun(chatId, 'stop-button');
+          answer.resolve({ commandId: 'req_first', generation: 1, status: 'applied', effect: 'durable', cursor: 3 });
+          publishLogRows(
+            store,
+            chatId,
+            [lifecycleRow(3, 'admitted', 'req_first'), lifecycleRow(4, 'running', 'req_first')],
+            3,
+          );
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledTimes(2);
+          });
+          expect(hostCommand.mock.calls[1]![0]).toMatchObject({ type: 'cancel', payload: { runId: 'req_first' } });
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a replayed send in the thread from its acceptance until the log has it', async () => {
+        const chatId = 'replay_accepted_shown';
+        const projectId = 'departing_project';
+        const first = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        first.hostCommand.mockRejectedValueOnce(new Error('Acknowledgement lost'));
+        publishLogRows(first.store, chatId, []);
+        await first.store.requestTurn(chatId, queuedGesture('replayed'));
+        await vi.waitFor(() => {
+          expect(first.session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        first.unpublish();
+        first.store.release(chatId);
+        const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+        store.setDependencies(first.deps);
+        const session = store.acquire(chatId, projectId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        const unadmitReopened = queueAdmission(chatId);
+        const replay = vi.fn<AgentHostClient['hostCommand']>(async () => ({
+          commandId: 'req_replayed',
+          generation: 2,
+          status: 'applied',
+          effect: 'durable',
+          cursor: 1,
+        }));
+        const client = mock<AgentHostClient>({
+          catchUp: writerOwnedCatchUp,
+          hostCommand: replay,
+          close: vi.fn(async () => undefined),
+        });
+        const disconnect = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          publishLogRows(store, chatId, []);
+          store.refreshMessageQueue(chatId);
+          /* Accepted, and out of the outbox, before the log has its rows: the thread still shows it. */
+          await vi.waitFor(() => {
+            expect(replay).toHaveBeenCalledOnce();
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(session.messages.filter((message) => message.id === 'replayed')).toHaveLength(1);
+        } finally {
+          disconnect();
+          unadmitReopened();
+          unadmit();
+          store.release(chatId);
+        }
+      });
+
+      it('should let go of a Stop waiting for a replayed send whose replay the host refused', async () => {
+        const chatId = 'stop_refused_replay';
+        const projectId = 'departing_project';
+        const first = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        first.hostCommand.mockRejectedValueOnce(new Error('Acknowledgement lost'));
+        publishLogRows(first.store, chatId, []);
+        await first.store.requestTurn(chatId, queuedGesture('replayed'));
+        await vi.waitFor(() => {
+          expect(first.session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        first.unpublish();
+        first.store.release(chatId);
+        const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+        store.setDependencies(first.deps);
+        const session = store.acquire(chatId, projectId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        const unadmitReopened = queueAdmission(chatId);
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        const replay = vi.fn<AgentHostClient['hostCommand']>(async () => answer.promise);
+        const client = mock<AgentHostClient>({
+          catchUp: writerOwnedCatchUp,
+          hostCommand: replay,
+          close: vi.fn(async () => undefined),
+        });
+        const disconnect = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          publishLogRows(store, chatId, []);
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(replay).toHaveBeenCalledOnce();
+            expect(store.departingSendOf(chatId)).toBe('replayed');
+          });
+          store.stopRun(chatId, 'stop-button');
+          expect(store.isStopping(chatId)).toBe(true);
+          answer.resolve({
+            commandId: 'req_replayed',
+            generation: 2,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'RUN_ID_TAKEN',
+            message: 'This run id is taken.',
+          });
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          /* The cancel waited for a run that never started, so none was sent. */
+          expect(replay).toHaveBeenCalledOnce();
+        } finally {
+          disconnect();
+          unadmitReopened();
+          unadmit();
+          store.release(chatId);
+        }
+      });
+    });
+
     it('should retain a streaming follow-up without cancelling the active run', async () => {
       const { store, session, hostCommand, unpublish } = await open('chat_queue', 'project_queue');
       try {
@@ -5541,16 +6988,29 @@ describe('ChatSessionStore', () => {
       });
       const cancel = hostCommand.mock.calls[0]?.[0];
       expect(cancel?.type).toBe('cancel');
-      /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
+      /* The person's own Stop asks to take the request back; only this line says which gesture sent it. */
       // As JSON text: the desktop log flattens an object argument to `[object Object]`.
       expect(info).toHaveBeenCalledWith(
         '[ChatSessionStore] host cancel',
-        JSON.stringify({ chatId, runId, commandId: cancel?.commandId, origin: 'stop-button' }),
+        JSON.stringify({ chatId, runId, withdraw: true, commandId: cancel?.commandId, origin: 'stop-button' }),
       );
       info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
-      publishLogRows(store, chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
+      publishLogRows(
+        store,
+        chatId,
+        [
+          logRow(3, {
+            runId,
+            type: 'run.lifecycle',
+            state: 'cancelled',
+            attempt: 1,
+            detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+          }),
+        ],
+        3,
+      );
       expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('cancelled');
       await vi.waitFor(() => {
         expect(session.draftActorRef.getSnapshot().context).toMatchObject({
@@ -5562,6 +7022,10 @@ describe('ChatSessionStore', () => {
         );
       });
       expect(store.getProjection(chatId)?.views[runId]?.user?.id).toBe('msg_projected_cancel');
+      /* The message is in one place: back in the composer, and out of the thread (chat UX F2). */
+      await vi.waitFor(() => {
+        expect(session.messages.some((message) => message.id === 'msg_projected_cancel')).toBe(false);
+      });
       expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
       expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
       store.release(chatId);
@@ -5593,7 +7057,7 @@ describe('ChatSessionStore', () => {
       });
       publishLogRows(store, chatId, [lifecycleRow(4, 'cancelled', runId)], 4);
       await vi.waitFor(() => {
-        expect(session.chat.messages.flatMap((message) => message.parts)).toEqual(
+        expect(session.messages.flatMap((message) => message.parts)).toEqual(
           expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Partial answer' })]),
         );
       });
@@ -5708,7 +7172,7 @@ describe('ChatSessionStore', () => {
       store.release('chat_send_then_edit');
     });
 
-    it('clears hydrated history only after an authoritative empty host answer', async () => {
+    it('never shows a record transcript, before or after an authoritative empty host answer (P26, T4)', async () => {
       const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       const previous: MyUIMessage = {
@@ -5720,10 +7184,10 @@ describe('ChatSessionStore', () => {
       store.setDependencies(deps);
       const session = store.acquire('chat_verified_empty', 'project_1');
       await settle();
-      expect(session.chat.messages).toEqual([previous]);
+      expect(session.messages).toEqual([]);
       publishLogPage(store, 'chat_verified_empty', [], { cursor: 0, endCursor: 0 });
       await vi.waitFor(() => {
-        expect(session.chat.messages).toEqual([]);
+        expect(session.messages).toEqual([]);
       });
       store.release('chat_verified_empty');
     });
@@ -6507,14 +7971,15 @@ describe('ChatSessionStore', () => {
 
       const session = store.acquire('chat_orphan_pending', 'resource_orphan');
       await vi.waitFor(() => {
-        expect(session.chat.messages).toContainEqual(pendingUserMessage);
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
+      await settle();
 
-      const fake = harness.created.find((entry) => entry.id === 'chat_orphan_pending')!;
-      expect(fake.regenerate).not.toHaveBeenCalled();
       expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
       expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
-      expect(fake.messages).toContainEqual(pendingUserMessage);
+      expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+      /* The record holds no transcript (P26): only a startup request's row is shown before the log has it (T4). */
+      expect(session.messages).toEqual([]);
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
       store.release('chat_orphan_pending');
@@ -6542,10 +8007,6 @@ describe('ChatSessionStore — composer records (W7)', () => {
     name: 'GPT Image',
     support: { modalities: { input: ['text', 'image'], output: ['text'] } },
   };
-
-  beforeEach(() => {
-    harness.created = [];
-  });
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -6699,6 +8160,111 @@ describe('ChatSessionStore — composer records (W7)', () => {
     expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(pngBytes);
     expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toEqual(pdfBytes);
     reopened.release(chatId);
+  });
+
+  it.each([
+    ['a trailing newline', 'model the bracket\n'],
+    ['a trailing space', 'model the bracket '],
+    ['leading whitespace', '\n model the bracket'],
+  ])('clears a sent draft that ends up queued when its text has %s', async (_case, typed) => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: typed });
+
+    /* The message carries the composed text, which `buildUserMessage` trims; the draft is what the editor holds. */
+    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: typed }) });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+    store.release(chatId);
+  });
+
+  it('keeps text typed after a send was composed, though it differs only past the sent text', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    const message = buildUserMessage({ text: 'model the bracket' });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket\nand a second one' });
+
+    await store.requestTurn(chatId, { kind: 'send', message });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket\nand a second one');
+    store.release(chatId);
+  });
+
+  /* PERF-8: a send writes the outbox, then the composer's cleared draft. A reload between the two restored the queued
+   * prompt as a draft, and the next one typed was queued as "Prompt 4.Prompt 3.". */
+  it('should not restore a queued send as the draft when a reload lands before the composer is cleared', async () => {
+    const client = createMemoryClient();
+    const first = openStore(client);
+    const session = first.store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: 'Prompt 3.' });
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+        draft: { parts: [{ type: 'text', text: 'Prompt 3.' }] },
+      });
+    });
+    /* The page goes away before the composer's clear lands: that write never reaches the disk. */
+    let reloading = true;
+    const write = client.writeFile.bind(client);
+    vi.spyOn(client, 'writeFile').mockImplementation(async (path, data) => {
+      if (reloading && path === composerPath(projectId, chatId)) {
+        return new Promise<void>(() => {
+          /* The page went away: this write never lands. */
+        });
+      }
+      await write(path, data);
+    });
+    const message = buildUserMessage({ text: 'Prompt 3.' });
+    await first.store.requestTurn(chatId, { kind: 'send', message });
+    expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+      draft: { parts: [{ type: 'text', text: 'Prompt 3.' }] },
+    });
+    reloading = false;
+
+    const reopened = openStore(client).store;
+    const restored = reopened.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(restored.messageQueueRef.getSnapshot().context.items.map((item) => item.message)).toEqual([message]);
+      expect(client.json(composerPath(projectId, chatId))).not.toHaveProperty('draft');
+    });
+    expect(restored.draftActorRef.getSnapshot().context.draftText).toBe('');
+    reopened.release(chatId);
+  });
+
+  it.each([
+    { name: 'a draft that differs from every queued send', draft: 'Prompt 4.', held: false, kept: true },
+    { name: 'a draft equal to a held send on its way to the composer', draft: 'Prompt 3.', held: true, kept: true },
+    { name: 'a draft equal to a queued send', draft: 'Prompt 3.', held: false, kept: false },
+    { name: 'a draft equal to a queued send but for a trailing space', draft: 'Prompt 3. ', held: false, kept: false },
+  ])('should restore $name: kept $kept (PERF-8)', async ({ draft, held, kept }) => {
+    const client = createMemoryClient();
+    const queued = buildUserMessage({ text: 'Prompt 3.' });
+    await client.writeFile(
+      composerPath(projectId, chatId),
+      /* The composer record holds the editor's raw text, which `buildUserMessage` would trim. */
+      new TextEncoder().encode(
+        JSON.stringify({ version: 1, draft: { id: '', role: 'user', parts: [{ type: 'text', text: draft }] } }),
+      ),
+    );
+    await client.writeFile(
+      chatMessageQueuePath(projectId, chatId),
+      new TextEncoder().encode(
+        JSON.stringify({
+          version: 1,
+          items: [{ id: queued.id, requestId: 'req_queued', message: queued, ...(held ? { held: true } : {}) }],
+        }),
+      ),
+    );
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.messageQueueRef.getSnapshot().context.items).toHaveLength(1);
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    await settle();
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe(kept ? draft : '');
+    store.release(chatId);
   });
 
   it('promotes both blobs into the chat directory and clears the draft-stage copies', async () => {
@@ -6938,15 +8504,11 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('still opens the chat when its record cannot be read', async () => {
     const client = createMemoryClient();
     client.failingReads.add(composerPath(projectId, chatId));
-    const transcript: MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'earlier' }] }];
-    const { store } = openStore(client, chatRow(chatId, projectId, { messages: transcript }));
+    const { store } = openStore(client, chatRow(chatId, projectId));
     const session = store.acquire(chatId, projectId);
     const unreadable = vi.fn();
     session.composerRecordRef.on('recordUnreadable', unreadable);
 
-    await vi.waitFor(() => {
-      expect(harness.created.at(-1)!.messages).toEqual(transcript);
-    });
     await vi.waitFor(() => {
       expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
     });
@@ -7001,10 +8563,6 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     liveSessions.set(projectId, projectRef);
     return { store };
   };
-
-  beforeEach(() => {
-    harness.created = [];
-  });
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -7069,7 +8627,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     await settle();
 
     await store.removeProject(projectId);
-    finishRun(harness.created.at(-1)!);
+    publishLogRows(store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
     await settle();
 
     expect(client.json(unreadPath)).toBeUndefined();

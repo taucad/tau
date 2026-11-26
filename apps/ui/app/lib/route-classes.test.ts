@@ -2,11 +2,12 @@
 /**
  * The route-class registry (progressive loading P1) and the static-shell routing it generates (PL3).
  *
- * The deployed site routes a request in Netlify's order: edge functions, then functions (the React Router function at
- * `/*` minus its `excludedPaths`, `preferStatic`), then redirects and rewrites in file order, then static files. This
- * file models that chain from the generated configuration and checks it against every `/w/…` shape the app or a
- * visitor can send, and against the URLs that must never reach a shell. A wrong rewrite would serve the wrong document
- * to every project URL, so the table is exhaustive by shape, not a sample.
+ * The deployed site routes a request in Netlify's order: edge functions (the static shell one rewrites a project URL
+ * to the shell's file), then, since the React Router function at `/*` is registered with `preferStatic`, the redirect
+ * rules in file order and the static files, then the function. This file models that chain from the generated
+ * configuration and checks it against every `/w/…` shape the app or a visitor can send, and against the URLs that must
+ * never reach a shell. A wrong rewrite would serve the wrong document to every project URL, so the table is exhaustive
+ * by shape, not a sample.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -20,7 +21,6 @@ import {
   edgeShellClasses,
   routeClassOfRouteId,
   isStaticShellPath,
-  netlifyFunctionExcludedPaths,
   netlifyShellRedirects,
   prerenderedFiles,
   renderNetlifyShellRouting,
@@ -30,6 +30,7 @@ import {
   shellSentinel,
   shellSkewCookie,
   staticShellClasses,
+  staticShellEdgePaths,
   staticShellFor,
   workerRouteClasses,
 } from '#lib/route-classes.js';
@@ -44,7 +45,11 @@ import {
 } from '../../netlify/edge-functions/marketing.js';
 import { config as marketingEventsEdge } from '../../netlify/edge-functions/marketing-events.js';
 import { config as posthogEdge } from '../../netlify/edge-functions/posthog.js';
-import { config as staticShellEdge, shellSkewCookieExpiry } from '../../netlify/edge-functions/static-shell.js';
+import {
+  config as staticShellEdge,
+  projectShellDocument,
+  shellSkewCookieExpiry,
+} from '../../netlify/edge-functions/static-shell.js';
 /* oxlint-enable eslint/no-restricted-imports */
 
 const appRoot = resolve(import.meta.dirname, '..');
@@ -62,14 +67,19 @@ const routeEntries = readdirSync(routesRoot, { withFileTypes: true })
   .map((entry) => entry.name);
 
 /**
- * Netlify's compiled form of one `excludedPath`: the URLPattern, plus the optional trailing slash
- * `@netlify/zip-it-and-ship-it` (`getRoutes`) appends to every expression.
+ * Whether the static shell edge function runs on a pathname: Netlify's compiled form of its paths, each URLPattern plus
+ * the optional trailing slash `@netlify/edge-bundler` appends to every expression.
  */
-const excludedByFunction = (pathname: string): boolean =>
-  netlifyFunctionExcludedPaths().some((path) => {
+const runsStaticShellEdge = (pathname: string): boolean =>
+  staticShellEdge.path.some((path) => {
     const pattern = new URLPattern({ pathname: path });
     return pattern.test({ pathname }) || (pathname.endsWith('/') && pattern.test({ pathname: pathname.slice(0, -1) }));
   });
+
+/** Every `[[redirects]]` rule of the checked-in `netlify.toml`, generated or not, in file order. */
+const tomlRedirects = [...toml.matchAll(/\[\[redirects\]\]\nfrom = "([^"]+)"\nto = "([^"]+)"\nstatus = (\d+)/gu)].map(
+  ([, from = '', to = '', status = '0']) => ({ from, to, status: Number(status) }),
+);
 
 /** Netlify's redirect `from` matching: literal segments, `:name` for one segment, a trailing `*` for the rest. */
 const redirectMatches = (from: string, url: URL): boolean => {
@@ -95,18 +105,20 @@ const redirectMatches = (from: string, url: URL): boolean => {
 type Routed =
   | Readonly<{ kind: 'function' }>
   | Readonly<{ kind: 'rewrite'; to: string }>
-  | Readonly<{ kind: 'redirect'; to: string; status: number }>
-  | Readonly<{ kind: 'not found' }>;
+  | Readonly<{ kind: 'redirect'; to: string; status: number }>;
 
-/** Where the deployed site sends a request, from the generated function exclusions and redirect rules. */
+/**
+ * Where the deployed site sends a request: the static shell edge function (which passes the `www` alias on), then every
+ * redirect rule of `netlify.toml` before the `preferStatic` function, then the function.
+ */
 const route = (href: string): Routed => {
   const url = new URL(href, `https://${metaConfig.appDomain}`);
-  if (!excludedByFunction(url.pathname)) {
-    return { kind: 'function' };
+  if (url.hostname.split('.')[0] !== 'www' && runsStaticShellEdge(url.pathname)) {
+    return { kind: 'rewrite', to: projectShellDocument };
   }
-  const rule = netlifyShellRedirects(metaConfig.appDomain).find((candidate) => redirectMatches(candidate.from, url));
+  const rule = tomlRedirects.find((candidate) => redirectMatches(candidate.from, url));
   if (rule === undefined) {
-    return { kind: 'not found' };
+    return { kind: 'function' };
   }
   if (rule.status === 200) {
     return { kind: 'rewrite', to: rule.to };
@@ -166,8 +178,8 @@ describe('route-class registry', () => {
 });
 
 describe('static-shell routing on Netlify (PL3)', () => {
-  it('should exclude from the function only one-segment parameters that hold no dot', () => {
-    expect(netlifyFunctionExcludedPaths()).toStrictEqual([String.raw`/w/:workspace([^\/.]+)/:project([^\/.]+)`]);
+  it('should run the static shell edge function only on one-segment parameters that hold no dot', () => {
+    expect(staticShellEdgePaths()).toStrictEqual([String.raw`/w/:workspace([^\/.]+)/:project([^\/.]+)`]);
   });
 
   it.each([
@@ -238,7 +250,7 @@ describe('static-shell routing on Netlify (PL3)', () => {
     });
   });
 
-  it('should never exclude a URL that no rewrite serves', () => {
+  it('should serve the shell for exactly the URLs a shell class claims, and every other shape from the function', () => {
     const shapes = [
       '/w/a/b',
       '/w/a/b/',
@@ -251,9 +263,29 @@ describe('static-shell routing on Netlify (PL3)', () => {
       '/w//',
     ];
     for (const pathname of shapes) {
-      expect(route(pathname).kind, pathname).not.toBe('not found');
-      expect(excludedByFunction(pathname), pathname).toBe(staticShellFor(pathname) !== undefined);
+      expect(route(pathname).kind, pathname).toBe(staticShellFor(pathname) === undefined ? 'function' : 'rewrite');
     }
+  });
+
+  /* N-3: a 200 rewrite of `/w/:workspace/:project` matched `<project>.data` too, and `preferStatic` let it answer before
+   * the function, so the project's data request got the shell's HTML ("Unable to decode turbo-stream response"). */
+  it("should keep every rule of netlify.toml off a project's data request, which a rule would answer before the function", () => {
+    for (const href of [
+      '/w/home/new-project.data',
+      '/w/home/new-project.data?_routes=root,routes/w.$workspace.$project',
+      '/w/home/new-project/_.data',
+      '/w/ws_01jx4k8m2n/proj_01jx4k9a7b.data',
+    ]) {
+      const url = new URL(href, 'https://tau.new');
+      expect(
+        tomlRedirects.filter((rule) => redirectMatches(rule.from, url)),
+        href,
+      ).toStrictEqual([]);
+      expect(route(href), href).toStrictEqual({ kind: 'function' });
+    }
+    // The rule this replaces matched the data request, which is why no rule may rewrite to a shell.
+    expect(redirectMatches('/w/:workspace/:project', new URL('https://tau.new/w/home/new-project.data'))).toBe(true);
+    expect(tomlRedirects.filter((rule) => rule.status === 200)).toStrictEqual([]);
   });
 
   it('should keep the shell URLs out of every edge function but the static shell one', () => {
@@ -267,16 +299,8 @@ describe('static-shell routing on Netlify (PL3)', () => {
     }
   });
 
-  it('should run the static shell edge function on exactly the URLs the function excludes', () => {
-    expect(staticShellEdge.path).toStrictEqual(netlifyFunctionExcludedPaths());
-    // `@netlify/edge-bundler` compiles an edge path as `getRoutes` does an excluded one: with an optional trailing slash.
-    const runsEdge = (pathname: string): boolean =>
-      staticShellEdge.path.some((path) => {
-        const pattern = new URLPattern({ pathname: path });
-        return (
-          pattern.test({ pathname }) || (pathname.endsWith('/') && pattern.test({ pathname: pathname.slice(0, -1) }))
-        );
-      });
+  it('should run the static shell edge function on exactly the URLs a shell class claims', () => {
+    expect(staticShellEdge.path).toStrictEqual(staticShellEdgePaths());
     const shapes = [
       '/w/home/bracket-v2',
       '/w/home/bracket-v2/',
@@ -289,7 +313,7 @@ describe('static-shell routing on Netlify (PL3)', () => {
       '/',
     ];
     for (const pathname of shapes) {
-      expect(runsEdge(pathname), pathname).toBe(staticShellFor(pathname) !== undefined);
+      expect(runsStaticShellEdge(pathname), pathname).toBe(staticShellFor(pathname) !== undefined);
     }
   });
 });
@@ -311,7 +335,7 @@ describe('the Home shell behind the marketing edge function (PL4)', () => {
   });
 
   it('should add no function exclusion, rewrite or header rule: the edge function alone chooses it', () => {
-    expect(netlifyFunctionExcludedPaths()).toHaveLength(rewriteShellClasses.length);
+    expect(staticShellEdgePaths()).toHaveLength(rewriteShellClasses.length);
     for (const rule of netlifyShellRedirects(metaConfig.appDomain)) {
       expect(redirectMatches(rule.from, new URL('https://tau.new/')), rule.from).toBe(false);
       expect(redirectMatches(rule.from, new URL('https://www.tau.new/')), rule.from).toBe(false);
@@ -341,13 +365,15 @@ describe('generated Netlify configuration', () => {
     );
   });
 
-  it('should hand the function its exclusions in the Netlify build', () => {
+  it('should exclude nothing from the function, so it renders any document the edge function passes on', () => {
     const viteConfig = readFileSync(join(uiRoot, 'vite.config.ts'), 'utf8');
-    expect(viteConfig).toContain('netlifyReactRouter({ excludedPaths: netlifyFunctionExcludedPaths() })');
+    expect(viteConfig).toContain('netlifyReactRouter()');
+    expect(viteConfig).not.toContain('excludedPaths');
   });
 
   it('should rewrite to the file the prerender pass writes', () => {
     expect(rewriteShellClasses.length).toBeGreaterThan(0);
+    expect(projectShellDocument).toBe(projectShell);
     for (const shell of rewriteShellClasses) {
       expect(shellDocumentFile(shell)).toBe(`${shell.shellPath.slice(1)}/index.html`);
       expect(shellDocumentFile(shell)).toBe(prerenderedFiles(shell.shellPath).document);

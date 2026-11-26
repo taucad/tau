@@ -26,6 +26,7 @@ import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
@@ -71,6 +72,7 @@ const TurnGroup = memo(function ({
         <ChatMessage
           key={id}
           messageId={id}
+          isPastTurn={!isLast}
           // The request's revision summary is a card attached under the user
           // message, so appending assistant messages never moves it.
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
@@ -104,6 +106,8 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
         ref={ref}
         role='region'
         aria-label='Chat history'
+        /* Session replay blocks this transcript while the account's chats may not be recorded (`replay-content.lib`). */
+        data-replay-content='chat'
         aria-busy={context === 'loading' ? true : undefined}
         data-transcript-state={context}
         className={cn('[scrollbar-gutter:stable]', props.className)}
@@ -309,7 +313,7 @@ const ExpandedChatHistory = memo(function ({
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChatRecords(projectId);
-  const { activeChatId, persistenceActorRef } = useChatContext();
+  const { activeChatId } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
   const agentInvocations = useChatSelector((state) => state.agentInvocations);
   const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
@@ -346,17 +350,15 @@ const ExpandedChatHistory = memo(function ({
     }
   }, [composerFocusRequest]);
 
-  // Empty-cancel: the persistence machine has lifted the cancelled user
-  // message back into the composer draft (via the store's
-  // `restoreCancelledDraft` listener), so refocus the composer in the next
-  // animation frame so Tiptap/HTMLTextArea can finish reflowing the restored
-  // draft text before the cursor lands.
+  // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
+  // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.
+  const sessionStore = useOptionalChatSessionStore();
   useEffect(() => {
-    if (!persistenceActorRef) {
+    if (!sessionStore) {
       return;
     }
     let frame: number | undefined;
-    const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
+    const unsubscribe = sessionStore.subscribeDraftReturned(activeChatId, () => {
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
@@ -369,17 +371,22 @@ const ExpandedChatHistory = memo(function ({
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [persistenceActorRef]);
+  }, [activeChatId, sessionStore]);
 
   // The turn host owns request configuration; the client exposes action verbs.
   // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, attachments, references }) => {
+    async ({ content, attachments, references, annotations }) => {
       // Pending until the message lands, so the composer stays busy through admission (R8).
-      await submitChat({ text: content, attachments, ...(references === undefined ? {} : { references }) });
+      await submitChat({
+        text: content,
+        attachments,
+        ...(references === undefined ? {} : { references }),
+        ...(annotations === undefined ? {} : { annotations }),
+      });
     },
     [submitChat],
   );

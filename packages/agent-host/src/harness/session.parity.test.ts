@@ -622,6 +622,9 @@ describe('pi full-turn parity fixture', () => {
       modelTransport: transport,
       toolRegistry: tools,
       eventLog: log,
+      /* The seeded reads came before the person spoke, so they no longer count toward a nudge; the fixture still
+       * carries one safeguard row through the turn, fired by this turn's own read. */
+      safeguardThresholds: { identicalCall: 1 },
       substituteToolResult: async (invocation) => ({
         content: { source: 'cache', input: invocation.input },
         isError: false,
@@ -682,7 +685,8 @@ describe('pi full-turn parity fixture', () => {
     expect(safeguardMessage?.role).toBe('user');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"kind":"safeguard"');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"pruning":"preserve-until-compaction"');
-    expect(JSON.stringify(transport.requests[0]?.messages)).toContain('<system-reminder>');
+    /* The nudge answers this turn's read: the turn's first request carries none for what an earlier turn did. */
+    expect(JSON.stringify(transport.requests[0]?.messages)).not.toContain('<system-reminder>');
     expect(JSON.stringify(transport.requests[1]?.messages)).toContain('<system-reminder>');
     expect(compactions).toContain('tool_result_clearing');
     expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);

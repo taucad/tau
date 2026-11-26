@@ -6,6 +6,7 @@ import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.
 import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent, StorageDurabilityClass } from '#log/event-types.js';
 import type { ChatLogSegment } from '#log/segments.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
@@ -763,9 +764,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     },
     openWriter: async (chatId, open) => {
       const filePath = logPath(chatId);
-      /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
-       * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
-      await fileSystem.unlink(`${filePath}.lock`).catch(() => undefined);
+      await takeOverWriterMarker(fileSystem, filePath);
       const { readdir, stat } = fileSystem;
       const directory = segmentsPath(chatId);
       return openProviderWriter(
@@ -799,6 +798,60 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */
     leadership: leadershipOf(options, true),
   });
+};
+
+/** A provider writer's marker is exactly one numeric line (`Date.now()\n`); anything else is a Node writer's (HA-I10). */
+const isProviderMarker = (text: string): boolean => /^\d+\n$/u.test(text);
+
+/** When the log's newest readable row was recorded, or `undefined` for an empty or unreadable tail. */
+const newestRowAt = (bytes: Uint8Array<ArrayBuffer> | undefined): number | undefined => {
+  const lines = bytes === undefined ? [] : new TextDecoder().decode(bytes).trimEnd().split('\n');
+  for (const line of lines.toReversed()) {
+    try {
+      const at = Date.parse((JSON.parse(line) as { readonly recordedAt?: unknown }).recordedAt as string);
+      if (Number.isFinite(at)) {
+        return at;
+      }
+    } catch {
+      /* A torn tail: the row before it is the newest whole one. */
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Clear a writer marker a provider open may take over (HA-I10, H51). A provider marker is always taken: this open runs
+ * under the chat's Web Lock, so it is a dead or stolen holder's, and the per-append fence refuses that holder (EQ2,
+ * RH-R12). A Node writer's marker on a folder shared with `tau serve` is honoured while it is fresh: the newer of the
+ * log's newest row and the marker's modification time (the live Node writer touches it every heartbeat tick) is
+ * within {@link foreignRunStaleMilliseconds}. Past that bound the Node writer is gone or paused past its hold, and the
+ * marker is taken over as another device's stale run is (XD3).
+ *
+ * @param fileSystem - The provider.
+ * @param filePath - The log.
+ * @param now - The wall clock, in epoch milliseconds.
+ */
+const takeOverWriterMarker = async (
+  fileSystem: Pick<ProviderEventLogOptions['fileSystem'], 'readFile' | 'unlink' | 'stat'>,
+  filePath: string,
+  now: number = Date.now(),
+): Promise<void> => {
+  const lockPath = `${filePath}.lock`;
+  const marker = await fileSystem.readFile(lockPath).catch(() => undefined);
+  if (marker !== undefined && !isProviderMarker(new TextDecoder().decode(marker))) {
+    const touchedAt = await fileSystem.stat?.(lockPath).then(
+      ({ mtimeMs }) => mtimeMs,
+      () => undefined,
+    );
+    const rowAt = newestRowAt(await fileSystem.readFile(filePath).catch(() => undefined));
+    if (now - Math.max(touchedAt ?? 0, rowAt ?? 0) < foreignRunStaleMilliseconds) {
+      throw new EventLogError(
+        'WRITER_LOCKED',
+        `Event log "${filePath}" has a live Node writer. Wait until it closes the log, then open it again.`,
+      );
+    }
+  }
+  await fileSystem.unlink(lockPath).catch(() => undefined);
 };
 
 const leadershipOf = (

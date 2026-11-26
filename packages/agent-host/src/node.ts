@@ -445,6 +445,11 @@ const openWriter = async (
     // The kernel lock is held for the log's life, so every section is already exclusive.
     exclusive: async (section) => section(),
     ...(segmentsDirectory === undefined ? {} : { segments: nodeSegmentsReader(segmentsDirectory) }),
+    /* `futimes` on the held handle: a taker's successor marker at the same path is never touched (HA-I10). */
+    touch: async () => {
+      const at = new Date();
+      await lock.handle.utimes(at, at);
+    },
     close: async () => {
       try {
         await file.close();

@@ -906,6 +906,14 @@
       "owner": "chat performance WP-06"
     },
     {
+      "id": "HA1-NODE-MARKER-STALE",
+      "bound": "A Node writer's marker on a folder shared with tau serve is honoured while the newer of the log's newest row and the marker's mtime is within foreignRunStaleMilliseconds (XD3, 10 min); past it a provider open takes the marker over (HA-I10)",
+      "site": "packages/agent-host/src/browser.ts",
+      "token": "now - Math.max(touchedAt ?? 0, rowAt ?? 0) < foreignRunStaleMilliseconds",
+      "class": "Liveness",
+      "owner": "host attachment reliability HA1"
+    },
+    {
       "id": "HA0-READ-LOSS",
       "bound": "Report-only: a lost or refused chat read (not a leadership handoff) that lasts 10 s (chatReadLossBoundMilliseconds) reports chat.read.cold-hidden and run.unsettled.own; an attach clears it",
       "site": "apps/ui/app/services/chat-session-store.ts",

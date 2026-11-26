@@ -1693,6 +1693,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (target === undefined) {
         return;
       }
+      /* HA-I10: the writer's marker stays fresh on every tick, shared or not, outside `serial` and before any publish,
+       * so a held chain or a hung publish never delays it. Fire and forget; a failed touch only ages the marker. */
+      const touch = async (): Promise<void> => {
+        try {
+          const log = await store.log;
+          await log?.touch?.();
+        } catch {
+          /* A failed touch only ages the marker. */
+        }
+      };
+      void touch();
       const { wrote } = store;
       /* What this tick decided on: a heartbeat is written only if no row lands before it does. */
       const decided = wrote;

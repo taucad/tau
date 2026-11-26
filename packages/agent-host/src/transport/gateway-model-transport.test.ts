@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import type { Usage } from '@earendil-works/pi-ai';
@@ -11,6 +12,7 @@ import {
   createCachedSystemPromptBlocks,
   createGatewayModelTransport as createGatewayModelTransportWithModel,
   GatewayModelTransportError,
+  resetGatewayGzipOrigins,
 } from '#transport/gateway-model-transport.js';
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
@@ -1293,6 +1295,35 @@ describe('createGatewayModelTransport', () => {
     expect(headers.get('x-tau-host-kind')).toBe('daemon');
     expect(headers.has('x-tau-host-build')).toBe(false);
     expect(headers.has('x-tau-kernel')).toBe(false);
+  });
+
+  /* Chat performance WP-15 step 2: gzip only after the gateway has said it inflates, so a host ahead of the API's
+   * deploy never sends a body the API cannot read. */
+  it('sends identity until the gateway advertises gzip, then the same bytes gzip', async () => {
+    resetGatewayGzipOrigins();
+    const sent: Array<{ readonly body: unknown; readonly encoding: string | undefined }> = [];
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sent.push({ body: init?.body, encoding: new Headers(init?.headers).get('content-encoding') ?? undefined });
+        const response = fixtureResponse();
+        const headers = new Headers(response.headers);
+        headers.set('x-tau-accept-encoding', 'gzip');
+        return new Response(response.body, { status: response.status, headers });
+      }),
+    });
+    const long = request({ messages: [{ id: 'user-1', role: 'user', content: 'q'.repeat(4096) }] });
+
+    await collect(transport.stream(long));
+    await collect(transport.stream(long));
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.encoding).toBeUndefined();
+    expect(typeof sent[0]?.body).toBe('string');
+    expect(sent[1]?.encoding).toBe('gzip');
+    expect(sent[1]?.body).toBeInstanceOf(Uint8Array);
+    expect(gunzipSync(sent[1]?.body as Uint8Array<ArrayBuffer>).toString('utf8')).toBe(sent[0]?.body);
+    resetGatewayGzipOrigins();
   });
 
   it('keeps the request body byte-identical with and without host labels', async () => {

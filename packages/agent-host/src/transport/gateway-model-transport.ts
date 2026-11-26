@@ -792,6 +792,50 @@ const anthropicSystemBlocks = (options: {
 /* A label is sent only as printable ASCII within the gateway's bound; anything else would throw in `Headers#set`. */
 const headerLabel = /^[!-~]{1,128}$/u;
 
+/**
+ * API origins whose gateway has answered with `x-tau-accept-encoding: gzip` (chat performance WP-15 step 2). A body
+ * is sent gzip only to an origin in this set, so a host that runs ahead of the API's deploy, or an API that drops
+ * the decoder, keeps receiving identity bodies: the first step to an origin is always identity.
+ */
+const gzipOrigins = new Set<string>();
+
+/* Below this, gzip's header and the CPU cost outweigh the bytes saved. */
+const gzipMinimumBytes = 1024;
+
+const originOf = (input: RequestInfo | URL): string | undefined => {
+  try {
+    return new URL(typeof input === 'string' || input instanceof URL ? input.toString() : input.url).origin;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The request body gzip, when the origin advertised it and the body is large enough to gain.
+ *
+ * @param origin - The API origin, when known.
+ * @param body - The serialized request.
+ * @returns The compressed bytes, or undefined to send the body as it is.
+ */
+const gzipBodyFor = async (origin: string | undefined, body: unknown): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  if (
+    origin === undefined ||
+    !gzipOrigins.has(origin) ||
+    typeof body !== 'string' ||
+    body.length < gzipMinimumBytes ||
+    typeof CompressionStream === 'undefined'
+  ) {
+    return undefined;
+  }
+  const compressed = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(compressed).arrayBuffer());
+};
+
+/** Forgets the origins that advertised gzip; for tests. */
+export const resetGatewayGzipOrigins = (): void => {
+  gzipOrigins.clear();
+};
+
 const authenticatedFetch =
   (options: {
     readonly auth?: GatewayModelTransportOptions['auth'];
@@ -891,12 +935,20 @@ const authenticatedFetch =
           body = JSON.stringify({ ...payload, system });
         }
       }
+      const origin = originOf(input);
+      const gzipped = await gzipBodyFor(origin, body);
+      if (gzipped !== undefined) {
+        headers.set('content-encoding', 'gzip');
+      }
       const response = await options.fetch(withoutBetaMarker(input), {
         ...init,
-        body,
+        body: gzipped ?? body,
         credentials: 'include',
         headers,
       });
+      if (origin !== undefined && response.headers.get('x-tau-accept-encoding') === 'gzip') {
+        gzipOrigins.add(origin);
+      }
       if (!response.ok) {
         const failure = await gatewayResponseError(response);
         options.state.failure = failure;

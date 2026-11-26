@@ -52,7 +52,8 @@
         "test:e2e:journey-viewer-3",
         "test:e2e:journey-viewer-4",
         "test:e2e:journey-viewer-5",
-        "test:e2e:journey-viewer-6"
+        "test:e2e:journey-viewer-6",
+        "test:e2e:browser-host-chat"
       ],
       "metadata": {
         "description": "The shadow rows (CI decomposition operator ruling Q1, option C; CI flake quarantine blueprint FQ-13): suites of this project on probation for test:e2e:queue. ci.yml's e2e-shadow lane runs each one as its own row in the merge queue (and on a push to main the queue did not prove) whenever this project is affected, outside the required gate and outside Fail fast, so a row never blocks a landing; its outcome rows reach the flake ledger like every lane's. A row joins test:e2e:queue once the ledger counts 100 consecutive runs with no failure of its own (shadow-row-promotion.yml proposes it), and a suite is in this list or in test:e2e:queue, never both. Running this target runs them all."
@@ -650,6 +651,29 @@
           "vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts src/chat-questions.spec.ts src/chat-todo-list.spec.ts",
           "vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
           "vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts"
+        ],
+        "parallel": false,
+        "env": {
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_E2E_HOST_TIER": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:browser-host-chat": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The passing files of test:e2e:browser-host as their own row (CI decomposition DC-27): chat-questions and chat-todo-list, which passed on every e2e-nightly from 11-22 to 11-25 (five runs) in at most 1.0 and 0.6 min. They run as test:e2e:browser-host runs them (its env fixture with TAU_E2E_HOST_TIER, ui:build first, the chromium instance, the only one that target gives them), and test:e2e:browser-host still runs every file. Held out: chat-isolated-workspace (#2283) and browser-agent-host (#2890, and #2297), red on 11-25 and 9.7 to 14 min alone, over the row budget, so it needs a split by its owner before it can be a row.",
+        "browsers": ["chromium"]
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "commands": [
+          "pnpm --dir ../.. exec nx run ui:build",
+          "vitest run --config vitest.config.ts --project chromium src/chat-questions.spec.ts src/chat-todo-list.spec.ts"
         ],
         "parallel": false,
         "env": {

@@ -1979,6 +1979,73 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
     expect(unrelated.outputs['e2e-shadow-suites']).toBe('[]');
   });
 
+  it('should run the desktop shadow rows only when the desktop lane is selected or the entry touches desktop-e2e (DC-27)', () => {
+    const desktopNodes = (lane: string): Record<string, Node> => ({
+      ...nodes,
+      'desktop-e2e': {
+        root: 'apps/desktop-e2e',
+        targets: ['test:e2e', 'test:e2e:chat', 'test:e2e:project', 'test:e2e:shadow'],
+        config: {
+          'test:e2e:chat': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:project': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:shadow': {
+            executor: 'nx:noop',
+            dependsOn: ['test:e2e:chat', 'test:e2e:project'],
+            metadata: { lane },
+          },
+        },
+      },
+    });
+    const graphNodes = desktopNodes('desktop');
+    const rows = ['test:e2e:chat', 'test:e2e:project'].map((target) => ({
+      project: 'desktop-e2e',
+      target,
+      label: `desktop-e2e ${target}`,
+      slug: `desktop-e2e-${target.replaceAll(':', '-')}`,
+      browsers: 'chromium',
+    }));
+    const desktopRows = (run: ReturnType<typeof plan>): unknown[] =>
+      (JSON.parse(run.outputs['e2e-shadow-suites'] ?? '[]') as Array<{ readonly project: string }>).filter(
+        ({ project }) => project === 'desktop-e2e',
+      );
+    for (const event of ['merge_group', 'push']) {
+      // A tag:ci:desktop project (`ui` in this fixture) is affected: the desktop lane is selected.
+      const desktopLane = plan(event, { affected: ['desktop-e2e', 'ui'], files: ['apps/ui/app/root.tsx'], graphNodes });
+      expect(desktopLane.status, desktopLane.stderr).toBe(0);
+      expect(desktopRows(desktopLane), event).toEqual(rows);
+      // The entry changes a file desktop-e2e owns, and no desktop project is affected.
+      const own = plan(event, { affected: ['desktop-e2e'], files: ['apps/desktop-e2e/src/a.spec.ts'], graphNodes });
+      expect(own.status, own.stderr).toBe(0);
+      expect(desktopRows(own), event).toEqual(rows);
+      // Affected through another dependency only (here the API): no desktop row, and the lane is off when no other
+      // project has shadow rows.
+      const through = plan(event, { affected: ['desktop-e2e', 'api'], files: ['apps/api/app/main.ts'], graphNodes });
+      expect(through.status, through.stderr).toBe(0);
+      expect(through.outputs['e2e-shadow'], event).toBe('false');
+      expect(through.outputs['e2e-shadow-suites'], event).toBe('[]');
+      // A project that names no lane keeps its rows whenever it is affected.
+      const both = plan(event, {
+        affected: ['desktop-e2e', 'ui-e2e'],
+        files: ['apps/ui-e2e/src/a.spec.ts'],
+        graphNodes,
+      });
+      expect(both.outputs['e2e-shadow'], event).toBe('true');
+      expect(desktopRows(both), event).toEqual([]);
+      expect(JSON.parse(both.outputs['e2e-shadow-suites'] ?? '[]'), event).toHaveLength(2);
+    }
+    const pullRequest = plan('pull_request', {
+      affected: ['desktop-e2e', 'ui'],
+      files: ['apps/desktop-e2e/src/a.spec.ts'],
+      graphNodes,
+    });
+    expect(pullRequest.outputs['e2e-shadow']).toBe('false');
+    const unknown = plan('merge_group', { affected: ['desktop-e2e'], files: [], graphNodes: desktopNodes('electron') });
+    expect(unknown.status).not.toBe(0);
+    expect(unknown.stderr).toContain(
+      'desktop-e2e:test:e2e:shadow names lane "electron", which is not a lane of this plan',
+    );
+  });
+
   it.each([
     [['test:e2e:missing'], 'ui-e2e:test:e2e:shadow depends on "test:e2e:missing", which is not a target of ui-e2e'],
     [['test:e2e'], 'ui-e2e:test:e2e declares shards; the e2e-shadow lane runs a suite as one job'],

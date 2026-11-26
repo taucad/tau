@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
-import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '#utils/project-name.utils.js';
+import {
+  fitProjectName,
+  maxProjectNameLength,
+  projectNameFromPrompt,
+  projectNameFromReply,
+} from '#utils/project-name.utils.js';
 
 const manifestWithName = (name: string): unknown => ({
   $schema: projectManifestSchemaUrl,
@@ -61,5 +66,19 @@ describe('projectNameFromReply', () => {
 
   it('should return empty for a reply with no title', () => {
     expect(projectNameFromReply(' \n \n')).toBe('');
+  });
+});
+
+describe('projectNameFromPrompt', () => {
+  it('should keep the first six words of the first line without trailing punctuation', () => {
+    expect(projectNameFromPrompt('make a 20 mm cube with a 5 mm hole through the centre.')).toBe(
+      'Make a 20 mm cube with',
+    );
+    expect(projectNameFromPrompt('\n  A bracket, please!\nWith two holes')).toBe('A bracket, please');
+  });
+
+  it('should be empty for a prompt with no words, and fit a single overlong word', () => {
+    expect(projectNameFromPrompt('  \n ')).toBe('');
+    expect(projectNameFromPrompt('x'.repeat(300))).toHaveLength(maxProjectNameLength);
   });
 });

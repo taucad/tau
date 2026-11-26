@@ -69,10 +69,6 @@ const { createProjectNameAhead, nameAheadPause, useProjectNameAhead } =
   await import('#components/chat/use-project-name-ahead.js');
 
 const textDraft = (text: string): NameAheadDraft => ({ text, attachments: [] });
-/* The stored-attachment brand is the attachment store's to grant; a test names one by its hash alone. */
-const storedImage = (hash: string): NameAheadDraft['attachments'][number] =>
-  // oxlint-disable-next-line typescript/consistent-type-assertions -- the brand has no runtime value
-  ({ hash, mediaType: 'image/png' }) as NameAheadDraft['attachments'][number];
 
 /** A naming fake whose replies the test settles, one per request. */
 const namingFake = () => {
@@ -118,41 +114,75 @@ describe('createProjectNameAhead', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it('should hand a held answer to a submit that extends the named text', async () => {
+  it('should hand the latest answer to a submit at once, for both name and slug', async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
     nameAhead.update(textDraft('A wall bracket for a pipe'), true);
     calls[0]?.reply.resolve('Pipe Wall Bracket\nextra');
     await vi.runAllTimersAsync();
 
-    await expect(nameAhead.take(textDraft('A wall bracket for a pipe, 32 mm'))).resolves.toBe('Pipe Wall Bracket');
+    expect(nameAhead.take(textDraft('A wall bracket for a pipe, 32 mm'))).toBe('Pipe Wall Bracket');
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it('should discard the answer when the submitted text is not an extension covering half of it', async () => {
+  it("should not wait for a request in flight, taking the earlier answer or the prompt's first words", async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
-    nameAhead.update(textDraft('A wall bracket'), true);
-    calls[0]?.reply.resolve('Wall Bracket');
-    await vi.runAllTimersAsync();
+    nameAhead.update(textDraft('a wall bracket for a pipe with two holes'), true);
+    expect(nameAhead.take(textDraft('a wall bracket for a pipe with two holes'))).toBe('A wall bracket for a pipe');
 
-    expect(nameAhead.take(textDraft('A phone stand'))).toBeUndefined();
-    expect(nameAhead.take(textDraft('A wall bracket for a 32 mm pipe with two screw holes'))).toBeUndefined();
-    expect(nameAhead.take({ text: 'A wall bracket', attachments: [storedImage('h1')] })).toBeUndefined();
-    /* An extension inside a word changes what was named: "bracket" is not "bracketed". */
-    expect(nameAhead.take(textDraft('A wall bracketed shelf'))).toBeUndefined();
+    calls[0]?.reply.resolve('Pipe Wall Bracket');
+    await vi.runAllTimersAsync();
+    nameAhead.update(
+      textDraft(
+        'a wall bracket for a pipe with two holes, 40 mm apart, chamfered on every outer edge, with countersunk screws',
+      ),
+      true,
+    );
+    /* The newer request is still in flight: the submit takes the answer it has, and the late answer renames nothing. */
+    expect(
+      nameAhead.take(
+        textDraft(
+          'a wall bracket for a pipe with two holes, 40 mm apart, chamfered on every outer edge, with countersunk screws',
+        ),
+      ),
+    ).toBe('Pipe Wall Bracket');
+    expect(calls).toHaveLength(2);
   });
 
-  it('should await the request in flight for the submitted text instead of repeating it', async () => {
+  it('should not give a rewritten prompt the name of the one it replaced', async () => {
     const { request, calls } = namingFake();
     const nameAhead = createProjectNameAhead(request);
     nameAhead.update(textDraft('A wall bracket for a pipe'), true);
-
-    const taken = nameAhead.take(textDraft('A wall bracket for a pipe'));
     calls[0]?.reply.resolve('Pipe Wall Bracket');
+    await vi.runAllTimersAsync();
 
-    await expect(taken).resolves.toBe('Pipe Wall Bracket');
+    expect(nameAhead.take(textDraft('A phone stand with a cable slot'))).toBe('A phone stand with a cable');
+  });
+
+  it("should take the prompt's first words when every request failed, without asking again", async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    nameAhead.update(textDraft('A wall bracket for a pipe'), true);
+    calls[0]?.reply.reject(new Error('offline'));
+    await vi.runAllTimersAsync();
+
+    expect(nameAhead.take(textDraft('A wall bracket for a pipe'))).toBe('A wall bracket for a pipe');
     expect(request).toHaveBeenCalledTimes(1);
+    nameAhead.update(textDraft('A wall bracket'), true);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("should forget a cleared draft's answer and give an empty draft no name", async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    nameAhead.update(textDraft('A wall bracket for a pipe'), true);
+    calls[0]?.reply.resolve('Pipe Wall Bracket');
+    await vi.runAllTimersAsync();
+    nameAhead.update(textDraft(''), false);
+
+    expect(nameAhead.take(textDraft('  '))).toBeUndefined();
+    expect(nameAhead.take(textDraft('A wall bracket for a pipe'))).toBe('A wall bracket for a pipe');
   });
 
   it('should keep one request in flight, aborting the older one, and ask at most three times per draft', () => {
@@ -170,56 +200,6 @@ describe('createProjectNameAhead', () => {
     nameAhead.update(textDraft('A pen holder'), true);
     expect(request).toHaveBeenCalledTimes(4);
     expect(request.mock.calls[3]?.[1].projectId).not.toBe(request.mock.calls[0]?.[1].projectId);
-  });
-
-  it('should fall back to the default name when the request awaited at submit fails, without asking again', async () => {
-    const { request, calls } = namingFake();
-    const nameAhead = createProjectNameAhead(request);
-    nameAhead.update(textDraft('A wall bracket for a pipe'), true);
-
-    const taken = nameAhead.take(textDraft('A wall bracket for a pipe'));
-    calls[0]?.reply.reject(new Error('offline'));
-
-    await expect(taken).resolves.toBe('New Project');
-    expect(request).toHaveBeenCalledTimes(1);
-  });
-
-  it('should ask again after a failed answer, leaving a submit to the create while the cap is not spent', async () => {
-    const { request, calls } = namingFake();
-    const nameAhead = createProjectNameAhead(request);
-    nameAhead.update(textDraft('A wall bracket'), true);
-    calls[0]?.reply.reject(new Error('offline'));
-    await vi.runAllTimersAsync();
-
-    expect(nameAhead.take(textDraft('A wall bracket for a pipe'))).toBeUndefined();
-    nameAhead.update(textDraft('A wall bracket'), true);
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  it('should give a submit the default name once every request of the draft failed', async () => {
-    const { request, calls } = namingFake();
-    const nameAhead = createProjectNameAhead(request);
-    for (const text of ['A wall bracket', 'A phone stand', 'A cable clip']) {
-      nameAhead.update(textDraft(text), true);
-    }
-    calls[2]?.reply.reject(new Error('offline'));
-    await vi.runAllTimersAsync();
-
-    await expect(nameAhead.take(textDraft('A cable clip'))).resolves.toBe('New Project');
-    expect(request).toHaveBeenCalledTimes(3);
-  });
-
-  it('should give a submit past every name the default once the draft spent its requests', async () => {
-    const { request, calls } = namingFake();
-    const nameAhead = createProjectNameAhead(request);
-    for (const text of ['A wall bracket', 'A phone stand', 'A cable clip']) {
-      nameAhead.update(textDraft(text), true);
-    }
-    calls[2]?.reply.resolve('Cable Clip');
-    await vi.runAllTimersAsync();
-
-    await expect(nameAhead.take(textDraft('A cable clip for a desk edge, 3 mm thick'))).resolves.toBe('New Project');
-    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it('should clear a pending pause on dispose', () => {
@@ -257,7 +237,8 @@ describe('useProjectNameAhead', () => {
     expect(input).toMatchObject({ text: 'A wall bracket for a pipe', imageUrls: [] });
     expect(input?.signal).toBeInstanceOf(AbortSignal);
     expect(input?.projectId).toMatch(/^proj_/);
-    await expect(result.current.take(textDraft('A wall bracket for a pipe'))).resolves.toBe('Pipe Wall Bracket');
+    await act(async () => vi.runAllTimersAsync());
+    expect(result.current.take(textDraft('A wall bracket for a pipe'))).toBe('Pipe Wall Bracket');
   });
 
   it('should not ask for a draft restored on mount until the person changes it', async () => {
@@ -341,7 +322,7 @@ describe('useProjectNameAhead', () => {
     await act(async () => vi.advanceTimersByTimeAsync(nameAheadPause));
 
     expect(mockGenerate).not.toHaveBeenCalled();
-    expect(result.current.take(textDraft('A wall bracket for a pipe'))).toBeUndefined();
+    expect(result.current.take(textDraft('A wall bracket for a pipe'))).toBe('A wall bracket for a pipe');
   });
 
   it('should return a stable take across rerenders', () => {

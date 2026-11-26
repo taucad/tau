@@ -35,3 +35,22 @@ export const projectNameFromReply = (reply: string): string => {
   const unwrapped = firstLine.trim().replaceAll(/^[\s"'`*#_]+|[\s"'`*_]+$/gu, '');
   return fitProjectName(unwrapped);
 };
+
+/** How many of a prompt's words a provisional project name keeps. */
+export const promptNameWords = 6;
+
+/**
+ * A project name made from a prompt's own words, for a create that has no generated name to hand (WP-12 step 1): the
+ * first non-empty line's first {@link promptNameWords} words, without trailing punctuation, with the first letter
+ * capitalised, fitted to the manifest. It asks nothing of the network, so a send never waits on naming.
+ *
+ * @param prompt - The person's message.
+ * @returns The name; empty when the prompt held no words.
+ */
+export const projectNameFromPrompt = (prompt: string): string => {
+  const firstLine = prompt.split(/\r?\n/u).find((line) => line.trim() !== '') ?? '';
+  const words = firstLine.trim().split(/\s+/u).slice(0, promptNameWords).join(' ');
+  const trimmed = words.replace(/[\s\p{P}]+$/u, '');
+  const fitted = fitProjectName(trimmed);
+  return fitted.charAt(0).toLocaleUpperCase() + fitted.slice(1);
+};

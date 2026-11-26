@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useSession } from '@better-auth-ui/react';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
+import { projectNameFromPrompt, projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
 import { defaultProjectName } from '@taucad/ui-core/constants/project-names';
 import { namingImageUrls } from '@taucad/project-library/runtime/project-library-commands';
 import type { InitialMessageAttachment } from '@taucad/project-library/runtime/project-library-commands';
@@ -26,10 +26,11 @@ export type ProjectNameAhead = Readonly<{
   /** Note the draft changed; `pasted` asks at once instead of after the pause. */
   update: (draft: NameAheadDraft, pasted: boolean) => void;
   /**
-   * The name for a submitted draft: a held answer or the request in flight for it (`New Project` if that fails),
-   * returned unawaited so the create overlaps it; `undefined` if no request covers the draft.
+   * The name for a submitted draft, at once (WP-12 step 1, ruling O-1): the latest name generated for this draft, used
+   * for both the display name and the slug; with none answered yet, a name made from the prompt's first words. A request
+   * still in flight is not waited for and renames nothing later. `undefined` only for an empty draft.
    */
-  take: (draft: NameAheadDraft) => Promise<string> | undefined;
+  take: (draft: NameAheadDraft) => string | undefined;
   /** Ask through `next` from now on, keeping the draft's state and its cap. */
   replaceRequest: (next: NameAheadRequest) => void;
   dispose: () => void;
@@ -43,9 +44,6 @@ const minimumWords = 3;
 
 type Named = { readonly text: string; readonly attachments: string; name: Promise<string | undefined> };
 
-/** The name a request gave, or `New Project` where it gave none. */
-const nameOrDefault = async (named: Named): Promise<string> => (await named.name) ?? defaultProjectName;
-
 const attachmentsKey = (attachments: NameAheadDraft['attachments']): string =>
   attachments.map((attachment) => attachment.hash).join(',');
 
@@ -57,9 +55,22 @@ const covers = (named: Named, text: string, attachments: string): boolean =>
   named.text.length * 2 >= text.length;
 
 /**
+ * Whether a name made for `named` still names `submitted`: the two agree on at least half of the shorter one, from the
+ * start. Text added or edited at the end keeps the name; a prompt rewritten from its start does not (WP-12 step 1).
+ */
+const namesSameDraft = (named: string, submitted: string): boolean => {
+  let shared = 0;
+  while (shared < named.length && shared < submitted.length && named[shared] === submitted[shared]) {
+    shared += 1;
+  }
+  return shared * 2 >= Math.min(named.length, submitted.length);
+};
+
+/**
  * Name ahead (C1): asks for a new project's name while its prompt is written, so the create that follows finds it
  * held. One request in flight, a newer one aborting it, at most three per draft; the answer is kept with the text it
- * named. A draft cleared to empty starts a new draft.
+ * named. A submit takes the latest answer at once and never waits (WP-12 step 1). A draft cleared to empty starts a new
+ * draft.
  *
  * @param initialRequest - Asks for one name, until `replaceRequest` swaps it.
  * @returns The draft's name-ahead state.
@@ -67,8 +78,8 @@ const covers = (named: Named, text: string, attachments: string): boolean =>
 export const createProjectNameAhead = (initialRequest: NameAheadRequest): ProjectNameAhead => {
   let request = initialRequest;
   let latest: (Named & { readonly controller: AbortController }) | undefined;
-  /* The last request that failed: once the cap is spent, a submit it covers takes the fallback, never a fourth ask. */
-  let failed: Named | undefined;
+  /* The latest name any request of this draft answered with, and the text it named: what a submit takes. */
+  let answered: { readonly text: string; readonly name: string } | undefined;
   let requests = 0;
   let projectId = generatePrefixedId(idPrefix.project);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -85,15 +96,17 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
     /* A failed answer is not held, so a later pause may ask again within the cap. */
     if (name === undefined && latest === entry) {
       latest = undefined;
-      failed = entry;
+    }
+    /* Only an answer for the current draft is kept: a request superseded by a cleared draft is aborted above. */
+    if (name !== undefined && !entry.controller.signal.aborted) {
+      answered = { text: entry.text, name };
     }
     return name;
   };
 
   const ask = (draft: NameAheadDraft, text: string, attachments: string): void => {
+    /* A newer request supersedes the one in flight; an answer already held stays the draft's latest until it lands. */
     latest?.controller.abort();
-    /* A newer request supersedes an earlier failure: a submit it no longer covers asks at creation instead. */
-    failed = undefined;
     requests += 1;
     const entry = {
       text,
@@ -112,7 +125,7 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
       if (text === '') {
         latest?.controller.abort();
         latest = undefined;
-        failed = undefined;
+        answered = undefined;
         requests = 0;
         projectId = generatePrefixedId(idPrefix.project);
         return;
@@ -133,20 +146,16 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
         }, nameAheadPause);
       }
     },
-    take(draft): Promise<string> | undefined {
+    take(draft): string | undefined {
       clearTimeout(timer);
       const text = draft.text.trim();
-      const attachments = attachmentsKey(draft.attachments);
-      const spent = requests >= nameAheadRequestsPerDraft;
-      const entry = [latest, spent ? failed : undefined].find(
-        (named) => named !== undefined && covers(named, text, attachments),
-      );
-      if (entry !== undefined) {
-        /* A request for this text, or one that failed with the cap spent: never another request at creation. */
-        return nameOrDefault(entry);
+      if (text === '') {
+        return undefined;
       }
-      /* With the cap spent, the create asks for no fourth name: today's fallback. */
-      return spent && text !== '' ? Promise.resolve(defaultProjectName) : undefined;
+      /* Never a request at creation, and never a wait on one in flight: the send goes now. */
+      return answered !== undefined && namesSameDraft(answered.text, text)
+        ? answered.name
+        : projectNameFromPrompt(text) || defaultProjectName;
     },
     replaceRequest(next) {
       request = next;

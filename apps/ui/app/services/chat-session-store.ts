@@ -890,6 +890,8 @@ type ObservedChat = {
   attachment?: Actor<typeof hostAttachment>;
   /** Placement of that live connection, not the chat's desired execution. */
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+  /** That live connection's client, which commands borrow while it is attached (WP-12 step 6, HP-06). */
+  client?: ConnectedHostClient;
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
@@ -914,12 +916,18 @@ export type ProjectClosePlan = Readonly<{
   >;
 }>;
 
+/** One connection a project's connector opened for a chat. */
+type ConnectedHostClient = Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'> & {
+  placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+};
+
 type ProjectHostConnector = Readonly<{
-  connect: (chatId: string) => Promise<
-    Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'> & {
-      placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
-    }
-  >;
+  connect: (chatId: string) => Promise<ConnectedHostClient>;
+  /**
+   * Where `connect` would dial for this chat now, or `undefined` when it would refuse. A command borrows the chat's
+   * attachment only when this names the attachment's host; without it every command dials its own connection.
+   */
+  placement?: (chatId: string) => Promise<{ hostId: ReturnType<typeof daemonPlacementOf> } | undefined>;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
   /** The page showed a live run's model text at `at` (T10); best effort, and only the project's host reports it. */
   presented?: (chatId: string, runId: string, at: number) => Promise<void>;
@@ -996,6 +1004,8 @@ export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  /** Attachment clients a command failed on; commands dial their own connection instead (WP-12 step 6). */
+  readonly #retiredCommandClients = new WeakSet<ConnectedHostClient>();
   /** The rating this page gave each run, by chat and run; a run is rated once, as its host reports it. */
   readonly #ratings = new Map<string, RunRating['value']>();
   readonly #remoteReadVersions = new Map<string, number>();
@@ -1304,7 +1314,7 @@ export class ChatSessionStore {
   public publishProjectHostConnector(
     projectId: string,
     connect: ProjectHostConnector['connect'],
-    extras: Pick<ProjectHostConnector, 'stoppability' | 'presented' | 'rated'> = {},
+    extras: Pick<ProjectHostConnector, 'placement' | 'stoppability' | 'presented' | 'rated'> = {},
   ): () => void {
     const connector = { connect, ...extras };
     this.#projectHostConnectors.set(projectId, connector);
@@ -1467,7 +1477,7 @@ export class ChatSessionStore {
       payload: { chatId, runId: run.runId },
     };
     logStop(command, 'project-close');
-    const answer = await sendHostCommand(async () => connector.connect(chatId), command);
+    const answer = await sendHostCommand(async () => this.#connectForCommand(chatId, connector), command);
     if (answer.status === 'refused') {
       if (
         answer.code === 'LEADER_VERSION_MISMATCH' ||
@@ -1505,7 +1515,7 @@ export class ChatSessionStore {
     if (connector === undefined) {
       return false;
     }
-    const answer = await sendHostCommand(async () => connector.connect(chatId), {
+    const answer = await sendHostCommand(async () => this.#connectForCommand(chatId, connector), {
       type: 'steer',
       commandId: generatePrefixedId(idPrefix.request),
       payload: { chatId, runId: run.runId, message },
@@ -1536,7 +1546,7 @@ export class ChatSessionStore {
     if (connector === undefined) {
       throw new Error(`Chat ${chatId} has no live host connector.`);
     }
-    const answer = await sendHostCommand(async () => connector.connect(chatId), {
+    const answer = await sendHostCommand(async () => this.#connectForCommand(chatId, connector), {
       type: 'resolve-interrupt',
       commandId: generatePrefixedId(idPrefix.request),
       payload: {
@@ -1555,7 +1565,7 @@ export class ChatSessionStore {
       return false;
     }
     if (decision.approved && run.kind === 'tau') {
-      const resumed = await sendHostCommand(async () => connector.connect(chatId), {
+      const resumed = await sendHostCommand(async () => this.#connectForCommand(chatId, connector), {
         type: 'resume',
         commandId: generatePrefixedId(idPrefix.request),
         payload: { chatId, runId: run.runId },
@@ -2614,13 +2624,78 @@ export class ChatSessionStore {
     }
   }
 
+  /**
+   * The connection one command attempt goes out on (WP-12 step 6, HP-06). While the chat's attachment is attached on
+   * the host `connect` would dial now, the command borrows that attachment's client: its channel already re-sends an
+   * unanswered command by its key, so a borrowed send is the same keyed send without a second connection's settings
+   * read, roots sync, capability probe and hello. The borrowed close does nothing; the attachment owns the client.
+   * Any failure on a borrowed client retires it for commands, so the retry in {@link sendHostCommand} dials afresh.
+   * Otherwise, or when the connector cannot say where it would dial, the command dials its own connection as before.
+   *
+   * @param chatId - The chat the command is for.
+   * @param connector - The chat's project connector.
+   * @returns A client whose `close` the caller calls, as it would a dialled one.
+   */
+  async #connectForCommand(chatId: string, connector: ProjectHostConnector): Promise<ConnectedHostClient> {
+    const observed = this.#observed.get(chatId);
+    const client = observed?.client;
+    if (
+      observed === undefined ||
+      client === undefined ||
+      connector.placement === undefined ||
+      !this.#lendsCommands(observed, client, connector)
+    ) {
+      return connector.connect(chatId);
+    }
+    const wanted = await connector.placement(chatId);
+    /* Read again: the attachment may have moved or dropped while the placement was read. */
+    if (
+      wanted === undefined ||
+      !this.#lendsCommands(observed, client, connector) ||
+      wanted.hostId !== observed.placement?.hostId
+    ) {
+      return connector.connect(chatId);
+    }
+    const retired = this.#retiredCommandClients;
+    return {
+      ...client,
+      placement: observed.placement,
+      hostCommand: async (command) => {
+        try {
+          return await client.hostCommand(command);
+        } catch (error) {
+          retired.add(client);
+          /* The attachment closed its client under this command: nothing was answered, so the key is sent again on a
+           * connection of its own, as after any closed channel. */
+          if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CLIENT_CLOSED') {
+            throw Object.assign(new Error('The chat attachment closed under a command.', { cause: error }), {
+              code: 'CHANNEL_CLOSED',
+            });
+          }
+          throw error;
+        }
+      },
+      close: async () => undefined,
+    };
+  }
+
+  /** Whether `client` is still the attached connection of `observed`, on `connector`, and no command failed on it. */
+  #lendsCommands(observed: ObservedChat, client: ConnectedHostClient, connector: ProjectHostConnector): boolean {
+    return (
+      observed.client === client &&
+      observed.status === 'attached' &&
+      !this.#retiredCommandClients.has(client) &&
+      this.#projectHostConnectors.get(observed.projectId) === connector
+    );
+  }
+
   /** Pin a prepared message before transmission so a lost acknowledgement cannot replay on another host. */
   async #connectQueuedCommand(
     session: InternalSession,
     connector: ProjectHostConnector,
     { queueId, signal }: { queueId: string; signal: AbortSignal },
   ): ReturnType<ProjectHostConnector['connect']> {
-    const client = await connector.connect(session.chatId);
+    const client = await this.#connectForCommand(session.chatId, connector);
     try {
       signal.throwIfAborted();
       const destination = connectionPlacement(client.placement);
@@ -2745,7 +2820,9 @@ export class ChatSessionStore {
       if (gate.kind === 'steer' && item.steer !== undefined) {
         signal.throwIfAborted();
         const { steer } = item;
-        const answer = await sendHostCommand(async () => connector.connect(session.chatId), steer, { signal });
+        const answer = await sendHostCommand(async () => this.#connectForCommand(session.chatId, connector), steer, {
+          signal,
+        });
         if (answer.status === 'refused') {
           throw new Error(`Could not steer: ${answer.message}`);
         }
@@ -3589,7 +3666,7 @@ export class ChatSessionStore {
     logStop(command, stop.origin);
     let failure: Error | undefined;
     try {
-      let answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
+      let answer = await sendHostCommand(async () => this.#connectForCommand(session.chatId, connector), command);
       if (answer.status === 'refused' && answer.code === 'COMMAND_UNREADABLE' && 'withdraw' in command.payload) {
         if (!this.#ownsLiveAttempt(session, { cancelId: command.commandId, runId, attempt: entry?.attempt })) {
           /* The Stop settled, or its run ended and resumed, while the host refused: the retry is no longer the
@@ -3598,7 +3675,7 @@ export class ChatSessionStore {
         }
         /* A host older than `withdraw` refuses the field and applies nothing: the same cancel without it still stops
          * the run, which then keeps its request in the thread. */
-        answer = await sendHostCommand(async () => connector.connect(session.chatId), {
+        answer = await sendHostCommand(async () => this.#connectForCommand(session.chatId, connector), {
           ...command,
           payload: { chatId: command.payload.chatId, runId: command.payload.runId },
         });
@@ -3711,6 +3788,7 @@ export class ChatSessionStore {
     observed.attachment?.stop();
     observed.attachment = undefined;
     observed.placement = undefined;
+    observed.client = undefined;
     observed.status = 'unknown';
   }
 
@@ -3752,6 +3830,7 @@ export class ChatSessionStore {
           const client = await connector.connect(chatId);
           if (observed.attachment === attachment) {
             observed.placement = client.placement;
+            observed.client = client;
           }
           return client;
         },
@@ -3805,6 +3884,7 @@ export class ChatSessionStore {
               if (observed.attachment === attachment) {
                 attachment.stop();
                 observed.attachment = undefined;
+                observed.client = undefined;
               }
             });
             return;
@@ -3819,6 +3899,7 @@ export class ChatSessionStore {
             if (!readerOnly) {
               attachment.stop();
               observed.attachment = undefined;
+              observed.client = undefined;
             }
             const retry = setTimeout(() => {
               if (observed.retry !== retry) {
@@ -4327,7 +4408,7 @@ export class ChatSessionStore {
         async () => {
           const client =
             request.queueId === undefined
-              ? await connector.connect(session.chatId)
+              ? await this.#connectForCommand(session.chatId, connector)
               : await this.#connectQueuedCommand(session, connector, {
                   queueId: request.queueId,
                   signal: abort.signal,

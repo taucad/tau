@@ -49,6 +49,9 @@ SeePredecessor == /\ s.observed = Home /\ Home \notin s.known
 BarrierAllows == ~s.after \/ s.observed \in s.known
                  \/ (s.afterPlacement # Unknown /\ s.afterPlacement # s.observed)
                  \/ (s.afterPlacement = Unknown /\ s.rebased = s.observed)
+\* A command goes out to s.observed: on the attachment's own connection when the
+\* host the chat's turns go to is the attachment's (WP-12 step 6), else on a
+\* connection dialled to the same host. Both need s.selected = s.observed.
 DeliverNext == /\ s.queued /\ s.pendingGrant = None
                /\ s.selected = s.observed /\ BarrierAllows
                /\ s' = [s EXCEPT !.queued = FALSE,

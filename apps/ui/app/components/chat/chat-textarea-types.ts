@@ -1,4 +1,5 @@
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import {
   useState,
   useRef,
@@ -63,6 +64,8 @@ export type ChatTextareaSubmitPayload = {
   readonly attachments: readonly StoredAttachmentRef[];
   /** The structured geometry references of the draft's chips (blueprint D6); present only when there are some. */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures; present only when there are some. */
+  readonly annotations?: MessageAnnotations;
 };
 
 /** Count a file intake refused and say so, naming its format and the next step. */
@@ -367,6 +370,8 @@ export function useChatTextareaLogic({
   const attachments = useDraftSelector((state) =>
     mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
   );
+  // Comments belong to a new message; an edit keeps the comments its message was sent with.
+  const annotations = useDraftSelector((state) => (mode === 'main' ? state.draftAnnotations : undefined));
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const pendingImages = useDraftSelector((state) => (mode === 'main' ? state.pendingMain : state.pendingEdit));
@@ -476,6 +481,7 @@ export function useChatTextareaLogic({
   // Refs for stable handleSubmit — prevents re-render cascades through memo'd children
   const inputTextRef = useRef(inputText);
   const attachmentsRef = useRef(attachments);
+  const annotationsRef = useRef(annotations);
   const sendBlockReasonRef = useRef(sendBlockReason);
   const isAttachingRef = useRef(isAttaching);
   const isSubmittingRef = useRef(isSubmitting);
@@ -488,6 +494,7 @@ export function useChatTextareaLogic({
   useLayoutEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
+    annotationsRef.current = annotations;
     sendBlockReasonRef.current = sendBlockReason;
     isAttachingRef.current = isAttaching;
     isSubmittingRef.current = isSubmitting;
@@ -495,6 +502,7 @@ export function useChatTextareaLogic({
     onSubmitRef.current = onSubmit;
     resumeRef.current = canResume ? resume : undefined;
   }, [
+    annotations,
     attachments,
     canResume,
     inputText,
@@ -531,6 +539,7 @@ export function useChatTextareaLogic({
           content,
           attachments: attachmentsRef.current,
           ...(references === undefined || references.length === 0 ? {} : { references }),
+          ...(annotationsRef.current === undefined ? {} : { annotations: annotationsRef.current }),
         });
       } finally {
         submitInFlightRef.current = false;

@@ -39,7 +39,23 @@ export { canonicalCaptureViews };
 export type HeadlessCaptureRecipe =
   | { readonly purpose: 'chat'; readonly mode: 'current' | 'isometric' | 'orthographic' }
   | { readonly purpose: 'agent'; readonly mode: 'isometric' | 'orthographic'; readonly includeEdges: boolean }
-  | { readonly purpose: 'utility'; readonly mode: 'current' };
+  | { readonly purpose: 'utility'; readonly mode: 'current' }
+  /** A comment pin's picture: the view as the person saw it, with nothing drawn over the model (charter D7). */
+  | { readonly purpose: 'pin'; readonly mode: 'current' };
+
+/** The long side of a pin's picture, in pixels: the largest a vision model reads without downscaling. */
+export const pinPictureLongSide = 1568;
+
+/**
+ * The size a pin's picture is taken at for a camera.
+ *
+ * @param aspect - The camera's width over height.
+ * @returns The width and height in pixels.
+ */
+export const pinPictureSize = (aspect: number): readonly [number, number] =>
+  aspect >= 1
+    ? [pinPictureLongSide, Math.max(16, Math.round(pinPictureLongSide / aspect))]
+    : [Math.max(16, Math.round(pinPictureLongSide * aspect)), pinPictureLongSide];
 
 type CaptureCadImagesOptions = {
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -160,6 +176,9 @@ const recipeSize = (recipe: HeadlessCaptureRecipe, cameraState?: CameraState): r
   if (recipe.purpose === 'agent' || recipe.mode === 'orthographic') {
     return [1600, 1600];
   }
+  if (recipe.purpose === 'pin' && cameraState) {
+    return pinPictureSize(cameraState.aspect);
+  }
   if (cameraState) {
     return cameraState.aspect >= 1
       ? [2400, Math.max(16, Math.round(2400 / cameraState.aspect))]
@@ -227,7 +246,8 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const { cadSnapshot, cameraState, imageService, presentation, recipe } = options;
   const { artifact, rendering, entryPath } = requireSettledArtifact(cadSnapshot, options.rendering);
   const [width, height] = recipeSize(recipe, artifact.mimeType === 'image/svg+xml' ? undefined : cameraState);
-  const annotated = recipe.purpose !== 'utility';
+  // A pin's picture carries no label, axes or scale bar: its pins are painted over it when the message is sent.
+  const annotated = recipe.purpose !== 'utility' && recipe.purpose !== 'pin';
 
   if (artifact.mimeType === 'image/svg+xml') {
     const files = await imageService.export({

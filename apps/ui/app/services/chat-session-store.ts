@@ -73,6 +73,7 @@ import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad
 import { createChatAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import type { DraftAttachmentBytes } from '#components/comments/prepare-annotated-send.js';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
@@ -2318,6 +2319,32 @@ export class ChatSessionStore {
         ? failure.reason
         : new Error('Attachment promotion failed.', { cause: failure.reason });
     }
+  }
+
+  /**
+   * The bytes behind a chat's draft attachments: what a send reads an annotated image from and stores its flattened
+   * copy into, beside the draft's record.
+   *
+   * @param chatId - The chat about to send.
+   * @returns The draft's attachment bytes.
+   * @throws When the chat has no active session.
+   * @public
+   */
+  public draftAttachmentBytes(chatId: string): DraftAttachmentBytes {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      throw new Error(`ChatSessionStore: cannot read attachments of inactive chat ${chatId}`);
+    }
+    return {
+      async read(attachment) {
+        const { record } = await session.composer;
+        return record.attachments.read(attachment);
+      },
+      async put(bytes, mediaType, filename) {
+        const { record } = await session.composer;
+        return record.attachments.put(bytes, mediaType, filename);
+      },
+    };
   }
 
   /**

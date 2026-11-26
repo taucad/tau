@@ -43,6 +43,7 @@ import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
@@ -169,6 +170,8 @@ export type CombinedChatState = {
   activeKernel: KernelId | undefined;
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
@@ -266,6 +269,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       activeKernel: persistenceContext?.activeKernel,
       draftText: draftContext.draftText,
       draftAttachments: draftContext.draftAttachments,
+      draftAnnotations: draftContext.draftAnnotations,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
@@ -314,6 +318,8 @@ export function useChatById<T>(chatId: string, selector: (state: CombinedChatSta
 export type DraftState = {
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
@@ -351,6 +357,7 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
     () => ({
       draftText: draftContext.draftText,
       draftAttachments: draftContext.draftAttachments,
+      draftAnnotations: draftContext.draftAnnotations,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
@@ -383,6 +390,8 @@ export type DraftAttachmentOptions = {
   readonly preserveOriginal?: boolean;
   /** The picked, dropped or pasted file's declared `type`, for the intake counter; the bytes decide the label (I1). */
   readonly declaredType?: string;
+  /** The annotated image this attachment is the picture of: once stored, that image names it. */
+  readonly annotationImageId?: string;
 };
 
 const sourceFields = (
@@ -404,6 +413,8 @@ export type DraftActions = {
    */
   addDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeDraftAttachment: (index: number) => void;
+  /** Replace the new-message draft's comments and annotated pictures; a record over a limit is refused. */
+  setDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
   clearDraft: () => void;
@@ -432,6 +443,9 @@ export function useDraftActions(): DraftActions {
       },
       removeDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeDraftAttachment', index });
+      },
+      setDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setDraftAnnotations', annotations });
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });

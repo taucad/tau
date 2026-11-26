@@ -1,3 +1,5 @@
+import { withAnnotations, withoutAnnotatedImage } from '@taucad/chat/annotations';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ToolUIPart } from 'ai';
 import type {
   CadAgentExecution,
@@ -868,6 +870,8 @@ export function buildUserMessage(input: {
   readonly attachments?: readonly StoredAttachmentRef[];
   /** Structured references the composer's chips held; matched to the text's `@cad[...]` tokens. */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures. */
+  readonly annotations?: MessageAnnotations;
 }): MyUIMessage {
   const text = input.text.trim();
   const references = messageReferences(text, input.references ?? []);
@@ -889,7 +893,10 @@ export function buildUserMessage(input: {
       ),
       ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
     ],
-    metadata: { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) },
+    metadata: withAnnotations(
+      { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) },
+      input.annotations,
+    ),
   };
 }
 
@@ -908,11 +915,20 @@ export function buildEditedUserMessage(
     readonly text: string;
     readonly attachments?: readonly StoredAttachmentRef[];
     readonly references?: readonly CadReference[];
+    /** The edit's comments and annotated pictures. Without them the original's stay, less any whose image the edit removed. */
+    readonly annotations?: MessageAnnotations;
   },
 ): MyUIMessage {
-  const { references: previous = [], ...metadata } = original.metadata ?? {};
+  const { references: previous = [], annotations: sent, ...metadata } = original.metadata ?? {};
+  const kept = new Set((input.attachments ?? []).map((attachment) => attachmentUrl(attachment)));
+  const annotations =
+    input.annotations ??
+    (input.attachments === undefined
+      ? sent
+      : withoutAnnotatedImage(sent, (image) => image.attachment === undefined || !kept.has(image.attachment)));
   const built = buildUserMessage({
     text: input.text,
+    ...(annotations === undefined ? {} : { annotations }),
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     // A later reference wins its token, so the edit composer's chips go last.
     references: [...previous, ...(input.references ?? [])],

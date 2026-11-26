@@ -106,7 +106,13 @@ export function ViewerComments({
   const isFlagOn = useFeatureState('commentPins') === 'on';
   const composer = useOptionalChatComposer();
   const draftRef = composer?.draftActorRef;
-  const annotations = useSelector(draftRef, (state) => state?.context.draftAnnotations);
+  // One set of numbers at a time (charter D18): while a sent message is being edited, the viewer shows that edit's pins.
+  const isEditing = useSelector(draftRef, (state) => state?.context.activeEditMessageId !== undefined);
+  const annotations = useSelector(draftRef, (state) =>
+    state?.context.activeEditMessageId === undefined
+      ? state?.context.draftAnnotations
+      : state.context.editDraftAnnotations,
+  );
   const attachments = useSelector(draftRef, (state) => state?.context.draftAttachments);
   const graphicsRef = useOptionalGraphics();
   const cadRef = useCad();
@@ -176,7 +182,8 @@ export function ViewerComments({
 
   const handlePlace = useCallback(
     (pick: CommentSurfacePick): void => {
-      if (!draftRef || !graphicsRef) {
+      // An edit's pins are shown, not changed, from the viewer: the edit closes when the person turns to it.
+      if (!draftRef || !graphicsRef || isEditing) {
         return;
       }
       if ((annotations?.comments.length ?? 0) >= annotationLimits.comments) {
@@ -210,6 +217,14 @@ export function ViewerComments({
         toast.error(`A message holds up to ${annotationLimits.images} commented pictures. Pin from an earlier view.`);
         return;
       }
+      // A retaken picture's old tile goes first: removing a tile drops its image, and the record set next has none.
+      const retakenIndex =
+        placed.retakenAttachment === undefined
+          ? -1
+          : (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === placed.retakenAttachment);
+      if (retakenIndex !== -1) {
+        draftRef.send({ type: 'removeDraftAttachment', index: retakenIndex });
+      }
       draftRef.send({
         type: 'setDraftAnnotations',
         annotations: placed.annotations,
@@ -219,12 +234,12 @@ export function ViewerComments({
         void takePicture(placed.imageId, pick);
       }
     },
-    [annotations, draftRef, entryPath, graphicsRef, instance, kernelView, takePicture],
+    [annotations, attachments, draftRef, entryPath, graphicsRef, instance, isEditing, kernelView, takePicture],
   );
 
   const remove = useCallback(
     (number: number): void => {
-      if (!draftRef || !annotations) {
+      if (!draftRef || !annotations || isEditing) {
         return;
       }
       const removed = removeComments(annotations, (comment) => comment.number === number);
@@ -241,7 +256,7 @@ export function ViewerComments({
       }
       setOpenNumber((current) => (current === number ? undefined : current));
     },
-    [annotations, attachments, draftRef],
+    [annotations, attachments, draftRef, isEditing],
   );
 
   const close = useCallback((): void => {
@@ -254,14 +269,14 @@ export function ViewerComments({
 
   const setText = useCallback(
     (number: number, text: string): void => {
-      if (draftRef && annotations) {
+      if (draftRef && annotations && !isEditing) {
         draftRef.send({
           type: 'setDraftAnnotations',
           annotations: setCommentText(annotations, number, text),
         });
       }
     },
-    [annotations, draftRef],
+    [annotations, draftRef, isEditing],
   );
 
   const host = useMemo<CommentPinsHost | undefined>(

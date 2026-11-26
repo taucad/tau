@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { runOpenrscadUsdzParity } from '#e2e/browser-command.js';
 
@@ -8,6 +8,7 @@ export default defineConfig({
   root: import.meta.dirname,
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     attachmentsDir: resolve(
       import.meta.dirname,
       '../../../../out/test-results/vitest-browser/packages/plugins/openrscad/attachments',

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { useSelector } from '@xstate/react';
@@ -42,6 +42,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { Button } from '@taucad/ui/components/button';
 import {
+  claimOncePerFileManager,
   conflictReasonOf,
   folderStatusOf,
   useRootStatuses,
@@ -57,8 +58,11 @@ type WorkspaceRow = {
 
 type DisplayedRow = WorkspaceRow & {
   readonly reason: string | undefined;
-  /** Granted, but the file service has not published its status yet: it offers no command until it has (T-R3.2). */
-  readonly isChecking: boolean;
+  /**
+   * Granted, but with no published status of its own, so it offers no command (T-R3.2): `checking` until the file
+   * service publishes one, `safeMode` for a launch that admits Home alone (D0).
+   */
+  readonly pending: 'checking' | 'safeMode' | undefined;
 };
 
 /** Where the project library lists an unfinished operation that can be discarded (U7). */
@@ -82,8 +86,21 @@ const relinkRefusalCopy: Readonly<Record<RelinkRefusalReason, string>> = {
   'marker-owned-by-another-workspace': 'That folder belongs to another workspace in Tau.',
 };
 
-/** Node folders whose marker this page has written or confirmed this session, so admission writes it once. */
-const anchoredMarkers = new Set<string>();
+/**
+ * Release the grant a Locate pick made, unless the folder held one before (D2 step 1). Best-effort.
+ *
+ * @param pick - The folder Locate was given.
+ */
+async function releasePick(pick: RelinkTarget): Promise<void> {
+  if (pick.backend !== 'node' || pick.wasGranted) {
+    return;
+  }
+  try {
+    await desktopBridge()?.directories?.disconnect(pick.path);
+  } catch (error) {
+    console.warn('Could not release the folder Locate was given', error);
+  }
+}
 
 /** The folder a desktop path names, by either separator. */
 const childPath = (parent: string, name: string): string =>
@@ -105,12 +122,30 @@ export function WorkspaceConnections({
   const [recoveryRefusal, setRecoveryRefusal] = useState<string>();
   const [isNotFoundOpen, setIsNotFoundOpen] = useState(false);
   const [relinkQuestion, setRelinkQuestion] = useState<RelinkQuestion>();
+  /* The pick an open question holds, so a page that closes on the question can release it (D2 step 1). */
+  const openQuestionRef = useRef<RelinkQuestion | undefined>(undefined);
+  const askRelinkQuestion = useCallback((question: RelinkQuestion | undefined): void => {
+    openQuestionRef.current = question;
+    setRelinkQuestion(question);
+  }, []);
+  useEffect(
+    () => () => {
+      const abandoned = openQuestionRef.current;
+      openQuestionRef.current = undefined;
+      if (abandoned !== undefined) {
+        void releasePick(abandoned.target);
+      }
+    },
+    [],
+  );
   const telemetry = useWorkspaceTelemetry();
   const projectManager = useProjectManager();
   const { workspaceConnection } = projectManager;
   const { workspace, fileManagerRef, scopedStorage, writeFiles } = useFileManager();
   const rootStatuses = useRootStatuses(fileManagerRef);
   const hasFileServiceFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
+  /* Safe mode admits Home alone and writes into no other folder (D0). */
+  const isSafeMode = useSelector(fileManagerRef, (state) => state.context.safeMode);
 
   const reloadRows = useCallback(async (): Promise<void> => {
     try {
@@ -353,10 +388,13 @@ export function WorkspaceConnections({
   const anchorNodeMarker = useCallback(
     async (target: Workspace): Promise<void> => {
       const { path } = target;
-      if (path === undefined || anchoredMarkers.has(`${target.workspaceId}:${path}:${target.slug}`)) {
+      if (
+        path === undefined ||
+        isSafeMode ||
+        !claimOncePerFileManager(fileManagerRef, `marker:${target.workspaceId}:${path}:${target.slug}`)
+      ) {
         return;
       }
-      anchoredMarkers.add(`${target.workspaceId}:${path}:${target.slug}`);
       const prefix = `/.tau-workspace-marker/${target.workspaceId}`;
       const scope = { backend: 'node', path } as const;
       let mounted = false;
@@ -380,7 +418,7 @@ export function WorkspaceConnections({
         }
       }
     },
-    [scopedStorage, workspace, writeFiles],
+    [fileManagerRef, isSafeMode, scopedStorage, workspace, writeFiles],
   );
 
   /** Open the picker for Locate: on desktop at the folder's old place, on the web for this workspace's handle. */
@@ -421,21 +459,6 @@ export function WorkspaceConnections({
     };
   }, [projectManager.readFolderEvidence]);
 
-  /** Release the grant a Locate pick made, unless the folder held one before (D2 step 1). Best-effort. */
-  const releasePick = useCallback(
-    async (pick: RelinkTarget): Promise<void> => {
-      if (pick.backend !== 'node' || pick.wasGranted || relinkPorts.revokeGrant === undefined) {
-        return;
-      }
-      try {
-        await relinkPorts.revokeGrant(pick.path);
-      } catch (error) {
-        console.warn('Could not release the folder Locate was given', error);
-      }
-    },
-    [relinkPorts],
-  );
-
   /** Run Locate on a pick and act on its answer: done, a question, or a refusal (D2). */
   const runRelink = useCallback(
     async (target: Workspace, pick: RelinkTarget, confirmed: boolean): Promise<void> => {
@@ -457,11 +480,11 @@ export function WorkspaceConnections({
           return;
         }
         default: {
-          setRelinkQuestion({ workspace: target, target: pick, result });
+          askRelinkQuestion({ workspace: target, target: pick, result });
         }
       }
     },
-    [anchorNodeMarker, refreshAfterFolderChange, relinkPorts, telemetry],
+    [anchorNodeMarker, askRelinkQuestion, refreshAfterFolderChange, relinkPorts, telemetry],
   );
 
   /**
@@ -472,8 +495,13 @@ export function WorkspaceConnections({
     async (target: Workspace): Promise<void> => {
       setBusyWorkspaceId(target.workspaceId);
       clearNotices();
-      setRelinkQuestion(undefined);
+      /* A question left open is abandoned: its pick is released before the picker opens again (D2 step 1). */
+      const abandoned = openQuestionRef.current;
+      askRelinkQuestion(undefined);
       try {
+        if (abandoned !== undefined) {
+          await releasePick(abandoned.target);
+        }
         if (!(await guardMutation(target))) {
           return;
         }
@@ -500,7 +528,7 @@ export function WorkspaceConnections({
         setBusyWorkspaceId(undefined);
       }
     },
-    [clearNotices, guardMutation, pickRelinkTarget, runRelink, telemetry],
+    [askRelinkQuestion, clearNotices, guardMutation, pickRelinkTarget, runRelink, telemetry],
   );
 
   /** Answer Locate's question: relink anyway, use the suggested subfolder, add the folder as a new workspace, or cancel. */
@@ -510,7 +538,7 @@ export function WorkspaceConnections({
       if (question === undefined) {
         return;
       }
-      setRelinkQuestion(undefined);
+      askRelinkQuestion(undefined);
       setBusyWorkspaceId(question.workspace.workspaceId);
       try {
         if (answer === 'cancel') {
@@ -555,10 +583,10 @@ export function WorkspaceConnections({
     },
     [
       anchorNodeMarker,
+      askRelinkQuestion,
       pickRelinkTarget,
       projectManager,
       refreshAfterFolderChange,
-      releasePick,
       relinkQuestion,
       reloadRows,
       runRelink,
@@ -691,41 +719,58 @@ export function WorkspaceConnections({
 
   /*
    * A granted folder's status is the file service's published one (U3); a record without a grant stays disconnected.
-   * Before the file service has published any status (it always publishes Home's), a granted folder is not yet known
-   * to be connected: it is shown as checking, with no command, so a lost folder never offers Disconnect in the
-   * meantime. A file service in `error` publishes nothing new, so its rows keep the grant's word.
+   * A granted folder with no status of its own is not known to be connected, whether the file service has published
+   * nothing yet, has published others' but not this one's yet (a folder added after the first publish), or admits Home
+   * alone (safe mode, D0). It is shown as checking, or as not connected in safe mode, with no command, so a lost folder
+   * never offers Disconnect meanwhile. A file service in `error` publishes nothing new, so its rows keep the grant's
+   * word; safe mode connects no folder whatever the file service does.
    */
-  const isAwaitingRootStatuses = useSelector(
-    fileManagerRef,
-    (state) => state.context.rootStatuses.length === 0 && !state.matches('error'),
-  );
   const displayedRows = useMemo((): DisplayedRow[] => {
     const byKey = new Map(rootStatuses.map((root) => [root.storageRootKey, root] as const));
     return rows.map((row) => {
-      const root = row.status === 'connected' ? byKey.get(workspaceStorageRootKey(row.workspace)) : undefined;
+      if (row.status !== 'connected') {
+        return { ...row, reason: undefined, pending: undefined };
+      }
+      if (isSafeMode) {
+        return { ...row, reason: undefined, pending: 'safeMode' };
+      }
+      const root = byKey.get(workspaceStorageRootKey(row.workspace));
       if (root === undefined) {
-        return { ...row, reason: undefined, isChecking: row.status === 'connected' && isAwaitingRootStatuses };
+        return { ...row, reason: undefined, pending: hasFileServiceFailed ? undefined : 'checking' };
       }
       const status = folderStatusOf(root);
       return {
         ...row,
         status,
         reason: status === 'conflict' || status === 'error' ? conflictReasonOf(root.code) : undefined,
-        isChecking: false,
+        pending: undefined,
       };
     });
-  }, [isAwaitingRootStatuses, rootStatuses, rows]);
-  /* A desktop folder connected before markers existed gets one at its next successful admission (D2 step 8). */
+  }, [hasFileServiceFailed, isSafeMode, rootStatuses, rows]);
+  /*
+   * A desktop folder connected before markers existed gets one at its next successful admission (D2 step 8): its own
+   * published status is `available`. A row that keeps the grant's word while the file service is in `error` is not
+   * known to be admitted, so it is not written to.
+   */
+  const admittedPaths = useMemo(
+    () => new Set(rootStatuses.filter((root) => root.state === 'available').map((root) => root.storageRootKey)),
+    [rootStatuses],
+  );
   useEffect(() => {
     if (!isDesktopTarget()) {
       return;
     }
     for (const row of displayedRows) {
-      if (row.status === 'connected' && !row.isChecking && row.workspace.path !== undefined) {
+      if (
+        row.status === 'connected' &&
+        row.pending === undefined &&
+        row.workspace.path !== undefined &&
+        admittedPaths.has(workspaceStorageRootKey(row.workspace))
+      ) {
         void anchorNodeMarker(row.workspace);
       }
     }
-  }, [anchorNodeMarker, displayedRows]);
+  }, [admittedPaths, anchorNodeMarker, displayedRows]);
   const notFoundRows = shouldGroupNotFound ? displayedRows.filter((row) => row.status === 'notFound') : [];
   const listedRows = shouldGroupNotFound ? displayedRows.filter((row) => row.status !== 'notFound') : displayedRows;
 
@@ -735,17 +780,22 @@ export function WorkspaceConnections({
   const isBusyRow = busyWorkspaceId !== undefined || isAddingWorkspace;
   const renderRow = (row: DisplayedRow): React.JSX.Element => {
     const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
-    const meta = row.isChecking ? (
-      <div role='status' className='flex items-center gap-2 text-xs text-muted-foreground'>
-        <Loader className='size-3.5' />
-        <span>Checking folder…</span>
-      </div>
-    ) : row.projectCount === undefined ? undefined : (
-      <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-        <span>{projectCountLabel}</span>
-      </div>
-    );
-    if (row.isChecking) {
+    const meta =
+      row.pending === 'safeMode' ? (
+        <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+          <span>Not connected in safe mode</span>
+        </div>
+      ) : row.pending === 'checking' ? (
+        <div role='status' className='flex items-center gap-2 text-xs text-muted-foreground'>
+          <Loader className='size-3.5' />
+          <span>Checking folder…</span>
+        </div>
+      ) : row.projectCount === undefined ? undefined : (
+        <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+          <span>{projectCountLabel}</span>
+        </div>
+      );
+    if (row.pending !== undefined) {
       return (
         <WorkspaceDirectoryPanel
           key={row.workspace.workspaceId}

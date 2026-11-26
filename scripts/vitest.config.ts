@@ -1,4 +1,4 @@
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 import { browserTests, workspaceTests } from '#test-sets.js';
@@ -17,6 +17,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     ...selection,
     coverage: {
       provider: 'v8',

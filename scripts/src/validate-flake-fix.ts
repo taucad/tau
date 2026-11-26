@@ -81,14 +81,15 @@ export type Verdict = {
 // --- Path guard ------------------------------------------------------------------------------------------------
 
 /**
- * Paths a flake fix may not touch: the quarantine and the ledger, the jobs and validators that decide them, the
- * workflows and actions, and the policy and instructions agents work under. FQ-1's outcome reporter is
- * `@taucad/vitest-ci` under `tools/vitest-ci/`; the burn-in and timing-budget jobs decide what quarantines and what
- * a timeout may be raised to.
+ * Paths a flake fix may not touch: the quarantine and the ledger (with its shadow-row count, FQ-13), the jobs and
+ * validators that decide them, the workflows and actions, and the policy and instructions agents work under. FQ-1's
+ * outcome reporter is `@taucad/vitest-ci` under `tools/vitest-ci/`; the burn-in and timing-budget jobs decide what
+ * quarantines and what a timeout may be raised to.
  */
 const protectedPaths: readonly RegExp[] = [
   /quarantine/iu,
   /flake-(?:ledger|repro|fix)/iu,
+  /shadow-rows?/iu,
   /^scripts\/src\/(?:ci-queue-health|validate-)/u,
   /outcomes?-reporter|test-outcomes/u,
   /^tools\/vitest-ci\//u,

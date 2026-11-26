@@ -1,4 +1,4 @@
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -11,6 +11,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     environment: 'node',
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     env: {
       // The support modules name the run at import; unit tests never write a run directory.
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

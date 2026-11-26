@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import { resolve } from 'node:path';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import {
   reactCaptureTargetDiagnostics,
@@ -29,7 +29,7 @@ export default defineConfig({
     setupFiles: [resolve(import.meta.dirname, 'support/test-lifecycle.ts')],
     testTimeout: 180_000,
     hookTimeout: 300_000,
-    retry: process.env['CI'] ? 2 : 0,
+    retry: testRetry(),
     fileParallelism: false,
     browser: {
       enabled: true,

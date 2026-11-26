@@ -12,8 +12,7 @@
  */
 
 import { createLogic } from 'xstate';
-import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import type { UIMessageChunk } from 'ai';
 import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
 import type { ChunkReduction } from '@taucad/chat-ui/services/ui-message-reducer';
 import {
@@ -45,6 +44,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { TurnRevisionLog } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import {
   agentApprovalToolName,
+  endedChunk,
+  reopenedChunk,
   parseAgentHostApproval,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
@@ -421,6 +422,12 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/** The metadata chunk that states when an answer's work ended; a reopened run restates it as `null`. */
+const isEndedChunk = (chunk: UIMessageChunk): boolean =>
+  chunk.type === 'message-metadata' &&
+  isRecord(chunk.messageMetadata) &&
+  typeof chunk.messageMetadata['endedAt'] === 'number';
 
 /**
  * Cut the active segment's dropped messages (the host reducer's prefix cut, at message granularity).
@@ -803,7 +810,8 @@ const foldRunViews = (
             ...(previous?.segments ?? []),
             {
               user: previous?.steering ?? previous?.user,
-              chunks: previous?.chunks ?? [],
+              // The steering input ends the sealed answer's work, as a terminal row ends a run's.
+              chunks: [...chunksOf(previous?.chunks), endedChunk(Date.parse(row.recordedAt))],
               providerIds: previous?.providerIds,
               messages: previous?.messages,
             },
@@ -812,9 +820,15 @@ const foldRunViews = (
       sealedSegment?.chunks ??
       (steering === undefined
         ? reopened
-          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type))
+          ? [...chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type)), reopenedChunk]
           : (previous?.chunks ?? [])
-        : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk]);
+        : [
+            {
+              type: 'start',
+              messageId: segmentId,
+              messageMetadata: { createdAt: Date.parse(row.recordedAt) },
+            } satisfies UIMessageChunk,
+          ]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
     const { terminal: _terminal, ...prior } = previous ?? {};
@@ -943,9 +957,16 @@ const foldLiveRow = (
   }
   const blocks = copyBlocks(live.blocks);
   const chunks = projectAgentHostEvent(row, blocks);
+  // A reopened run has not ended: the watch replays these chunks, so it states that, as the run's view does.
+  const isEnding = (chunk: UIMessageChunk): boolean => terminalChunks.has(chunk.type) || isEndedChunk(chunk);
+  const reopens =
+    row.type === 'run.lifecycle' &&
+    row.state === 'running' &&
+    // A run's ending is its last two chunks at most: the end time, then its terminal chunk.
+    [...chunksSince(live.chunks, Math.max(0, live.chunks.length - 2))].some((chunk) => isEnding(chunk));
   return {
     runId: live.runId,
-    chunks: appendChunks(live.chunks, chunks),
+    chunks: appendChunks(live.chunks, reopens ? [reopenedChunk, ...chunks] : chunks),
     blocks: Object.fromEntries(blocks),
   };
 };
@@ -1514,6 +1535,9 @@ const reductionOf = (chunks: ProjectedChunks): ChunkReduction => {
   }
   const reduction = reduceChunks(chunksSince(chunks, base?.length ?? 0), base);
   reductions.set(chunks, reduction);
+  /* A reduced value is where a later walk stops, so its own ancestors (and their reductions) can be collected: a long
+   * live run otherwise held every displayed snapshot of its answer until the overlay cleared. */
+  extensions.delete(chunks);
   return reduction;
 };
 
@@ -1619,147 +1643,6 @@ export const selectTranscript = (
   return messages.length === previous.length && messages.every((message, index) => message === previous[index])
     ? previous
     : messages;
-};
-
-const messagesByChunks = new WeakMap<RunView['chunks'], Promise<MyUIMessage | undefined>>();
-
-const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> => {
-  let pending = messagesByChunks.get(view.chunks);
-  if (pending === undefined) {
-    pending = (async () => {
-      if (view.chunks.length === 0) {
-        return undefined;
-      }
-      /* PL1: the SDK's stream processor loads with the first transcript, not with the page. A failed load is not
-       * this run's answer, so it is not kept: the next materialization loads again. */
-      let sdk: Awaited<ReturnType<typeof loadChatSdk>>;
-      try {
-        sdk = await loadChatSdk();
-      } catch (error) {
-        messagesByChunks.delete(view.chunks);
-        throw error;
-      }
-      const { createUIMessageStream: createUiMessageStream, readUIMessageStream: readUiMessageStream } = sdk;
-      const [last] = chunksSince(view.chunks, view.chunks.length - 1);
-      let eligible = false;
-      if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {
-        let hasStart = false;
-        let explicitStarts = true;
-        for (const chunk of chunksSince(view.chunks)) {
-          if (chunk.type === 'start') {
-            hasStart = true;
-            explicitStarts &&= typeof chunk.messageId === 'string';
-          }
-        }
-        eligible = hasStart && explicitStarts;
-      }
-      if (eligible) {
-        let message: MyUIMessage | undefined;
-        const completed = createUiMessageStream<MyUIMessage>({
-          // Eligible starts always provide their own ID; the generated fallback is never published.
-          generateId: () => '',
-          execute({ writer }) {
-            for (const chunk of chunksSince(view.chunks)) {
-              if (chunk.type !== 'error') {
-                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The owned projector produces MyUIMessage chunks; this writer narrows the existing reader's generic chunk input.
-                writer.write(chunk as InferUIMessageChunk<MyUIMessage>);
-              }
-            }
-          },
-          onError(error) {
-            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the SDK processor's exact rejection.
-            throw error;
-          },
-          onFinish({ responseMessage }) {
-            message = structuredClone(responseMessage);
-          },
-        });
-        const reader = completed.getReader();
-        try {
-          for (;;) {
-            // oxlint-disable-next-line no-await-in-loop -- Drain the public processor before publishing its final snapshot.
-            const { done } = await reader.read();
-            if (done) {
-              break;
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        return message;
-      }
-      const stream = new ReadableStream<UIMessageChunk>({
-        start(controller) {
-          for (const chunk of chunksSince(view.chunks)) {
-            // The ledger owns run failure; only malformed SDK reconstruction should reject this transcript.
-            if (chunk.type === 'error') {
-              continue;
-            }
-            controller.enqueue(chunk);
-          }
-          controller.close();
-        },
-      });
-      let message: MyUIMessage | undefined;
-      for await (const next of readUiMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
-        message = next;
-      }
-      return message;
-    })();
-    messagesByChunks.set(view.chunks, pending);
-  }
-  const message = await pending;
-  if (message === undefined || view.terminal === undefined) {
-    return message;
-  }
-  const cause = view.terminal === 'completed' ? 'success' : view.terminal === 'cancelled' ? 'user_stop' : 'error';
-  let finalized = finalizedMessages.get(message);
-  if (finalized === undefined) {
-    finalized = new Map();
-    finalizedMessages.set(message, finalized);
-  }
-  const previous = finalized.get(view.terminal);
-  if (previous !== undefined) {
-    return previous;
-  }
-  const result = finalizeInterruptedToolParts([message], undefined, cause)[0]!;
-  finalized.set(view.terminal, result);
-  return result;
-};
-
-/** Materialize one log snapshot; the adapter versions its async result before writing to a ready SDK chat. @public */
-export const materializeTranscript = async (
-  projection: ChatProjection,
-  watchedRunId?: string,
-): Promise<MyUIMessage[]> => {
-  const runs = selectTranscriptSource(projection);
-  const transcripts = await Promise.all(
-    runs.map(async (run) => {
-      const segments = await Promise.all(
-        (run.segments ?? []).map(async (segment) => {
-          const assistant = await materializeRun({
-            ...run,
-            chunks: segment.chunks,
-            terminal: undefined,
-          });
-          return [segment.user, assistant].filter((message): message is MyUIMessage => message !== undefined);
-        }),
-      );
-      const messages = segments.flat();
-      const user = run.steering ?? run.user;
-      if (user !== undefined) {
-        messages.push(user);
-      }
-      if (run.runId !== watchedRunId) {
-        const assistant = await materializeRun(run);
-        if (assistant !== undefined && (user !== undefined || assistant.parts.length > 0)) {
-          messages.push(assistant);
-        }
-      }
-      return messages;
-    }),
-  );
-  return transcripts.flat();
 };
 
 /** @public */

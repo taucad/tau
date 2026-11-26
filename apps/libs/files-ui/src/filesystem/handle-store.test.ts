@@ -365,6 +365,8 @@ beforeEach(() => {
   // natively, so identity pass-through is the faithful stand-in.
   vi.stubGlobal('structuredClone', (value: unknown) => value);
   stubStorage(undefined);
+  /* `loadStore` replaces the factory, but a case that imports the store itself would read the last case's database. */
+  globalThis.indexedDB = new IDBFactory();
 });
 
 afterEach(() => {
@@ -2317,6 +2319,38 @@ describe('Home engine mirror', () => {
     await expect(getHomeStorageBackend()).rejects.toMatchObject({ name: 'VersionError' });
   });
 
+  /* Risk S37: a reset another tab blocks is rejected, but the deletion stays queued and completes when that tab
+   * closes. The next start then opens an empty database; Home must stay on the engine its mirror names. */
+  it('should keep Home on its mirrored engine when a blocked reset completes after it was refused', async () => {
+    stubHomeProbe(true);
+    const store = await loadStore();
+    await store.pinHomeStorageBackend('opfs');
+    const holder = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`);
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('holder open failed'));
+      });
+    });
+
+    await expect(store.resetHomeRecords()).rejects.toMatchObject({ name: 'StorageUpgradeBlockedError' });
+    holder.close();
+    /* Queued behind the refused deletion, so it settles once that deletion has run. */
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.deleteDatabase(`${appMetaConfig.databasePrefix}fs-handles`);
+      request.addEventListener('success', () => {
+        resolve();
+      });
+    });
+    stubHomeProbe(false);
+    vi.resetModules();
+    const next = await import('#filesystem/handle-store.js');
+
+    await expect(next.getHomeStorageBackend()).resolves.toBe('opfs');
+  });
+
   it('should ignore a mirror that names no engine', async () => {
     globalThis.localStorage.setItem(homeBackendMirrorKey, 'floppy');
     vi.resetModules();
@@ -2388,6 +2422,55 @@ describe('folder list from the grants after a database reset', () => {
     const workspaces = await listWorkspaces();
     expect(workspaces).toHaveLength(2);
     expect(workspaces.filter((workspace) => workspace.workspaceId === markedWorkspaceId)).toHaveLength(1);
+  });
+
+  /* A folder whose marker answers after the deadline is adopted under a new id so the start is not held; once its
+   * marker can be read, the row takes the id the marker names (D2's marker rule), rather than staying a conflict. */
+  it('should give a folder adopted before its marker could be read the id its marker names', async () => {
+    let answer: ((text: string) => void) | undefined;
+    installGrants(
+      [grantedPath],
+      async () =>
+        new Promise<string>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const store = await loadStore();
+    await store.getProjectRootConfigs();
+    answer?.(markerJson(markedWorkspaceId, 'workshop'));
+    const [adopted] = await store.listWorkspaces();
+    expect(adopted?.workspaceId).not.toBe(markedWorkspaceId);
+    await store.setProjectCreationLocation({ kind: 'workspace', workspaceId: adopted!.workspaceId });
+    const write = vi.fn(async () => undefined);
+
+    const outcome = await store.syncNodeWorkspaceMarker(adopted!, {
+      read: async () => markerJson(markedWorkspaceId, 'workshop'),
+      write,
+    });
+
+    expect(outcome).not.toBe('conflict');
+    const workspaces = await store.listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]).toMatchObject({ workspaceId: markedWorkspaceId, path: grantedPath });
+    await expect(store.getProjectCreationLocation({ webAccessSupported: true })).resolves.toMatchObject({
+      location: { kind: 'workspace', workspaceId: markedWorkspaceId },
+    });
+  }, 15_000);
+
+  it('should keep a conflict for a folder whose marker names another workspace it was not adopted from', async () => {
+    installGrants([]);
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace(grantedPath);
+
+    const outcome = await store.syncNodeWorkspaceMarker(workspace, {
+      read: async () => markerJson(markedWorkspaceId, 'workshop'),
+      write: async () => undefined,
+    });
+
+    expect(outcome).toBe('conflict');
+    await expect(store.listWorkspaces()).resolves.toEqual([
+      expect.objectContaining({ workspaceId: workspace.workspaceId }),
+    ]);
   });
 
   it('should adopt nothing into a database that was not just created', async () => {

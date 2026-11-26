@@ -47,6 +47,7 @@ export const workspaceTests = [
   'src/telemetry-usage-coverage.test.ts',
   'src/telemetry-vocabulary-contract.test.ts',
   'src/test-outcome-outputs.test.ts',
+  'src/test-retry-policy.test.ts',
   'src/test-shard-dealer.test.ts',
   'src/timing-budgets-workflow.test.ts',
   'src/tsgo-plugin-target.test.ts',

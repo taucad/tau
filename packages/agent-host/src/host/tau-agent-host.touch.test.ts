@@ -133,6 +133,12 @@ describe('the writer marker touch (HA-I10)', () => {
     const firstTouch = calls.indexOf('touch');
     expect(firstTouch).toBeGreaterThanOrEqual(0);
     expect(firstTouch).toBeLessThan(calls.indexOf('append-held'));
+    /* The held append stalls the tick that wrote it, and with it the next tick: the marker is touched regardless. */
+    await vi.waitFor(() => {
+      expect(
+        calls.slice(calls.indexOf('append-held')).filter((call) => call === 'touch').length,
+      ).toBeGreaterThanOrEqual(3);
+    });
     log.release();
     await run.stop();
   });

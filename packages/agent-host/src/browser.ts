@@ -6,7 +6,7 @@ import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.
 import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent, StorageDurabilityClass } from '#log/event-types.js';
 import type { ChatLogSegment } from '#log/segments.js';
-import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { isMarkerFresh, isProviderMarker, newestRowAt } from '#log/writer-marker.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
@@ -301,7 +301,8 @@ const openProviderWriter = async (
   if (await fileSystem.exists(lockPath)) {
     throw new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active provider writer.`);
   }
-  await appendFile.call(fileSystem, lockPath, `${Date.now()}\n`);
+  const marker = `${Date.now()}\n`;
+  await appendFile.call(fileSystem, lockPath, marker);
 
   const releaseWriterLock = async (): Promise<void> => {
     await fileSystem.unlink(lockPath).catch(() => undefined);
@@ -381,6 +382,14 @@ const openProviderWriter = async (
     read: async () => {
       await settled();
       return joined(await readBytes(), held);
+    },
+    /* HA-I10: a live provider writer keeps its marker fresh for a `tau serve` sharing the folder, which cannot see the
+     * Web Lock. Only its own marker: a successor's is left as it is. */
+    touch: async () => {
+      const current = await fileSystem.readFile(lockPath).catch(() => undefined);
+      if (current !== undefined && new TextDecoder().decode(current) === marker) {
+        await fileSystem.writeFile(lockPath, new TextEncoder().encode(marker));
+      }
     },
     append: async (bytes, expectedLength) =>
       appendFileFenced === undefined || expectedLength === undefined
@@ -800,31 +809,12 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
   });
 };
 
-/** A provider writer's marker is exactly one numeric line (`Date.now()\n`); anything else is a Node writer's (HA-I10). */
-const isProviderMarker = (text: string): boolean => /^\d+\n$/u.test(text);
-
-/** When the log's newest readable row was recorded, or `undefined` for an empty or unreadable tail. */
-const newestRowAt = (bytes: Uint8Array<ArrayBuffer> | undefined): number | undefined => {
-  const lines = bytes === undefined ? [] : new TextDecoder().decode(bytes).trimEnd().split('\n');
-  for (const line of lines.toReversed()) {
-    try {
-      const at = Date.parse((JSON.parse(line) as { readonly recordedAt?: unknown }).recordedAt as string);
-      if (Number.isFinite(at)) {
-        return at;
-      }
-    } catch {
-      /* A torn tail: the row before it is the newest whole one. */
-    }
-  }
-  return undefined;
-};
-
 /**
  * Clear a writer marker a provider open may take over (HA-I10, H51). A provider marker is always taken: this open runs
  * under the chat's Web Lock, so it is a dead or stolen holder's, and the per-append fence refuses that holder (EQ2,
  * RH-R12). A Node writer's marker on a folder shared with `tau serve` is honoured while it is fresh: the newer of the
  * log's newest row and the marker's modification time (the live Node writer touches it every heartbeat tick) is
- * within {@link foreignRunStaleMilliseconds}. Past that bound the Node writer is gone or paused past its hold, and the
+ * within the XD3 bound (`isMarkerFresh`). Past that bound the Node writer is gone or paused past its hold, and the
  * marker is taken over as another device's stale run is (XD3).
  *
  * @param fileSystem - The provider.
@@ -844,7 +834,7 @@ const takeOverWriterMarker = async (
       () => undefined,
     );
     const rowAt = newestRowAt(await fileSystem.readFile(filePath).catch(() => undefined));
-    if (now - Math.max(touchedAt ?? 0, rowAt ?? 0) < foreignRunStaleMilliseconds) {
+    if (isMarkerFresh(now, touchedAt, rowAt)) {
       throw new EventLogError(
         'WRITER_LOCKED',
         `Event log "${filePath}" has a live Node writer. Wait until it closes the log, then open it again.`,

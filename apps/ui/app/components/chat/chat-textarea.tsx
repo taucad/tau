@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -106,6 +107,12 @@ const paintedSendVerdictOf = (
  */
 const useTurnFilesArriving = (projectId: string | undefined, execution: CadAgentExecution): boolean =>
   useTauCloudIntent(projectId ?? '') === 'open' && daemonPlacementOf(execution) === undefined;
+
+/* Loaded when the draft first holds a comment: most drafts never do. */
+const DraftCommentList = lazyCode(async () => {
+  const module = await import('#components/comments/comment-list.js');
+  return { default: module.DraftCommentList };
+});
 
 export const ChatTextarea = memo(function ({
   ref,
@@ -576,6 +583,13 @@ export const ChatTextarea = memo(function ({
         handleTextareaFocus={handleFocus}
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
+        comments={
+          mode === 'main' && logic.hasDraftComments ? (
+            <Suspense fallback={null}>
+              <DraftCommentList />
+            </Suspense>
+          ) : undefined
+        }
       />
     </>
   );

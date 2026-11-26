@@ -1,0 +1,132 @@
+import { describe, expect, it } from 'vitest';
+import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
+import {
+  nextCommentNumber,
+  placePin,
+  removeComments,
+  sendableAnnotations,
+  setCommentText,
+} from '#components/comments/draft-comments.js';
+import type { PinPlacement } from '#components/comments/draft-comments.js';
+
+const camera: AnnotationCamera = {
+  frameId: 'tau:root',
+  position: [1, 1, 1],
+  target: [0, 0, 0],
+  up: [0, 0, 1],
+  projection: { kind: 'perspective', verticalFieldOfView: 45, zoom: 1 },
+  clipping: { near: 0.01, far: 10 },
+  aspect: 1.5,
+};
+
+const placement = (patch: Partial<PinPlacement> = {}): PinPlacement => ({
+  point: [0.01, 0.02, 0.03],
+  normal: [0, 0, 1],
+  camera,
+  scene: { path: 'main.ts', revision: 'r1', scene: 's1' },
+  size: { width: 1568, height: 1045 },
+  newImageId: 'img-new',
+  ...patch,
+});
+
+const stored = (annotations: MessageAnnotations, id: string, attachment: string): MessageAnnotations => ({
+  ...annotations,
+  images: annotations.images.map((image) => (image.id === id ? { ...image, attachment } : image)),
+});
+
+describe('placePin', () => {
+  it('should give the first pin number 1 and a new picture of what the viewer showed', () => {
+    const placed = placePin(undefined, placement({ newImageId: 'img-1' }));
+
+    expect(placed).toMatchObject({ number: 1, imageId: 'img-1', needsPicture: true });
+    expect(placed.annotations.comments).toEqual([
+      { number: 1, text: '', image: 'img-1', model: { point: [0.01, 0.02, 0.03], normal: [0, 0, 1] } },
+    ]);
+    expect(placed.annotations.images).toEqual([
+      {
+        id: 'img-1',
+        width: 1568,
+        height: 1045,
+        forPin: true,
+        marks: [],
+        view: { path: 'main.ts', revision: 'r1', scene: 's1', camera },
+      },
+    ]);
+  });
+
+  it('should share one picture between pins placed from the same camera on the same scene', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const second = placePin(first.annotations, placement({ newImageId: 'img-2', point: [0.05, 0, 0] }));
+
+    expect(second).toMatchObject({ number: 2, imageId: 'img-1', needsPicture: false });
+    expect(second.annotations.images).toHaveLength(1);
+  });
+
+  it('should take another picture once the camera, the model or what is shown differs', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const moved = placePin(
+      first.annotations,
+      placement({ newImageId: 'img-2', camera: { ...camera, position: [2, 1, 1] } }),
+    );
+    const rebuilt = placePin(
+      first.annotations,
+      placement({ newImageId: 'img-3', scene: { path: 'main.ts', revision: 'r2', scene: 's1' } }),
+    );
+    const hidden = placePin(
+      first.annotations,
+      placement({ newImageId: 'img-4', scene: { path: 'main.ts', revision: 'r1', scene: 's2' } }),
+    );
+
+    expect([moved.imageId, rebuilt.imageId, hidden.imageId]).toEqual(['img-2', 'img-3', 'img-4']);
+    expect([moved.needsPicture, rebuilt.needsPicture, hidden.needsPicture]).toEqual([true, true, true]);
+  });
+
+  it('should never give a number twice, even after its comment was removed', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const second = placePin(first.annotations, placement());
+    const { annotations } = removeComments(second.annotations, (comment) => comment.number === 2);
+
+    expect(nextCommentNumber(annotations)).toBe(3);
+    expect(placePin(annotations, placement()).number).toBe(3);
+  });
+});
+
+describe('removeComments', () => {
+  it("should drop a pin's picture with its last pin, and keep it while another pin stands on it", () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const second = placePin(first.annotations, placement());
+    const drafted = stored(second.annotations, 'img-1', 'attachments/a.webp');
+
+    const one = removeComments(drafted, (comment) => comment.number === 1);
+    expect(one.orphanedAttachments).toEqual([]);
+    expect(one.annotations.images).toHaveLength(1);
+
+    const both = removeComments(one.annotations, (comment) => comment.number === 2);
+    expect(both.orphanedAttachments).toEqual(['attachments/a.webp']);
+    expect(both.annotations.images).toEqual([]);
+  });
+});
+
+describe('sendableAnnotations', () => {
+  it('should send only the comments that say something, trimmed, without the draft counter', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const second = placePin(
+      first.annotations,
+      placement({ newImageId: 'img-2', camera: { ...camera, position: [2, 1, 1] } }),
+    );
+    const drafted = stored(
+      stored(setCommentText(second.annotations, 1, '  Round this edge  '), 'img-1', 'attachments/a.webp'),
+      'img-2',
+      'attachments/b.webp',
+    );
+
+    const sent = sendableAnnotations(drafted);
+
+    expect(sent.annotations.comments.map(({ number, text }) => ({ number, text }))).toEqual([
+      { number: 1, text: 'Round this edge' },
+    ]);
+    expect(sent.annotations.images.map(({ id }) => id)).toEqual(['img-1']);
+    expect(sent.annotations.nextNumber).toBeUndefined();
+    expect(sent.orphanedAttachments).toEqual(['attachments/b.webp']);
+  });
+});

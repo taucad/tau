@@ -1,4 +1,7 @@
 import type { CadReference } from '@taucad/chat/references';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
+import type { AnnotatedSend } from '#components/comments/prepare-annotated-send.js';
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
@@ -27,6 +30,8 @@ export type CadChatSubmitInput = {
   readonly attachments?: readonly StoredAttachmentRef[];
   /** The composer chips' structured geometry references (blueprint D6). */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures; images with pins or marks are flattened before sending. */
+  readonly annotations?: MessageAnnotations;
 };
 
 /**
@@ -175,12 +180,38 @@ export const useCadChatClient = (): CadChatClient => {
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
-      const userMessage = buildUserMessage(input);
-      await withAttachments('send', input.attachments ?? [], async () =>
+      // A message without annotations is sent as it always was, with no step before it.
+      let send: AnnotatedSend = { attachments: input.attachments ?? [], annotations: undefined, originals: [] };
+      if (input.annotations !== undefined) {
+        try {
+          // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
+          const { sendAnnotated } = await loadCode(async () => import('#components/comments/annotated-send.js'));
+          send = await sendAnnotated({
+            attachments: send.attachments,
+            annotations: input.annotations,
+            store: store.draftAttachmentBytes(activeChatId),
+          });
+        } catch (error) {
+          console.error('[useCadChatClient] annotated images could not be prepared', error);
+          toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
+            id: promotionToastId,
+          });
+          return;
+        }
+      }
+      const attachments = input.attachments === undefined ? undefined : send.attachments;
+      const userMessage = buildUserMessage({
+        text: input.text,
+        ...(attachments === undefined ? {} : { attachments }),
+        ...(input.references === undefined ? {} : { references: input.references }),
+        ...(send.annotations === undefined ? {} : { annotations: send.annotations }),
+      });
+      // The untouched originals are kept with the chat beside what is sent, so an edit can start from them again.
+      await withAttachments('send', [...send.attachments, ...send.originals], async () =>
         actions.sendMessage(userMessage, {
           execution: agent.execution,
           queueIntent,
-          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+          ...(attachments === undefined ? {} : { attachments }),
         }),
       );
     },

@@ -236,3 +236,48 @@ export const partLabelOf = (comment: AnnotationComment): string | undefined => {
   const label = comment.model?.part?.label;
   return label === undefined || label === '' ? undefined : label;
 };
+
+/**
+ * The comments whose model has changed since their picture was taken (charter I5): the picture's revision is not the
+ * geometry on screen. Nothing is outdated before any geometry is presented.
+ *
+ * @param annotations - The message's annotations, for each picture's revision.
+ * @param comments - The comments shown in this viewer.
+ * @param geometryKey - The key of the geometry on screen, empty when there is none.
+ * @returns The numbers of the outdated comments.
+ */
+export function outdatedComments(
+  annotations: MessageAnnotations | undefined,
+  comments: readonly AnnotationComment[],
+  geometryKey: string,
+): ReadonlySet<number> {
+  if (geometryKey === '') {
+    return new Set();
+  }
+  const revisions = new Map(annotations?.images.map((image) => [image.id, image.view?.revision]));
+  return new Set(
+    comments
+      .filter((comment) => {
+        const revision = comment.image === undefined ? undefined : revisions.get(comment.image);
+        return revision !== undefined && revision !== geometryKey;
+      })
+      .map(({ number }) => number),
+  );
+}
+
+/**
+ * Whether any pinned comment is out of the camera's frame, behind it or beside it. A comment on a picture alone has no
+ * model point and never asks for a fit.
+ *
+ * @param camera - The viewer's camera.
+ * @param comments - The comments shown in this viewer.
+ * @returns `true` when the model should be fitted to bring every pin into view.
+ */
+export const isAnyPinOutOfFrame = (camera: AnnotationCamera, comments: readonly AnnotationComment[]): boolean =>
+  comments.some((comment) => {
+    if (!comment.model) {
+      return false;
+    }
+    const projected = projectToImage(camera, comment.model.point);
+    return projected === undefined || projected.at.some((fraction) => fraction < 0 || fraction > 1);
+  });

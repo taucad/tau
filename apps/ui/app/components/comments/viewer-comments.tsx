@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Rendering } from '@taucad/runtime';
 import { annotationLimits } from '@taucad/chat/annotations';
@@ -10,8 +10,18 @@ import { toast } from '@taucad/ui/components/sonner';
 import { randomUuid } from '@taucad/utils/id';
 import { CommentPinsProvider, useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import type { CommentPinsHost, CommentSurfacePick, ViewerCommentPin } from '@taucad/viewer/cad/comment-pins';
-import { useOptionalGraphics } from '@taucad/viewer/hooks/use-graphics';
-import { partLabelOf, placePin, removeComments, setCommentText } from '#components/comments/draft-comments.js';
+import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
+import { useOptionalGraphics, useOptionalGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { selectPresentedGeometryKey } from '@taucad/viewer/machines/graphics.machine';
+import {
+  isAnyPinOutOfFrame,
+  outdatedComments,
+  partLabelOf,
+  placePin,
+  removeComments,
+  setCommentText,
+} from '#components/comments/draft-comments.js';
+import { useShownComments } from '#components/comments/shown-comments.js';
 import { useFeatureState } from '#flags/use-feature.js';
 import { useOptionalChatComposer } from '#hooks/active-chat-provider.js';
 import { useCad } from '#hooks/use-cad.js';
@@ -48,6 +58,12 @@ type ViewerCommentsValue = Readonly<{
   close: () => void;
   setText: (number: number, text: string) => void;
   remove: (number: number) => void;
+  /** The pins are a sent message's or an open edit's: shown here, changed elsewhere. */
+  isReadOnly: boolean;
+  /** Ends the look at a sent message's comments, when that is what the viewer shows. */
+  hideShown: (() => void) | undefined;
+  /** The comments whose model has changed since their picture was taken (charter I5). */
+  outdated: ReadonlySet<number>;
 }>;
 
 const ViewerCommentsContext = createContext<ViewerCommentsValue | undefined>(undefined);
@@ -106,13 +122,18 @@ export function ViewerComments({
   const isFlagOn = useFeatureState('commentPins') === 'on';
   const composer = useOptionalChatComposer();
   const draftRef = composer?.draftActorRef;
-  // One set of numbers at a time (charter D18): while a sent message is being edited, the viewer shows that edit's pins.
+  /*
+   * One set of numbers at a time (charter D18). An open edit's pins come first, then a sent message's the person asked
+   * to see, then the new message's own. Only the last can be changed from the viewer.
+   */
   const isEditing = useSelector(draftRef, (state) => state?.context.activeEditMessageId !== undefined);
-  const annotations = useSelector(draftRef, (state) =>
-    state?.context.activeEditMessageId === undefined
-      ? state?.context.draftAnnotations
-      : state.context.editDraftAnnotations,
-  );
+  const draft = useSelector(draftRef, (state) => state?.context.draftAnnotations);
+  const edited = useSelector(draftRef, (state) => state?.context.editDraftAnnotations);
+  const shownComments = useShownComments();
+  const shown = isEditing ? undefined : shownComments?.shown;
+  const hideShown = shownComments?.hide;
+  const annotations = isEditing ? edited : (shown?.annotations ?? draft);
+  const isReadOnly = isEditing || shown !== undefined;
   const attachments = useSelector(draftRef, (state) => state?.context.draftAttachments);
   const graphicsRef = useOptionalGraphics();
   const cadRef = useCad();
@@ -131,6 +152,31 @@ export function ViewerComments({
 
   const scope = useMemo(() => ({ entryPath, kernelView, instance }), [entryPath, instance, kernelView]);
   const comments = useMemo(() => scopedComments(annotations, scope), [annotations, scope]);
+  const geometryKey = useOptionalGraphicsSelector(selectPresentedGeometryKey, '');
+  const outdated = useMemo(
+    () => outdatedComments(annotations, comments, geometryKey),
+    [annotations, comments, geometryKey],
+  );
+
+  /*
+   * Showing a sent message's comments never turns the camera. Only when one of its pins is out of the frame is the
+   * model fitted, which keeps the direction the person is looking from.
+   */
+  const shownMessageId = shown?.messageId;
+  useEffect(() => {
+    if (shownMessageId === undefined || !graphicsRef) {
+      return;
+    }
+    const camera = getGraphicsCameraState(graphicsRef);
+    if (!camera) {
+      return;
+    }
+    const isOutOfFrame = isAnyPinOutOfFrame(structuredClone(camera) as AnnotationCamera, comments);
+    if (isOutOfFrame) {
+      graphicsRef.send({ type: 'fitView' });
+    }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs when the person asks to see a message's comments, not as its pins or the camera change.
+  }, [shownMessageId]);
   const pins = useMemo<readonly ViewerCommentPin[]>(
     () =>
       comments.flatMap((comment) =>
@@ -186,12 +232,14 @@ export function ViewerComments({
       if (!draftRef || !graphicsRef || isEditing) {
         return;
       }
-      if ((annotations?.comments.length ?? 0) >= annotationLimits.comments) {
+      // Pinning again ends the look at an earlier message's comments: the new pin joins the new message.
+      hideShown?.();
+      if ((draft?.comments.length ?? 0) >= annotationLimits.comments) {
         toast.error(`A message holds up to ${annotationLimits.comments} comments.`);
         return;
       }
       const [width, height] = pinPictureSize(pick.camera.aspect);
-      const placed = placePin(annotations, {
+      const placed = placePin(draft, {
         point: [...pick.point],
         normal: [...pick.normal],
         ...(pick.componentId === undefined
@@ -234,15 +282,15 @@ export function ViewerComments({
         void takePicture(placed.imageId, pick);
       }
     },
-    [annotations, attachments, draftRef, entryPath, graphicsRef, instance, isEditing, kernelView, takePicture],
+    [attachments, draft, draftRef, entryPath, graphicsRef, hideShown, instance, isEditing, kernelView, takePicture],
   );
 
   const remove = useCallback(
     (number: number): void => {
-      if (!draftRef || !annotations || isEditing) {
+      if (!draftRef || !draft || isReadOnly) {
         return;
       }
-      const removed = removeComments(annotations, (comment) => comment.number === number);
+      const removed = removeComments(draft, (comment) => comment.number === number);
       draftRef.send({
         type: 'setDraftAnnotations',
         annotations: removed.annotations,
@@ -256,27 +304,27 @@ export function ViewerComments({
       }
       setOpenNumber((current) => (current === number ? undefined : current));
     },
-    [annotations, attachments, draftRef, isEditing],
+    [attachments, draft, draftRef, isReadOnly],
   );
 
   const close = useCallback((): void => {
     const comment = comments.find(({ number }) => number === openNumber);
-    if (comment?.text.trim() === '') {
+    if (!isReadOnly && comment?.text.trim() === '') {
       remove(comment.number);
     }
     setOpenNumber(undefined);
-  }, [comments, openNumber, remove]);
+  }, [comments, isReadOnly, openNumber, remove]);
 
   const setText = useCallback(
     (number: number, text: string): void => {
-      if (draftRef && annotations && !isEditing) {
+      if (draftRef && draft && !isReadOnly) {
         draftRef.send({
           type: 'setDraftAnnotations',
-          annotations: setCommentText(annotations, number, text),
+          annotations: setCommentText(draft, number, text),
         });
       }
     },
-    [annotations, draftRef, isEditing],
+    [draft, draftRef, isReadOnly],
   );
 
   const host = useMemo<CommentPinsHost | undefined>(
@@ -284,8 +332,21 @@ export function ViewerComments({
     [handlePlace, isEnabled, pins],
   );
   const value = useMemo<ViewerCommentsValue | undefined>(
-    () => (isEnabled ? { comments, openNumber, open: setOpenNumber, close, setText, remove } : undefined),
-    [close, comments, isEnabled, openNumber, remove, setText],
+    () =>
+      isEnabled
+        ? {
+            comments,
+            openNumber,
+            open: setOpenNumber,
+            close,
+            setText,
+            remove,
+            isReadOnly,
+            hideShown: shown === undefined ? undefined : hideShown,
+            outdated,
+          }
+        : undefined,
+    [close, comments, hideShown, isEnabled, isReadOnly, openNumber, outdated, remove, setText, shown],
   );
 
   return (
@@ -296,18 +357,46 @@ export function ViewerComments({
 }
 
 const headClass =
-  'pointer-events-auto absolute top-0 left-0 flex size-6 items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline data-[occluded=true]:opacity-40';
+  'pointer-events-auto absolute top-0 left-0 flex size-6 items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline data-[occluded=true]:opacity-40 data-[sent=true]:border-markup-ink data-[sent=true]:bg-background data-[sent=true]:text-markup-ink data-[outdated=true]:border-dashed';
+
+const outdatedNote = 'The model has changed since this comment.';
+
+/** A sent or edited comment's card: its words, to read. */
+function ReadOnlyCommentCard({
+  comment,
+  isOutdated,
+}: {
+  readonly comment: AnnotationComment;
+  readonly isOutdated: boolean;
+}): React.JSX.Element {
+  return (
+    <div className='flex flex-col gap-2' data-comment-ui=''>
+      <div className='flex items-center gap-2'>
+        <span className='flex size-5 shrink-0 items-center justify-center rounded-full border-2 border-markup-ink text-xs font-semibold text-markup-ink'>
+          {comment.number}
+        </span>
+        <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>
+          {partLabelOf(comment) ?? 'Comment'}
+        </span>
+      </div>
+      <p className='text-sm break-words whitespace-pre-wrap'>{comment.text}</p>
+      {isOutdated ? <p className='text-xs text-muted-foreground'>{outdatedNote}</p> : null}
+    </div>
+  );
+}
 
 function CommentCard({
   comment,
   onText,
   onRemove,
   onDone,
+  isOutdated,
 }: {
   readonly comment: AnnotationComment;
   readonly onText: (text: string) => void;
   readonly onRemove: () => void;
   readonly onDone: () => void;
+  readonly isOutdated: boolean;
 }): React.JSX.Element {
   return (
     <div className='flex flex-col gap-2' data-comment-ui=''>
@@ -341,7 +430,9 @@ function CommentCard({
           }
         }}
       />
-      <p className='text-xs text-muted-foreground'>Sent with your next message. Enter to finish.</p>
+      <p className='text-xs text-muted-foreground'>
+        {isOutdated ? `${outdatedNote} ` : ''}Sent with your next message. Enter to finish.
+      </p>
     </div>
   );
 }
@@ -358,9 +449,20 @@ export function ViewerCommentHeads(): React.JSX.Element | undefined {
   if (!value || !pins || value.comments.length === 0) {
     return undefined;
   }
-  const { comments, openNumber, open, close, setText, remove } = value;
+  const { comments, openNumber, open, close, setText, remove, isReadOnly, hideShown, outdated } = value;
   return (
     <div className='pointer-events-none absolute inset-0 z-10' data-comment-ui=''>
+      {hideShown ? (
+        <div
+          role='status'
+          className='pointer-events-auto absolute top-2 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background py-1 pr-1 pl-3 text-xs shadow-sm'
+        >
+          Showing comments from an earlier message
+          <Button variant='ghost' size='sm' onClick={hideShown}>
+            Hide
+          </Button>
+        </div>
+      ) : null}
       {comments.map((comment) => {
         const id = pinId(comment.number);
         const isOpen = comment.number === openNumber;
@@ -373,6 +475,8 @@ export function ViewerCommentHeads(): React.JSX.Element | undefined {
             data-comment-ui=''
             aria-label={`Comment ${comment.number}${comment.text ? `: ${comment.text}` : ''}`}
             aria-expanded={isOpen}
+            data-sent={isReadOnly}
+            data-outdated={outdated.has(comment.number)}
             className={headClass}
             style={{ visibility: 'hidden' }}
             onClick={() => {
@@ -398,16 +502,21 @@ export function ViewerCommentHeads(): React.JSX.Element | undefined {
           >
             <PopoverAnchor asChild>{head}</PopoverAnchor>
             <PopoverContent side='right' align='start' className='w-72 p-3' updatePositionStrategy='always'>
-              <CommentCard
-                comment={comment}
-                onText={(text) => {
-                  setText(comment.number, text);
-                }}
-                onRemove={() => {
-                  remove(comment.number);
-                }}
-                onDone={close}
-              />
+              {isReadOnly ? (
+                <ReadOnlyCommentCard comment={comment} isOutdated={outdated.has(comment.number)} />
+              ) : (
+                <CommentCard
+                  comment={comment}
+                  isOutdated={outdated.has(comment.number)}
+                  onText={(text) => {
+                    setText(comment.number, text);
+                  }}
+                  onRemove={() => {
+                    remove(comment.number);
+                  }}
+                  onDone={close}
+                />
+              )}
             </PopoverContent>
           </Popover>
         );

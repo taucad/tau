@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
 import {
+  isAnyPinOutOfFrame,
   nextCommentNumber,
+  outdatedComments,
   placePin,
   removeComments,
   sendableAnnotations,
@@ -179,5 +181,45 @@ describe('sendableAnnotations', () => {
     expect(sent.annotations.images.map(({ id }) => id)).toEqual(['img-1']);
     expect(sent.annotations.nextNumber).toBeUndefined();
     expect(sent.orphanedAttachments).toEqual(['attachments/b.webp']);
+  });
+});
+
+describe('outdatedComments', () => {
+  const placed = placePin(undefined, placement()).annotations;
+  const annotations: MessageAnnotations = {
+    ...placed,
+    comments: [...placed.comments, { number: 2, text: 'On the picture', image: 'img-new', at: [0.5, 0.5] }],
+  };
+
+  it('marks every comment on a picture of other geometry', () => {
+    expect([...outdatedComments(annotations, annotations.comments, 'r2')]).toEqual([1, 2]);
+  });
+
+  it('marks none on the geometry the picture was taken of', () => {
+    expect(outdatedComments(annotations, annotations.comments, 'r1').size).toBe(0);
+  });
+
+  it('marks none before any geometry is on screen', () => {
+    expect(outdatedComments(annotations, annotations.comments, '').size).toBe(0);
+  });
+});
+
+describe('isAnyPinOutOfFrame', () => {
+  const pinned = (point: [number, number, number]) => [{ number: 1, text: '', image: 'img-new', model: { point } }];
+
+  it('keeps the camera when every pin is in frame', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([0, 0, 0]))).toBe(false);
+  });
+
+  it('asks for a fit when a pin is beside the frame', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([5, -5, 0]))).toBe(true);
+  });
+
+  it('asks for a fit when a pin is behind the camera', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([3, 3, 3]))).toBe(true);
+  });
+
+  it('never fits for a comment on the picture alone', () => {
+    expect(isAnyPinOutOfFrame(camera, [{ number: 1, text: '', image: 'img-new', at: [2, 2] }])).toBe(false);
   });
 });

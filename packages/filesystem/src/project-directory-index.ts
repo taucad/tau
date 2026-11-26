@@ -503,7 +503,8 @@ export class ProjectDirectoryIndex {
     if (rootLevel) {
       this._unlistNames(root);
     }
-    if (root.namesListed && root.dirty.size > root.names.size) {
+    /* `dirty` never outgrows the entries the root holds; past them the root is cold (A5). */
+    if (root.dirty.size > Math.max(root.names.size, root.entries.size, 1)) {
       this._reset(root);
       countDiscoveryRootCold('bound', this._timings);
     }
@@ -558,6 +559,15 @@ export class ProjectDirectoryIndex {
         this.note(storageRootKey, paths, 'own');
       }
     };
+  }
+
+  /**
+   * When the clock reads now, for a validation's start.
+   *
+   * @returns Milliseconds.
+   */
+  public now(): number {
+    return this._now();
   }
 
   /**
@@ -679,10 +689,5 @@ export class ProjectDirectoryIndex {
   private _tick(): number {
     this._clock += 1;
     return this._clock;
-  }
-
-  /** When the clock reads now, for a validation's start. */
-  public now(): number {
-    return this._now();
   }
 }

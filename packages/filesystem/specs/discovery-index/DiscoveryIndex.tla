@@ -54,6 +54,8 @@
 \* FW2 (2026-11-26): first version, before `packages/filesystem/src/project-directory-index.ts`. Its conformance
 \* adapter is the differential test `project-directory-index.differential.test.ts`, which replays generated evidence
 \* schedules against the index and checks `CleanIsCurrent` after every step.
+\* FW2 acceptance tests (2026-11-26): `project-directory-index.ts` bounds `dirty` by the entries a root holds whether or
+\* not its names are listed (A5), and orders its members; the protocol, every action and every verdict are unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

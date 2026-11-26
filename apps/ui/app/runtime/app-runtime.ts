@@ -46,7 +46,6 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { chatSdkSource } from '@taucad/chat-ui/services/chat-sdk-loader';
 import type { LiveProjectSessions } from '#services/chat-session-store.js';
 import { selectLibraryRevision } from '@taucad/project-library/runtime/project-library';
 import { ProjectLibrary } from '#runtime/project-library.js';
@@ -231,8 +230,6 @@ const createChatSessions = (
     focusedProject,
     /* A7c: and every live project's session from the registry, so a run reports to the project that ran it (R2). */
     projectSessions,
-    /* PL1: each chat's AI SDK `Chat` loads on demand, by the chat's one dynamic import (D5's function form). */
-    chatSdk: chatSdkSource,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined

@@ -13,12 +13,13 @@
  *
  * `useResolvedAuth`, the user menu and the billing session read this owner instead of `useSession`.
  */
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
+import { publishIdentityState } from '#lib/identity-answer.js';
 
 const identityUserSchema = z.object({
   id: z.string().min(1),
@@ -170,7 +171,7 @@ export const resolveIdentity = (session: SessionAnswer, record: IdentityUser | u
  * @public
  */
 export function useIdentity(): Identity {
-  const { data, isSuccess, error } = useSession(authClient);
+  const { data, isSuccess, error, refetch } = useSession(authClient);
   /* The server and the hydrating render hold no record, so they agree; the record arrives in the next commit. */
   const record = useSyncExternalStore(subscribe, readIdentityRecord, noRecord);
   const identity = resolveIdentity({ data, isSuccess, error }, record);
@@ -178,6 +179,12 @@ export function useIdentity(): Identity {
   /* The record follows the session's answer: rewritten when verified, cleared when signed out, kept otherwise. */
   const verified = identity.state === 'verified' ? JSON.stringify(identity.user) : undefined;
   const isSignedOut = identity.state === 'signed-out';
+  /* A layout effect: every one runs before any passive effect of the same commit, so an effect that starts a turn on
+   * the commit a sign-in lands in is admitted against that answer. */
+  const { state } = identity;
+  useLayoutEffect(() => {
+    publishIdentityState(state);
+  }, [state]);
   useEffect(() => {
     if (verified !== undefined) {
       writeIdentityRecord(identityUserSchema.parse(JSON.parse(verified)));
@@ -185,6 +192,30 @@ export function useIdentity(): Identity {
       writeIdentityRecord(undefined);
     }
   }, [isSignedOut, verified]);
+
+  /* Another tab of this origin signed in, out or as someone else: its record changed, and this tab's session query
+   * still holds the answer it had before. That answer is no longer the auth server's, so it is asked again, and a
+   * send in this tab is not refused as signed out on a stale "nobody". Every mounted owner shares the one request. */
+  const answered = useRef({ state, userId: identity.user?.id, refetch });
+  useLayoutEffect(() => {
+    answered.current = { state, userId: identity.user?.id, refetch };
+  });
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key !== null && event.key !== recordKey()) {
+        return;
+      }
+      const recorded = readIdentityRecord()?.id;
+      const { state: current, userId, refetch: ask } = answered.current;
+      if ((current === 'signed-out' && recorded !== undefined) || (current === 'verified' && recorded !== userId)) {
+        void ask({ cancelRefetch: false });
+      }
+    };
+    globalThis.addEventListener('storage', onStorage);
+    return () => {
+      globalThis.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   return identity;
 }

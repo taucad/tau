@@ -6,7 +6,8 @@ import {
   useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
-import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import type { ProjectWaitShape } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
@@ -339,9 +340,26 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
   );
 }
 
-/** A lazy pane body inside its pane: the pane's frame shows until the body's chunk is in. */
-function PaneBody({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  return <Suspense fallback={null}>{children}</Suspense>;
+/**
+ * A lazy pane body inside its pane: the pane's frame shows until the body's chunk is in, with the body's shape where it
+ * has one (Progressive Loading Policy rule 15), on the open's clock for a pane the open restored.
+ */
+function PaneBody({
+  children,
+  shape,
+  label,
+}: {
+  readonly children: ReactNode;
+  readonly shape?: ProjectWaitShape;
+  readonly label?: string;
+}): React.JSX.Element {
+  return (
+    <Suspense
+      fallback={shape === undefined || label === undefined ? null : <PaneWaitSkeleton shape={shape} label={label} />}
+    >
+      {children}
+    </Suspense>
+  );
 }
 
 function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
@@ -354,7 +372,7 @@ function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParam
 
 function ParametersWorkbenchPanel(): React.JSX.Element {
   return (
-    <PaneBody>
+    <PaneBody shape='fields' label='Parameters'>
       <ParametersPanelBody />
     </PaneBody>
   );
@@ -362,7 +380,7 @@ function ParametersWorkbenchPanel(): React.JSX.Element {
 
 function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   return (
-    <PaneBody>
+    <PaneBody shape='list' label='Kinematics'>
       <KinematicsPanelBody panelApi={api} />
     </PaneBody>
   );
@@ -370,7 +388,7 @@ function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Eleme
 
 function ModelWorkbenchPanel(): React.JSX.Element {
   return (
-    <PaneBody>
+    <PaneBody shape='tree' label='Model'>
       <ModelPanelBody />
     </PaneBody>
   );
@@ -381,7 +399,7 @@ function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Elemen
   /* The toolbar chip reads as pressed while History is on screen (C2). */
   useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
   return (
-    <PaneBody>
+    <PaneBody shape='list' label='History'>
       <RevisionsPanelBody />
     </PaneBody>
   );
@@ -410,7 +428,7 @@ function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
 function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
   return (
-    <PaneBody>
+    <PaneBody shape='list' label='Agents'>
       <AgentsPanelBody enableHistory={isShown} />
     </PaneBody>
   );
@@ -418,7 +436,7 @@ function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
 
 function JobsWorkbenchPanel(): React.JSX.Element {
   return (
-    <PaneBody>
+    <PaneBody shape='list' label='Jobs'>
       <JobsPanelBody />
     </PaneBody>
   );
@@ -427,7 +445,7 @@ function JobsWorkbenchPanel(): React.JSX.Element {
 export function PrintWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
   return (
-    <PaneBody>
+    <PaneBody shape='fields' label='Print'>
       <PrintPanelBody isShown={isShown} />
     </PaneBody>
   );
@@ -437,7 +455,7 @@ export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.El
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
   return (
-    <PaneBody>
+    <PaneBody shape='fields' label='Export'>
       <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />
     </PaneBody>
   );
@@ -445,7 +463,7 @@ export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.El
 
 function ShareWorkbenchPanel(): React.JSX.Element {
   return (
-    <PaneBody>
+    <PaneBody shape='list' label='Share'>
       <ProjectShareWorkbenchPanel />
     </PaneBody>
   );
@@ -455,7 +473,7 @@ function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element 
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
   return (
-    <PaneBody>
+    <PaneBody shape='fields' label='Details'>
       <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />
     </PaneBody>
   );

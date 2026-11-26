@@ -11,6 +11,7 @@ import type { DeploymentAnswer } from '@taucad/types/deployment';
 import { deploymentModeDefaults } from '@taucad/utils/deployment-mode';
 import { boundMaxAge, requestAnswer } from '@taucad/utils/origin-answer';
 import type { AnswerStorage } from '@taucad/utils/origin-answer';
+import { pageReadsOffline } from '#lib/page-offline.js';
 import { deploymentMachine } from '#runtime/deployment.machine.js';
 import type { DeploymentAskOutcome, DeploymentRecord } from '#runtime/deployment.machine.js';
 
@@ -158,6 +159,8 @@ export type DeploymentOwnerPorts = Readonly<{
   now?: () => number;
   /** Subscribe to the browser's `online` event. */
   onOnline?: (listener: () => void) => () => void;
+  /** Whether the page reads a network now (`navigator.onLine`); while it does not, no ask is sent. */
+  isOnline?: () => boolean;
 }>;
 
 const originOf = (url: string | undefined): string | undefined => {
@@ -175,6 +178,8 @@ const originOf = (url: string | undefined): string | undefined => {
 const browserStorage = (): (AnswerStorage & Readonly<{ removeItem: (key: string) => void }>) | undefined =>
   globalThis.localStorage;
 
+const browserIsOnline = (): boolean => !pageReadsOffline();
+
 const browserOnline = (listener: () => void): (() => void) => {
   globalThis.addEventListener('online', listener);
   return () => {
@@ -184,9 +189,10 @@ const browserOnline = (listener: () => void): (() => void) => {
 
 /**
  * Provide the machine with this page's record, ask and listener. An API URL with no origin reads no record and asks
- * nothing: every ask fails, so the mode stays `unknown` (I2).
+ * nothing: every ask fails, so the mode stays `unknown` (I2). Nor does an ask while the page reads offline (onboarding
+ * DT3): it fails as the request would, without leaving the device, and the machine asks again on `online`.
  *
- * @param ports - The page's API URL, fetch, storage, clock and `online` subscription.
+ * @param ports - The page's API URL, fetch, storage, clock, `online` subscription and online reading.
  * @returns The machine the runtime invokes as its `deployment` child.
  * @public
  */
@@ -196,6 +202,7 @@ export const createDeploymentOwner = ({
   storage = browserStorage,
   now = Date.now,
   onOnline = browserOnline,
+  isOnline = browserIsOnline,
 }: DeploymentOwnerPorts): typeof deploymentMachine => {
   const origin = originOf(apiUrl);
   const store = origin === undefined ? undefined : createDeploymentRecordStore(storage, origin);
@@ -204,7 +211,7 @@ export const createDeploymentOwner = ({
       recall: createAsyncLogic<DeploymentRecord | undefined>({ run: async () => store?.read() }),
       ask: createAsyncLogic<DeploymentAskOutcome>({
         run: async ({ signal }) => {
-          if (origin === undefined) {
+          if (origin === undefined || !isOnline()) {
             return { kind: 'failed', reason: 'network', at: now() };
           }
           /* BA7: never from the HTTP cache. A simple GET with no credentials and no header: no preflight. */

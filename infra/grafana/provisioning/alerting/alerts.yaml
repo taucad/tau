@@ -15,6 +15,33 @@ groups:
     folder: Tau Alerts
     interval: 60s
     rules:
+      - uid: outside-probe-unreachable
+        title: 'P0: Tau Unreachable From Outside'
+        condition: probe_down
+        data:
+          - refId: probe_down
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: synthetic-monitoring
+            model:
+              instant: true
+              range: false
+              expr: max by (job) (max_over_time(probe_success{app=~".*",probe_group="outside"}[6m])) == bool 0
+              intervalMs: 60000
+              maxDataPoints: 20
+              refId: probe_down
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: 'A Grafana synthetic check from outside Tau failed three times in a row: the API or UI readiness endpoint did not answer 200, or the API reported an indicator under error (database, Redis, object storage). The job label names the check.'
+          runbook_url: docs/handbooks/cloud/playbooks/site-down.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: outside-probe
       - uid: redis-connection-lost
         title: 'P0: Redis Connection Lost'
         condition: redis_down
@@ -1632,6 +1659,116 @@ groups:
           severity: warning
           service: tau-api
           component: email
+      - uid: chat-gateway-server-refusal
+        title: 'P1: Model Gateway Refused With a Server Error'
+        condition: gateway_5xx_threshold
+        data:
+          - refId: gateway_5xx_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum by (type) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Model gateway refusal" | json status="gatewayRefusal.status", type="gatewayRefusal.type" | status >= 500 [5m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: gateway_5xx_logs
+          - refId: gateway_5xx_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: gateway_5xx_logs
+              refId: gateway_5xx_reduce
+          - refId: gateway_5xx_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: gateway_5xx_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: gateway_5xx_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/chat-llm-failing.md
+          summary: "The API logged `Model gateway refusal` with status 500 or above in the last 5 min, by refusal type: a model step was refused for a reason on Tau's side, not the customer's. It covers an expired or missing route tariff, a supplier key that is refused or out of credit, and a supplier outage. Credit refusals (402), sign-in refusals (401) and rate limits (429) are excluded because they are normal. Read `gatewayRefusal.type` on the line, then follow the playbook for that code. One event alerts because production makes only a few model calls a day."
+        labels:
+          severity: warning
+          service: tau-api
+          component: gateway
+      - uid: chat-exception-server-error
+        title: 'P1: Chat Request Failed With a Server Error'
+        condition: chat_exception_threshold
+        data:
+          - refId: chat_exception_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Chat exception: " [5m]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: chat_exception_logs
+          - refId: chat_exception_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: chat_exception_logs
+              refId: chat_exception_reduce
+          - refId: chat_exception_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: chat_exception_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: chat_exception_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/chat-llm-failing.md
+          summary: 'The API logged `Chat exception:` in the last 5 min: `ChatExceptionFilter` answered a chat request (`/v1/chat`) with a 500 or above that was not a typed model refusal, so the person saw a server error. Read the error and stack on the line. Model gateway refusals are logged separately as `Chat model refusal` and do not fire this rule.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: chat
       - uid: api-email-complaint
         title: 'P1: Email Marked as Spam'
         condition: email_complaint_threshold
@@ -1961,6 +2098,33 @@ groups:
           severity: warning
           service: tau-api
           component: agent
+      - uid: outside-probe-certificate-expiring
+        title: 'P1: Tau Certificate Expires Within 14 Days'
+        condition: cert_expiring
+        data:
+          - refId: cert_expiring
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: synthetic-monitoring
+            model:
+              instant: true
+              range: false
+              expr: min by (job) (probe_ssl_earliest_cert_expiry{app=~".*",probe_group="outside"}) - time() < bool 1209600
+              intervalMs: 60000
+              maxDataPoints: 20
+              refId: cert_expiring
+        noDataState: OK
+        execErrState: OK
+        for: 1h
+        annotations:
+          summary: The TLS certificate an outside synthetic check saw expires in under 14 days. Netlify and Cloudflare renew on their own, so a renewal has stalled. The job label names the check.
+          runbook_url: docs/handbooks/cloud/playbooks/dns-tls.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: outside-probe
   - orgId: 1
     name: tau-storage-critical
     folder: Tau Alerts

@@ -158,6 +158,28 @@
 \* this tab's or another tab's, now removes the root or leaves it (`Applied`), and `Ops` needs no third operation. The
 \* gate (`MutationJournaled`, `HeldActive`), the journal-then-apply order and recovery are unchanged; every invariant
 \* and property is unchanged and is checked over the larger set of behaviours.
+\* Fast-path FW1 (2026-11-25): mutations that change no disk fact stop scanning. Trash, Restore and every chat
+\* create, delete, purge and recency touch re-enrich the current pass's listing and write it only while that pass's
+\* epoch is current, as a workspace catalog's publish already does, instead of refetching or bumping the epoch; a
+\* removed bump is one `EpochBumped` the environment no longer takes, and the listing's projects come only from a
+\* pass. A permanent delete's precheck reads its target and root statuses from the current pass (`discover` with
+\* `reuse`) and proves another copy with `verifyProjectRoute`, scanning only for a copy no route binds; it runs
+\* before `MutationJournaled`, which is unchanged. The refetches after a delete's and a duplicate's settle go: the
+\* settled row's `Bump` already owes the pass (`project-library-commands.ts` re-reviewed in its final form). No action
+\* or correspondence changes.
+\* Name ahead C1 (2026-11-26): a kernel create starts its name request before the worker, storage and template
+\* awaits and awaits it at directory allocation, before anything is journaled; `namingImageUrls` is exported. The
+\* journal, apply and gate order is unchanged. A caller's `projectName` may be a promise, awaited at the same point.
+\* No action or correspondence changes.
+\* FW1 over C1 (2026-11-26): `project-library-commands.ts` re-reviewed with both changes in it, C1's name request
+\* started ahead of a kernel create and FW1's scan-free commands and permanent-delete precheck; they touch different
+\* commands and merged without overlap. No action or correspondence changes.
+\* FW1 review (2026-11-26): the permanent-delete precheck counts a route verification as proof of another copy only
+\* when the directory it read, which the verification now names (an older authority names none: no proof), is the
+\* copy the precheck chose and not the target; a "Use this folder" that moves the route in between leaves `copy`
+\* unset, the stricter Trash check. Overlapping `refreshListingRows` calls of one pass publish only the latest call's
+\* listing. Both sit before `MutationJournaled` or outside the gate, which are unchanged. No action or correspondence
+\* changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 /*
  * The flake ledger ingestion (FQ-2) runs after every completed CI run, so its reach is kept to what it needs: it
- * lists runs and downloads artifacts (`actions: read`) and writes its own state branch (`contents: write`), with no
- * environment, no secret and no persisted checkout credential, and it skips a pull request's run before a runner
- * starts.
+ * lists runs and downloads artifacts (`actions: read`), writes its own state branch and the quarantine entry branch
+ * (`contents: write`), and opens the owner issues and the entry pull request (FQ-6: `issues: write`,
+ * `pull-requests: write`), with no environment, no secret and no persisted checkout credential, and it skips a pull
+ * request's run before a runner starts.
  */
 const text = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/flake-ledger.yml'), 'utf8');
 
@@ -59,10 +60,15 @@ describe('flake ledger workflow', () => {
     );
   });
 
-  it('should hold only actions: read and contents: write, with no environment, secret or persisted credential', () => {
+  it('should hold only the permissions it writes with, and no environment, secret or persisted credential', () => {
     expect(workflow.permissions).toEqual({});
     for (const job of Object.values(workflow.jobs)) {
-      expect(job.permissions).toEqual({ actions: 'read', contents: 'write' });
+      expect(job.permissions).toEqual({
+        actions: 'read',
+        contents: 'write',
+        issues: 'write',
+        'pull-requests': 'write',
+      });
       expect(job.environment).toBeUndefined();
     }
     expect(text).not.toMatch(/secrets\./u);
@@ -83,24 +89,73 @@ describe('flake ledger workflow', () => {
     expect(ingest?.run).not.toContain('${{');
   });
 
-  it('should check out every module the ingestion imports', () => {
-    const checkout = Object.values(workflow.jobs)
-      .flatMap((job) => job.steps)
-      .find((step) => step.uses?.startsWith('actions/checkout@'));
+  it('should check out every module the ingestion and the entry import', () => {
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
+    const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout@'));
     const listed = checkout?.with?.['sparse-checkout'];
     const sparse = (typeof listed === 'string' ? listed : '').split('\n').filter((line) => line !== '');
-    const imported = new Set<string>(['scripts/src/ci-flake-ledger-ingest-cli.ts']);
+    const imported = new Set<string>([
+      'scripts/src/ci-flake-ledger-ingest-cli.ts',
+      'scripts/src/ci-flake-quarantine-entry-cli.ts',
+      'scripts/src/ci-flake-quarantine-release-cli.ts',
+      'scripts/src/ci-flake-metrics-cli.ts',
+    ]);
     // A Set's iteration visits what is added during it, so this walks the whole import graph.
     for (const file of imported) {
       const source = readFileSync(resolve(import.meta.dirname, '../..', file), 'utf8');
       for (const match of source.matchAll(/from '#([\w-]+)\.js'/gu)) {
         imported.add(`scripts/src/${match[1]}.ts`);
       }
-      // Only `node:` modules and workspace-local `#` imports: the job installs nothing.
-      expect(source, file).not.toMatch(/from '(?!node:|#)[^']+'/u);
+      if (source.includes("from '@taucad/vitest-ci/quarantine'")) {
+        imported.add('tools/vitest-ci/src/quarantine.ts');
+      }
+      // Only `node:` modules, workspace-local `#` imports and the linked quarantine module: the job installs nothing.
+      expect(source, file).not.toMatch(/from '(?!node:|#|@taucad\/vitest-ci\/quarantine')[^']+'/u);
     }
-    for (const file of [...imported, 'scripts/package.json', 'scripts/src/flake-ledger.json']) {
+    for (const file of [
+      ...imported,
+      'scripts/package.json',
+      'scripts/src/flake-ledger.json',
+      'tools/vitest-ci/package.json',
+    ]) {
       expect(sparse).toContain(file);
     }
+    // The entry reads every project and quarantine file, and links the one workspace package as pnpm would.
+    expect(sparse).toEqual(expect.arrayContaining(['project.json', 'quarantine.json']));
+    // The quarantine module is linked before the ingestion, which reads the entries to count their release bar.
+    const link = steps.findIndex((step) =>
+      step.run?.includes('ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci'),
+    );
+    const ingest = steps.findIndex((step) => step.run?.startsWith('node scripts/src/ci-flake-ledger-ingest-cli.ts'));
+    expect(link).toBeGreaterThan(-1);
+    expect(link).toBeLessThan(ingest);
+    const entry = steps.find((step) => step.run?.includes('node scripts/src/ci-flake-quarantine-entry-cli.ts'));
+    // Entries are planned only from a complete ingestion.
+    expect((entry as { if?: string } | undefined)?.if).toBe(`\${{ steps.ingest.outcome == 'success' }}`);
+    // Release and expiry too, and an expiry is due on its day even when the entry step failed.
+    const release = steps.findIndex((step) =>
+      step.run?.startsWith('node scripts/src/ci-flake-quarantine-release-cli.ts'),
+    );
+    // A test is released only from a count of every pending run.
+    expect(steps[release]?.run).toBe(
+      'node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"',
+    );
+    expect((steps[release] as { env?: Record<string, string> } | undefined)?.env?.['INGEST_COMPLETE']).toBe(
+      `\${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}`,
+    );
+    expect(release).toBeGreaterThan(steps.indexOf(entry ?? {}));
+    // An expiry is due on its day: a failed or partial ingestion releases nothing but still expires.
+    expect((steps[release] as { if?: string } | undefined)?.if).toBe(
+      `\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`,
+    );
+  });
+
+  it('should write the D9 metrics table to its summary last, on every run that ingested (FQ-11)', () => {
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
+    const metrics = steps.at(-1) as (Step & { if?: string; env?: Record<string, string> }) | undefined;
+    expect(metrics?.run).toBe('node scripts/src/ci-flake-metrics-cli.ts');
+    expect(metrics?.if).toBe(`\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`);
+    expect(Object.keys(metrics?.env ?? {})).toEqual(['GITHUB_TOKEN']);
+    expect(metrics?.env?.['GITHUB_TOKEN']).toBe(`\${{ github.token }}`);
   });
 });

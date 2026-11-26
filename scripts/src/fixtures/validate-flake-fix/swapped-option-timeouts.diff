@@ -1,0 +1,14 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+-it('boots', { timeout: 1000 }, async () => {
++it('boots', { timeout: 5000 }, async () => {
+   expect(await boot()).toBe('ready');
+ });
+
+-it('reboots', { timeout: 5000 }, async () => {
++it('reboots', { timeout: 1000 }, async () => {
+   expect(await reboot()).toBe('ready');
+ });

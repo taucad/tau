@@ -1,6 +1,6 @@
 # Privacy Policy
 
-*Effective date: November 9, 2026*
+*Effective date: November 26, 2026*
 
 This policy explains what TAUCAD LIMITED ("Tau", "we", "us") collects when you use tau.new, the Tau web and desktop apps, the Tau command line and the Tau API, why we collect it, who sees it and what you can do about it. TAUCAD LIMITED, a New Zealand company, is the controller of your personal information.
 
@@ -28,7 +28,7 @@ This policy explains what TAUCAD LIMITED ("Tau", "we", "us") collects when you u
 
 **Usage and diagnostics.** The apps send Tau counts and timings about how Tau runs: which kernels run, how long operations take, how often they fail, memory use, export formats, sync outcomes and agent turn counts, token counts and error codes. They never include prompts, code, file names or geometry, and are not stored against your account. Operational metrics are always sent; you can switch the optional usage metrics off under **Settings → Data controls → Share usage and diagnostics**. The command line uses `tau telemetry off`.
 
-**Product analytics.** On the web, PostHog records pages, clicks, feature use and session replays only after you accept analytics; replays mask all text and inputs. The desktop app records the same events, without replay, unless you turn this off in **Settings → Data controls**. Details are in our [Storage and Cookie Policy](/legal/cookies).
+**Product analytics.** On the web, PostHog records pages, clicks, feature use and session replays only after you accept analytics. Replays show the pages as you saw them, but never what you type into a field or the chat box before you send it, and never API keys, sign-in codes or invitation links. Your chats and code appear in a replay only while **Improve Tau for everyone** is on for your account (see [section 2](#2-improving-tau-with-your-chats)); otherwise those areas are hidden, as they are when you are signed out or viewing another account's project. The desktop app records the same events, without replay, unless you turn this off in **Settings → Data controls**. Details are in our [Storage and Cookie Policy](/legal/cookies).
 
 **Error and crash reports.** When Tau hits an error, it sends Sentry the error message and stack trace, the app version and route, your browser, operating system and device, and recent technical events; desktop crash reports may include a memory snapshot of the crashed process. Reports may carry your internal account id so we can tell how many people a fault affects, never your name or email, and cookies, tokens and authorization headers are stripped first. If the browser stops a Tau page (for example because it ran out of memory), the next load sends a short diagnostic report: which kernel was running, which step it had reached, memory and geometry sizes and recent technical events, never your code, parameter values, file names or geometry. That report is usage and diagnostics data: it is sent only while **Share usage and diagnostics** is on and never carries your account id. Tau does not ask you about it.
 
@@ -48,6 +48,7 @@ Tau records agent tasks to find and fix failures, evaluate changes and improve t
 - **Ratings:** rating an agent reply records that rating and the reply it rates. The rating control is hidden while the switch is off.
 - **Shared material:** we do not record full tasks, or reuse content, in a project that belongs to another account or contains another account's material.
 - **Who sees it:** Tau's team, for the purposes above. Recordings are stored with [Langfuse](https://langfuse.com/privacy) in the United States (Oregon), under a pseudonymous account id, never your name or email. Langfuse does not use them for its own purposes and has its AI features turned off for our data.
+- **Session replays:** while the switch is on and you have accepted analytics, PostHog replays of your web sessions can show your chats and code. Turning the switch off hides them from new replays; it does not change replays already recorded, which PostHog keeps for its retention period.
 - **How long:** recordings are deleted no later than 180 days after capture, and promptly when you delete your account. Deleting a project does not delete them early.
 - **What we never do:** share your designs with third parties for training, or let our AI providers train on your content.
 

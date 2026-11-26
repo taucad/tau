@@ -535,7 +535,7 @@
         "test:e2e:history-lanes"
       ],
       "metadata": {
-        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before. Admitted to the merge queue as one row through test:e2e:queue after five consecutive green nightlies (CI decomposition DC-24; 7.6 to 10.4 min a job), so e2e-nightly.yml no longer runs it."
       }
     },
     "test:e2e:chat-viewer": {
@@ -648,7 +648,7 @@
     },
     "test:e2e:queue": {
       "executor": "nx:noop",
-      "dependsOn": ["test:e2e:attachment-image-engines"],
+      "dependsOn": ["test:e2e", "test:e2e:attachment-image-engines"],
       "metadata": {
         "description": "The ui end-to-end suites admitted to the merge queue (ci.yml lane e2e-queue, CI decomposition blueprint DC-23/DC-24): each runs as its own row whenever ui is affected, and e2e-nightly.yml leaves it out."
       }

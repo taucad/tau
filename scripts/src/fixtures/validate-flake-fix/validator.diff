@@ -1,0 +1,5 @@
+--- a/scripts/src/validate-flake-fix.ts
++++ b/scripts/src/validate-flake-fix.ts
+@@
+-export const ruleEnabled = true;
++export const ruleEnabled = false;

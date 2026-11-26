@@ -74,6 +74,7 @@ vi.mock('@taucad/editor-ui/lib/editor-syntax', () => ({ loadEditorSyntax: mockLo
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
 vi.mock('#routes/w.$workspace.$project/project-wait-skeleton.js', () => ({
   ProjectWaitSkeleton: ({ state }: { readonly state: string }) => <div data-testid={`project-wait-${state}`} />,
+  PaneWaitSkeleton: ({ label }: { readonly label: string }) => <div data-testid={`pane-wait-${label}`} />,
 }));
 /* What each surface shows; a surface not named here is ready. */
 const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));

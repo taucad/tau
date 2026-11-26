@@ -20,6 +20,10 @@ export type ChatActivityFacts = Readonly<{
   runState: ChatSidebarState | undefined;
   chatStatus: 'submitted' | 'streaming' | 'ready' | 'error';
   parts?: readonly MyMessagePart[];
+  /** A send is leaving for its own turn, before the chat's machine has admitted it. */
+  sending?: boolean;
+  /** A send waits for its host, which will take it later: what the chat says meanwhile (PERF-5). */
+  queued?: string;
 }>;
 
 /** Select an honest current action without cycling through invented progress. */
@@ -27,9 +31,15 @@ export const selectChatActivityCue = ({
   runState,
   chatStatus,
   parts = [],
+  sending = false,
+  queued,
 }: ChatActivityFacts): ChatActivityCue | undefined => {
   if (runState === 'reconnecting') {
     return { kind: 'reconnecting', sentence: 'Reconnecting…' };
+  }
+  /* Nothing runs for it yet, and it goes on its own once the host can take it: the send is queued, and says why. */
+  if (queued !== undefined) {
+    return { kind: 'waiting', sentence: queued };
   }
   if (runState === 'approval') {
     return { kind: 'waiting', sentence: 'Waiting for approval' };
@@ -37,19 +47,28 @@ export const selectChatActivityCue = ({
   if (runState === 'question') {
     return { kind: 'waiting', sentence: 'Waiting for your answer' };
   }
+  /* A send that starts a turn is not queued behind anything: from the moment it is sent, the turn is under way and
+   * reads like one. Admission and the host's own start are not states the person waits on (chat UX F1). */
+  const starting = sending || runState === 'queued';
   // Terminal host state wins over stale streaming parts/status during settlement.
-  if (chatStatus !== 'submitted' && (runState === 'done' || runState === 'failed' || runState === 'stopped')) {
+  if (
+    !starting &&
+    chatStatus !== 'submitted' &&
+    (runState === 'done' || runState === 'failed' || runState === 'stopped')
+  ) {
     return undefined;
   }
-  if (runState === 'queued') {
-    return { kind: 'working', sentence: 'Queued…' };
-  }
   const isLive =
-    runState === 'working' || runState === 'tool' || chatStatus === 'submitted' || chatStatus === 'streaming';
+    starting ||
+    runState === 'working' ||
+    runState === 'tool' ||
+    chatStatus === 'submitted' ||
+    chatStatus === 'streaming';
   if (!isLive) {
     return undefined;
   }
-  return selectPartActivity(chatStatus === 'submitted' ? [] : parts);
+  /* Until the new turn streams, the parts on screen are the previous turn's. */
+  return selectPartActivity(chatStatus === 'submitted' || starting ? [] : parts);
 };
 
 const summaryParser = unified().use(remarkParse);

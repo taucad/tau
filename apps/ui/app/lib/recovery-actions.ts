@@ -36,9 +36,19 @@ export type RecoveryActionId =
   | 'resetLocalDatabase'
   | 'resetFolderList';
 
-/** One action the panel can offer: a button that runs, or a link to follow. @public */
+/**
+ * One action the panel can offer: a button that runs, or a link to follow. A run that cannot be undone carries the
+ * question the panel asks, and the confirming button's label, before it runs. @public
+ */
 export type RecoveryAction = Readonly<{ id: RecoveryActionId; label: string }> &
-  (Readonly<{ kind: 'run'; run: () => void | Promise<void> }> | Readonly<{ kind: 'link'; href: string }>);
+  (
+    | Readonly<{
+        kind: 'run';
+        run: () => void | Promise<void>;
+        confirm?: Readonly<{ question: string; label: string }>;
+      }>
+    | Readonly<{ kind: 'link'; href: string; confirm?: undefined }>
+  );
 
 const labels: Readonly<Record<RecoveryActionId, string>> = {
   updateTau: 'Update Tau',
@@ -90,6 +100,12 @@ const action = (id: RecoveryActionId): RecoveryAction | undefined => {
               id,
               label,
               kind: 'run',
+              /* Every folder this browser connected is forgotten with the database, so the panel asks first. */
+              confirm: {
+                question:
+                  'Reset the folder list? Tau forgets the folders this browser connected and reloads. Your files are not changed, Home stays as it is, and you can add the folders again.',
+                label: 'Reset and reload',
+              },
               run: runner(async () => {
                 await resetHomeRecords();
                 globalThis.location.reload();

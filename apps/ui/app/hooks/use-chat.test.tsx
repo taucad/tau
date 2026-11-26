@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-/* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { memo } from 'react';
 import type { ReactNode } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
@@ -14,10 +13,18 @@ import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import {
+  lifecycleRow,
+  logRow,
+  publishLogRows,
+  runningRows,
+  writerOwnedCatchUp,
+} from '#machines/chat-projection.fixture.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import { presentMessages } from '#services/chat-session-store.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import type { CombinedChatState } from '#hooks/use-chat.js';
 import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
 
 /** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
@@ -33,120 +40,12 @@ vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) =>
   };
 });
 
-// ---------------------------------------------------------------------------
-// Hoisted test harness
-//
-// A minimal SDK Chat stand-in lets the provider tests read status, messages,
-// and selection without invoking a real host transport. Host commands and
-// projection-driven transcript behavior are covered by their owning suites.
-// ---------------------------------------------------------------------------
-
-type FakeChat = {
-  id: string;
-  messages: MyUIMessage[];
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
-  error: Error | undefined;
-  sendMessage: ReturnType<typeof vi.fn>;
-  regenerate: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  // Private in AI SDK source; chat-session-store uses a typed shim. Exposed
-  // as a public spy here so we can assert continuation flows.
-  makeRequest: ReturnType<typeof vi.fn>;
-  resumeStream: ReturnType<typeof vi.fn>;
-  emitMessages: () => void;
-  emitStatus: () => void;
-  onFinish: (event: { messages: MyUIMessage[]; isAbort: boolean; isError: boolean; isDisconnect: boolean }) => void;
-  onError: (error: Error) => void;
-};
-
 const harness = vi.hoisted(() => ({
-  created: [] as FakeChat[],
   patchChat: vi.fn(),
   touchChatRecency: vi.fn(),
   getChat: vi.fn(),
   consumeChatStartupRequest: vi.fn(),
   commitCancelledDraftRestore: vi.fn(),
-}));
-
-function getFake(chatId: string): FakeChat {
-  const fake = harness.created.find((chat) => chat.id === chatId);
-  if (!fake) {
-    throw new Error(`No fake Chat created for ${chatId}`);
-  }
-  return fake;
-}
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id: string;
-    public status: 'submitted' | 'streaming' | 'ready' | 'error' = 'ready';
-    public error: Error | undefined = undefined;
-    public messages: MyUIMessage[];
-    public sendMessage = vi.fn().mockResolvedValue(undefined);
-    public regenerate = vi.fn().mockResolvedValue(undefined);
-    public stop = vi.fn().mockResolvedValue(undefined);
-    public makeRequest = vi.fn().mockResolvedValue(undefined);
-    public resumeStream = vi.fn().mockResolvedValue(undefined);
-    readonly #messagesListeners = new Set<() => void>();
-    readonly #statusListeners = new Set<() => void>();
-    readonly #errorListeners = new Set<() => void>();
-
-    constructor(init: {
-      id: string;
-      messages?: MyUIMessage[];
-      onFinish?: (event: {
-        messages: MyUIMessage[];
-        isAbort: boolean;
-        isError: boolean;
-        isDisconnect: boolean;
-      }) => void;
-      onError?: (error: Error) => void;
-    }) {
-      this.id = init.id;
-      this.messages = init.messages ?? [];
-      const fake: FakeChat = Object.assign(this, {
-        // oxlint-disable-next-line no-empty-function -- default no-op until store wires its callback
-        onFinish: init.onFinish ?? (() => {}),
-        // oxlint-disable-next-line no-empty-function -- default no-op until store wires its callback
-        onError: init.onError ?? (() => {}),
-      });
-      harness.created.push(fake);
-    }
-
-    public '~registerMessagesCallback' = (onChange: () => void): (() => void) => {
-      this.#messagesListeners.add(onChange);
-      return () => {
-        this.#messagesListeners.delete(onChange);
-      };
-    };
-
-    public '~registerStatusCallback' = (onChange: () => void): (() => void) => {
-      this.#statusListeners.add(onChange);
-      return () => {
-        this.#statusListeners.delete(onChange);
-      };
-    };
-
-    public '~registerErrorCallback' = (onChange: () => void): (() => void) => {
-      this.#errorListeners.add(onChange);
-      return () => {
-        this.#errorListeners.delete(onChange);
-      };
-    };
-
-    public emitMessages = (): void => {
-      for (const listener of this.#messagesListeners) {
-        listener();
-      }
-    };
-
-    public emitStatus = (): void => {
-      for (const listener of this.#statusListeners) {
-        listener();
-      }
-    };
-  },
 }));
 
 vi.mock('ai', async (importOriginal) => ({
@@ -395,15 +294,8 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
 /** Torn down in `afterEach` so one test's project session never binds the next one's chat. */
 let stopTurnOwner: (() => void) | undefined;
 
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   beforeEach(() => {
-    harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
@@ -441,7 +333,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     });
     const user = makeUserMessage('msg_user_activity', 'activity');
     const assistant = makeAssistantMessage('msg_assistant_activity', 'answer');
-    getFake(defaultTestChatId).messages = [user, assistant];
     expect(assistant.id).toBeDefined();
     act(() => {
       stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId);
@@ -482,7 +373,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       expect(refuse).toHaveBeenCalledOnce();
     });
 
-    expect(getFake(defaultTestChatId).sendMessage).not.toHaveBeenCalled();
     expect(harness.touchChatRecency).not.toHaveBeenCalled();
   });
 });
@@ -498,7 +388,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
 describe('hooks resolution rules', () => {
   beforeEach(() => {
-    harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
@@ -572,36 +461,84 @@ describe('hooks resolution rules', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('does not re-render a status selector for message-only streaming updates', async () => {
+  it('should not re-render a status selector for message-only streaming updates', () => {
     let renderCount = 0;
     const { result } = renderHook(
       () => {
         renderCount++;
-        return useChatSelector((state) => state.status);
+        return { status: useChatSelector((state) => state.status), store: useChatSessionStore() };
       },
       { wrapper: createWrapper('chat_selector_stability') },
     );
-    await waitFor(() => {
-      expect(result.current).toBe('ready');
+    act(() => {
+      publishLogRows(result.current.store, 'chat_selector_stability', runningRows());
     });
-    const fake = getFake('chat_selector_stability');
+    expect(result.current.status).toBe('streaming');
     const beforeMessageUpdate = renderCount;
 
     act(() => {
-      fake.messages = [makeAssistantMessage('assistant_1', 'streaming')];
-      fake.emitMessages();
+      publishLogRows(
+        result.current.store,
+        'chat_selector_stability',
+        [
+          logRow(2, {
+            type: 'message.appended',
+            message: { id: 'assistant_1', role: 'assistant', content: [{ type: 'text', text: 'Streaming' }] },
+          }),
+        ],
+        2,
+      );
     });
     expect(renderCount).toBe(beforeMessageUpdate);
 
     act(() => {
-      fake.status = 'streaming';
-      fake.emitStatus();
+      publishLogRows(result.current.store, 'chat_selector_stability', [lifecycleRow(3, 'completed')], 3);
     });
-    expect(result.current).toBe('streaming');
+    expect(result.current.status).toBe('ready');
     expect(renderCount).toBe(beforeMessageUpdate + 1);
   });
 
-  it('shows Stop status for a reattached host run when the SDK is ready', () => {
+  it('should wake a selector only for the sources it read (WP-06a, D3)', () => {
+    const transcriptSelector = vi.fn((state: CombinedChatState) => state.messages);
+    const draftSelector = vi.fn((state: CombinedChatState) => state.draftText);
+    let draftText: string | undefined;
+    /* Each selector in its own component, as a message row and the composer are: a render of one is not a wake of the other. */
+    const Transcript = memo(function Transcript() {
+      useChatSelector(transcriptSelector);
+      return null;
+    });
+    const Draft = memo(function Draft() {
+      draftText = useChatSelector(draftSelector);
+      return null;
+    });
+    const Base = createWrapper('chat_selector_reads');
+    const { result } = renderHook(() => ({ actions: useDraftActions(), store: useChatSessionStore() }), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <Base>
+          <Transcript />
+          <Draft />
+          {children}
+        </Base>
+      ),
+    });
+    const transcriptRuns = transcriptSelector.mock.calls.length;
+    act(() => {
+      result.current.actions.setDraftText('typing');
+    });
+    expect(draftText).toBe('typing');
+    /* A keystroke moves nothing the transcript selector reads, so it did not run. */
+    expect(transcriptSelector.mock.calls.length).toBe(transcriptRuns);
+
+    const draftRuns = draftSelector.mock.calls.length;
+    act(() => {
+      publishLogRows(result.current.store, 'chat_selector_reads', runningRows());
+    });
+    /* The log moved what the transcript selector reads and nothing the draft selector reads. */
+    expect(transcriptSelector.mock.calls.length).toBeGreaterThan(transcriptRuns);
+    expect(draftSelector.mock.calls.length).toBe(draftRuns);
+  });
+
+  it('shows Stop status for a reattached host run', () => {
     const { result } = renderHook(
       () => ({ status: useChatSelector((state) => state.status), store: useChatSessionStore() }),
       { wrapper: createWrapper('chat_reattached_stop') },
@@ -617,67 +554,71 @@ describe('hooks resolution rules', () => {
     expect(result.current.status).toBe('ready');
   });
 
-  it('does not hide same-sized message order and map replacements', async () => {
-    const { result } = renderHook(
-      () =>
-        useChatSelector((state) => ({
-          order: state.messageOrder,
-          messagesById: state.messagesById,
-        })),
-      { wrapper: createWrapper('chat_selector_structure') },
-    );
-    await waitFor(() => {
-      expect(getFake('chat_selector_structure')).toBeDefined();
-    });
-    const fake = getFake('chat_selector_structure');
+  /* T2: the displayed transcript is the fold of the log, so its index is re-homed from the SDK chat's
+   * replaced messages to the store's pure index and to the log rows that replace a message. */
+  it('does not hide same-sized message order and map replacements', () => {
+    const first = presentMessages([
+      makeAssistantMessage('assistant_1', 'ready'),
+      makeAssistantMessage('assistant_2', 'ready'),
+      makeAssistantMessage('assistant_3', 'ready'),
+    ]);
+    expect(first.order).toEqual(['assistant_1', 'assistant_2', 'assistant_3']);
 
-    act(() => {
-      fake.messages = [
-        makeAssistantMessage('assistant_1', 'ready'),
-        makeAssistantMessage('assistant_2', 'ready'),
-        makeAssistantMessage('assistant_3', 'ready'),
-      ];
-      fake.emitMessages();
-    });
-    expect(result.current.order).toEqual(['assistant_1', 'assistant_2', 'assistant_3']);
-
-    act(() => {
-      fake.messages = [
+    const next = presentMessages(
+      [
         makeAssistantMessage('assistant_1', 'ready'),
         makeAssistantMessage('assistant_changed', 'ready'),
         makeAssistantMessage('assistant_3', 'ready'),
-      ];
-      fake.emitMessages();
-    });
-    expect(result.current.order).toEqual(['assistant_1', 'assistant_changed', 'assistant_3']);
-    expect(result.current.messagesById.has('assistant_changed')).toBe(true);
-    expect(result.current.messagesById.has('assistant_2')).toBe(false);
+      ],
+      first,
+    );
+    expect(next.order).toEqual(['assistant_1', 'assistant_changed', 'assistant_3']);
+    expect(next.messagesById.has('assistant_changed')).toBe(true);
+    expect(next.messagesById.has('assistant_2')).toBe(false);
   });
 
-  it('refreshes the middle-message index when actions replace a transcript without changing its ends', () => {
+  it('refreshes the middle-message index when the log replaces a message without changing its ends', async () => {
     const { result } = renderHook(
       () => ({
-        actions: useChatActions(),
+        store: useChatSessionStore(),
         order: useChatSelector((state) => state.messageOrder),
         messagesById: useChatSelector((state) => state.messagesById),
       }),
       { wrapper: createWrapper('chat_middle_replace') },
     );
-    const first = makeUserMessage('first', 'first');
-    const last = makeAssistantMessage('last', 'last');
-    act(() => {
-      result.current.actions.setMessages([first, makeAssistantMessage('middle-old', 'old'), last]);
-      getFake('chat_middle_replace').emitMessages();
+    await waitFor(() => {
+      expect(result.current.store.get('chat_middle_replace')).toBeDefined();
     });
-    expect(result.current.order).toEqual(['first', 'middle-old', 'last']);
+    const assistant = (text: string) => ({ id: 'step-1', role: 'assistant', content: [{ type: 'text', text }] });
+    act(() => {
+      publishLogRows(result.current.store, 'chat_middle_replace', [
+        ...runningRows(),
+        logRow(2, { type: 'message.appended', message: { id: 'first', role: 'user', content: 'first' } }),
+        logRow(3, { type: 'message.appended', message: assistant('old') }),
+        lifecycleRow(4, 'completed'),
+        lifecycleRow(5, 'admitted', 'run_2'),
+        lifecycleRow(6, 'running', 'run_2'),
+        logRow(7, { runId: 'run_2', type: 'message.appended', message: { id: 'last', role: 'user', content: 'last' } }),
+      ]);
+    });
+    await waitFor(() => {
+      expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
+    });
+    expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'old' });
 
     act(() => {
-      result.current.actions.setMessages([first, makeAssistantMessage('middle-new', 'new'), last]);
-      getFake('chat_middle_replace').emitMessages();
+      publishLogRows(
+        result.current.store,
+        'chat_middle_replace',
+        [logRow(8, { type: 'message.envelope-replaced', messageId: 'step-1', replacement: assistant('new') })],
+        8,
+      );
     });
-    expect(result.current.order).toEqual(['first', 'middle-new', 'last']);
-    expect(result.current.messagesById.has('middle-old')).toBe(false);
-    expect(result.current.messagesById.get('middle-new')?.parts[0]).toMatchObject({ text: 'new' });
+    /* The replacement shows with the next transcript announcement (D-UI-10). */
+    await waitFor(() => {
+      expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
+    });
+    expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
   });
 
   // =========================================================================

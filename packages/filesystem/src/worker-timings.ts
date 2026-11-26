@@ -72,6 +72,18 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `watch.changeSets`: change sets delivered to handlers (the `watchChangeSets` form, D6), one per handler.
  * - `overlay.read` / `overlay.fetch`: system skill resource reads, and those that reached the network rather than
  *   the realm's resource cache, so `overlay.fetch / overlay.read` is the miss rate.
+ * - `discovery.fullRead`: discovery roots read in full, every project directory of the root probed (one per root a
+ *   `listProjectManifests` call scans; project-library fast-path blueprint FW0).
+ * - `discovery.directoryRead`: project directories probed to learn what they hold: two file reads each, `tau.json`
+ *   and `.tau/project.json`.
+ * - `discovery.listing`: listings made to learn what a root or a project directory holds.
+ * - `discovery.identitySweep`: sweeps that read every directory's identity record to prove no directory carries an id.
+ * - `discovery.auditRead` / `discovery.auditMismatch`: directories the discovery index's audit re-read from content,
+ *   and those whose reading differed from the index's entry.
+ * - `discovery.rootCold`: discovery roots whose index went cold, every directory unknown; each also moves its reason's
+ *   counter, `discovery.rootCold.<reason>` (see {@link discoveryRootColdReasons}).
+ *
+ * The discovery index (fast-path blueprint FW2) moves the sweep, audit and cold counters; until it lands they stay 0.
  *
  * @public
  */
@@ -95,10 +107,54 @@ export const workerTimingCounters = [
   'watch.changeSets',
   'overlay.read',
   'overlay.fetch',
+  'discovery.fullRead',
+  'discovery.directoryRead',
+  'discovery.listing',
+  'discovery.identitySweep',
+  'discovery.auditRead',
+  'discovery.auditMismatch',
+  'discovery.rootCold',
+  'discovery.rootCold.reset',
+  'discovery.rootCold.gap',
+  'discovery.rootCold.observer',
+  'discovery.rootCold.notice',
+  'discovery.rootCold.bound',
 ] as const;
 
 /** One counter's name. @public */
 export type WorkerTimingCounter = (typeof workerTimingCounters)[number];
+
+/**
+ * Why a discovery root's index went cold (fast-path blueprint, evidence rules):
+ *
+ * - `reset`: a reset fact, a diff too large to localize, `refresh()` with no prefixes, a re-picked handle, or the root
+ *   admitted again.
+ * - `gap`: a lost sibling-tab notice; every root goes cold.
+ * - `observer`: the native observer was lost on a root with no snapshot source.
+ * - `notice`: a notice that names no directory, from an older tab.
+ * - `bound`: the dirty set outgrew the root's entries.
+ *
+ * @public
+ */
+export const discoveryRootColdReasons = ['reset', 'gap', 'observer', 'notice', 'bound'] as const;
+
+/** One reason a discovery root went cold. @public */
+export type DiscoveryRootColdReason = (typeof discoveryRootColdReasons)[number];
+
+/**
+ * Count one discovery root going cold, in total and under its reason.
+ *
+ * @param reason - Why the root went cold.
+ * @param timings - The recorder; this realm's by default.
+ * @public
+ */
+export const countDiscoveryRootCold = (
+  reason: DiscoveryRootColdReason,
+  timings: Pick<WorkerTimings, 'count'> = workerTimings,
+): void => {
+  timings.count('discovery.rootCold');
+  timings.count(`discovery.rootCold.${reason}`);
+};
 
 /**
  * The gauges, summarised as their highest value.

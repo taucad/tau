@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
   removeWorkspace: vi.fn<(workspaceId: string) => Promise<boolean>>(),
   rootStatuses: [] as RootStatus[],
   fileManagerState: 'ready' as 'ready' | 'error',
+  safeMode: false,
+  mount: vi.fn(async () => undefined),
   sendToFileManager: vi.fn(),
   selectDirectory: vi.fn<(options?: { id?: string; defaultPath?: string }) => Promise<string | undefined>>(),
   relink: vi.fn(),
@@ -33,16 +35,20 @@ const state = vi.hoisted(() => ({
   syncMarker: vi.fn(async () => 'written'),
   createNodeWorkspace: vi.fn(),
 }));
-/** The root file manager, as far as the rows read it: its published root statuses and whether it is in `error`. */
-const fileManagerRef = {
+/**
+ * The root file manager, as far as the rows read it: its published root statuses, whether it is in `error` and whether
+ * it started in safe mode. One per test, as each page load has its own.
+ */
+const createFileManagerRef = () => ({
   getSnapshot: () => ({
     status: 'active',
     matches: (value: string) => value === state.fileManagerState,
-    context: { rootStatuses: state.rootStatuses },
+    context: { rootStatuses: state.rootStatuses, safeMode: state.safeMode },
   }),
   subscribe: () => ({ unsubscribe: () => undefined }),
   send: state.sendToFileManager,
-};
+});
+const fileManager = vi.hoisted(() => ({ ref: undefined as unknown }));
 const workspace = {
   workspaceId: 'wsp_tau',
   name: 'Tau Workspace',
@@ -76,11 +82,11 @@ vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    fileManagerRef,
+    fileManagerRef: fileManager.ref,
     workspace: {
       disposeStorageRoot: state.dispose,
       syncProjectRoots: state.sync,
-      mount: vi.fn(async () => undefined),
+      mount: state.mount,
       unmount: vi.fn(),
     },
     scopedStorage: { readFile: vi.fn(async () => undefined) },
@@ -113,9 +119,14 @@ beforeEach(() => {
   state.listWorkspaces.mockResolvedValue([workspace]);
   state.connection.mockReturnValue({ phase: 'idle' });
   state.retry.mockReset();
-  /* The file service has started and published Home's status; a folder it has not published keeps its grant's word. */
-  state.rootStatuses = [{ storageRootKey: `node:${homePath}`, backend: 'node', state: 'available' }];
+  /* The file service has started and published Home's status and the folder's. */
+  state.rootStatuses = [
+    { storageRootKey: `node:${homePath}`, backend: 'node', state: 'available' },
+    { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'available' },
+  ];
   state.fileManagerState = 'ready';
+  state.safeMode = false;
+  fileManager.ref = createFileManagerRef();
   state.removeWorkspace.mockResolvedValue(true);
   state.disconnect.mockImplementation(async (path) => {
     state.paths = state.paths.filter((candidate) => candidate !== path);
@@ -496,5 +507,92 @@ describe('WorkspaceConnections', () => {
     );
     expect(state.disconnect).not.toHaveBeenCalled();
     expect(state.removeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('should anchor the marker of a folder whose own status is available, once per page load', async () => {
+    const { unmount } = render(<WorkspaceConnections />);
+
+    await waitFor(() => {
+      expect(state.syncMarker).toHaveBeenCalledOnce();
+    });
+    expect(state.syncMarker).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: workspace.workspaceId }),
+      expect.anything(),
+    );
+    unmount();
+    render(<WorkspaceConnections />);
+    await screen.findByRole('button', { name: 'Disconnect workspace' });
+    expect(state.syncMarker).toHaveBeenCalledOnce();
+  });
+
+  it('should show a granted folder the file service has not published yet as checking, with no command', async () => {
+    /* Home's status is published, the folder's is not (it was added after the first publish). */
+    state.rootStatuses = [{ storageRootKey: `node:${homePath}`, backend: 'node', state: 'available' }];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByText('Checking folder…')).toBeInTheDocument();
+    expect(screen.queryByText('Connected', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Change folder' })).not.toBeInTheDocument();
+    expect(state.syncMarker).not.toHaveBeenCalled();
+    expect(state.mount).not.toHaveBeenCalled();
+  });
+
+  it('should hold a granted folder as not connected in safe mode, offer no command and write nothing into it', async () => {
+    state.safeMode = true;
+    /* Safe mode admits Home alone, so Home's is the only status the file service publishes (D0). */
+    state.rootStatuses = [{ storageRootKey: `node:${homePath}`, backend: 'node', state: 'available' }];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByText('Not connected in safe mode')).toBeInTheDocument();
+    expect(screen.queryByText('Connected', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Locate…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove from Tau' })).not.toBeInTheDocument();
+    expect(state.syncMarker).not.toHaveBeenCalled();
+    expect(state.mount).not.toHaveBeenCalled();
+  });
+
+  it('should release an unanswered Locate pick when Locate is pressed again', async () => {
+    const moved = '/Volumes/Archive/Tau Workspace';
+    const again = '/Volumes/Backup/Tau Workspace';
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.selectDirectory.mockResolvedValueOnce(moved).mockResolvedValueOnce(again);
+    state.relink.mockResolvedValue({ status: 'confirm', matched: 3, total: 5 });
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Locate…' }));
+    expect(await screen.findByText(/contains 3 of the 5 projects/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Locate…' }));
+
+    await waitFor(() => {
+      expect(state.relink).toHaveBeenCalledTimes(2);
+    });
+    expect(state.disconnect).toHaveBeenCalledWith(moved);
+    expect(state.disconnect).not.toHaveBeenCalledWith(again);
+    /* The first pick is released before the picker opens again, so picking the same folder keeps its new grant. */
+    expect(state.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      state.selectDirectory.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it('should release an unanswered Locate pick when the page closes', async () => {
+    const moved = '/Volumes/Archive/Tau Workspace';
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.selectDirectory.mockResolvedValue(moved);
+    state.relink.mockResolvedValue({ status: 'confirm-different' });
+    const { unmount } = render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Locate…' }));
+    expect(await screen.findByText(/looks like a different folder/)).toBeInTheDocument();
+    unmount();
+
+    await waitFor(() => {
+      expect(state.disconnect).toHaveBeenCalledWith(moved);
+    });
   });
 });

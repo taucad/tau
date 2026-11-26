@@ -148,6 +148,19 @@ describe('boot-health sequences (T-R12.2)', () => {
     expect(begun.ledger.autoInstall).toEqual({ fromBuild: build, targetVersion: '1.15.1' });
   });
 
+  it('should not block a target attempted from another build, and should drop that record', () => {
+    const manuallyInstalled = buildIdentity({ version: '1.15.2', sourceCommit: '5c6d7e8', packaged: true });
+    const begun = beginLaunch({
+      previous: ledger({ autoInstall: { fromBuild: build, targetVersion: '1.15.1' } }),
+      build: manuallyInstalled,
+      version: '1.15.2',
+      safeModeRequested: false,
+      launchId: 'id',
+    });
+    expect(begun.blockedAutoInstallTarget).toBeUndefined();
+    expect(begun.ledger.autoInstall).toBeUndefined();
+  });
+
   it('should write the new launch at main-started with its mode', () => {
     const begun = beginLaunch({
       previous: undefined,
@@ -298,5 +311,25 @@ describe('boot-health automatic install record (T-N1.2)', () => {
     });
     expect(next.blockedAutoInstallTarget).toBeUndefined();
     expect(readBootHealth(path)?.autoInstall).toBeUndefined();
+  });
+
+  it('should withdraw an attempt that never started, keeping the block this launch began with', async () => {
+    const path = join(await profile(), bootHealthFileName);
+    const first = startBootHealth({ path, build, version: '1.15.0', safeModeRequested: false, launchId: 'one' });
+    first.noteAutoInstall('1.15.1');
+    first.withdrawAutoInstall('1.15.1');
+    expect(readBootHealth(path)?.autoInstall).toBeUndefined();
+    expect(
+      startBootHealth({ path, build, version: '1.15.0', safeModeRequested: false, launchId: 'two' })
+        .blockedAutoInstallTarget,
+    ).toBeUndefined();
+
+    /* A launch that began with 1.15.1 blocked withdraws a refused 1.15.2 back to that block. */
+    first.noteAutoInstall('1.15.1');
+    const blocked = startBootHealth({ path, build, version: '1.15.0', safeModeRequested: false, launchId: 'three' });
+    expect(blocked.blockedAutoInstallTarget).toBe('1.15.1');
+    blocked.noteAutoInstall('1.15.2');
+    blocked.withdrawAutoInstall('1.15.2');
+    expect(readBootHealth(path)?.autoInstall).toEqual({ fromBuild: build, targetVersion: '1.15.1' });
   });
 });

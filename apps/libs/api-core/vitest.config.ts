@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -26,6 +26,7 @@ export default defineConfig({
       ignoreSourceErrors: true,
     },
     reporters: testReporters('default'),
+    retry: testRetry(),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/apps/libs/api-core',

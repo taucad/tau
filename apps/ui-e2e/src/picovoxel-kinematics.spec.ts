@@ -8,12 +8,20 @@ type State = Readonly<{
   playback: Readonly<{ status: 'stopped' | 'playing' | 'paused'; animationId?: string; time: number }>;
 }>;
 type BufferCounts = Readonly<{ allocations: number; updates: number }>;
+/**
+ * Buffer uploads on the viewport's WebGL 2 context, by what they hold. `mesh` is model vertex and index data, the
+ * uploads a pose must never repeat. `overlay` is a screen-space quad of at most four vec3 vertices (the emphasis region
+ * of `model-emphasis-region.ts`), which follows the posed parts on screen and is rewritten in place as they move.
+ * `uniform` is the node WebGL 2 pipeline's uniform blocks (`UNIFORM_BUFFER`), which Three's WebGLBackend writes with
+ * `bufferData` whenever a matrix or material uniform changes, so every posed frame legitimately adds to it.
+ */
+type BufferUploads = Readonly<{ mesh: BufferCounts; overlay: BufferCounts; uniform: BufferCounts }>;
 type ViewerWindow = typeof globalThis & {
   __TAU_KINEMATICS_TEST__?: {
     getState(unitId: string): State | undefined;
     getComponentWorldMatrix(unitId: string, componentId: string): number[] | undefined;
   };
-  __TAU_PICOVOXEL_BUFFER_TEST__?: { read(context: WebGL2RenderingContext): BufferCounts };
+  __TAU_PICOVOXEL_BUFFER_TEST__?: { read(context: WebGL2RenderingContext): BufferUploads };
 };
 
 const unitId = 'file:main.ts';
@@ -119,7 +127,7 @@ async function reset(): Promise<void> {
   expectAsBuilt(await matrices());
 }
 
-async function buffers(): Promise<BufferCounts> {
+async function buffers(): Promise<BufferUploads> {
   return target.evaluate(() => {
     const global = globalThis as ViewerWindow;
     const context = globalThis.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas().getContext('webgl2');
@@ -133,26 +141,54 @@ async function buffers(): Promise<BufferCounts> {
 test('should play, pause and reset the shipped PicoVoxel stage without remeshing or accumulated pose drift', async () => {
   // Count actual uploads on this viewport's WebGL context, rather than only its live geometry count.
   await target.addInitScript(() => {
-    const counts = new WeakMap<WebGL2RenderingContext, { allocations: number; updates: number }>();
-    const read = (context: WebGL2RenderingContext) => {
+    type Counts = { allocations: number; updates: number };
+    type Uploads = { mesh: Counts; overlay: Counts; uniform: Counts };
+    const counts = new WeakMap<WebGL2RenderingContext, Uploads>();
+    const read = (context: WebGL2RenderingContext): Uploads => {
       let value = counts.get(context);
       if (!value) {
-        value = { allocations: 0, updates: 0 };
+        const zero = (): Counts => ({ allocations: 0, updates: 0 });
+        value = { mesh: zero(), overlay: zero(), uniform: zero() };
         counts.set(context, value);
       }
       return value;
+    };
+    const overlayBytes = 4 * 3 * Float32Array.BYTES_PER_ELEMENT;
+    const sizes = new WeakMap<WebGLBuffer, number>();
+    const bound = (context: WebGL2RenderingContext, binding: unknown): WebGLBuffer | undefined => {
+      const parameter =
+        binding === context.ELEMENT_ARRAY_BUFFER
+          ? context.ELEMENT_ARRAY_BUFFER_BINDING
+          : binding === context.ARRAY_BUFFER
+            ? context.ARRAY_BUFFER_BINDING
+            : undefined;
+      const buffer: unknown = parameter === undefined ? undefined : context.getParameter(parameter);
+      return buffer instanceof WebGLBuffer ? buffer : undefined;
+    };
+    // Classified by the bound buffer's allocated size; a buffer the probe cannot see counts as mesh, so it cannot hide.
+    const holder = (context: WebGL2RenderingContext, binding: unknown, buffer: WebGLBuffer | undefined): Counts => {
+      if (binding === context.UNIFORM_BUFFER) {
+        return read(context).uniform;
+      }
+      const size = buffer ? sizes.get(buffer) : undefined;
+      return size !== undefined && size <= overlayBytes ? read(context).overlay : read(context).mesh;
     };
     const allocate = WebGL2RenderingContext.prototype.bufferData;
     const update = WebGL2RenderingContext.prototype.bufferSubData;
     WebGL2RenderingContext.prototype.bufferData = new Proxy(allocate, {
       apply(original, context: WebGL2RenderingContext, args: unknown[]): void {
-        read(context).allocations++;
+        const buffer = bound(context, args[0]);
+        const data = args[1];
+        if (buffer) {
+          sizes.set(buffer, typeof data === 'number' ? data : ArrayBuffer.isView(data) ? data.byteLength : Infinity);
+        }
+        holder(context, args[0], buffer).allocations++;
         Reflect.apply(original, context, args);
       },
     });
     WebGL2RenderingContext.prototype.bufferSubData = new Proxy(update, {
       apply(original, context: WebGL2RenderingContext, args: unknown[]): void {
-        read(context).updates++;
+        holder(context, args[0], bound(context, args[0])).updates++;
         Reflect.apply(original, context, args);
       },
     });
@@ -194,7 +230,7 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   await expectSlide(0);
   await target.delay(500);
   const before = await buffers();
-  expect(before.allocations, 'initial geometry was uploaded').toBeGreaterThan(0);
+  expect(before.mesh.allocations, 'initial geometry was uploaded').toBeGreaterThan(0);
 
   await setDriver(90);
   expectPose(await matrices(), 90, 1);
@@ -238,7 +274,7 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   await expectSlide(5);
   await reset();
   const after = await buffers();
-  expect(after, 'pose controls reuse uploaded mesh buffers').toEqual(before);
+  expect(after.mesh, 'pose controls reuse uploaded mesh buffers').toEqual(before.mesh);
 
   await openCommand('Open parameters');
   const lead = selectors.getByLabelText('Input for Lead').first();

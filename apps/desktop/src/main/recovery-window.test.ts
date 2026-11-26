@@ -58,6 +58,7 @@ const fakeWindow = () => {
 
 const controllerFor = (window = fakeWindow()) => {
   const createWindow = vi.fn(() => window);
+  const openWhenClosed: boolean[] = [];
   const showMessageBox = vi.fn(async () => ({ response: 3 }));
   const fallback = {
     restartInSafeMode: vi.fn(async () => true),
@@ -74,8 +75,11 @@ const controllerFor = (window = fakeWindow()) => {
     fallback,
     report,
     log: vi.fn(),
+    closed: () => {
+      openWhenClosed.push(controller.isOpen());
+    },
   });
-  return { controller, createWindow, showMessageBox, fallback, report, window };
+  return { controller, createWindow, showMessageBox, fallback, report, window, openWhenClosed };
 };
 
 let userData: string | undefined;
@@ -184,6 +188,34 @@ describe('recovery window (T-R12.6)', () => {
     controller.open('load-failed');
     await vi.waitFor(() => {
       expect(showMessageBox).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('should tell main when the window stops showing: closed, failed to load, renderer gone, or never created (N1)', async () => {
+    const closedByPerson = controllerFor();
+    closedByPerson.controller.open('auto-install');
+    expect(closedByPerson.openWhenClosed).toEqual([]);
+    closedByPerson.window.events.emit('closed');
+    expect(closedByPerson.openWhenClosed).toEqual([false]);
+
+    const failedLoad = controllerFor();
+    failedLoad.controller.open('auto-install');
+    failedLoad.window.contents.emit('did-fail-load', {}, -6, 'ERR_FILE_NOT_FOUND', 'file:///missing', true);
+    expect(failedLoad.openWhenClosed).toEqual([false]);
+
+    const rendererGone = controllerFor();
+    rendererGone.controller.open('auto-install');
+    rendererGone.window.contents.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    expect(rendererGone.openWhenClosed).toEqual([false]);
+
+    const neverCreated = controllerFor();
+    neverCreated.createWindow.mockImplementationOnce(() => {
+      throw new Error('no window');
+    });
+    neverCreated.controller.open('auto-install');
+    expect(neverCreated.openWhenClosed).toEqual([false]);
+    await vi.waitFor(() => {
+      expect(neverCreated.showMessageBox).toHaveBeenCalledOnce();
     });
   });
 

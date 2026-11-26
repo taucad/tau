@@ -23,10 +23,6 @@ const cappedModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
   'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
@@ -58,10 +54,6 @@ const pdfInputModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
   'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
@@ -145,12 +137,12 @@ describe('modelList', () => {
       }
     });
 
-    it('should include every row default in its own levels, sent at high', () => {
+    it('should include every row default in its own levels, sent at medium', () => {
       for (const model of getCloudCatalogEntries()) {
         const levels: readonly string[] | undefined = model.support?.reasoning?.levels;
         if (levels !== undefined) {
           expect(levels, model.id).toContain(forwardedDefault(model));
-          expect(forwardedDefault(model), model.id).toBe('high');
+          expect(forwardedDefault(model), model.id).toBe('medium');
         }
       }
     });
@@ -172,9 +164,6 @@ describe('modelList', () => {
         'openai-gpt-6-astra',
         'openai-gpt-6-sol',
         'openai-gpt-6-luna',
-        'openai-gpt-5.6-sol',
-        'openai-gpt-5.6-terra',
-        'openai-gpt-5.6-luna',
       ]);
     });
 
@@ -301,7 +290,7 @@ describe('ModelService', () => {
         maxTokens: 128_000,
         cost: { inputTokens: 2, outputTokens: 10, cacheReadTokens: 0.2, cacheWriteTokens: 2.5 },
       },
-      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'high' } },
+      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'medium' } },
     });
     expect(modelList.anthropic['claude-sonnet-5']?.recommended).toBe(false);
   });
@@ -330,7 +319,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -361,7 +350,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(fable52?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -369,18 +358,14 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
   });
 
-  it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
-    const service = createModelService();
-    const listedModels = await service.getModels();
-    const gpt56ModelIds = ['openai-gpt-5.6-sol', 'openai-gpt-5.6-terra', 'openai-gpt-5.6-luna'];
-    const listedModelIds = listedModels.map((model) => model.id);
+  it('lists no GPT-5 generation model', async () => {
+    const listedModels = await createModelService().getModels();
 
-    expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
-    expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
-    expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
+    expect(listedModels.filter((model) => model.id.startsWith('openai-gpt-5'))).toEqual([]);
+    expect(Object.keys(modelList.openai).filter((key) => key.startsWith('gpt-5'))).toEqual([]);
   });
 
-  it('should recommend GPT-6.1 Terra while retaining GPT-5.6 Terra as non-recommended', async () => {
+  it('should recommend GPT-6.1 Terra', async () => {
     const listedModels = await createModelService().getModels();
     expect(listedModels.find((model) => model.id === 'openai-gpt-6.1-terra')).toMatchObject({
       recommended: true,
@@ -396,9 +381,8 @@ describe('ModelService', () => {
         knowledgeCutoff: '2026-06',
         cost: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.05, cacheWriteTokens: 1.25 },
       },
-      configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
+      configuration: { streaming: true, reasoning: { effort: 'medium', summary: 'auto' } },
     });
-    expect(listedModels.find((model) => model.id === 'openai-gpt-5.6-terra')).toMatchObject({ recommended: false });
     expect(gatewayModelRoutes()).toContainEqual({
       routeId: 'openai-gpt-6.1-terra',
       modelId: 'gpt-6.1-terra',
@@ -472,7 +456,7 @@ describe('ModelService', () => {
       configuration: {
         streaming: true,
         maxOutputTokens: 64_000,
-        reasoning: { effort: 'high', summary: 'auto' },
+        reasoning: { effort: 'medium', summary: 'auto' },
       },
     });
     expect(modelList.xai['grok-4.6']?.recommended).toBe(false);

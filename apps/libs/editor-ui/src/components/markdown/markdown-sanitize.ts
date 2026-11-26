@@ -4,97 +4,37 @@ import type { Root, Element } from 'hast';
 import type { Schema } from 'hast-util-sanitize';
 import type { PluggableList } from 'unified';
 
-const katexTagAllowList = [
-  'math',
-  'maction',
-  'maligngroup',
-  'malignmark',
-  'menclose',
-  'merror',
-  'mfenced',
-  'mfrac',
-  'mi',
-  'mlongdiv',
-  'mmultiscripts',
-  'mn',
-  'mo',
-  'mover',
-  'mpadded',
-  'mphantom',
-  'mroot',
-  'mrow',
-  'ms',
-  'mscarries',
-  'mscarry',
-  'msgroup',
-  'msline',
-  'mspace',
-  'msqrt',
-  'msrow',
-  'mstack',
-  'mstyle',
-  'msub',
-  'msup',
-  'msubsup',
-  'mtable',
-  'mtd',
-  'mtext',
-  'mtr',
-  'munder',
-  'munderover',
-  'semantics',
-  'annotation',
-  'annotation-xml',
-  'svg',
-  'g',
-  'path',
-  'span',
-] as const;
-
-const katexAttributeAllowList = [
-  ['className'],
-  ['style'],
-  ['encoding'],
-  ['display'],
-  ['mathvariant'],
-  ['xmlns'],
-  ['viewBox'],
-  ['width'],
-  ['height'],
-  ['preserveAspectRatio'],
-  ['fill'],
-  ['stroke'],
-  ['d'],
-  ['transform'],
-  ['x'],
-  ['y'],
-  ['x1'],
-  ['x2'],
-  ['y1'],
-  ['y2'],
-];
-
 const allowedAnchorProtocols = ['http', 'https', 'mailto'];
 const allowedImageProtocols = ['http', 'https'];
 
+/*
+ * Elements dropped from the default schema: `picture` and `source` load from `srcset`, which the protocol check does
+ * not cover.
+ */
+const droppedTagNames = new Set(['picture', 'source']);
+
 /**
- * Strict sanitize schema for publication README markdown:
+ * Sanitize schema for Markdown a model, an agent or a project file wrote, which is all the Markdown this viewer shows:
  *
  * - Strips `<script>` / `<iframe>` and `javascript:` URLs.
  * - Forces every `<a>` to carry `rel='nofollow noopener noreferrer'` and `target='_blank'`.
- * - Permits KaTeX `MathML`/SVG nodes and `language-*` code class names.
+ * - Keeps no `style` attribute and no class beyond `language-*`, `katex*` and `hljs*`, so the text cannot draw over
+ *   the app, look like one of its controls, or load a stylesheet URL.
+ * - Keeps no `picture` or `source`; an `img` keeps its `src`, and `MarkdownImage` loads one from another host only
+ *   when the person asks.
+ *
+ * Math needs no allowance here: the math plugin renders KaTeX after this schema has run.
  */
-const publicationSanitizeSchema: Schema = {
+const markdownSanitizeSchema: Schema = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames ?? []), ...katexTagAllowList],
+  tagNames: (defaultSchema.tagNames ?? []).filter((tag) => !droppedTagNames.has(tag)),
   attributes: {
     ...defaultSchema.attributes,
     a: [...(defaultSchema.attributes?.['a'] ?? []), 'target', 'rel'],
     code: [['className', /^language-./u]],
     pre: [['className', /^language-./u]],
-    span: [...(defaultSchema.attributes?.['span'] ?? []), ['className', /^(?:katex|hljs)/u], ['style']],
+    span: [...(defaultSchema.attributes?.['span'] ?? []), ['className', /^(?:katex|hljs)/u]],
     div: [...(defaultSchema.attributes?.['div'] ?? []), ['className', /^(?:katex|hljs)/u]],
-    ...Object.fromEntries(katexTagAllowList.map((tag) => [tag, katexAttributeAllowList])),
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -122,11 +62,8 @@ const enforceSafeAnchors = () => (tree: Root) => {
 };
 
 /**
- * Composite rehype plugin set for publication README markdown.
+ * Composite rehype plugin set for the Markdown the viewer shows.
  *
  * @public
  */
-export const publicationRehypeSanitize: PluggableList = [
-  [rehypeSanitize, publicationSanitizeSchema],
-  [enforceSafeAnchors],
-];
+export const markdownRehypeSanitize: PluggableList = [[rehypeSanitize, markdownSanitizeSchema], [enforceSafeAnchors]];

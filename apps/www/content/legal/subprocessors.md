@@ -1,6 +1,6 @@
 # Sub-processors
 
-*Effective date: November 8, 2026*
+*Effective date: November 26, 2026*
 
 These are the companies that process personal data on behalf of TAUCAD LIMITED to run Tau. Each may use the data only to provide its service to us and must protect it under a written agreement with us. Our [Privacy Policy](/legal/privacy) explains what we collect and why.
 
@@ -37,7 +37,7 @@ When you use an AI feature, your prompt and the design context the agent needs g
 
 | Provider | What it does for us | Data it handles | Location |
 | --- | --- | --- | --- |
-| PostHog | Product analytics (on the web, after you accept) | Usage events, device information, session replays with text masked | United States |
+| PostHog | Product analytics (on the web, after you accept) | Usage events, device information and session replays (typed input hidden; chats and code only when your setting allows it) | United States |
 | Sentry | Error and crash reports | Error messages, stack traces, app and device details, desktop crash memory snapshots | United States |
 | Grafana Labs | Server logs and metrics | API logs and performance metrics | United States |
 | Langfuse (Langfuse GmbH, part of ClickHouse, Inc.) | Stores agent task recordings (Privacy Policy section 2) | Task summaries and ratings and, when your setting allows it, prompts, designs, tool calls and replies, under a pseudonymous account id | United States (Oregon) |

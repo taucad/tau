@@ -57,9 +57,10 @@ import {
   routeBindsLocator,
   writeProjectLibraryFile,
 } from '#runtime/project-library-storage.js';
-import type { PersistentStorageRoot } from '#runtime/project-library-storage.js';
+import type { PersistentStorageRoot, ProjectOccurrence } from '#runtime/project-library-storage.js';
 import type {
   InitialEditorState,
+  ProjectLibraryFileManager,
   ProjectLibraryRootFacade,
   ProjectLibraryWorker,
 } from '#types/project-library-io.types.js';
@@ -144,8 +145,8 @@ type CreateProjectFromKernel = CreateProjectChatOptions & {
    * and evaluates becomes main.
    */
   kernel: KernelProvider | 'auto';
-  /** Override default project name */
-  projectName?: string;
+  /** Override default project name; a promise is awaited only where the name is needed, so the create overlaps it. */
+  projectName?: string | Promise<string>;
 };
 
 /**
@@ -322,7 +323,8 @@ export type ProjectCommandsHost<
   readiedWorker: () => Promise<ObjectStore>;
   whenDiscoveryReady: () => Promise<void>;
   whenReplaysDrained: () => Promise<void>;
-  discover: () => Promise<ProjectDiscoveryResult>;
+  /** A pass's listing; `reuse` accepts the current pass's when its epoch is still current. */
+  discover: (options?: Readonly<{ reuse?: boolean }>) => Promise<ProjectDiscoveryResult>;
   beginMutation: (
     projectId: string,
     options: Readonly<{ gated: boolean }>,
@@ -336,6 +338,8 @@ export type ProjectCommandsHost<
   replayForPerson: (operation: PendingProjectOperation) => Promise<boolean>;
   invalidateProjectListing: () => Promise<unknown>;
   invalidateListing: () => void;
+  /** A library row moved and nothing on disk did: the listing is enriched again from the current pass, with no scan. */
+  refreshListingRows: () => Promise<void>;
   noteLibraryChanged: () => void;
   sessions: () => ProjectLibrarySessions | undefined;
   chatSessions: () => ProjectLibraryChatSessions<Projection> | undefined;
@@ -351,9 +355,42 @@ const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSour
   return source === undefined ? {} : { attachmentSource: source };
 };
 
+/**
+ * The image attachments of a prompt as the `data:` URLs the project-name profile takes (D14). The Home composer asks
+ * the same way before submit (C1), so a name it holds was made from the same input.
+ *
+ * @param recordFiles - The record client the composer's attachments are stored under.
+ * @param message - The prompt's attachments and the composer directory holding them.
+ * @returns One URL per readable image, in order.
+ *
+ * @public
+ */
+export const namingImageUrls = async (
+  recordFiles: ProjectLibraryFileManager['recordFiles'],
+  message: Readonly<Pick<NonNullable<CreateProjectChatOptions['initialMessage']>, 'attachments' | 'attachmentSource'>>,
+): Promise<string[]> => {
+  const source = composerAttachmentsOf(recordFiles, message.attachmentSource);
+  const urls = await Promise.all(
+    (message.attachments ?? [])
+      .filter((attachment) => attachmentKind(attachment.mediaType) === 'image')
+      .map(async (attachment) => {
+        const bytes = await source.read(attachment);
+        return bytes && `data:${attachment.mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+      }),
+  );
+  return urls.filter((url) => url !== undefined);
+};
+
 /** Whether the registry holds a live session for the project. */
 const selectProjectLive = (snapshot: ReturnType<ProjectLibrarySessions['getSnapshot']>, projectId: string): boolean =>
   snapshot.context.refs[projectId] !== undefined;
+
+/** Whether a route verification names the directory at `locator` as the one it read; one that names none does not. */
+const namesDirectory = (
+  verified: Readonly<{ storageRootKey?: string; providerBasePath?: string }>,
+  locator: ProjectLocator,
+): boolean =>
+  verified.storageRootKey === locator.storageRootKey && verified.providerBasePath === locator.relativeDirectory;
 
 /**
  * Where a new project is created: the explicit location, or the last
@@ -648,7 +685,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     await mutation.apply(operation, worker);
     /* D19: a copy has no remote of its own, so it backs up by default too. */
     this.#host.services.cloudIntent.set(targetId, 'default');
-    void this.#host.invalidateProjectListing();
+    /* The settled row moved the epoch and owes the pass that lists the copy (fast-path blueprint FW1). */
     return {
       ...operation.manifest,
       id: operation.projectId,
@@ -667,13 +704,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const worker = await this.#host.readiedWorker();
     const trashed = await worker.trashProject(projectId);
     if (trashed?.deletedAt === undefined) {
-      this.#projectChanged(projectId);
+      this.#rowChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, { deletedAt: trashed.deletedAt });
     this.#host.noteLibraryChanged();
-    this.#projectChanged(projectId);
+    this.#rowChanged(projectId);
     return true;
   };
 
@@ -688,13 +725,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const worker = await this.#host.readiedWorker();
     const restored = await worker.restoreProject(projectId);
     if (!restored) {
-      this.#projectChanged(projectId);
+      this.#rowChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, {});
     this.#host.noteLibraryChanged();
-    this.#projectChanged(projectId);
+    this.#rowChanged(projectId);
     return true;
   };
 
@@ -731,7 +768,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     mutation.journaled(operation);
     await mutation.apply(operation, worker);
     this.#host.noteLibraryChanged();
-    void this.#host.invalidateProjectListing();
+    /* The settled row moved the epoch and owes the pass that drops the card (fast-path blueprint FW1). */
     if (survives) {
       // Another copy keeps the project: its queries are read again, from the copy the route binds now.
       this.#host.invalidateProject(projectId);
@@ -883,6 +920,15 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     this.#host.invalidateProject(projectId);
   }
 
+  /**
+   * Only the project's library row moved (the Trash): the listing is enriched again from the current pass, with no
+   * scan, and the project's own queries are read again (fast-path blueprint FW1).
+   */
+  #rowChanged(projectId: string): void {
+    void this.#host.refreshListingRows();
+    this.#host.invalidateProject(projectId);
+  }
+
   async #importStagingOwners(): Promise<string[]> {
     const worker = await this.#host.readiedWorker();
     const operations = await worker.getPendingProjectOperations();
@@ -892,28 +938,16 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   }
 
   /**
-   * Images for the naming profile, which needs bytes over HTTP. Documents are
-   * not sent to it (blueprint §Legacy arms).
-   */
-  async #namingImageUrls(message: NonNullable<CreateProjectChatOptions['initialMessage']>): Promise<string[]> {
-    const fileManager = await this.#host.facade();
-    const source = composerAttachmentsOf(fileManager.recordFiles, message.attachmentSource);
-    const urls = await Promise.all(
-      (message.attachments ?? [])
-        .filter((attachment) => attachmentKind(attachment.mediaType) === 'image')
-        .map(async (attachment) => {
-          const bytes = await source.read(attachment);
-          return bytes && `data:${attachment.mediaType};base64,${uint8ArrayToBase64(bytes)}`;
-        }),
-    );
-    return urls.filter((url) => url !== undefined);
-  }
-
-  /**
    * Find the one directory a permanent delete removes, in a pass whose roots are all observed: the copy at `locator`,
    * or with none the copy the route binds, or the only copy. The directory must still carry the project id; the
    * authority checks that once more under the project and physical locks before it deletes. `survives` says another
-   * directory carried the id too.
+   * directory carries the id too.
+   *
+   * The target and the root statuses come from the current pass, with no scan (fast-path blueprint FW1). A stale pass
+   * can only make this stricter: `survives`, the one fact that loosens a delete (no Trash needed), is read from disk.
+   * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks,
+   * and counts only when the directory it read is that copy and not the target. Only when the pass shows another
+   * copy that no route binds does the precheck still scan, as before.
    */
   async #discoverPermanentDeleteStorage(
     projectId: string,
@@ -924,7 +958,51 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       throw new Error(`Project locator unavailable: ${projectId}`);
     }
     const fileManager = await this.#host.facade();
-    const discovery = await fileManager.client.listProjectManifests();
+    const pass = await this.#host.discover({ reuse: true });
+    const target = this.#permanentDeleteTarget({ projectId, locator, configured }, pass);
+    const others = projectOccurrences(pass, projectId).filter((occurrence) => occurrence !== target);
+    if (others.length === 0) {
+      return { storage: locatorToPendingStorage(target.locator), survives: false };
+    }
+    const routeCopy = others.find((occurrence) => routeBindsLocator(configured, occurrence.locator));
+    if (routeCopy !== undefined) {
+      /* The route binds another copy: proven by reading it now, or not at all. The verification reads whichever
+       * directory the route binds when it runs, and an ungated "Use this folder" may have moved the route since
+       * `configured` was read, even onto the target; so the proof counts only for the directory it names, and only
+       * when that is the copy chosen here and not the target. With no proof the delete stays a sole copy's, which
+       * only asks for the Trash. */
+      const verification = await fileManager.client.verifyProjectRoute({ projectId });
+      const proven =
+        verification.status === 'verified' &&
+        namesDirectory(verification, routeCopy.locator) &&
+        !namesDirectory(verification, target.locator);
+      return { storage: locatorToPendingStorage(target.locator), survives: proven };
+    }
+    /* Another copy that no route binds: no read proves it without a scan until the authority can probe (FW3). */
+    const scanned = await fileManager.client.listProjectManifests();
+    const scannedTarget = this.#permanentDeleteTarget({ projectId, locator, configured }, scanned);
+    return {
+      storage: locatorToPendingStorage(scannedTarget.locator),
+      survives: projectOccurrences(scanned, projectId).length > 1,
+    };
+  }
+
+  /**
+   * The occurrence a permanent delete targets in `discovery`, once every root is observed: the copy at `locator`, the
+   * copy the route binds, or the only copy.
+   */
+  #permanentDeleteTarget(
+    {
+      projectId,
+      locator,
+      configured,
+    }: Readonly<{
+      projectId: string;
+      locator: ProjectLocator | undefined;
+      configured: Awaited<ReturnType<typeof getProjectFileSystemConfig>>;
+    }>,
+    discovery: ProjectDiscoveryResult,
+  ): ProjectOccurrence {
     const targetRoot =
       locator?.storageRootKey ??
       (configured === undefined || configured.backend === 'memory' ? undefined : persistentStorageRootKey(configured));
@@ -949,7 +1027,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
           : `This folder no longer holds the project: ${projectId}`,
       );
     }
-    return { storage: locatorToPendingStorage(target.locator), survives: occurrences.length > 1 };
+    return target;
   }
 
   /**
@@ -980,11 +1058,46 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     await fileManager.workspace.syncProjectRoots();
   }
 
-  /** The manifest, files and kernel a create starts from: a kernel template, or the caller's own data. */
-  async #projectSource(
+  /**
+   * The name a kernel create takes: the caller's, or one generated from the initial message. Started before the
+   * create's other awaits and awaited only where the name is needed (C1), so the request overlaps them. Never rejects.
+   */
+  async #projectName(
     options: CreateProjectOptions,
     projectId: string,
     naming: ProjectNaming | undefined,
+  ): Promise<string> {
+    /* A create from data keeps its own manifest, and so its own name. */
+    if (!('kernel' in options)) {
+      return options.project.name;
+    }
+    const { projectName, initialMessage } = options;
+    if (projectName) {
+      return projectName;
+    }
+    if (!initialMessage || naming === undefined) {
+      return defaultProjectName;
+    }
+    try {
+      const fileManager = await this.#host.facade();
+      const generated = await naming.generate({
+        projectId,
+        text: initialMessage.content,
+        imageUrls: await namingImageUrls(fileManager.recordFiles, initialMessage),
+      });
+      /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
+      return projectNameFromReply(generated) || defaultProjectName;
+    } catch {
+      /* Naming is a courtesy from the API, not a prerequisite: with the API unreachable (a daemon-served page, desktop
+       * offline) the project is still created, under the same default an empty suggestion gets. */
+      return defaultProjectName;
+    }
+  }
+
+  /** The manifest, files and kernel a create starts from: a kernel template, or the caller's own data. */
+  async #projectSource(
+    options: CreateProjectOptions,
+    projectName: Promise<string>,
   ): Promise<
     Readonly<{
       projectData: Omit<ProjectManifest, '$schema'>;
@@ -992,56 +1105,27 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       kernel: KernelProvider | undefined;
     }>
   > {
-    // Determine project data and files based on pattern
-    let projectData: Omit<ProjectManifest, '$schema'>;
-    let files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
-    let kernel: KernelProvider | undefined;
-
-    if ('kernel' in options) {
-      // CreateProjectFromKernel: Generate from kernel template
-      const { projectName: requestedProjectName } = options;
-      let projectName = requestedProjectName;
-      if (!projectName && options.initialMessage) {
-        const generated =
-          naming === undefined
-            ? ''
-            : await naming
-                .generate({
-                  projectId,
-                  text: options.initialMessage.content,
-                  imageUrls: await this.#namingImageUrls(options.initialMessage),
-                })
-                /* Naming is a courtesy from the API, not a prerequisite: with the
-                 * API unreachable (a daemon-served page, desktop offline) the
-                 * project is still created, under the same default an empty
-                 * suggestion gets. */
-                .catch((): string => '');
-        /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
-        projectName = projectNameFromReply(generated) || defaultProjectName;
-      }
-      const { projectTemplates: templates } = this.#host.services;
-      if (options.kernel === 'auto') {
-        projectData = templates.createEntrylessProject(projectName ?? defaultProjectName);
-        files = {};
-      } else {
-        kernel = options.kernel;
-        const { mainFile: mainFileName, emptyCode, ecosystem } = templates.getKernelOption(options.kernel);
-        const result = templates.createInitialProject({
-          projectName: projectName ?? defaultProjectName,
-          mainFileName,
-          emptyCodeContent: encodeTextFile(emptyCode),
-          ecosystem,
-          dependencies: await templates.getKernelDependencies(options.kernel),
-          template: await templates.getKernelProjectTemplate(options.kernel),
-        });
-        projectData = result.projectData;
-        files = result.files;
-      }
-    } else {
+    if (!('kernel' in options)) {
       // CreateProjectFromData: Use provided project data and files
-      projectData = options.project;
-      files = options.files;
+      return { projectData: options.project, files: options.files, kernel: undefined };
     }
+    const { projectTemplates: templates } = this.#host.services;
+    if (options.kernel === 'auto') {
+      return { projectData: templates.createEntrylessProject(await projectName), files: {}, kernel: undefined };
+    }
+    const { kernel } = options;
+    const { mainFile: mainFileName, emptyCode, ecosystem } = templates.getKernelOption(kernel);
+    /* The template reads run while the name is still being generated. */
+    const dependencies = await templates.getKernelDependencies(kernel);
+    const template = await templates.getKernelProjectTemplate(kernel);
+    const { projectData, files } = templates.createInitialProject({
+      projectName: await projectName,
+      mainFileName,
+      emptyCodeContent: encodeTextFile(emptyCode),
+      ecosystem,
+      dependencies,
+      template,
+    });
     return { projectData, files, kernel };
   }
 
@@ -1060,13 +1144,16 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (options.id !== undefined && (await getProjectFileSystemConfig(options.id)) !== undefined) {
       throw new Error('This project is already on this device.');
     }
+    const projectId = options.id ?? generatePrefixedId(idPrefix.project);
+    /* C1: the name request starts first and is awaited only where the name is needed, so it overlaps the worker's
+       readiness, the storage resolution and the template reads. */
+    const projectName = this.#projectName(options, projectId, naming);
+
     const worker = await this.#host.readiedWorker();
 
     const { location, storageRoot, workspaceSlug } = await resolveCreationStorage(options.location);
 
-    const projectId = options.id ?? generatePrefixedId(idPrefix.project);
-
-    const source = await this.#projectSource(options, projectId, naming);
+    const source = await this.#projectSource(options, projectName);
     const { projectData, kernel } = source;
     let { files } = source;
 

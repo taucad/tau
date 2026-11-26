@@ -45,6 +45,38 @@ const retryError = (error: unknown): boolean => {
   );
 };
 
+/**
+ * The `wait` refusals that mean this chat's writer cannot take a command now but will (RH-R17, RH-R18): it is held by
+ * a paused tab, is changing hands, or its host is closing. Nothing was applied, and the same key is sent again later.
+ * The other `wait` codes have owners of their own: a live run holds the outbox's gate, another device's run is the
+ * refused-admission path, and the channel's codes are re-sent here already.
+ */
+const ownerWaits: ReadonlySet<string> = new Set([
+  'WRITER_LOCKED',
+  'LOG_FENCED',
+  'LOG_CLOSED',
+  'HOST_CLOSED',
+  'LEADERSHIP_LOST',
+  'LEADER_GENERATION_STALE',
+  'LEADER_VERSION_MISMATCH',
+  'SEGMENTS_UNREADABLE',
+  'TURN_ALREADY_LEASED',
+]);
+
+/** A refusal that applied nothing. */
+export type CommandRefusal = Extract<CommandAnswer, { status: 'refused' }>;
+
+/**
+ * The refusal, when an answer says this chat's writer will take the command later, so it is held and sent again by
+ * its key rather than shown as failed (PERF-5).
+ *
+ * @param answer - The host's answer.
+ * @returns The `not-applied` refusal whose code is an owner wait, or `undefined`.
+ * @public
+ */
+export const ownerWaitOf = (answer: CommandAnswer): CommandRefusal | undefined =>
+  answer.status === 'refused' && answer.effect === 'not-applied' && ownerWaits.has(answer.code) ? answer : undefined;
+
 /** The only command leg of a chat gesture; connection churn never mints a new id. @public */
 export const sendHostCommand = async (
   connect: () => Promise<Pick<AgentHostClient, 'hostCommand' | 'close'>>,

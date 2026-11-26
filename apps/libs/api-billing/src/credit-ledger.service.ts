@@ -453,6 +453,19 @@ export const recordSettledGenAiUsage = (
 };
 /* eslint-enable max-params-no-constructor/max-params-no-constructor -- one settled operation */
 
+/**
+ * A settlement under a generation the operation has moved past: the recovery sweep claimed the row (at its deadline)
+ * after this caller admitted it. The row is the sweep's to settle, from the evidence already recorded.
+ *
+ * @public
+ */
+export class StaleCreditOperationGenerationError extends Error {
+  public constructor() {
+    super('Stale credit operation generation');
+    this.name = 'StaleCreditOperationGenerationError';
+  }
+}
+
 @Injectable()
 export class CreditLedgerService {
   private readonly logger = new Logger(CreditLedgerService.name);
@@ -735,7 +748,7 @@ export class CreditLedgerService {
           invocation.supplierRatesValidUntil !== null &&
           new Date(invocation.supplierRatesValidUntil) <= effective.selectedAt
         ) {
-          return { status: 'denied', reason: 'policy_unavailable' };
+          return { status: 'denied', reason: 'route_rates_expired' };
         }
         const quantities = new Map(
           input.maximumQuantities.map((item) => [`${item.dimension}:${item.tier ?? ''}`, item.quantity]),
@@ -1462,7 +1475,7 @@ export class CreditLedgerService {
       }
       assertMatchingRequestDigest(operation.requestDigest, input.requestDigest);
       if (operation.generation !== input.expectedGeneration) {
-        throw new Error('Stale credit operation generation');
+        throw new StaleCreditOperationGenerationError();
       }
       if (operation.customerState !== 'pending') {
         return this.receipt(tx, operation);

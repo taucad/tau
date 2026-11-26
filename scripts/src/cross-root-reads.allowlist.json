@@ -125,6 +125,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/libs/project-library/src/discovery-budget.test.ts",
+    "target": "packages/filesystem/src/testing/discovery-unit-cost.json",
+    "reason": "holds the library budget's per-call rows to the unit costs the filesystem cost test measures"
+  },
+  {
     "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
     "target": "packages/plugins/heif/src/fixtures/small.heic",
     "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
@@ -548,6 +553,11 @@
     "file": "apps/ui/app/routes/w.$workspace.$project/chat-print.test.tsx",
     "target": "packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode",
     "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/ui/app/machines/chat-projection.transcript.test.ts",
+    "target": "packages/agent-host/specs/ChatLog/recorded/kinetic-regenerate-resume.jsonl",
+    "reason": "conformance or recorded corpus read from another project's specs"
   },
   {
     "file": "apps/ui/app/services/chat-session-store.test.ts",

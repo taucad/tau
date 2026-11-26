@@ -1,7 +1,7 @@
 import { frameHintKey } from '#lib/frame-hint.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
@@ -26,6 +26,7 @@ import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
@@ -51,8 +52,10 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
-import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { isInOpen, openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
+import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // One conversational turn per virtual row, sized only by its content.
@@ -69,6 +72,7 @@ const TurnGroup = memo(function ({
         <ChatMessage
           key={id}
           messageId={id}
+          isPastTurn={!isLast}
           // The request's revision summary is a card attached under the user
           // message, so appending assistant messages never moves it.
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
@@ -102,6 +106,8 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
         ref={ref}
         role='region'
         aria-label='Chat history'
+        /* Session replay blocks this transcript while the account's chats may not be recorded (`replay-content.lib`). */
+        data-replay-content='chat'
         aria-busy={context === 'loading' ? true : undefined}
         data-transcript-state={context}
         className={cn('[scrollbar-gutter:stable]', props.className)}
@@ -196,13 +202,24 @@ const endedDocumentOpens = new WeakSet<WaitClock>();
  */
 const isDocumentOpen = (clock: WaitClock): boolean => !endedDocumentOpens.has(clock) && isOnDocumentProject();
 
-const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
+const startTranscriptWait = (
+  clock: WaitClock,
+  isFirst: boolean,
+  open: OpenWait | undefined,
+): Omit<TranscriptWait, 'active'> => {
   if (isFirst && isDocumentOpen(clock)) {
     return { startedAt: 0, isGesture: false };
   }
   const { navigator } = globalThis;
   const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
-  return { startedAt: clock.now(), isGesture: activation?.isActive ?? false };
+  const isGesture = activation?.isActive ?? false;
+  const startedAt = clock.now();
+  /* A lane that mounts loading during a later project open is part of that open (`isInOpen`): its wait counts from
+   * the open's start, as the frame's bars it takes over did. */
+  if (isFirst && open !== undefined && isInOpen(open, { startedAt })) {
+    return { startedAt: open.startedAt, isGesture: false };
+  }
+  return { startedAt, isGesture };
 };
 
 /**
@@ -216,7 +233,11 @@ const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<Transcrip
  */
 function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
   const clock = useWaitClockSource();
-  const [tracked, setTracked] = useState<TranscriptWait>(() => ({ active, ...startTranscriptWait(clock, true) }));
+  const open = useContext(openWaitContext);
+  const [tracked, setTracked] = useState<TranscriptWait>(() => ({
+    active,
+    ...startTranscriptWait(clock, true, open),
+  }));
   /* A lane unmounted once the page has left the document's project (to Home, to another project) ends the open. */
   useEffect(
     () => () => {
@@ -235,7 +256,7 @@ function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'>
   }, [active, clock]);
   let current = tracked;
   if (tracked.active !== active) {
-    current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };
+    current = active ? { active, ...startTranscriptWait(clock, false, open) } : { ...tracked, active };
     setTracked(current);
   }
   return { startedAt: current.startedAt, isGesture: current.isGesture };
@@ -292,7 +313,7 @@ const ExpandedChatHistory = memo(function ({
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChatRecords(projectId);
-  const { activeChatId, persistenceActorRef } = useChatContext();
+  const { activeChatId } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
   const agentInvocations = useChatSelector((state) => state.agentInvocations);
   const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
@@ -329,17 +350,15 @@ const ExpandedChatHistory = memo(function ({
     }
   }, [composerFocusRequest]);
 
-  // Empty-cancel: the persistence machine has lifted the cancelled user
-  // message back into the composer draft (via the store's
-  // `restoreCancelledDraft` listener), so refocus the composer in the next
-  // animation frame so Tiptap/HTMLTextArea can finish reflowing the restored
-  // draft text before the cursor lands.
+  // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
+  // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.
+  const sessionStore = useOptionalChatSessionStore();
   useEffect(() => {
-    if (!persistenceActorRef) {
+    if (!sessionStore) {
       return;
     }
     let frame: number | undefined;
-    const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
+    const unsubscribe = sessionStore.subscribeDraftReturned(activeChatId, () => {
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
@@ -352,17 +371,22 @@ const ExpandedChatHistory = memo(function ({
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [persistenceActorRef]);
+  }, [activeChatId, sessionStore]);
 
   // The turn host owns request configuration; the client exposes action verbs.
   // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, attachments, references }) => {
+    async ({ content, attachments, references, annotations }) => {
       // Pending until the message lands, so the composer stays busy through admission (R8).
-      await submitChat({ text: content, attachments, ...(references === undefined ? {} : { references }) });
+      await submitChat({
+        text: content,
+        attachments,
+        ...(references === undefined ? {} : { references }),
+        ...(annotations === undefined ? {} : { annotations }),
+      });
     },
     [submitChat],
   );
@@ -436,20 +460,21 @@ const ExpandedChatHistory = memo(function ({
                     />
                   }
                 />
-                {/* The header's indicator slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
-                 * slot hangs below the header over the empty feed and takes no layout, so no header control moves when
-                 * the words appear. The feed carries `aria-busy`; a load that is part of the route open is seen, not
-                 * announced. */}
-                <div className='pointer-events-none absolute inset-x-0 top-full z-10 flex justify-center pt-2'>
-                  <WaitIndicator
-                    active={transcript === 'loading'}
-                    label='Loading chat'
-                    slowLabel='Still loading chat'
-                    startedAt={transcriptWait.startedAt}
-                    live={transcriptWait.isGesture}
-                    variant='pill'
-                  />
-                </div>
+                {/* While the transcript loads the feed below draws its shape (Progressive Loading Policy rules 15 and 17):
+                 * the bars hang below the header over the empty feed, take no layout, and appear from 300 ms into the
+                 * wait on its own clock, which a lane mounted during the open shares with the open. No words: the
+                 * viewer is the open's one status, and the feed carries `aria-busy`. */}
+                {transcript === 'loading' ? (
+                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
+                    <WaitSkeleton
+                      isActive
+                      startedAt={transcriptWait.startedAt}
+                      shape='transcript'
+                      label='Chat'
+                      className='h-auto'
+                    />
+                  </div>
+                ) : null}
               </FloatingPanelContentHeader>
 
               {/* Main chat content area */}

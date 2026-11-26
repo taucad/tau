@@ -50,7 +50,7 @@
     "AcpSessions.target-live.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "W10 I33 CancelSettles, Terminates"
+      "ref": "W10 I33 CancelSettles, Terminates; DrainSettles with no fairness on TurnEnded (launch audit E-1, E-11)"
     },
     "AcpSessions.export.cfg": {
       "tier": "pr",
@@ -114,6 +114,24 @@
       },
       "kind": "witness",
       "ref": "W10 QUEUED_CANCEL knob (W10.r1 finding 1)"
+    },
+    "AcpSessions.no-drain-bound.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CancelSettles"
+      },
+      "kind": "defect",
+      "ref": "DRAIN_BOUND knob: busy.flushing and busy.recording had no timer, so a stopped turn whose drain never answered stayed lent and its chat refused every later turn (launch audit E-1)",
+      "fixedBy": "taucad/tau#2815"
+    },
+    "AcpSessions.no-drain-bound-settles.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "DrainSettles"
+      },
+      "kind": "defect",
+      "ref": "DRAIN_BOUND knob, DrainSettles: without the bound a turn whose own flush or record never answers stays in finishing while its adapter stays open, so no later turn is lent (launch audit E-1)",
+      "fixedBy": "taucad/tau#2815"
     }
   },
   "graphs": {

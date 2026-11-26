@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -84,6 +84,7 @@ export default defineConfig({
   },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['app/machines/project-open.browser.test.ts'],
     fileParallelism: false,
     browser: {

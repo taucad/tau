@@ -2930,12 +2930,12 @@ describe('post-hoc supplier metering', () => {
       supplierCostPicoUsd: 357_500_000n,
     },
     {
-      // The base tier of a tiered route: $0.20, $0.02, $0.25 (30m write) and $1.20 per million.
+      // The base tier of a tiered route: $0.10, $0.01, $0.125 (30m write) and $0.50 per million.
       routeId: 'openai-gpt-6-luna',
       providerWire: 'openai-responses',
       body: { input: 'hello', max_output_tokens: 500 },
       cacheWriteTier: '30m',
-      supplierCostPicoUsd: 795_000_000n,
+      supplierCostPicoUsd: 357_500_000n,
     },
     {
       // $1.50, $0.075 and $7.50 per million; no cache write meter.

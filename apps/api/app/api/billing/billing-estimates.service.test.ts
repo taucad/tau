@@ -93,17 +93,10 @@ describe('BillingEstimatesService', () => {
       tier: 'base',
     });
     expect(estimates.routes).toContainEqual({
-      routeId: 'openai-gpt-5.6-sol',
-      modelId: 'gpt-5.6-sol',
-      typicalHoldAtoms: '1233733',
-      minimumHoldAtoms: '453551',
-      tier: 'base',
-    });
-    expect(estimates.routes).toContainEqual({
-      routeId: 'openai-gpt-5.6-luna',
-      modelId: 'gpt-5.6-luna',
-      typicalHoldAtoms: '65947',
-      minimumHoldAtoms: '26938',
+      routeId: 'openai-gpt-6-luna',
+      modelId: 'gpt-6-luna',
+      typicalHoldAtoms: '30844',
+      minimumHoldAtoms: '11339',
       tier: 'base',
     });
     expect(estimates.routes).toContainEqual({

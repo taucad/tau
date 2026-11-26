@@ -203,6 +203,15 @@
 \* `use-cad-chat-client.ts` is the run phase, else the command in flight; the store arms no SDK stream, and its usage,
 \* trays and first-text timing read the fold. Dispatch, acknowledgement and the queue are untouched. No action or
 \* verdict changes.
+\* use_skill startup latency T4 (2026-11-26): `chat-session-store.ts` and `use-chat.tsx` hold no AI SDK `Chat`, watch,
+\* presentation hold, retry or materialization; the fold is the transcript's one owner and settles its load. A Start
+\* whose log read is refused for good no longer shows as submitted. Dispatch, acknowledgement and the queue are
+\* untouched. No action or verdict changes.
+\* T4 review (2026-11-26): the store's transcript holds its D-UI-10 announcement, a refused read releases its held run
+\* and a Resume stays submitted until its run reopens. Dispatch, acknowledgement and the queue are untouched.
+\* T4 review round 3 (2026-11-26): a command answered on a refused read releases its run, and a gesture's admission
+\* in `use-chat.tsx` reads the current fold rather than the throttled transcript, and `chat-turn-host.tsx` builds
+\* its command from the fold read after its admission waits. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

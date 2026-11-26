@@ -14,7 +14,6 @@ import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
-import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { ChatActions } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
@@ -79,9 +78,6 @@ vi.mock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
   useCadAgentConfig: vi.fn(),
   awaitAgentHostAvailability: vi.fn(async () => availabilityHarness.availability),
-}));
-vi.mock('#chat-clients/_internal/use-active-chat-instance.js', () => ({
-  useActiveChatInstance: vi.fn(),
 }));
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: vi.fn(),
@@ -158,17 +154,6 @@ vi.mock('#hooks/use-file-manager.js', () => {
   });
   return { useFileManager: fileManager, useOptionalFileManager: fileManager };
 });
-vi.mock('@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport', () => ({
-  registerAgentHost: (_chatId: string, registration: typeof browserHostHarness.registration) => {
-    browserHostHarness.registration = registration;
-    return () => {
-      browserHostHarness.registration = undefined;
-    };
-  },
-  getBrowserAgentHostRun: () => browserHostHarness.run,
-  resumableBrowserAgentHostRunId: () => undefined,
-  resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
-}));
 vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof AgentHostClientModule>()),
   createAgentHostClient: browserHostHarness.createDaemonClient,
@@ -204,7 +189,6 @@ vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) 
 vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 
 const useCadAgentConfigMock = vi.mocked(useCadAgentConfig);
-const useActiveChatInstanceMock = vi.mocked(useActiveChatInstance);
 const useChatActionsMock = vi.mocked(useChatActions);
 const useChatSelectorMock = vi.mocked(useChatSelector);
 
@@ -223,7 +207,6 @@ type ActionsMock = {
   regenerate: ReturnType<typeof vi.fn>;
   editMessage: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
-  setMessages: ReturnType<typeof vi.fn>;
 };
 
 const buildActions = (): ActionsMock => ({
@@ -231,7 +214,6 @@ const buildActions = (): ActionsMock => ({
   regenerate: vi.fn(),
   editMessage: vi.fn(),
   stop: vi.fn(),
-  setMessages: vi.fn(),
 });
 
 const mountAgentMock = (agent: CadAgentConfigInput): void => {
@@ -263,6 +245,10 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
     refreshMessageQueue: vi.fn(),
     captureMessageQueueIntent: vi.fn(() => ({})),
     subscribeProjection: vi.fn(() => vi.fn()),
+    /* The turn host reads the fold as it is now; here that is the session's shown messages. */
+    getCurrentTranscript(this: ChatSessionStore, chatId: string) {
+      return this.get(chatId)?.messages ?? [];
+    },
     getProjection: () => undefined,
     getAttachmentStatus: () => 'unknown',
     respondToProjectedApproval,
@@ -327,7 +313,6 @@ describe('admission against the placement book a real discovery pass filled', ()
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
 
@@ -368,7 +353,6 @@ describe('admission against the placement book a real discovery pass filled', ()
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     // No run this transport is driving: `getBrowserAgentHostRun` answers nothing.
     browserHostHarness.run = undefined;
@@ -379,7 +363,6 @@ describe('admission against the placement book a real discovery pass filled', ()
     });
 
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
-    expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
     expect(respondToProjectedApproval).toHaveBeenCalledWith('chat_test', 'approval-1', {
       approved: true,
       reason: undefined,

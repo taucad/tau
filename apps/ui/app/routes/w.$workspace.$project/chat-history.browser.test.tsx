@@ -7,7 +7,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { initialChatProjection, reduceChatProjection, selectTranscript } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
 /**
@@ -187,7 +187,7 @@ it('should disclose recovered filenames and real highlighted diffs in a browser'
     type: 'batch',
     answer: { status: 'batch', cursor: 0, nextCursor: rows.length, endCursor: rows.length, events: rows },
   }).state;
-  const messages = await materializeTranscript(projection);
+  const messages = selectTranscript(projection);
   const tools = messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
   expect(tools).toHaveLength(2);
   await page.viewport(640, 500);

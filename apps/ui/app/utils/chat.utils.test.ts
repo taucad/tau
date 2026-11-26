@@ -14,11 +14,8 @@ import type { RequestTerminationCause } from '@taucad/chat-ui/hooks/chat-persist
 import { clearLedger, recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { metaConfig } from '#constants/meta.constants.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
-import { Chat } from '@ai-sdk/react';
-import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { initialChatProjection, reduceChatProjection, selectTranscript } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
-import { openRunWatch } from '#chat-clients/_internal/run-watch.js';
-import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 
 const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   id: 'msg-1',
@@ -26,124 +23,104 @@ const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   parts,
 });
 
-it.each([1, 16, 113])(
-  'should converge live, reload and export for 55 calls and 9 edits in batches of %s',
-  async (size) => {
-    const rows = [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')];
-    for (let index = 0; index < 55; index++) {
-      const edit = index >= 46;
-      const content = edit
-        ? [
-            {
-              type: 'diff',
-              path: index % 2 === 0 ? 'main.cs' : 'main.geospec.ts',
-              oldText: 'before',
-              newText: `after-${String(index)}`,
-            },
-          ]
-        : { result: index };
-      const call = { toolCallId: `vendor-${String(index)}`, kind: edit ? 'edit' : 'execute', content };
-      const identity = {
-        toolCallId: `call-${String(index)}`,
-        toolName: edit ? 'applyPatch' : 'shell',
-        metadata: { tauInternal: { kind: 'external-tool', origin: 'external' } },
-      };
-      rows.push(
-        logRow(rows.length, {
-          type: 'message.appended',
-          message: {
-            ...identity,
-            id: `in-${String(index)}`,
-            role: 'tool-input',
-            content: { index },
-            call: { ...call, status: 'pending' },
+it.each([1, 16, 113])('should converge live, reload and export for 55 calls and 9 edits in batches of %s', (size) => {
+  const rows = [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')];
+  for (let index = 0; index < 55; index++) {
+    const edit = index >= 46;
+    const content = edit
+      ? [
+          {
+            type: 'diff',
+            path: index % 2 === 0 ? 'main.cs' : 'main.geospec.ts',
+            oldText: 'before',
+            newText: `after-${String(index)}`,
           },
-        }),
-      );
-      rows.push(
-        logRow(rows.length, {
-          type: 'message.appended',
-          message: {
-            ...identity,
-            id: `out-${String(index)}`,
-            role: 'tool-output',
-            content,
-            call: { ...call, status: 'completed' },
-            isError: false,
-          },
-        }),
-      );
-    }
-    rows.push(lifecycleRow(rows.length, 'completed'));
-    const prefix = 24; // The first 11 calls are visible before call 12's progress.
-    let projection = reduceChatProjection(initialChatProjection, {
-      type: 'batch',
-      answer: { status: 'batch', cursor: 0, nextCursor: prefix, endCursor: rows.length, events: rows.slice(0, prefix) },
-    }).state;
-    const listeners = new Set<() => void>();
-    const watch = openRunWatch({
-      runId: 'run_1',
-      getProjection: () => projection,
-      subscribe: (listener) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    });
-    const transport = new BrowserPlacementChatTransport<MyUIMessage>();
-    transport.arm(watch.stream);
-    const errors: Error[] = [];
-    const chat = new Chat<MyUIMessage>({ id: 'convergence', transport, onError: (error) => errors.push(error) });
-    try {
-      const request = chat.sendMessage({ role: 'user', parts: [{ type: 'text', text: 'fixture' }] });
-      projection = reduceChatProjection(projection, {
-        type: 'live',
-        event: {
-          type: 'tool-output-update',
-          chatId: 'convergence',
-          runId: 'run_1',
-          messageId: 'in-11',
-          contentIndex: 0,
-          toolCallId: 'call-11',
-          toolName: 'shell',
-          output: 'early',
+        ]
+      : { result: index };
+    const call = { toolCallId: `vendor-${String(index)}`, kind: edit ? 'edit' : 'execute', content };
+    const identity = {
+      toolCallId: `call-${String(index)}`,
+      toolName: edit ? 'applyPatch' : 'shell',
+      metadata: { tauInternal: { kind: 'external-tool', origin: 'external' } },
+    };
+    rows.push(
+      logRow(rows.length, {
+        type: 'message.appended',
+        message: {
+          ...identity,
+          id: `in-${String(index)}`,
+          role: 'tool-input',
+          content: { index },
+          call: { ...call, status: 'pending' },
+        },
+      }),
+    );
+    rows.push(
+      logRow(rows.length, {
+        type: 'message.appended',
+        message: {
+          ...identity,
+          id: `out-${String(index)}`,
+          role: 'tool-output',
+          content,
+          call: { ...call, status: 'completed' },
           isError: false,
         },
-      }).state;
-      for (const listener of listeners) {
-        listener();
-      }
-      for (let cursor = prefix; cursor < rows.length; cursor += size) {
-        const events = rows.slice(cursor, cursor + size);
-        projection = reduceChatProjection(projection, {
-          type: 'batch',
-          answer: { status: 'batch', cursor, nextCursor: cursor + events.length, endCursor: rows.length, events },
-        }).state;
-        for (const listener of listeners) {
-          listener();
-        }
-      }
-      await request;
-      const restored = await materializeTranscript(projection);
-      const tools = (messages: MyUIMessage[]) =>
-        messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
-      expect(errors).toEqual([]);
-      expect(chat.status).toBe('ready');
-      expect(tools(chat.messages)).toEqual(tools(restored));
-      expect(new Set(tools(restored).map((part) => part.toolCallId)).size).toBe(55);
-      expect(tools(restored).every((part) => part.state === 'output-available')).toBe(true);
-      expect(tools(restored).filter((part) => part.toolName === 'applyPatch')).toHaveLength(9);
-      const exported = serializeTranscript(restored, 'Recovered fixture');
-      expect(exported.match(/<tool_call /gu)).toHaveLength(55);
-      expect(exported.match(/"type": "diff"/gu)).toHaveLength(9);
-      expect(exported).toContain('main.cs');
-      expect(exported).toContain('main.geospec.ts');
-      expect(exported).not.toMatch(/\[Pending\.\.\.\]|\[Streaming\.\.\.\]/u);
-      expect(listeners.size).toBe(0);
-    } finally {
-      watch.detach();
-    }
-  },
-);
+      }),
+    );
+  }
+  rows.push(lifecycleRow(rows.length, 'completed'));
+  const prefix = 24; // The first 11 calls are visible before call 12's progress.
+  let projection = reduceChatProjection(initialChatProjection, {
+    type: 'batch',
+    answer: { status: 'batch', cursor: 0, nextCursor: prefix, endCursor: rows.length, events: rows.slice(0, prefix) },
+  }).state;
+  /* Live is the fold as the page shows it, batch by batch; reload is the fold of the whole log read at once (T4). */
+  let live = selectTranscript(projection);
+  projection = reduceChatProjection(projection, {
+    type: 'live',
+    event: {
+      type: 'tool-output-update',
+      chatId: 'convergence',
+      runId: 'run_1',
+      messageId: 'in-11',
+      contentIndex: 0,
+      toolCallId: 'call-11',
+      toolName: 'shell',
+      output: 'early',
+      isError: false,
+    },
+  }).state;
+  live = selectTranscript(projection, live);
+  for (let cursor = prefix; cursor < rows.length; cursor += size) {
+    const events = rows.slice(cursor, cursor + size);
+    projection = reduceChatProjection(projection, {
+      type: 'batch',
+      answer: { status: 'batch', cursor, nextCursor: cursor + events.length, endCursor: rows.length, events },
+    }).state;
+    live = selectTranscript(projection, live);
+  }
+  const restored = [
+    ...selectTranscript(
+      reduceChatProjection(initialChatProjection, {
+        type: 'batch',
+        answer: { status: 'batch', cursor: 0, nextCursor: rows.length, endCursor: rows.length, events: rows },
+      }).state,
+    ),
+  ];
+  const tools = (messages: readonly MyUIMessage[]) =>
+    messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
+  expect(tools(live)).toEqual(tools(restored));
+  expect(new Set(tools(restored).map((part) => part.toolCallId)).size).toBe(55);
+  expect(tools(restored).every((part) => part.state === 'output-available')).toBe(true);
+  expect(tools(restored).filter((part) => part.toolName === 'applyPatch')).toHaveLength(9);
+  const exported = serializeTranscript(restored, 'Recovered fixture');
+  expect(exported.match(/<tool_call /gu)).toHaveLength(55);
+  expect(exported.match(/"type": "diff"/gu)).toHaveLength(9);
+  expect(exported).toContain('main.cs');
+  expect(exported).toContain('main.geospec.ts');
+  expect(exported).not.toMatch(/\[Pending\.\.\.\]|\[Streaming\.\.\.\]/u);
+});
 
 describe('serializeMessage', () => {
   describe('text parts', () => {

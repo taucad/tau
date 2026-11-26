@@ -19,6 +19,6 @@ A durable tool result projects as its output, then `finish-step` and `start-step
 | `FoldOutput`                        | `foldLiveRow` → `projectAgentHostEvent` `tool-output` in `apps/libs/chat-ui/src/services/agent-host-event-projection.ts` |
 | `Boundary`, `GuardBoundary`         | `hasOpenStreamBlock`: an open text or reasoning block holds back the result's step boundary                              |
 | `LiveStart`, `LiveDelta`, `LiveEnd` | `reduceChatProjection` `live` → `projectAgentHostLiveEvent` `thinking-*`                                                 |
-| `active`, `errored`, `shown`        | `openRunWatch` drain → the SDK's `processUIMessageStream`                                                                |
+| `active`, `errored`, `shown`        | `selectTranscript` → `reduceChunks`, the synchronous fold of the projection (T4)                                         |
 
 The `paused` lifecycle row already keeps the same rule through `hasOpenBlock`. The regression tests are in `app/machines/chat-projection.logic.test.ts` under "durable tool results read after the next step went live".

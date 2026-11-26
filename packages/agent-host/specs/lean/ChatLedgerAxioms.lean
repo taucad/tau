@@ -35,6 +35,11 @@ import ChatLedgerProofs
 #print axioms ChatLedger.good_append_self
 #print axioms ChatLedger.reach_good
 #print axioms ChatLedger.t1_held_key_never_writes
+#print axioms ChatLedger.current_after_write
+#print axioms ChatLedger.appendBatchFrom_checked
+#print axioms ChatLedger.appendBatch_eq_appendSeq
+#print axioms ChatLedger.reach_appendSeq
+#print axioms ChatLedger.batch_crash_reachable
 #print axioms ChatLedger.snoc_induction
 #print axioms ChatLedger.commitAll_snoc
 #print axioms ChatLedger.strict_append

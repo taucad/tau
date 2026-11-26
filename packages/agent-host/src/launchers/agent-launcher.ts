@@ -609,15 +609,30 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     replay.delete(chatId);
     dropObservation(chatId);
     wakeReads(chatId);
+    /* The binding's durability class, stated on the run's admission (W3 §11). */
+    const stated = (candidate: AgentLogEvent): AgentLogEvent =>
+      candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
+        ? { ...candidate, storageDurability: binding.durability }
+        : candidate;
     return {
+      ...(log.appendMany === undefined
+        ? {}
+        : {
+            appendMany: async (candidates: readonly AgentLogEvent[]) => {
+              const batch = await log.appendMany!(candidates.map((candidate) => stated(candidate)));
+              const last = batch.outcomes.findLast((outcome) => outcome.appended);
+              if (last !== undefined) {
+                leading.port?.appended(chatId, last.endCursor);
+              }
+              if ((batch.failure as { readonly code?: unknown } | undefined)?.code === 'LOG_FENCED') {
+                leading.port?.fenced(chatId);
+              }
+              return batch;
+            },
+          }),
       append: async (candidate: AgentLogEvent) => {
         try {
-          const outcome = await log.append(
-            /* The binding's durability class, stated on the run's admission (W3 §11). */
-            candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
-              ? { ...candidate, storageDurability: binding.durability }
-              : candidate,
-          );
+          const outcome = await log.append(stated(candidate));
           if (outcome.appended) {
             leading.port?.appended(chatId, outcome.endCursor);
           }

@@ -11,7 +11,7 @@ import {
   closeReleased,
   ensureOwnerNotes,
   readLinkedFixes,
-  readPendingRemovals,
+  readRemovalBranches,
   reconcileRemovals,
 } from '#ci-flake-quarantine-release-cli.js';
 import {
@@ -332,6 +332,27 @@ describe('the count in run order', () => {
     expect(releaseVerdict(track, fix)).toMatchObject({ passes: 99, met: false });
   });
 
+  it('should count a passing re-run attempt after a failing attempt of the same run, in either order', () => {
+    const tests = testsOf([entryOf()]);
+    const inOrder = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const reversed = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const at = '2026-11-21T01:00:00Z';
+    const attempt = (state: LedgerState, number: number, failed: boolean): void => {
+      countQuarantineRun(state, {
+        run: { ...runOf(1000, at), run_attempt: number },
+        rows: [rowOf(1000, { attempt: number, ...(failed ? { state: 'failed' } : {}) })],
+        tests,
+      });
+    };
+    attempt(inOrder, 1, true);
+    attempt(inOrder, 2, false);
+    attempt(reversed, 2, false);
+    attempt(reversed, 1, true);
+
+    expect(inOrder.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+    expect(reversed.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+  });
+
   it('should give an entry that replaces another for the same test a track of its own', () => {
     const [first] = testsOf([entryOf()]);
     const [replacement] = testsOf([entryOf({ issue: 99, created: '2026-11-21', expires: '2026-12-05' })]);
@@ -601,7 +622,7 @@ describe('the release job', () => {
     expect(pull.head).toMatch(/^flake-expiry\//u);
     expect(requests.some((request) => request.path === '/graphql')).toBe(true);
     const note = requests.find((request) => request.path.endsWith('/issues/12/comments'))?.body as { body: string };
-    expect(note.body).toContain('The removal is #9001 (squash auto-merge on).');
+    expect(note.body).toContain('The removal is #9001, eligible for squash auto-merge.');
     expect(note.body).toContain('may renew it once');
     expect(requests.find((request) => request.path.endsWith('/issues/12/labels'))?.body).toEqual({
       labels: ['flake:needs-operator'],
@@ -638,34 +659,51 @@ describe('the release job', () => {
     ]);
   });
 
-  it('should read the entries a pending branch removes from its parent commit and its own', async () => {
+  it('should read the entries a pending branch removes, and the releases that merged', async () => {
     const before = `${JSON.stringify({ entries: [entryOf(), entryOf({ issue: 14, test: 'src/a.test.ts > a > b' })] })}\n`;
     const after = removeFromQuarantine(before, [entryOf()]);
+    const commit = {
+      commit: { message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n' },
+      parents: [{ sha: 'parent-sha' }],
+      files: [{ filename: path, status: 'modified' }],
+    };
     const { github } = fakeGitHub(
       {
         'matching-refs/heads/flake-release': [
           { ref: 'refs/heads/flake-release/2026-11-24-abcd1234', object: { sha: 'branch-sha' } },
+          { ref: 'refs/heads/flake-release/2026-11-20-merged00', object: { sha: 'branch-sha' } },
+          { ref: 'refs/heads/flake-release/2026-11-19-closed00', object: { sha: 'branch-sha' } },
         ],
         'matching-refs/heads/flake-expiry': [],
-        '/pulls?': [],
-        '/commits/branch-sha': {
-          commit: { message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n' },
-          parents: [{ sha: 'parent-sha' }],
-          files: [{ filename: path, status: 'modified' }],
-        },
+        '/pulls?': (requested: string) =>
+          requested.includes('merged00')
+            ? [{ number: 70, state: 'closed', merged_at: '2026-11-21T08:00:00Z' }]
+            : requested.includes('closed00')
+              ? [{ number: 71, state: 'closed', merged_at: null }]
+              : [],
+        '/commits/branch-sha': commit,
       },
       { texts: { 'ref=parent-sha': before, 'ref=branch-sha': after } },
     );
 
-    expect(await readPendingRemovals(github)).toEqual([
-      {
-        branch: 'flake-release/2026-11-24-abcd1234',
-        kind: 'release',
-        pull: undefined,
-        message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n',
-        removed: [{ path, entry: entryOf() }],
-      },
-    ]);
+    expect(await readRemovalBranches(github, '2026-10-27T00:00:00Z')).toEqual({
+      pending: [
+        {
+          branch: 'flake-release/2026-11-24-abcd1234',
+          kind: 'release',
+          pull: undefined,
+          message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n',
+          removed: [{ path, entry: entryOf() }],
+        },
+      ],
+      landed: [
+        {
+          branch: 'flake-release/2026-11-20-merged00',
+          mergedAt: '2026-11-21T08:00:00Z',
+          removed: [{ path, entry: entryOf() }],
+        },
+      ],
+    });
   });
 
   it('should open the pull request of a current removal branch and close the one of a stale branch', async () => {
@@ -694,44 +732,84 @@ describe('the release job', () => {
     ]);
   });
 
-  it('should close the owner issue once its release merged, and not after an expiry or an unmerged release', async () => {
-    const record = { identity: 'abcd', path, created: '2026-11-20', expires: '2026-12-04' };
-    const merged = { ...record, branch: 'flake-release/2026-11-24-aaaa' };
-    const unmerged = { ...record, branch: 'flake-release/2026-11-24-bbbb' };
+  it('should close the owner issue of a merged release, recover one never labelled, and strip the rest', async () => {
+    const branch = 'flake-release/2026-11-24-aaaa';
     const bot = { type: 'Bot' };
     const releasing = [{ name: 'flake' }, { name: 'flake:releasing' }];
     const { github, requests } = fakeGitHub({
-      'labels=flake%3Areleasing': [12, 13, 14, 15, 16].map((number) => ({ number, state: 'open', labels: releasing })),
-      '/issues/12/comments': [{ body: removalMarker('release', merged), user: bot }],
-      '/issues/13/comments': [
-        { body: removalMarker('release', merged), user: bot },
-        { body: removalMarker('expiry', record), user: bot },
+      'labels=flake%3Areleasing': [12, 13, 14].map((number) => ({ number, state: 'open', labels: releasing })),
+      // #18's owner update failed before its release merged: no label, but it still closes.
+      '/issues/18/comments': [],
+      '/issues/18': { number: 18, state: 'open', labels: [{ name: 'flake' }] },
+      // #19 was closed by an earlier run: nothing more to do.
+      '/issues/19/comments': [
+        {
+          body: removalMarker('released', {
+            identity: 'abcd',
+            path,
+            created: '2026-11-20',
+            expires: '2026-12-04',
+            branch,
+            released: '2026-11-25',
+          }),
+          user: bot,
+        },
       ],
-      '/issues/15/comments': [{ body: removalMarker('release', unmerged), user: bot }],
-      // A person's comment cannot pose as the automation's record.
-      '/issues/16/comments': [{ body: removalMarker('release', merged), user: { type: 'User' } }],
-      '/pulls?': (requested: string) =>
-        requested.includes(encodeURIComponent('taucad:flake-release/2026-11-24-aaaa'))
-          ? [{ number: 70, state: 'closed', merged_at: '2026-11-25T08:00:00Z' }]
-          : [{ number: 71, state: 'closed', merged_at: null }],
+      '/issues/19': { number: 19, state: 'closed', labels: [{ name: 'flake' }, { name: 'flake:released' }] },
     });
+    const landed = [
+      {
+        branch,
+        mergedAt: '2026-11-25T08:00:00Z',
+        removed: [12, 14, 18, 19].map((issue) => ({ path, entry: entryOf({ issue }) })),
+      },
+    ];
 
-    const outcome = await closeReleased(github, { tests: testsOf([entryOf({ issue: 14 })]) });
+    const outcome = await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 14 })]),
+      landed,
+      identityOf: (file, test) => (file === path ? `host › ${test}` : undefined),
+    });
 
     const patched = (issue: number): unknown =>
       requests.find((request) => request.method === 'PATCH' && request.path.endsWith(`/issues/${issue}`))?.body;
-    expect(patched(12)).toEqual({ state: 'closed', state_reason: 'completed', labels: ['flake', 'flake:released'] });
+    expect(patched(12)).toEqual({ state: 'closed', state_reason: 'completed', labels: ['flake:released'] });
+    expect(patched(18)).toEqual({ state: 'closed', state_reason: 'completed', labels: ['flake', 'flake:released'] });
+    // #13 left main without a landed release: it only loses the label.
     expect(patched(13)).toEqual({ labels: ['flake'] });
-    expect(patched(15)).toEqual({ labels: ['flake'] });
-    expect(patched(16)).toEqual({ labels: ['flake'] });
-    expect(requests.some((request) => request.path.includes('/issues/14'))).toBe(false);
+    expect(patched(14)).toBeUndefined();
+    expect(patched(19)).toBeUndefined();
     // The closing comment records the day the release merged: the start of the 30-day return window.
     const closing = requests.find(
       (request) => request.method === 'POST' && request.path.endsWith('/issues/12/comments'),
     )?.body as { body: string };
-    expect(lastLanded([closing.body])).toEqual({ ...merged, released: '2026-11-25' });
+    expect(lastLanded([closing.body])).toMatchObject({ branch, released: '2026-11-25', created: '2026-11-20' });
     expect(lastRemoval([closing.body])).toBeUndefined();
-    expect(outcome).toHaveLength(4);
+    expect(outcome).toHaveLength(3);
+  });
+
+  it('should leave auto-merge off until every owner issue is told', async () => {
+    const tests = testsOf([entryOf()], '2026-12-04');
+    const { expiries } = planOf(emptyState(new Date()), tests, { today: '2026-12-04' });
+    const { github, requests } = fakeGitHub({
+      '/git/commits/': { tree: { sha: 'base-tree' } },
+      '/issues/12/comments': () => {
+        throw new GitHubError('GET comments', 502);
+      },
+    });
+
+    const outcome = await applyRemovals(github, {
+      kind: 'expiry',
+      removals: expiries,
+      base: 'main',
+      baseSha: 'base-sha',
+      quarantines: workspaceOf([entryOf()]).quarantines,
+      problems: [],
+      today: '2026-12-04',
+    });
+
+    expect(requests.some((request) => request.path === '/graphql')).toBe(false);
+    expect(outcome).toContain('Auto-merge left off: an owner issue was not updated; a later run retries it.');
   });
 
   it('should comment once per removal branch and add a label a failed run left out', async () => {

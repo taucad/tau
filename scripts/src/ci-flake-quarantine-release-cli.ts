@@ -42,12 +42,13 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { dayNumber, utcDay } from '@taucad/vitest-ci/quarantine';
+import type { QuarantineRenewal } from '@taucad/vitest-ci/quarantine';
 
 import { client, GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import type { LedgerState } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
-import { identityHashOf } from '#ci-flake-quarantine-entry.js';
+import { addDays, identityHashOf, quarantinePath } from '#ci-flake-quarantine-entry.js';
 import {
   automationComments,
   branchExists,
@@ -77,6 +78,7 @@ import {
   releaseComment,
   releasedLabel,
   releasingLabel,
+  returnWindowDays,
   removalBody,
   removalMarker,
   removalFiles,
@@ -131,15 +133,27 @@ const labelNames = (labels: LabelledIssue['labels']): string[] =>
 
 const isQuarantineFile = (path: string): boolean => path === 'quarantine.json' || path.endsWith('/quarantine.json');
 
+/** A release whose pull request merged: the entries it removed and when. */
+export type LandedRelease = {
+  readonly branch: string;
+  readonly mergedAt: string;
+  readonly removed: PendingRemoval['removed'];
+};
+
 /**
- * Every removal branch still in play: one whose pull request is open, or that has none yet. A branch whose pull
- * request was merged or closed holds nothing. Each lists the entries it removes, read from the commit it was built on
+ * Every removal branch still in play: one whose pull request is open, or that has none yet; and every release branch
+ * whose pull request merged on or after `since`, whose owner issues close (`closeReleased`). A branch whose pull
+ * request was closed unmerged holds nothing. Each lists the entries it removes, read from the commit it was built on
  * and its own: entries added to `main` since are not removals.
  */
-export const readPendingRemovals = async (github: Client): Promise<PendingRemoval[]> => {
+export const readRemovalBranches = async (
+  github: Client,
+  since: string,
+): Promise<{ pending: PendingRemoval[]; landed: LandedRelease[] }> => {
   const repo = `/repos/${github.repository}`;
   const owner = github.repository.split('/')[0] ?? '';
   const pending: PendingRemoval[] = [];
+  const landed: LandedRelease[] = [];
   for (const [kind, prefix] of prefixes) {
     // oxlint-disable-next-line no-await-in-loop -- two prefixes, read in order
     const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/heads/${prefix.slice(0, -1)}`);
@@ -149,7 +163,9 @@ export const readPendingRemovals = async (github: Client): Promise<PendingRemova
       const pulls = await github.get<Pull[]>(
         `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
       );
-      if (pulls.some((pull) => pull.state === 'closed')) {
+      const merged = pulls.find((pull) => pull.merged_at)?.merged_at;
+      const isLanded = kind === 'release' && typeof merged === 'string' && merged >= since;
+      if (pulls.some((pull) => pull.state === 'closed') && !isLanded) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one commit per branch
@@ -166,6 +182,10 @@ export const readPendingRemovals = async (github: Client): Promise<PendingRemova
         const [before, after] = await Promise.all([read(parent), read(reference.object.sha)]);
         removed.push(...removedEntries(before, after).map((entry) => ({ path: file.filename, entry })));
       }
+      if (isLanded) {
+        landed.push({ branch, mergedAt: merged, removed });
+        continue;
+      }
       pending.push({
         branch,
         kind,
@@ -175,7 +195,7 @@ export const readPendingRemovals = async (github: Client): Promise<PendingRemova
       });
     }
   }
-  return pending;
+  return { pending, landed };
 };
 
 /**
@@ -431,97 +451,135 @@ export const applyRemovals = async (github: Client, context: RemovalContext): Pr
       `Could not open the pull request (${error instanceof Error ? error.message : String(error)}); the owner issues name the branch to open.`,
     );
   }
-  let merging = false;
   if (pull) {
     outcome.push(`Opened #${pull.number}.`);
-    if (autoMerge) {
+  }
+  const compare = `https://github.com/${github.repository}/compare/${context.base}...${encodePath(branch)}?expand=1`;
+  const where = pull
+    ? `The removal is #${pull.number}${autoMerge ? ', eligible for squash auto-merge' : ''}.`
+    : `The removal is on branch \`${branch}\`, but this token may not open pull requests: open it at ${compare} (it touches only quarantine.json files${autoMerge ? ' and validates, so it may auto-merge' : ''}).`;
+  // The owners first: auto-merge waits until every owner issue carries its note and label.
+  const unnoted = await ensureOwnerNotes(
+    github,
+    removals.map((removal) => ({ kind, removal, branch, where })),
+  );
+  outcome.push(...unnoted);
+  if (pull && autoMerge) {
+    if (unnoted.length > 0) {
+      outcome.push('Auto-merge left off: an owner issue was not updated; a later run retries it.');
+    } else {
       try {
         const refused = await enableAutoMerge(github, pull.node_id);
-        merging = refused === undefined;
-        outcome.push(merging ? 'Enabled squash auto-merge.' : `Auto-merge refused: ${refused}.`);
+        outcome.push(refused === undefined ? 'Enabled squash auto-merge.' : `Auto-merge refused: ${refused}.`);
       } catch (error) {
         outcome.push(`Auto-merge refused: ${error instanceof Error ? error.message : String(error)}.`);
       }
     }
   }
-  const compare = `https://github.com/${github.repository}/compare/${context.base}...${encodePath(branch)}?expand=1`;
-  const where = pull
-    ? `The removal is #${pull.number}${merging ? ' (squash auto-merge on)' : ''}.`
-    : `The removal is on branch \`${branch}\`, but this token may not open pull requests: open it at ${compare} (it touches only quarantine.json files${autoMerge ? ' and validates, so it may auto-merge' : ''}).`;
-  outcome.push(
-    ...(await ensureOwnerNotes(
-      github,
-      removals.map((removal) => ({ kind, removal, branch, where })),
-    )),
-  );
   if (failure !== undefined) {
     throw failure;
   }
   return outcome;
 };
 
-/** The day the removal branch's pull request merged, if it did. */
-const mergedDay = async (github: Client, branch: string): Promise<string | undefined> => {
-  const owner = github.repository.split('/')[0] ?? '';
-  const pulls = await github.get<Pull[]>(
-    `/repos/${github.repository}/pulls?state=closed&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
-  );
-  return pulls.find((pull) => pull.merged_at)?.merged_at?.slice(0, 10);
-};
-
 /**
- * Close the owner issue of every release that has landed: an issue labelled `flake:releasing` whose entry is no
- * longer on `main`, whose newest removal comment is a release, and whose release branch's pull request merged. It
- * closes as completed, labelled `flake:released`, with a comment recording the day the release merged: the start of
- * the 30-day return window. An entry that left `main` another way (an expiry, or by hand) only loses
- * `flake:releasing`: the release did not land. Markers are read only from comments an app wrote.
+ * Close the owner issue of every release that landed: for each release branch whose pull request merged (and whose
+ * entry is no longer on `main`), the issue gets one comment recording the entry and the day it merged, the start of
+ * the 30-day return window, and closes as completed, labelled `flake:released`. It is found through the merged branch,
+ * not through a label, so an owner update that failed before the merge is recovered. An issue still labelled
+ * `flake:releasing` whose entry left `main` without a landed release only loses that label. Markers are read only
+ * from comments an app wrote.
  */
 export const closeReleased = async (
   github: Client,
-  context: { readonly tests: readonly QuarantinedTest[] },
+  context: {
+    readonly tests: readonly QuarantinedTest[];
+    readonly landed: readonly LandedRelease[];
+    /** The ledger identity of a test in a `quarantine.json`, or `undefined` when no project owns the file. */
+    readonly identityOf: (path: string, test: string) => string | undefined;
+  },
 ): Promise<string[]> => {
   const repo = `/repos/${github.repository}`;
   const onMain = new Set(context.tests.map((test) => test.entry.issue));
   const outcome: string[] = [];
-  const issues = await readPages<LabelledIssue>(
+  const handled = new Set<number>();
+  for (const release of context.landed) {
+    const released = release.mergedAt.slice(0, 10);
+    for (const { path, entry } of release.removed) {
+      const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+      const { issue, test, created, expires, renewal } = fields;
+      const id = typeof test === 'string' ? context.identityOf(path, test) : undefined;
+      if (
+        typeof issue !== 'number' ||
+        id === undefined ||
+        typeof created !== 'string' ||
+        typeof expires !== 'string' ||
+        onMain.has(issue) ||
+        handled.has(issue)
+      ) {
+        continue;
+      }
+      handled.add(issue);
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+      const [current, comments] = await Promise.all([
+        github.get<LabelledIssue>(`${repo}/issues/${issue}`),
+        automationComments(github, issue),
+      ]);
+      const noted = markersIn(comments).some(
+        (marker) => marker.kind === 'released' && marker.record.branch === release.branch,
+      );
+      const labels = [
+        ...new Set([...labelNames(current.labels).filter((name) => name !== releasingLabel), releasedLabel]),
+      ];
+      const done =
+        noted &&
+        current.state === 'closed' &&
+        labels.length === labelNames(current.labels).length &&
+        labelNames(current.labels).includes(releasedLabel);
+      if (done) {
+        continue;
+      }
+      if (!noted) {
+        const record = {
+          identity: identityHashOf(id),
+          path,
+          created,
+          expires,
+          ...(typeof renewal === 'object' && renewal !== null ? { renewal: renewal as QuarantineRenewal } : {}),
+          branch: release.branch,
+          released,
+        };
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+        await comment(
+          github,
+          issue,
+          `${removalMarker('released', record)}\nThe release merged on ${released}: the entry is no longer on main and the test gates again. A return within 30 days reopens this issue as the same entry, for the operator.`,
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+      await github.send(
+        'PATCH',
+        `${repo}/issues/${issue}`,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+        current.state === 'open' ? { state: 'closed', state_reason: 'completed', labels } : { labels },
+      );
+      outcome.push(`Closed #${issue}: released on ${released}.`);
+    }
+  }
+  const labelled = await readPages<LabelledIssue>(
     github,
     `${repo}/issues?state=all&labels=${encodeURIComponent(releasingLabel)}`,
   );
-  for (const issue of issues) {
-    if (issue.pull_request !== undefined || onMain.has(issue.number)) {
+  for (const issue of labelled) {
+    if (issue.pull_request !== undefined || onMain.has(issue.number) || handled.has(issue.number)) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-    const last = lastRemoval(await automationComments(github, issue.number));
     const others = labelNames(issue.labels).filter((name) => name !== releasingLabel);
-    const landed =
-      last?.kind === 'release' && last.record.branch !== undefined
-        ? // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-          await mergedDay(github, last.record.branch)
-        : undefined;
-    if (last === undefined || landed === undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-      await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels: others });
-      outcome.push(
-        `#${issue.number} left quarantine without its release landing: \`${releasingLabel}\` removed, the issue stays as it is.`,
-      );
-      continue;
-    }
     // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-    await comment(
-      github,
-      issue.number,
-      `${removalMarker('released', { ...last.record, released: landed })}\nThe release merged on ${landed}: the entry is no longer on main and the test gates again. A return within 30 days reopens this issue as the same entry, for the operator.`,
+    await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels: others });
+    outcome.push(
+      `#${issue.number} left quarantine without its release landing: \`${releasingLabel}\` removed, the issue stays as it is.`,
     );
-    const labels = [...new Set([...others, releasedLabel])];
-    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-    await github.send(
-      'PATCH',
-      `${repo}/issues/${issue.number}`,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
-      issue.state === 'open' ? { state: 'closed', state_reason: 'completed', labels } : { labels },
-    );
-    outcome.push(`Closed #${issue.number}: released on ${landed}.`);
   }
   return outcome;
 };
@@ -594,7 +652,9 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   const workspace = await readWorkspace(root);
   const tests = quarantinedTests(workspace, values.today);
-  const pending = offline ? [] : await readPendingRemovals(github);
+  const { pending, landed } = offline
+    ? { pending: [], landed: [] }
+    : await readRemovalBranches(github, `${addDays(values.today, -returnWindowDays)}T00:00:00Z`);
   const fixes = offline ? new Map<string, LinkedFix | undefined>() : await readFixes(github, tests, state);
   const releases = values.releases === 'true';
   const plan = planRemovals({
@@ -677,7 +737,19 @@ const main = async (args: readonly string[]): Promise<number> => {
         })),
       );
     }
-    outcome.push(...(await closeReleased(github, { tests })));
+    const roots = new Map(
+      [...workspace.projects.values()].map((project) => [quarantinePath(project.root), project.name]),
+    );
+    outcome.push(
+      ...(await closeReleased(github, {
+        tests,
+        landed,
+        identityOf: (path, test) => {
+          const project = roots.get(path);
+          return project === undefined ? undefined : `${project} › ${test}`;
+        },
+      })),
+    );
   } else {
     outcome.push(dryRun ? 'Dry run: nothing written to GitHub.' : 'Nothing written to GitHub.');
     if (values.out) {

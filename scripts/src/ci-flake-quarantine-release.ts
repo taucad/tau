@@ -136,28 +136,32 @@ const passesOf = (runs: readonly StreakRun[]): number => runs.reduce((sum, run) 
  * longer count, and a late pass from before the newest failure never joins the count after it. Runs past the newest
  * {@link maximumStreakRuns} fold into `trimmed`, which keeps their passes and when they ran.
  */
+/** Run order: by creation time, then run, then attempt (the attempts of one run share its creation time). */
+const runOrder = (
+  a: { readonly at: string; readonly run: number; readonly attempt: number },
+  b: { readonly at: string; readonly run: number; readonly attempt: number },
+): number => a.at.localeCompare(b.at) || a.run - b.run || a.attempt - b.attempt;
+
 const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number): void => {
   if (failures > 0) {
     track.failures += failures;
-    if (track.lastFailure === undefined || attempt.at >= track.lastFailure.at) {
+    if (track.lastFailure === undefined || runOrder(attempt, track.lastFailure) >= 0) {
       track.lastFailure = { run: attempt.run, attempt: attempt.attempt, at: attempt.at };
     }
-    track.streakRuns = track.streakRuns.filter((run) => run.at > attempt.at);
+    track.streakRuns = track.streakRuns.filter((run) => runOrder(run, attempt) > 0);
     if (track.trimmed && track.trimmed.from <= attempt.at) {
       // Some trimmed passes may be later than the failure; which is unknown, so none counts.
       track.trimmed = undefined;
     }
-  } else if (track.lastFailure === undefined || attempt.at > track.lastFailure.at) {
-    if (track.trimmed && attempt.at <= track.trimmed.to) {
+  } else if (track.lastFailure === undefined || runOrder(attempt, track.lastFailure) > 0) {
+    if (track.trimmed && attempt.at < track.trimmed.to) {
       track.trimmed = {
         passes: track.trimmed.passes + attempt.passes,
         from: attempt.at < track.trimmed.from ? attempt.at : track.trimmed.from,
         to: track.trimmed.to,
       };
     } else {
-      track.streakRuns = [...track.streakRuns, attempt].sort(
-        (a, b) => a.at.localeCompare(b.at) || a.run - b.run || a.attempt - b.attempt,
-      );
+      track.streakRuns = [...track.streakRuns, attempt].sort(runOrder);
     }
     while (track.streakRuns.length > maximumStreakRuns) {
       const [oldest] = track.streakRuns;
@@ -614,9 +618,16 @@ export const lastLanded = (texts: readonly string[]): (ReleaseRecord & { readonl
 export type ReturnRecord = ReleaseRecord & {
   readonly issue: number;
   readonly released: string;
-  /** Already handed to the operator by an earlier run: the issue is open and labelled `flake:needs-operator`. */
-  readonly handedOff?: boolean | undefined;
+  /**
+   * What earlier runs already did to hand the return to the operator: each step is finished on a later run, the note
+   * (found by {@link returnMarker}) never twice. All three done is a complete handoff.
+   */
+  readonly handoff?: { readonly labelled: boolean; readonly noted: boolean; readonly open: boolean } | undefined;
 };
+
+/** The marker of the note that hands a return to the operator: one per landed release, so it is written once. */
+export const returnMarker = (record: { readonly identity: string; readonly released: string }): string =>
+  `<!-- flake-returned: ${record.identity} ${record.released} -->`;
 
 /** Whether a release is recent enough that the test's return is the same entry (D5). */
 export const isRecentRelease = (released: string, today: string): boolean =>

@@ -12,6 +12,7 @@ import {
   applyPlan,
   mayAutoMerge,
   proposedFiles,
+  readPages,
   readReturns,
   reconcileEntryBranches,
   validatePlan,
@@ -29,7 +30,7 @@ import {
   renderQuarantine,
 } from '#ci-flake-quarantine-entry.js';
 import { identityMarker } from '#flake-regression.js';
-import { removalMarker } from '#ci-flake-quarantine-release.js';
+import { removalMarker, returnMarker } from '#ci-flake-quarantine-release.js';
 import type { ReturnRecord } from '#ci-flake-quarantine-release.js';
 import type { EntryPlan, PlanInput, WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 import { GitHubError } from '#ci-github-client.js';
@@ -862,7 +863,7 @@ describe('the 30-day return (FQ-9)', () => {
   });
 
   it('should not reopen or comment again on a return an earlier run handed to the operator', async () => {
-    const open = { ...record, expires: '2026-11-21', handedOff: true };
+    const open = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: true, open: true } };
     const refused = plan(replayWeek(), { returns: new Map([[record.identity, open]]) }).refused.filter(
       (refusal) => refusal.kind === 'returned',
     );
@@ -876,6 +877,41 @@ describe('the 30-day return (FQ-9)', () => {
 
     expect(result.outcome).toEqual(['#77 is already open for the operator: a return that is not quarantined again.']);
     expect(requests.filter((request) => request.method !== 'GET')).toEqual([]);
+  });
+
+  it('should finish a handoff an earlier run left half-done, without a second note', async () => {
+    const half = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: true, open: false } };
+    const refused = plan(replayWeek(), { returns: new Map([[record.identity, half]]) }).refused.filter(
+      (refusal) => refusal.kind === 'returned',
+    );
+    const { github, requests } = fakeGitHub();
+
+    await applyPlan(
+      github,
+      { admitted: [], held: [], refused },
+      { base: 'main', baseSha: sha(1), quarantines: [], problems: [], today: '2026-11-22' },
+    );
+
+    expect(requests.filter((request) => request.method !== 'GET')).toEqual([
+      { method: 'PATCH', path: '/repos/taucad/tau/issues/77', body: { state: 'open', state_reason: 'reopened' } },
+    ]);
+  });
+
+  it('should fail closed on a list longer than it reads', async () => {
+    const github: Client = {
+      repository: 'taucad/tau',
+      budget: () => 100,
+      get: async <T>(): Promise<T> => Array.from({ length: 100 }, () => ({})) as T,
+      getText: async () => '',
+      getBytes: async () => new Uint8Array(),
+      send: async () => {
+        throw new Error('unexpected write');
+      },
+    };
+
+    await expect(readPages(github, '/repos/taucad/tau/issues/1/comments')).rejects.toThrow(
+      'more than 5000 items; not read in part',
+    );
   });
 
   it('should read the releases of the last 30 days from the owner issues', async () => {
@@ -909,6 +945,7 @@ describe('the 30-day return (FQ-9)', () => {
         // Reopened and labelled by an earlier run: still the same entry, already with the operator.
         return [
           { body: removalMarker('released', { ...record, identity: 'reopened', released: '2026-11-18' }), user: bot },
+          { body: `${returnMarker({ identity: 'reopened', released: '2026-11-18' })}\nReturned.`, user: bot },
         ];
       }
       if (path.includes('/issues/81/comments')) {
@@ -935,9 +972,21 @@ describe('the 30-day return (FQ-9)', () => {
     const returns = await readReturns(github, '2026-11-22');
 
     expect([...returns.values()]).toEqual([
-      { ...record, issue: 77, released: '2026-11-14', handedOff: false },
-      { ...record, identity: 'reopened', issue: 80, released: '2026-11-18', handedOff: true },
-      { ...record, identity: 'half', issue: 81, released: '2026-11-18', handedOff: false },
+      { ...record, issue: 77, released: '2026-11-14', handoff: { labelled: false, noted: false, open: false } },
+      {
+        ...record,
+        identity: 'reopened',
+        issue: 80,
+        released: '2026-11-18',
+        handoff: { labelled: true, noted: true, open: true },
+      },
+      {
+        ...record,
+        identity: 'half',
+        issue: 81,
+        released: '2026-11-18',
+        handoff: { labelled: false, noted: false, open: true },
+      },
     ]);
     expect(requests[0]).toContain('state=all&labels=flake%3Areleased&since=2026-10-23T00:00:00Z');
     expect(requests.some((path) => path.includes('/issues/79/'))).toBe(false);

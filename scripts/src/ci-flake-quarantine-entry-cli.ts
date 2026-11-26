@@ -74,6 +74,7 @@ import {
   lastLanded,
   operatorLabel,
   releasedLabel,
+  returnMarker,
   returnWindowDays,
 } from '#ci-flake-quarantine-release.js';
 import type { ReturnRecord } from '#ci-flake-quarantine-release.js';
@@ -429,21 +430,41 @@ export const pushFiles = async (
 
 /**
  * Hand an owner issue to the operator: label it `flake:needs-operator`, say why, and reopen it last. A return within
- * 30 days of release goes to the operator, not the agent (FQ-9, D5). The handoff is complete only when the issue is
- * open and labelled, so a run that failed half-way is finished by the next.
+ * 30 days of release goes to the operator, not the agent (FQ-9, D5). Each step an earlier run already did (the
+ * record's `handoff`) is skipped, so a run that failed half-way is finished by the next and the note, marked with
+ * {@link returnMarker}, is written once.
  */
-export const reopenForOperator = async (github: Client, issue: number, note: string): Promise<void> => {
+export const reopenForOperator = async (
+  github: Client,
+  handoff: {
+    readonly issue: number;
+    readonly returned: ReturnRecord;
+    readonly note: string;
+  },
+): Promise<void> => {
   const repo = `/repos/${github.repository}`;
-  await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
-  await comment(github, issue, note);
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
-  await github.send('PATCH', `${repo}/issues/${issue}`, { state: 'open', state_reason: 'reopened' });
+  const { issue, returned } = handoff;
+  const done = returned.handoff;
+  if (done?.labelled !== true) {
+    await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
+  }
+  if (done?.noted !== true) {
+    await comment(github, issue, `${returnMarker(returned)}\n${handoff.note}`);
+  }
+  if (done?.open !== true) {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+    await github.send('PATCH', `${repo}/issues/${issue}`, { state: 'open', state_reason: 'reopened' });
+  }
 };
 
-/** The most pages a list is read to: 1,000 items. */
-const maximumPages = 10;
+/** Whether every step of a return's handoff to the operator is done. */
+const handedOff = (returned: ReturnRecord | undefined): boolean =>
+  returned?.handoff?.labelled === true && returned.handoff.noted && returned.handoff.open;
 
-/** Every item of a paged REST list, up to {@link maximumPages} pages of 100. */
+/** The most pages a list is read to; a longer list fails the run rather than be read in part. */
+const maximumPages = 50;
+
+/** Every item of a paged REST list, 100 a page. A list longer than {@link maximumPages} pages throws: fail closed. */
 export const readPages = async <T>(github: Client, path: string): Promise<T[]> => {
   const items: T[] = [];
   for (let page = 1; page <= maximumPages; page += 1) {
@@ -451,10 +472,10 @@ export const readPages = async <T>(github: Client, path: string): Promise<T[]> =
     const batch = await github.get<T[]>(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
     items.push(...batch);
     if (batch.length < 100) {
-      break;
+      return items;
     }
   }
-  return items;
+  throw new Error(`${path}: more than ${maximumPages * 100} items; not read in part`);
 };
 
 /** An issue comment; `user` is `null` for a deleted account. */
@@ -496,7 +517,8 @@ export const readReturns = async (github: Client, today: string): Promise<Map<st
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one issue's comments at a time
-      const landed = lastLanded(await automationComments(github, issue.number));
+      const comments = await automationComments(github, issue.number);
+      const landed = lastLanded(comments);
       const known = landed ? returns.get(landed.identity) : undefined;
       if (
         landed &&
@@ -507,7 +529,11 @@ export const readReturns = async (github: Client, today: string): Promise<Map<st
         returns.set(landed.identity, {
           ...landed,
           issue: issue.number,
-          handedOff: issue.state === 'open' && labels.includes(operatorLabel),
+          handoff: {
+            labelled: labels.includes(operatorLabel),
+            noted: comments.some((body) => body.includes(returnMarker(landed))),
+            open: issue.state === 'open',
+          },
         });
       }
     }
@@ -566,16 +592,16 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
   for (const refusal of plan.refused.filter((entry) => entry.returned !== undefined)) {
     const issue = refusal.returned?.issue ?? 0;
     issues.set(refusal.id, issue);
-    if (refusal.returned?.handedOff === true) {
+    if (refusal.returned === undefined || handedOff(refusal.returned)) {
       outcome.push(`#${issue} is already open for the operator: a return that is not quarantined again.`);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- issues are updated one at a time
-    await reopenForOperator(
-      github,
+    await reopenForOperator(github, {
       issue,
-      `**Returned** within ${returnWindowDays} days of its release on ${refusal.returned?.released ?? ''}: not quarantined again, ${refusal.reason.replaceAll('`', "'")}. It goes to the operator, not the agent.`,
-    );
+      returned: refusal.returned,
+      note: `**Returned** within ${returnWindowDays} days of its release on ${refusal.returned.released}: not quarantined again, ${refusal.reason.replaceAll('`', "'")}. It goes to the operator, not the agent.`,
+    });
     outcome.push(`Reopened #${issue} for the operator: a return that is not quarantined again.`);
   }
   const admitted: PlannedEntry[] = [];
@@ -586,13 +612,13 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
       issueBody(planned, { repository: github.repository, entry: planned.entry }),
     );
     issues.set(planned.id, issue);
-    if (planned.returned && planned.returned.handedOff !== true) {
+    if (planned.returned && !handedOff(planned.returned)) {
       // oxlint-disable-next-line no-await-in-loop -- issues are updated one at a time
-      await reopenForOperator(
-        github,
+      await reopenForOperator(github, {
         issue,
-        `**Returned** within ${returnWindowDays} days of its release on ${planned.returned.released}: it re-enters as the same entry (created ${planned.entry.created}, expires ${planned.entry.expires}) and goes to the operator, not the agent (testing policy § 16.3).`,
-      );
+        returned: planned.returned,
+        note: `**Returned** within ${returnWindowDays} days of its release on ${planned.returned.released}: it re-enters as the same entry (created ${planned.entry.created}, expires ${planned.entry.expires}) and goes to the operator, not the agent (testing policy § 16.3).`,
+      });
       outcome.push(`Reopened #${issue} for the operator: a return re-enters as the same entry.`);
     }
     admitted.push({ ...planned, entry: { ...planned.entry, issue } });

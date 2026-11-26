@@ -385,6 +385,13 @@ export const namingImageUrls = async (
 const selectProjectLive = (snapshot: ReturnType<ProjectLibrarySessions['getSnapshot']>, projectId: string): boolean =>
   snapshot.context.refs[projectId] !== undefined;
 
+/** Whether a route verification names the directory at `locator` as the one it read; one that names none does not. */
+const namesDirectory = (
+  verified: Readonly<{ storageRootKey?: string; providerBasePath?: string }>,
+  locator: ProjectLocator,
+): boolean =>
+  verified.storageRootKey === locator.storageRootKey && verified.providerBasePath === locator.relativeDirectory;
+
 /**
  * Where a new project is created: the explicit location, or the last
  * successful one, and the storage root it names. The workspace is resolved
@@ -938,8 +945,9 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
    *
    * The target and the root statuses come from the current pass, with no scan (fast-path blueprint FW1). A stale pass
    * can only make this stricter: `survives`, the one fact that loosens a delete (no Trash needed), is read from disk.
-   * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks.
-   * Only when the pass shows another copy that no route binds does the precheck still scan, as before.
+   * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks,
+   * and counts only when the directory it read is that copy and not the target. Only when the pass shows another
+   * copy that no route binds does the precheck still scan, as before.
    */
   async #discoverPermanentDeleteStorage(
     projectId: string,
@@ -958,10 +966,17 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     }
     const routeCopy = others.find((occurrence) => routeBindsLocator(configured, occurrence.locator));
     if (routeCopy !== undefined) {
-      /* The route binds another copy: proven by reading it now, or not at all. With no proof the delete stays a
-       * sole copy's, which only asks for the Trash. */
+      /* The route binds another copy: proven by reading it now, or not at all. The verification reads whichever
+       * directory the route binds when it runs, and an ungated "Use this folder" may have moved the route since
+       * `configured` was read, even onto the target; so the proof counts only for the directory it names, and only
+       * when that is the copy chosen here and not the target. With no proof the delete stays a sole copy's, which
+       * only asks for the Trash. */
       const verification = await fileManager.client.verifyProjectRoute({ projectId });
-      return { storage: locatorToPendingStorage(target.locator), survives: verification.status === 'verified' };
+      const proven =
+        verification.status === 'verified' &&
+        namesDirectory(verification, routeCopy.locator) &&
+        !namesDirectory(verification, target.locator);
+      return { storage: locatorToPendingStorage(target.locator), survives: proven };
     }
     /* Another copy that no route binds: no read proves it without a scan until the authority can probe (FW3). */
     const scanned = await fileManager.client.listProjectManifests();

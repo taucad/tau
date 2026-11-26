@@ -17,6 +17,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeSet, WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
 import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
+import { projectToManifest } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
@@ -646,6 +647,41 @@ describe('createFileSystemBridgeProxy', () => {
       site: 'client-call-result',
       entry: 'listProjectManifests',
     });
+    proxy.dispose();
+  });
+
+  it('carries the directory a project verification read, and an answer that names none', async () => {
+    const channel = new MessageChannel();
+    const verified = {
+      status: 'verified',
+      project: {
+        projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+        manifest: projectToManifest({ name: 'P', description: '', tags: [], assets: {} }),
+      },
+      storageRootKey: 'opfs',
+      providerBasePath: 'p',
+    } as const;
+    let answer: unknown = verified;
+    createBridgeServer(
+      { verifyProjectRoute: async () => answer },
+      fsBridgePort(channel.port1, 'fs-bridge-verification-result-server'),
+      {
+        hello: createFileSystemBridgeHello({ state: 'workspace', watchable: false }),
+        protocolSchemas: fileSystemBridgeSchemas,
+      },
+    );
+    const proxy = createFileSystemBridgeProxy({
+      port: fsBridgePort(channel.port2, 'fs-bridge-verification-result-client'),
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+
+    await expect(proxy.verifyProjectRoute({ projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa' })).resolves.toEqual(verified);
+    /* An authority from before the directory was sent still answers; its proof names no copy. */
+    const { storageRootKey: _storageRootKey, providerBasePath: _providerBasePath, ...older } = verified;
+    answer = older;
+    await expect(proxy.verifyProjectRoute({ projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa' })).resolves.toEqual(older);
     proxy.dispose();
   });
 

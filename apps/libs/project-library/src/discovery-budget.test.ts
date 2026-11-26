@@ -381,4 +381,35 @@ describe('a copy delete proves the other copy from disk', () => {
     expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
     expect(harness.profile.counts()).toMatchObject({ scans: 0, verifications: 1 });
   });
+
+  it('should not count a verification of the target as proof when the route moves onto it mid-precheck', async () => {
+    const harness = await startLibrary();
+    const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
+    /* The pass still lists the Home copy; the disk no longer holds it, so the target is the last copy. */
+    harness.profile.removeDirectory('home', 'home-000');
+    /* After the precheck read the route (it bound the Home copy) and before the verification reads, "Use this folder"
+     * rebinds the route onto the very copy being deleted, as `chooseProjectDirectory` would with no mutation gate. */
+    harness.profile.onVerification((projectId) => {
+      if (projectId === homeId(0)) {
+        harness.profile.routes.set(projectId, {
+          projectId,
+          backend: 'webaccess',
+          workspaceId: libraryProfileFolderId,
+          providerBasePath: 'copy-000',
+        });
+      }
+    });
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(
+          homeId(0),
+          harness.profile.locatorOf('workspace', 'copy-000'),
+        ),
+      ).rejects.toThrow('Permanent delete is available only for trashed projects');
+      await settle(harness);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
+  });
 });

@@ -96,6 +96,7 @@
     "./utils/external-call-summary": "./src/utils/external-call-summary.ts",
     "./utils/external-tool-output": "./src/utils/external-tool-output.ts",
     "./utils/model-groups": "./src/utils/model-groups.ts",
+    "./utils/model-lineup": "./src/utils/model-lineup.ts",
     "./utils/new-chat-execution": "./src/utils/new-chat-execution.ts",
     "./utils/partial-json": "./src/utils/partial-json.ts",
     "./utils/question-tool": "./src/utils/question-tool.ts",

@@ -4,12 +4,16 @@
  * - {@link testRootFiles}: a root file facade (A4b), a fixed value a test can replace, as `rootFiles` publishes a new
  *   record client when its worker is replaced.
  * - {@link createLibraryProfile}: the 386-directory library of the project-library fast-path blueprint (FW0), with
- *   every full discovery scan, targeted verification and file read the library asks of the authority counted, so a
- *   budget test can hold each mutation to its scans and reads.
+ *   every full discovery read, directory re-read, targeted verification, identity sweep and file read the library asks
+ *   of the authority counted, so a budget test can hold each mutation to its reads. Its authority keeps a discovery
+ *   index as the filesystem's does (FW2): the first pass reads every directory, and a later one re-reads only the
+ *   directories this authority's own writes marked. A commit and a delete install their own result, as the filesystem
+ *   cost test measures; a change made behind the authority's back reaches no pass.
  */
 import { Topic } from '@taucad/events';
 import type { Chat } from '@taucad/chat';
 import type {
+  ProjectAbsence,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectLocator,
@@ -86,8 +90,12 @@ export type LibraryProfileRoute =
 
 /** What the library asked of the authority since the last reset. @public */
 export type LibraryProfileCounts = Readonly<{
-  /** Full discovery scans: `listProjectManifests` round trips, each reading every directory of every root. */
+  /** Full discovery reads: passes that read every directory of every root, the first one and none after it. */
   scans: number;
+  /** Directories a warm pass re-read, each marked by evidence since it was read: two file reads each. */
+  directoryReads: number;
+  /** Identity sweeps: `verifyAbsent`, a listing of every root and one identity read per directory (FW2). */
+  sweeps: number;
   /** Targeted verifications: `verifyProjectRoute`, two file reads of one directory under its locks. */
   verifications: number;
   /** Root re-syncs (`syncProjectRoots`); not a discovery read, counted to show its share. */
@@ -205,7 +213,8 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     states.set(projectId, { projectId, lastActivityAt: 1_600_000_000_000 + index });
   }
 
-  let counts = { scans: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
+  const noCounts = { scans: 0, directoryReads: 0, sweeps: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
+  let counts = noCounts;
   const rootOf = (storage: Readonly<{ backend: string }>): 'home' | 'workspace' =>
     storage.backend === 'webaccess' ? 'workspace' : 'home';
   const routedDirectory = (projectId: string): ProfileDirectory | undefined => {
@@ -220,15 +229,39 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
         );
   };
 
-  /* A scan as the authority answers it: every directory, sorted by backend, root and directory, with the ids more than
-   * one directory carries marked `duplicate-id`. */
+  /* The authority's discovery index: what each directory held when last read, and the directories marked since. */
+  const keyOf = (directory: Pick<ProfileDirectory, 'root' | 'relativeDirectory'>): string =>
+    `${directory.root}\0${directory.relativeDirectory}`;
+  let indexed: Map<string, ProfileDirectory> | undefined;
+  const marked = new Set<string>();
+  const install = (directory: ProfileDirectory): void => {
+    indexed?.set(keyOf(directory), { ...directory });
+  };
+
+  /* A pass as the authority answers it over its index: every directory, sorted by backend, root and directory, with
+   * the ids more than one directory carries marked `duplicate-id`. */
   const listProjectManifests = async (): Promise<ProjectDiscoveryResult> => {
-    counts = { ...counts, scans: counts.scans + 1 };
+    if (indexed === undefined) {
+      counts = { ...counts, scans: counts.scans + 1 };
+      indexed = new Map(directories.map((directory) => [keyOf(directory), { ...directory }]));
+    } else {
+      for (const key of marked) {
+        counts = { ...counts, directoryReads: counts.directoryReads + 1 };
+        const directory = directories.find((candidate) => keyOf(candidate) === key);
+        if (directory === undefined) {
+          indexed.delete(key);
+        } else {
+          install(directory);
+        }
+      }
+    }
+    marked.clear();
+    const listed = [...indexed.values()];
     const occurrences = new Map<string, number>();
-    for (const directory of directories) {
+    for (const directory of listed) {
       occurrences.set(directory.projectId, (occurrences.get(directory.projectId) ?? 0) + 1);
     }
-    const sorted = directories.toSorted(
+    const sorted = listed.toSorted(
       (left, right) =>
         (left.root === right.root ? 0 : left.root === 'home' ? -1 : 1) ||
         left.relativeDirectory.localeCompare(right.relativeDirectory),
@@ -251,10 +284,30 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
   };
 
   let beforeVerification: ((projectId: string) => void) | undefined;
+  /* Storage's answer to "does any directory carry this id", every directory read (index-contract review A1). */
+  const verifyAbsent = async (projectId: string): Promise<ProjectAbsence> => {
+    counts = { ...counts, sweeps: counts.sweeps + 1 };
+    const carrying = directories.filter((directory) => directory.projectId === projectId);
+    return carrying.length === 0
+      ? { status: 'absent' }
+      : {
+          status: 'present',
+          locators: carrying.map((directory) => locatorOf(directory.root, directory.relativeDirectory)),
+        };
+  };
+
   const verifyProjectRoute = async ({ projectId }: Readonly<{ projectId: string }>) => {
     counts = { ...counts, verifications: counts.verifications + 1 };
     beforeVerification?.(projectId);
     const directory = routedDirectory(projectId);
+    const route = routes.get(projectId);
+    if (directory === undefined && route !== undefined) {
+      /* A read that contradicts the index marks the directory, so the next pass re-reads it (A2 i). */
+      const key = keyOf({ root: rootOf(route), relativeDirectory: route.providerBasePath });
+      if (indexed?.has(key) === true) {
+        marked.add(key);
+      }
+    }
     return (
       directory === undefined
         ? { status: 'discovery-required' }
@@ -281,7 +334,9 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     if (index === -1) {
       return { status: 'absent' } as const;
     }
-    directories.splice(index, 1);
+    const [removed] = directories.splice(index, 1);
+    /* The delete installs what it verified: the directory is gone. */
+    indexed?.delete(keyOf(removed!));
     return { status: 'deleted' } as const;
   };
 
@@ -300,7 +355,10 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     if (!parsed.success) {
       throw new Error('The profile commits strict manifests only');
     }
-    directories.push({ root: rootOf(scope), relativeDirectory: providerBasePath, projectId, manifest: parsed.data });
+    const committed = { root: rootOf(scope), relativeDirectory: providerBasePath, projectId, manifest: parsed.data };
+    directories.push(committed);
+    /* The commit installs what it verified. */
+    install(committed);
     return { status: 'committed' } as const;
   };
 
@@ -327,6 +385,8 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
       if (parsed.success) {
         directory.manifest = parsed.data;
       }
+      /* The provider tap marks the directory: the next pass re-reads it. */
+      marked.add(keyOf(directory));
     },
     readdir: async (path: string) => {
       throw notFound(path);
@@ -343,6 +403,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     client: {
       listProjectManifests,
       verifyProjectRoute,
+      verifyAbsent,
       permanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory,
       adoptProjectDirectory: async () => {
@@ -548,7 +609,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     },
     counts: () => counts,
     reset: () => {
-      counts = { scans: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
+      counts = noCounts;
     },
   };
 };

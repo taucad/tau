@@ -6664,6 +6664,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@taucad/formal':
+        specifier: workspace:*
+        version: link:../../tools/formal
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx

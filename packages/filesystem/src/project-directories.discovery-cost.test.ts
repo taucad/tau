@@ -13,14 +13,15 @@ import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { MockBrowserCall } from '#testing/mock-handle-factory.js';
 
 /**
- * What one full discovery scan costs on the operator's profile (project-library fast-path blueprint FW0, Finding 1):
- * 386 project directories, 84 in Home (OPFS) and 302 in one File System Access folder, three ids carried by a copy in
- * each. A scan lists each root once and reads `tau.json` and `.tau/project.json` of every directory, and stats
- * `tau.json` only where an id has more than one directory.
+ * What discovery costs on the operator's profile (project-library fast-path blueprint FW0, Finding 1; FW2): 386
+ * project directories, 84 in Home (OPFS) and 302 in one File System Access folder, three ids carried by a copy in each.
+ * A full read lists each root once and reads `tau.json` and `.tau/project.json` of every directory, and stats
+ * `tau.json` only where an id has more than one directory. With the discovery index (FW2) only the first pass after a
+ * reload, or after a reset, is a full read; a warm pass reads only the directories with evidence.
  *
- * These are the per-scan figures `apps/libs/project-library/src/discovery-budget.ceiling.json` multiplies by the scans
- * each library mutation makes. `the discovery unit cost` below records them in `testing/discovery-unit-cost.json`, and
- * the library budget test holds its ceiling's `scan` and `verification` rows to that file.
+ * These are the per-call figures `apps/libs/project-library/src/discovery-budget.ceiling.json` multiplies by what each
+ * library mutation asks. `the discovery unit cost` below records them in `testing/discovery-unit-cost.json`, and the
+ * library budget test holds its ceiling's unit rows to that file.
  */
 describe('listProjectManifests cost on the 386-directory profile', () => {
   let profile: DiscoveryProfile;
@@ -71,10 +72,23 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
     });
   });
 
-  it('should cost the same browser calls on every warm scan: nothing about a directory is remembered', async () => {
-    /* The first scan of a fresh profile is cold: it opens every directory handle. The scans measured below are warm. */
+  it('should make no provider or browser call on a warm pass with no evidence (FW2, S9)', async () => {
     await profile.service.listProjectManifests();
+
+    const warm = await profile.measure(async () => profile.service.listProjectManifests());
+
+    expect(warm.result.entries).toHaveLength(operatorDiscoveryProfile.home + operatorDiscoveryProfile.workspace);
+    expect(warm.cost.counters).toEqual({});
+    expect(warm.cost.providers.home.total + warm.cost.providers.workspace.total).toBe(0);
+    expect(warm.cost.browserCalls).toBe(0);
+  });
+
+  it('should cost the same browser calls on every full read with warm handles: a reset index reads everything', async () => {
+    /* The first pass of a fresh profile is cold: it opens every directory handle. The reads measured below are warm. */
+    await profile.service.listProjectManifests();
+    profile.index.cold(undefined, 'reset');
     const first = await profile.measure(async () => profile.service.listProjectManifests());
+    profile.index.cold(undefined, 'reset');
     const second = await profile.measure(async () => profile.service.listProjectManifests());
 
     expect(second.cost).toEqual(first.cost);
@@ -129,7 +143,13 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
 type UnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
 const unitCost = JSON.parse(
   readFileSync(path.join(import.meta.dirname, 'testing/discovery-unit-cost.json'), 'utf8'),
-) as Readonly<{ scan: UnitCost; verification: UnitCost }>;
+) as Readonly<{
+  scan: UnitCost;
+  warmPass: UnitCost;
+  directoryRead: UnitCost;
+  sweep: UnitCost;
+  verification: UnitCost;
+}>;
 
 describe('the discovery unit cost', () => {
   let profile: DiscoveryProfile;
@@ -148,15 +168,32 @@ describe('the discovery unit cost', () => {
     browserCalls: cost.browserCalls,
   });
 
-  it('should record what one warm scan and one route verification cost on the profile', async () => {
+  it('should record what a full read, a warm pass, one directory re-read, an identity sweep and one route verification cost on the profile', async () => {
     await profile.service.listProjectManifests();
+    profile.index.cold(undefined, 'reset');
     const scan = await profile.measure(async () => profile.service.listProjectManifests());
+    const warmPass = await profile.measure(async () => profile.service.listProjectManifests());
+    const [home] = await profile.service.getRootStatuses();
+    /* Evidence names one directory's manifest, as the provider tap or a sibling's named notice would. */
+    profile.index.note(home!.storageRootKey, ['home-010/tau.json']);
+    const directoryRead = await profile.measure(async () => profile.service.listProjectManifests());
+    const sweep = await profile.measure(async () => profile.service.verifyAbsent(discoveryProfileHomeId(0)));
     const verification = await profile.measure(async () =>
       profile.service.verifyProjectRoute({ projectId: discoveryProfileHomeId(0) }),
     );
 
-    expect({ scan: unitCostOf(scan.cost), verification: unitCostOf(verification.cost) }).toEqual({
+    expect(sweep.result.status).toBe('present');
+    expect({
+      scan: unitCostOf(scan.cost),
+      warmPass: unitCostOf(warmPass.cost),
+      directoryRead: unitCostOf(directoryRead.cost),
+      sweep: unitCostOf(sweep.cost),
+      verification: unitCostOf(verification.cost),
+    }).toEqual({
       scan: unitCost.scan,
+      warmPass: unitCost.warmPass,
+      directoryRead: unitCost.directoryRead,
+      sweep: unitCost.sweep,
       verification: unitCost.verification,
     });
   });

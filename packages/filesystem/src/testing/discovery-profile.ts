@@ -22,12 +22,15 @@ import type { ProjectRootConfig, ProjectRootConfiguration } from '#mount-table.j
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { ProjectDirectoryIndex } from '#project-directory-index.js';
+import type { ProjectDirectoryReading } from '#project-directories.js';
 import { workerTimingCounters, workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { MockBrowserCall } from '#testing/mock-handle-factory.js';
 import { countProviderCalls } from '#testing/counting-provider.js';
 import type { ProviderCallCounts } from '#testing/counting-provider.js';
+import type { FileSystemProvider } from '#types.js';
 
 /** How many project directories each root holds, and how many ids a copy in each root shares. @public */
 export type DiscoveryProfileShape = Readonly<{
@@ -71,6 +74,14 @@ export type DiscoveryCost = Readonly<{
 /** The fixture, built. @public */
 export type DiscoveryProfile = Readonly<{
   service: WorkspaceFileService;
+  /** The authority's discovery index (FW2), so a test can make it cold and measure a full read. */
+  index: ProjectDirectoryIndex;
+  /** Write one file into a root's handle tree behind the authority's back, as another program would. */
+  writeBehind: (root: 'home' | 'workspace', path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>;
+  /** Remove one entry of a root's handle tree, recursively, behind the authority's back. */
+  removeBehind: (root: 'home' | 'workspace', path: string) => Promise<void>;
+  /** The providers the authority reads each root through, for a test that injects a fault. */
+  providers: Readonly<{ home: FileSystemProvider; workspace: FileSystemProvider }>;
   shape: DiscoveryProfileShape;
   /** Run `operation` and report what it cost, counted from a clean window. */
   measure: <Result>(operation: () => Promise<Result>) => Promise<Readonly<{ result: Result; cost: DiscoveryCost }>>;
@@ -181,11 +192,13 @@ export async function createDiscoveryProfile(
   const rootProvider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: rootStorageRootKey });
   const mountTable = new MountTable();
   mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory', storageRootKey: rootStorageRootKey });
+  const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
   const service = new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),
     eventBus: new ChangeEventBus(),
     mountTable,
+    discoveryIndex: index,
   });
   const workspaceScope = {
     backend: 'webaccess',
@@ -193,8 +206,10 @@ export async function createDiscoveryProfile(
     directoryHandle: workspace.root as unknown as FileSystemDirectoryHandle,
     workspaceId: 'wsp_discoveryprofile00000',
   } as const;
-  const homeProvider = countProviderCalls(await providerRegistry.getProvider({ backend: 'opfs' }));
-  const workspaceProvider = countProviderCalls(await providerRegistry.getProvider(workspaceScope));
+  const homeInstance = await providerRegistry.getProvider({ backend: 'opfs' });
+  const workspaceInstance = await providerRegistry.getProvider(workspaceScope);
+  const homeProvider = countProviderCalls(homeInstance);
+  const workspaceProvider = countProviderCalls(workspaceInstance);
   /* Every project is routed to its own directory, and a duplicated id to its Home copy, as the library binds them. */
   const projects: ProjectRootConfiguration['projects'] = [
     ...Array.from(
@@ -255,6 +270,19 @@ export async function createDiscoveryProfile(
 
   return {
     service,
+    index,
+    writeBehind: async (root, path, bytes) => writeInto(root === 'home' ? home.root : workspace.root, path, bytes),
+    removeBehind: async (root, path) => {
+      const segments = path.split('/');
+      const name = segments.pop()!;
+      let directory = root === 'home' ? home.root : workspace.root;
+      for (const segment of segments) {
+        // oxlint-disable-next-line no-await-in-loop -- Each directory is opened inside the last.
+        directory = await directory.getDirectoryHandle(segment);
+      }
+      await directory.removeEntry(name, { recursive: true });
+    },
+    providers: { home: homeInstance, workspace: workspaceInstance },
     shape,
     measure,
     dispose: () => {

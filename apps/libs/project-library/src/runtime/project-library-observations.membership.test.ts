@@ -5,7 +5,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createActor } from 'xstate';
 import { QueryClient } from '@tanstack/react-query';
+import { mock } from 'vitest-mock-extended';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
+import type { WatchEvent } from '@taucad/filesystem';
 import { createMetadataObservation, createMetadataReadOwner } from '#runtime/project-library-observations.js';
 import type { LibraryObservationHost } from '#runtime/project-library-observations.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
@@ -22,12 +24,12 @@ const openWatch = (): ObservationWatch => ({
 
 /** A listing of these projects, each last active at `activityAt`; only the ids matter to the watch. */
 const listingOf = (projectIds: readonly string[], activityAt = 0): ProjectListing =>
-  ({
+  mock<ProjectListing>({
     projects: projectIds.map((projectId) => ({ projectId, library: { projectId, lastActivityAt: activityAt } })),
     conflicts: [],
     recoveries: [],
     workspaceBindingRepairs: [],
-  }) as unknown as ProjectListing;
+  });
 
 const turns = async (count = 20): Promise<void> => {
   for (let turn = 0; turn < count; turn += 1) {
@@ -45,12 +47,18 @@ afterEach(() => {
   }
 });
 
-/** The chat-metadata watch over a query client, with no change ever delivered. */
-const startWatch = async (queryClient: QueryClient): Promise<void> => {
-  const fileManager = {
-    workerChangeChannel: { watchReady: () => openWatch() },
+/** The chat-metadata watch over a query client; `emit` delivers a change to its workspace watch. */
+const startWatch = async (queryClient: QueryClient): Promise<Readonly<{ emit: (event: WatchEvent) => void }>> => {
+  let deliver: ((event: WatchEvent) => void) | undefined;
+  const fileManager = mock<ProjectLibraryFileManager>({
+    workerChangeChannel: {
+      watchReady: (_request, onEvent) => {
+        deliver = onEvent;
+        return openWatch();
+      },
+    },
     watchRecordFile: () => openWatch(),
-  } as unknown as ProjectLibraryFileManager;
+  });
   const records = { chatStore: {}, readOwner: createMetadataReadOwner({}) };
   const host: LibraryObservationHost = {
     queryClient,
@@ -68,6 +76,11 @@ const startWatch = async (queryClient: QueryClient): Promise<void> => {
     actor.stop();
   });
   await turns();
+  return {
+    emit: (event) => {
+      deliver?.(event);
+    },
+  };
 };
 
 const invalidated = (queryClient: QueryClient, projectId: string): boolean =>
@@ -108,6 +121,28 @@ describe('chat-metadata membership', () => {
     await turns();
 
     expect(invalidated(queryClient, 'proj_x')).toBe(false);
+    expect(invalidated(queryClient, 'proj_y')).toBe(false);
+  });
+
+  it("should refetch a replaced project directory's chat list and records, and no other project's", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['projects'], listingOf(['proj_x', 'proj_y']));
+    const watch = await startWatch(queryClient);
+    /* Each project's chat list and its chat records (what a chat's details and options read), all under
+     * `['chats', P]`. */
+    const recordsKey = (projectId: string) => ['chats', projectId, 'records', 'source', { includeDeleted: false }];
+    for (const projectId of ['proj_x', 'proj_y']) {
+      queryClient.setQueryData(['chats', projectId], []);
+      queryClient.setQueryData(recordsKey(projectId), []);
+    }
+    await turns();
+
+    watch.emit({ type: 'change', path: '/projects/proj_x' });
+    await turns();
+
+    expect(queryClient.getQueryState(recordsKey('proj_x'))?.isInvalidated).toBe(true);
+    expect(invalidated(queryClient, 'proj_x')).toBe(true);
+    expect(queryClient.getQueryState(recordsKey('proj_y'))?.isInvalidated).toBe(false);
     expect(invalidated(queryClient, 'proj_y')).toBe(false);
   });
 });

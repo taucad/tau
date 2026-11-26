@@ -54,8 +54,17 @@ import { countShadowRun, readShadowRegistry, renderShadowMarkdown, retainShadowR
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
 export const artifactPrefix = 'test-outcomes-';
+/** The outcome artifacts of the non-gating shadow rows (DC-25): `test-outcomes-shadow-<suite>`. */
+export const shadowArtifactPrefix = `${artifactPrefix}shadow-`;
 /** The largest unzipped outcome text one artifact may hold. */
 const maximumArtifactBytes = 512 * 1024 * 1024;
+
+/**
+ * The rows of one artifact as the ledger counts them: a shadow row (DC-25) gates nothing, so its rows are marked and
+ * their events never count toward the entry rule (FQ-6).
+ */
+export const artifactRows = (name: string, rows: readonly OutcomeRow[]): OutcomeRow[] =>
+  name.startsWith(shadowArtifactPrefix) ? rows.map((row) => ({ ...row, shadow: true })) : [...rows];
 
 type Artifact = { readonly id: number; readonly name: string; readonly expired: boolean };
 
@@ -111,7 +120,7 @@ const readRun = async (github: Client, runId: number, directory: string): Promis
   for (const artifact of artifacts) {
     // oxlint-disable-next-line no-await-in-loop -- one artifact at a time keeps memory to one zip
     const parsed = parseOutcomes(await readArtifact(github, artifact, directory), `${runId}/${artifact.name}`);
-    rows.push(...parsed.rows);
+    rows.push(...artifactRows(artifact.name, parsed.rows));
     problems.push(...parsed.problems);
   }
   return { artifacts: artifacts.length, rows, problems };

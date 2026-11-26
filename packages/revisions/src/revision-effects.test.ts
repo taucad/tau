@@ -826,9 +826,18 @@ describe('the tree a cut hashes', () => {
     await filesystem.writeFile('vendor/lib/.git/config', '[remote "origin"]\n');
     /* G0-3: `classify` answered with the first matching row, so a store under an
      * authored `.tau` control was that row's — authored and *versioned*. The
-     * skill beside it still arrives, so an empty subtree cannot pass this. */
+     * parameter file beside it still arrives, so an empty subtree cannot pass this. */
+    await filesystem.writeFile('.tau/parameters/main.ts.json', '{}\n');
+    await filesystem.writeFile('.tau/parameters/.git/config', '[remote "origin"]\n');
+    /* The project's agent files are its own, at the paths every agent reads; a
+     * skill cloned into place brings a `.git` that stays out like any other. */
+    await filesystem.writeFile('AGENTS.md', 'Dimensions in millimetres.\n');
+    await filesystem.writeFile('.agents/skills/cad/SKILL.md', '---\nname: cad\ndescription: CAD help.\n---\n');
+    await filesystem.writeFile('.agents/skills/cad/.git/config', '[remote "origin"]\n');
+    /* Their retired `.tau` paths have no row: what a project still keeps there
+     * is a reserved `.tau` member, left out of every cut. */
+    await filesystem.writeFile('.tau/AGENTS.md', 'Old instructions.\n');
     await filesystem.writeFile('.tau/skills/cad/SKILL.md', '---\nname: cad\n---\n');
-    await filesystem.writeFile('.tau/skills/cad/.git/config', '[remote "origin"]\n');
     /* G0b-9: a case alias of a reserved path wedged this cut. `classify` called it
      * authored and versioned, so the capture carried it — and `portable-tree`
      * refused the whole tree at commit, with no way out but deleting the file by
@@ -855,7 +864,14 @@ describe('the tree a cut hashes', () => {
         ?.entries()
         .map(({ path }) => path)
         .toSorted(),
-    ).toEqual(['.gitattributes', '.gitignore', '.tau/skills/cad/SKILL.md', 'main.ts']);
+    ).toEqual([
+      '.agents/skills/cad/SKILL.md',
+      '.gitattributes',
+      '.gitignore',
+      '.tau/parameters/main.ts.json',
+      'AGENTS.md',
+      'main.ts',
+    ]);
   }, 30_000);
 
   it('refuses a capture whose paths differ only by case', async () => {

@@ -25,8 +25,6 @@ The generated ignore block is the one Tau artifact a person reads in their own c
 /.tau/*
 !/.tau/parameters
 !/.tau/machines
-!/.tau/skills
-!/.tau/AGENTS.md
 .jj
 /exports/
 /thumbnail.webp
@@ -75,25 +73,13 @@ Git's directory walk never enters an entry named `.git` (directory or pointer fi
 
 ### 4. The only negations are re-includes of authored `.tau` controls
 
-A `!` line exists only to re-include a versioned registry row directly inside `.tau/` (`.tau/parameters`, `.tau/machines`, `.tau/skills`, `.tau/AGENTS.md`). Keep every authored control a direct member of `.tau/`: a nested one needs a `!/.tau/a/` + `/.tau/a/*` chain, which the generator deliberately does not emit.
+A `!` line exists only to re-include a versioned registry row directly inside `.tau/` (`.tau/parameters`, `.tau/machines`). Keep every authored control a direct member of `.tau/`: a nested one needs a `!/.tau/a/` + `/.tau/a/*` chain, which the generator deliberately does not emit.
 
 ### 5. Put every new Tau-owned path under `.tau/`
 
 A new derived, cached, record, staging or control path that Tau writes into a project or storage root lives under that root's `.tau/` and is root-matched. It then needs no ignore line (rule 2) and adds no top-level name to the person's project. A new top-level name, or a new segment-matched row, needs a written justification in the change and a reviewer's agreement; "it was simpler to put it at the root" is not one.
 
 **Why**: `.tau-staging` was a second top-level dot-folder that cost its own ignore line; as `.tau/staging` it costs neither.
-
-CORRECT:
-
-```typescript
-{ prefix: '.tau/staging', class: 'control-plane', versioned: false, anchored: true, match: 'root', ... }
-```
-
-INCORRECT:
-
-```typescript
-{ prefix: '.tau-staging', class: 'control-plane', versioned: false, anchored: false, match: 'segment', ... }
-```
 
 ### 6. Spell each remaining line in its simplest form
 
@@ -106,6 +92,24 @@ Any change to the registry or the generator keeps the stock-Git case in `package
 ### 8. Breaking layout moves are hard cutovers unless the operator asks otherwise
 
 Moving a Tau-owned path (as `.tau-staging` → `.tau/staging`) ships as a breaking change in the package's version plan, without a legacy reader or migration, while the product's install base is small. Leftover bytes at the old path are inert and are not swept. Revisit this rule before general availability.
+
+### 9. Keep a cross-tool convention's file at the convention's path
+
+A file that other tools read by a fixed, published path stays at that path and takes no registry row: the project's instructions are `AGENTS.md` at the project root, and its skills live under `.agents/skills/<name>/`. They are the person's own files, authored and versioned by the unlisted default, so they cost no ignore line and no `!` line. Never give such a file a Tau-private copy under `.tau/`, and never generate Tau content into it.
+
+**Why**: `.tau/AGENTS.md` and `.tau/skills` each needed a registry row and a re-include line, and no agent but Tau's could find them. At the conventional paths every agent reads them, a publication carries them into a remix, and the block is two lines shorter (`docs/research/project-agent-files-standard-paths.md`).
+
+CORRECT:
+
+```typescript
+{ prefix: '.tau/staging', class: 'control-plane', versioned: false, anchored: true, match: 'root', ... }
+```
+
+INCORRECT:
+
+```typescript
+{ prefix: '.tau-staging', class: 'control-plane', versioned: false, anchored: false, match: 'segment', ... }
+```
 
 ## Anti-Patterns
 

@@ -907,8 +907,8 @@
     },
     {
       "id": "HA1-NODE-MARKER-STALE",
-      "bound": "A Node writer's marker on a folder shared with tau serve is honoured while the newer of the log's newest row and the marker's mtime is within foreignRunStaleMilliseconds (XD3, 10 min); past it a provider open takes the marker over (HA-I10)",
-      "site": "packages/agent-host/src/browser.ts",
+      "bound": "A writer's marker on a folder a browser shares with tau serve (a Node pid marker judged by a provider open, or a provider epoch-ms marker judged by tau serve) is honoured while the newer of the log's newest row and the marker's mtime is within foreignRunStaleMilliseconds (XD3, 10 min); past it the other writer takes the marker over (HA-I10)",
+      "site": "packages/agent-host/src/log/writer-marker.ts",
       "token": "now - Math.max(touchedAt ?? 0, rowAt ?? 0) < foreignRunStaleMilliseconds",
       "class": "Liveness",
       "owner": "host attachment reliability HA1"

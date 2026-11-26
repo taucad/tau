@@ -116,7 +116,30 @@ describe('provider open and a Node writer marker (HA-I10)', () => {
     await expect(open(files, new Map([[lockPath, now]]))).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
   });
 
-  it('always takes a provider marker (one numeric line), however fresh', async () => {
+  it('treats a bare pid marker from an older Node build as Node format, not a provider marker', async () => {
+    const files = new Map([[lockPath, encode('4242\n')]]);
+
+    await expect(open(files, new Map([[lockPath, now - 1000]]))).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
+    expect(new TextDecoder().decode(files.get(lockPath))).toBe('4242\n');
+  });
+
+  it('touches its own provider marker and never a successor’s', async () => {
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const writer = await open(files, new Map());
+    const own = files.get(lockPath);
+    files.set(lockPath, new Uint8Array(own!));
+    await writer.touch?.();
+    expect(files.get(lockPath)).toEqual(own);
+    expect(files.get(lockPath)).not.toBe(own);
+
+    const successor = encode('4242\n/elsewhere\n');
+    files.set(lockPath, successor);
+    await writer.touch?.();
+    expect(files.get(lockPath)).toBe(successor);
+    await writer.close();
+  });
+
+  it('always takes a provider marker (one epoch-millisecond line), however fresh', async () => {
     const files = new Map([[lockPath, encode(`${String(now)}\n`)]]);
 
     const writer = await open(files, new Map([[lockPath, now]]));

@@ -33,7 +33,9 @@ export type ReplayFacts = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
   generation: string;
   sourceHealth: ProjectionSourceHealth;
-  projectionBatch: ReplayView['projectionBatch'];
+  projectionBatch(
+    input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes: number }>,
+  ): ProjectionBatch;
   /** Fold the bytes past the held ones; the caller checks {@link isBytePrefix} first, as the launcher does. */
   extend(bytes: Uint8Array<ArrayBuffer>): ReplayFacts;
 }>;

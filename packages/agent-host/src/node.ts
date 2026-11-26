@@ -12,6 +12,7 @@ import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import { parseEventLogBytes } from '#log/serialization.js';
+import { isMarkerFresh, isProviderMarker, newestRowAt } from '#log/writer-marker.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
@@ -196,6 +197,15 @@ const resolveLogPath = async (filePath: string): Promise<string> =>
 // ponytail: pid liveness only; a reused pid after reboot keeps a dead lock alive until that process exits — add a boot id if that bites.
 const isStaleLock = async (path: string, logPath: string): Promise<boolean> => {
   const contents = await readFile(path, 'utf8').catch(() => '');
+  /* A browser writer's marker names no process: it is stale past the XD3 bound by its touch or newest row (HA-I10). */
+  if (isProviderMarker(contents)) {
+    const touchedAt = await stat(path).then(
+      ({ mtimeMs }) => mtimeMs,
+      () => undefined,
+    );
+    const log = await readFile(logPath).catch(() => undefined);
+    return !isMarkerFresh(Date.now(), touchedAt, newestRowAt(log === undefined ? undefined : new Uint8Array(log)));
+  }
   const [pidLine = '', recordedPath] = contents.split('\n');
   const pid = Number.parseInt(pidLine, 10);
   if (!Number.isInteger(pid) || pid <= 0) {

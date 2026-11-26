@@ -1,9 +1,10 @@
 /** HA-I10: the Node writer touches its own marker through the handle it holds, never a successor at the same path. */
-import { mkdtemp, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createNodeEventLog } from '#node.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 
 const directories: string[] = [];
 
@@ -50,5 +51,27 @@ describe('Node writer touch', () => {
     } finally {
       await log.close();
     }
+  });
+});
+
+/* Finding 14: a crashed browser tab's provider marker (epoch ms, no process) must not lock `tau serve` out forever. */
+describe('Node open on a provider marker (HA-I10)', () => {
+  const withMarker = async (touchedAt: Date): Promise<string> => {
+    const filePath = await logPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(`${filePath}.lock`, `${String(touchedAt.getTime())}\n`);
+    await utimes(`${filePath}.lock`, touchedAt, touchedAt);
+    return filePath;
+  };
+
+  it('should take a provider marker over once it is past the XD3 bound', async () => {
+    const filePath = await withMarker(new Date(Date.now() - foreignRunStaleMilliseconds - 60_000));
+    const log = await createNodeEventLog({ filePath, access: 'write' });
+    await log.close();
+  });
+
+  it('should refuse WRITER_LOCKED while a live browser writer keeps its provider marker fresh', async () => {
+    const filePath = await withMarker(new Date());
+    await expect(createNodeEventLog({ filePath, access: 'write' })).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
   });
 });

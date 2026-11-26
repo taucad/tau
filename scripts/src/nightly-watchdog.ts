@@ -516,18 +516,41 @@ const recentScheduledRuns = async (
   return body.workflow_runs;
 };
 
-/** The ledger job's failed and timed-out runs of the last 24 hours, any event. */
-const recentRedLedgerRuns = async (repository: string, token: string, now: Date): Promise<LedgerRun[]> => {
+/** The most pages of ledger runs read for one day: a run per CI run, most of them skipped pull-request runs. */
+const maximumLedgerPages = 20;
+
+/** The ledger job's completed runs of the last 24 hours, any event, every page; the judge picks the red ones. */
+const recentLedgerRuns = async (repository: string, token: string, now: Date): Promise<LedgerRun[]> => {
   const since = `${new Date(now.getTime() - recentWindow).toISOString().slice(0, 19)}Z`;
-  const pages = await Promise.all(
-    ['failure', 'timed_out'].map(async (status) =>
-      githubGet<{ readonly workflow_runs: readonly LedgerRun[] }>(
-        `repos/${repository}/actions/workflows/${ledgerWorkflow.file}/runs?status=${status}&created=${encodeURIComponent(`>=${since}`)}&per_page=100`,
-        token,
-      ),
-    ),
-  );
-  return pages.flatMap((page) => page.workflow_runs);
+  const runs: LedgerRun[] = [];
+  for (let page = 1; page <= maximumLedgerPages; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
+    const body = await githubGet<{ readonly total_count: number; readonly workflow_runs: readonly LedgerRun[] }>(
+      `repos/${repository}/actions/workflows/${ledgerWorkflow.file}/runs?status=completed&created=${encodeURIComponent(`>=${since}`)}&per_page=100&page=${page}`,
+      token,
+    );
+    runs.push(...body.workflow_runs);
+    if (body.workflow_runs.length === 0 || runs.length >= body.total_count) {
+      return runs;
+    }
+  }
+  throw new Error(`more than ${maximumLedgerPages * 100} ledger runs in a day; not read in part`);
+};
+
+/**
+ * The ledger job's row from its runs, or a problem row when they cannot be read: a failed read never stops the other
+ * rows from being reported and delivered.
+ */
+export const ledgerJobVerdict = async (read: () => Promise<readonly LedgerRun[]>, now: Date): Promise<Verdict> => {
+  try {
+    return judgeLedgerJob(await read(), now);
+  } catch (error) {
+    return {
+      workflow: ledgerWorkflow,
+      state: 'failed',
+      detail: `the ledger job's runs could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 };
 
 /** The never-quarantine rows from the ledger state, or one problem row when the state cannot be read. */
@@ -585,7 +608,7 @@ const main = async (args: readonly string[]): Promise<number> => {
     )),
     ...(await candidateVerdicts(repository, token, now)),
     ...judgeQuarantine(quarantineFiles, now.toISOString().slice(0, 10), repository),
-    judgeLedgerJob(await recentRedLedgerRuns(repository, token, now), now),
+    await ledgerJobVerdict(async () => recentLedgerRuns(repository, token, now), now),
     judgeDebt(quarantineFiles),
     ...(await neverQuarantineVerdicts({ repository, token, root, now })),
   ];

@@ -205,13 +205,20 @@ describe('flake quarantine metrics (FQ-11, D9)', () => {
       ];
       const pr = (n: number, id: number): WorkflowRun =>
         run(id, { head_branch: `gh-readonly-queue/main/pr-${n}-${sha(id)}` });
-      const stats = landingStats(landings, [pr(1, 1), pr(2, 2), pr(2, 3), pr(2, 4), pr(3, 5), pr(5, 6)], window);
+      // An attempt of #3 before the window counts toward its landing; a run of #1 after its merge does not.
+      const early = { ...pr(3, 7), created_at: '2026-11-15T10:00:00Z' };
+      const late = { ...pr(1, 8), created_at: '2026-11-21T10:00:00Z' };
+      const stats = landingStats(
+        landings,
+        [pr(1, 1), pr(2, 2), pr(2, 3), pr(2, 4), pr(3, 5), pr(5, 6), early, late],
+        window,
+      );
       expect(stats).toEqual({
         landed: 4,
         queued: 3,
         p50Minutes: 30,
         p90Minutes: 60,
-        runsPerLanding: 5 / 3,
+        runsPerLanding: 2,
       });
     });
   });
@@ -358,6 +365,21 @@ describe('flake quarantine metrics (FQ-11, D9)', () => {
         },
       );
       expect(hoursToQuarantine(ledger, window)).toEqual([1.5]);
+    });
+
+    it('should start a new onset when the rule lapsed between two events with no event recording it', () => {
+      // Met at execution 2 (two in 80), lapsed by execution 82, met again at 100 (three in 230).
+      const ledger = state(
+        {
+          'ui-e2e › a': identity([
+            event({ execution: 1, at: '2026-11-19T01:00:00Z' }),
+            event({ execution: 2, at: '2026-11-19T02:00:00Z' }),
+            event({ execution: 100, at: '2026-11-20T10:00:00Z' }),
+          ]),
+        },
+        { quarantineTracks: { a: track('ui-e2e › a', '2026-11-20T11:00:00Z') } },
+      );
+      expect(hoursToQuarantine(ledger, window)).toEqual([1]);
     });
   });
 

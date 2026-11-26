@@ -124,6 +124,21 @@ export const readLandings = async (github: Client, window: Window, base = 'main'
   return landings;
 };
 
+/** Every job of every attempt of a run, page by page until the count is reached. */
+const readJobs = async (github: Client, runId: number): Promise<WorkflowJob[]> => {
+  const jobs: WorkflowJob[] = [];
+  for (let page = 1; ; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
+    const body = await github.get<{ total_count: number; jobs: WorkflowJob[] }>(
+      `/repos/${github.repository}/actions/runs/${runId}/jobs?filter=all&per_page=100&page=${page}`,
+    );
+    jobs.push(...body.jobs);
+    if (body.jobs.length === 0 || jobs.length >= body.total_count) {
+      return jobs;
+    }
+  }
+};
+
 /** Runner minutes of the stress harness and agent workflows' runs created in the window, over every attempt. */
 export const readUsage = async (github: Client, window: Window): Promise<UsageStats> => {
   let runs = 0;
@@ -133,9 +148,7 @@ export const readUsage = async (github: Client, window: Window): Promise<UsageSt
     const listed = await listRuns(github, { workflow, ...window });
     for (const run of listed) {
       // oxlint-disable-next-line no-await-in-loop -- one run's jobs at a time
-      const { jobs } = await github.get<{ jobs: WorkflowJob[] }>(
-        `/repos/${github.repository}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
-      );
+      const jobs = await readJobs(github, run.id);
       runs += 1;
       runnerMinutes += runnerMinutesOf(jobs);
     }

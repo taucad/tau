@@ -516,7 +516,8 @@ const main = async (args: readonly string[]): Promise<number> => {
     window,
     branch: values.branch,
     queue: { evidence, mergedNothingShare: queueReport.classes.mergedNothingShare, event: values.event },
-    queueRuns: queueRuns.filter((run) => inWindow(run)),
+    // Every run of the flake window: a pull request landing in the report window keeps its earlier attempts.
+    queueRuns,
     ledger: ledgerState,
   });
   const report = { ...queueReport, flakes, ...(testLedger ? { testLedger: testLedger.json } : {}), metrics };

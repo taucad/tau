@@ -143,15 +143,18 @@ describe('flake quarantine metrics readers (FQ-11)', () => {
         { total_count: 1, workflow_runs: [{ id: 12 }] },
       ],
       [
-        '/repos/taucad/tau/actions/runs/11/jobs',
-        {
-          jobs: [
-            job('2026-11-20T10:00:00Z', '2026-11-20T10:30:00Z'),
-            job('2026-11-20T10:00:00Z', '2026-11-20T10:15:00Z'),
-          ],
-        },
+        // Two pages of jobs: every page is read.
+        '/repos/taucad/tau/actions/runs/11/jobs?filter=all&per_page=100&page=1',
+        { total_count: 2, jobs: [job('2026-11-20T10:00:00Z', '2026-11-20T10:30:00Z')] },
       ],
-      ['/repos/taucad/tau/actions/runs/12/jobs', { jobs: [job('2026-11-21T10:00:00Z', '2026-11-21T10:05:00Z')] }],
+      [
+        '/repos/taucad/tau/actions/runs/11/jobs?filter=all&per_page=100&page=2',
+        { total_count: 2, jobs: [job('2026-11-20T10:00:00Z', '2026-11-20T10:15:00Z')] },
+      ],
+      [
+        '/repos/taucad/tau/actions/runs/12/jobs',
+        { total_count: 1, jobs: [job('2026-11-21T10:00:00Z', '2026-11-21T10:05:00Z')] },
+      ],
     ]);
     expect(await readUsage(github, window)).toEqual({
       runs: 2,

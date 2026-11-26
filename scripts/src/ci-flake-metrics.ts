@@ -150,7 +150,11 @@ export type LandingStats = {
   readonly runsPerLanding: number;
 };
 
-/** First enqueue to merge and runs per landing over the pull requests merged in the window. */
+/**
+ * First enqueue to merge and runs per landing over the pull requests merged in the window. A landing's runs are its
+ * merge-group runs created up to its merge, whenever they started: pass every run the caller listed, not only the
+ * window's, so attempts before the window count (a pull request first enqueued before the runs listed is undercounted).
+ */
 export const landingStats = (
   landings: readonly Landing[],
   queueRuns: readonly WorkflowRun[],
@@ -163,8 +167,11 @@ export const landingStats = (
   const minutes = queued.map(
     (landing) => (Date.parse(landing.mergedAt) - Date.parse(landing.firstEnqueuedAt)) / 60_000,
   );
-  const numbers = new Set(queued.map((landing) => landing.number));
-  const runs = queueRuns.filter((run) => numbers.has(queuePullNumber(run) ?? -1)).length;
+  const mergedAt = new Map(queued.map((landing) => [landing.number, landing.mergedAt]));
+  const runs = queueRuns.filter((run) => {
+    const merged = mergedAt.get(queuePullNumber(run) ?? -1);
+    return merged !== undefined && run.created_at <= merged;
+  }).length;
   return {
     landed: landings.filter((landing) => inWindow(landing.mergedAt, window)).length,
     queued: queued.length,
@@ -246,18 +253,15 @@ export const debtStats = (files: readonly QuarantineText[], today: string): Debt
   return { entries, testDays, oldestDays, overFourteen, fullest };
 };
 
-/** Whether the gating events up to and including `index` meet D3's entry rule at that event. */
-const ruleMetAt = (events: readonly FlakeEvent[], index: number): boolean => {
-  const at = events[index];
-  if (!at) {
-    return false;
-  }
-  return entryRule.some(
+/**
+ * Whether the first `end` gating events meet D3's entry rule at `execution`. Passing executions record no event, so
+ * the rule can lapse between two events: the events before one are judged at that event's execution, not their own.
+ */
+const ruleMetAt = (events: readonly FlakeEvent[], end: number, execution: number): boolean =>
+  entryRule.some(
     (rule) =>
-      events.slice(0, index + 1).filter((event) => event.execution > at.execution - rule.executions).length >=
-      rule.events,
+      events.slice(0, end).filter((event) => event.execution > execution - rule.executions).length >= rule.events,
   );
-};
 
 /**
  * Hours from the event at which a quarantined test last came to meet the entry rule to the ingestion that first saw
@@ -273,9 +277,9 @@ export const hoursToQuarantine = (state: LedgerState, window: Window): number[] 
       .filter((event) => event.shadow !== true && event.at <= track.since)
       .sort((a, b) => a.execution - b.execution);
     let onset: FlakeEvent | undefined;
-    for (let index = 0; index < events.length; index += 1) {
-      if (ruleMetAt(events, index) && !ruleMetAt(events, index - 1)) {
-        onset = events[index];
+    for (const [index, event] of events.entries()) {
+      if (ruleMetAt(events, index + 1, event.execution) && !ruleMetAt(events, index, event.execution)) {
+        onset = event;
       }
     }
     return onset ? [(Date.parse(track.since) - Date.parse(onset.at)) / 3_600_000] : [];

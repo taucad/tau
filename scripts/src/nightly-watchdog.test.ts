@@ -8,6 +8,7 @@ import {
   judgeCandidates,
   judgeDebt,
   judgeLedgerJob,
+  ledgerJobVerdict,
   judgeNeverQuarantine,
   judgeQuarantine,
   judgeRuns,
@@ -338,6 +339,20 @@ describe('nightly watchdog', () => {
       expect(verdict.state).toBe('failed');
       expect(verdict.detail).toMatch(/^2 red ledger runs in the last 24 h \(newest timed_out\)/u);
       expect(verdict.url).toBe('https://github.com/taucad/tau/actions/runs/1');
+      expect(judgeLedgerJob([ledgerRun('2026-11-08T12:00:00Z', 'startup_failure')], now).state).toBe('failed');
+    });
+
+    it('should report a ledger run listing it cannot read as a failed row, not stop the report', async () => {
+      const failed = await ledgerJobVerdict(async () => {
+        throw new Error('GitHub API 503');
+      }, now);
+      expect(failed).toMatchObject({
+        workflow: { file: 'flake-ledger.yml' },
+        state: 'failed',
+        detail: "the ledger job's runs could not be read: GitHub API 503",
+      });
+      const read = await ledgerJobVerdict(async () => [ledgerRun('2026-11-08T12:00:00Z', 'success')], now);
+      expect(read.state).toBe('ok');
     });
   });
 

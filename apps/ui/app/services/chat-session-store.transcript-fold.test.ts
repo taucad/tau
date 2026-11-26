@@ -822,9 +822,9 @@ describe('frame clock (WP-06, LiveOverlay FrameClock)', () => {
     };
     try {
       await reader.run(rowsOf([0, 1, 2], rows));
-      frames.splice(0).forEach((frame) => {
+      for (const frame of frames.splice(0)) {
         frame();
-      });
+      }
       wakes = 0;
 
       live({ type: 'text-start', ...text });

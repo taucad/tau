@@ -452,12 +452,12 @@ const changesOnlyLive = (previous: ChatProjection, next: ChatProjection): boolea
   if (previous.live === next.live) {
     return false;
   }
-  for (const key of Object.keys(next) as (keyof ChatProjection)[]) {
+  for (const key of Object.keys(next) as Array<keyof ChatProjection>) {
     if (key !== 'live' && previous[key] !== next[key]) {
       return false;
     }
   }
-  for (const key of Object.keys(previous) as (keyof ChatProjection)[]) {
+  for (const key of Object.keys(previous) as Array<keyof ChatProjection>) {
     if (key !== 'live' && !(key in next)) {
       return false;
     }

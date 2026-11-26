@@ -457,7 +457,7 @@ export const chatCards = (page: Page): ChatCards => {
 /** `/usage`: the account's metered usage, its summary and its rows. */
 export type UsagePage = {
   readonly open: () => Promise<void>;
-  /** The activity table's row whose text matches `pattern`; the "Reserved right now" holds table is not searched. */
+  /** The activity table's row whose text matches `pattern`. */
   readonly row: (pattern: RegExp) => Locator;
 };
 

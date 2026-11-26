@@ -13,7 +13,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { wireOpenHoldsSchema, wireUsageSnapshotSchema } from '@taucad/billing';
+import { wireUsageSnapshotSchema } from '@taucad/billing';
 import { AuthGuard, SessionResolver } from '@taucad/api-auth';
 import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import type { FakeSessionLookup } from '@taucad/api-auth/testing';
@@ -72,23 +72,6 @@ const emptyUsage = wireUsageSnapshotSchema.parse({
   rows: { items: [], nextCursor: null, complete: true },
 });
 
-const openHolds = wireOpenHoldsSchema.parse({
-  environment: 'development',
-  ownerId: owner.id,
-  holds: [
-    {
-      operationId: 'operation-a',
-      model: { id: 'gpt-6-astra', displayName: 'Astra', providerId: 'openai' },
-      heldCreditAtoms: '3084332',
-      admittedAt: instant.toISOString(),
-      dueAt: '2026-09-05T12:10:00.000Z',
-      releaseAfter: '2026-09-05T12:15:00.000Z',
-      dispatchState: 'accepted',
-      customerState: 'pending',
-    },
-  ],
-});
-
 describe('billing authenticated reporting endpoints', () => {
   it('should authenticate before reporting, bind the session owner and keep collection closed', async () => {
     const billing = mock<BillingService>();
@@ -98,7 +81,6 @@ describe('billing authenticated reporting endpoints', () => {
     const closure = mock<BillingAccountClosureService>();
     getSession.mockResolvedValue(null);
     usage.getUsage.mockResolvedValue(emptyUsage);
-    usage.getOpenHolds.mockResolvedValue(openHolds);
     const module = await Test.createTestingModule({
       controllers: [BillingController],
       providers: [
@@ -123,9 +105,6 @@ describe('billing authenticated reporting endpoints', () => {
       });
       expect(unauthorized.statusCode).toBe(401);
       expect(usage.getUsage).not.toHaveBeenCalled();
-      const unauthorizedHolds = await app.inject({ method: 'GET', url: '/v1/billing/holds' });
-      expect(unauthorizedHolds.statusCode).toBe(401);
-      expect(usage.getOpenHolds).not.toHaveBeenCalled();
       const topup = {
         requestId: 'request-a',
         returnPath: '/',
@@ -294,12 +273,9 @@ describe('billing authenticated reporting endpoints', () => {
         operationId: 'operation-b',
         rawQuery: { snapshotRevision: '5' },
       });
-      const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds?accountId=other' });
-      expect(holds.statusCode).toBe(200);
-      expect(holds.json()).toEqual(openHolds);
-      expect(holds.headers['cache-control']).toBe('private, no-store');
-      /* The route takes no query: a caller-supplied selector cannot widen it. */
-      expect(usage.getOpenHolds).toHaveBeenCalledWith({ authUserId: owner.id });
+      /* Credit holds are the ledger's own and are never published to the customer. */
+      const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds' });
+      expect(holds.statusCode).toBe(404);
       const gated = await app.inject({
         method: 'POST',
         url: '/v1/billing/topup-session',

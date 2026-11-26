@@ -139,6 +139,30 @@ describe('provider open and a Node writer marker (HA-I10)', () => {
     await writer.close();
   });
 
+  /* Review: a `tau serve` that took this tab's stale marker over keeps it when the tab closes, so no second writer. */
+  it('leaves a Node writer’s takeover marker in place on close, so the next provider open is refused', async () => {
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const mtimes = new Map<string, number>();
+    const writer = await open(files, mtimes);
+    files.set(lockPath, nodeMarker);
+    mtimes.set(lockPath, now);
+
+    await writer.touch?.();
+    await writer.close();
+
+    expect(files.get(lockPath)).toEqual(nodeMarker);
+    await expect(open(files, mtimes)).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
+  });
+
+  it('never writes its marker back once closed, even when a touch races the close', async () => {
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const writer = await open(files, new Map());
+    const touching = writer.touch?.();
+    await writer.close();
+    await touching;
+    expect(files.has(lockPath)).toBe(false);
+  });
+
   it('always takes a provider marker (one epoch-millisecond line), however fresh', async () => {
     const files = new Map([[lockPath, encode(`${String(now)}\n`)]]);
 

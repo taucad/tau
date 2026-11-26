@@ -23,6 +23,10 @@ vi.mock('#environment.config.js', () => ({
     POSTHOG_UI_HOST: 'https://posthog.example.invalid',
   },
 }));
+/* Replay's content decision reads the account's "Improve Tau for everyone" value; this suite does not. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({
+  usePrivacyPreferences: () => ({ preferences: undefined, isLoading: false, error: null }),
+}));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({
   useSession: () => ({ data: undefined, isPending: false }),

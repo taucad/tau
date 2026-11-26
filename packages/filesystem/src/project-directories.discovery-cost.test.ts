@@ -19,8 +19,8 @@ import type { MockBrowserCall } from '#testing/mock-handle-factory.js';
  * `tau.json` only where an id has more than one directory.
  *
  * These are the per-scan figures `apps/libs/project-library/src/discovery-budget.ceiling.json` multiplies by the scans
- * each library mutation makes; `the library discovery budget per call` below holds that file's `scan` and
- * `verification` rows to them.
+ * each library mutation makes. `the discovery unit cost` below records them in `testing/discovery-unit-cost.json`, and
+ * the library budget test holds its ceiling's `scan` and `verification` rows to that file.
  */
 describe('listProjectManifests cost on the 386-directory profile', () => {
   let profile: DiscoveryProfile;
@@ -125,16 +125,13 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
   });
 });
 
-/** The per-call rows of the library's discovery budget, which charges every mutation at these figures. */
-type BudgetUnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
-const budgetCeiling = JSON.parse(
-  readFileSync(
-    path.join(import.meta.dirname, '../../../apps/libs/project-library/src/discovery-budget.ceiling.json'),
-    'utf8',
-  ),
-) as Readonly<{ scan: BudgetUnitCost; verification: BudgetUnitCost }>;
+/** The per-call figures the library's discovery budget charges every mutation at; see `discovery-unit-cost.json`. */
+type UnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
+const unitCost = JSON.parse(
+  readFileSync(path.join(import.meta.dirname, 'testing/discovery-unit-cost.json'), 'utf8'),
+) as Readonly<{ scan: UnitCost; verification: UnitCost }>;
 
-describe('the library discovery budget per call', () => {
+describe('the discovery unit cost', () => {
   let profile: DiscoveryProfile;
 
   beforeEach(async () => {
@@ -145,13 +142,13 @@ describe('the library discovery budget per call', () => {
     profile.dispose();
   });
 
-  const unitCostOf = (cost: DiscoveryCost): BudgetUnitCost => ({
+  const unitCostOf = (cost: DiscoveryCost): UnitCost => ({
     fileReads: cost.providers.home.fileReads + cost.providers.workspace.fileReads,
     listings: cost.providers.home.listings + cost.providers.workspace.listings,
     browserCalls: cost.browserCalls,
   });
 
-  it('should charge one warm scan and one route verification at what they cost here', async () => {
+  it('should record what one warm scan and one route verification cost on the profile', async () => {
     await profile.service.listProjectManifests();
     const scan = await profile.measure(async () => profile.service.listProjectManifests());
     const verification = await profile.measure(async () =>
@@ -159,8 +156,8 @@ describe('the library discovery budget per call', () => {
     );
 
     expect({ scan: unitCostOf(scan.cost), verification: unitCostOf(verification.cost) }).toEqual({
-      scan: budgetCeiling.scan,
-      verification: budgetCeiling.verification,
+      scan: unitCost.scan,
+      verification: unitCost.verification,
     });
   });
 });

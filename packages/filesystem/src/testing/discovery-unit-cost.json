@@ -1,0 +1,13 @@
+{
+  "$comment": "What one warm full discovery scan and one targeted route verification cost on the 386-directory profile (packages/filesystem/src/testing/discovery-profile.ts), held to the measurement by project-directories.discovery-cost.test.ts. apps/libs/project-library/src/discovery-budget.test.ts holds its ceiling's scan and verification rows to these figures.",
+  "scan": {
+    "fileReads": 772,
+    "listings": 2,
+    "browserCalls": 2324
+  },
+  "verification": {
+    "fileReads": 2,
+    "listings": 0,
+    "browserCalls": 8
+  }
+}

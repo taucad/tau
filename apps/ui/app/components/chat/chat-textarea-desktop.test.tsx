@@ -86,8 +86,13 @@ vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
   ),
 }));
 
-vi.mock('#components/chat/chat-kernel-selector.js', () => ({
-  KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+/* The + menu has its own tests (`chat-add-menu.test.tsx`); here it is the bar's first control. */
+vi.mock('#components/chat/chat-add-menu.js', () => ({
+  ChatAddMenu: () => (
+    <button type='button' aria-label='Add'>
+      +
+    </button>
+  ),
 }));
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
@@ -179,15 +184,12 @@ describe('ChatTextareaBar', () => {
     placements.current = [];
   });
 
-  it('lays out +, the kernel, the agent trigger and Send — no branch, balance or Tau mode (D6, Q11, Q16)', () => {
+  it('lays out +, the agent trigger and Send — no branch, balance, kernel or Tau mode (D6, Q11, Q16)', () => {
     const { container } = renderBar();
 
     const left = container.querySelector('[data-slot=composer-left]')!;
     const right = container.querySelector('[data-slot=composer-right]')!;
-    expect([...left.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Add',
-      'Kernel: Manifold',
-    ]);
+    expect([...left.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Add']);
     expect([...right.querySelectorAll('button')].map((button) => button.textContent || button.ariaLabel)).toEqual([
       'Agent and model',
       'Send',
@@ -195,37 +197,6 @@ describe('ChatTextareaBar', () => {
     expect(screen.queryByRole('button', { name: /branch/iu })).toBeNull();
     expect(screen.queryByRole('button', { name: /credits/iu })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Mode/u })).toBeNull();
-  });
-
-  it('lets the kernel label leave first when the bar needs the room', () => {
-    renderBar();
-
-    const kernel = screen.getByRole('button', { name: 'Kernel: Manifold' });
-    expect(kernel.querySelector('span:not([data-testid])')!.className).toContain('group-data-[hide-kernel]/bar:hidden');
-  });
-
-  it('offers attaching and adding context from one + (F10)', async () => {
-    const handleFileSelect = vi.fn();
-    const handleAtButtonClick = vi.fn();
-    renderBar({ handleFileSelect, handleAtButtonClick });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'Attach image or PDF',
-      'Add context@',
-    ]);
-    await userEvent.click(screen.getByRole('menuitem', { name: /Add context/u }));
-    expect(handleAtButtonClick).toHaveBeenCalledOnce();
-  });
-
-  it('keeps the attach item, disabled with its reason, for a model that cannot read files (F14)', async () => {
-    renderBar({ attachmentInputSupported: false, enableContextActions: false });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
-    const attach = screen.getByRole('menuitem', { name: /Attach image or PDF/u });
-    expect(attach).toHaveAttribute('aria-disabled', 'true');
-    expect(attach).toHaveTextContent("This model can't read images or PDFs");
-    expect(screen.queryByRole('menuitem', { name: /Add context/u })).toBeNull();
   });
 
   it('gives Send its refusal while staying focusable (F14)', () => {
@@ -1512,8 +1483,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(submit).not.toHaveBeenCalled();
     });
 
+    /* Add's tooltip is the + menu's (`chat-add-menu.test.tsx`). */
     it.each([
-      ['Add', 'ready'],
       ['Dictate', 'ready'],
       ['Send', 'ready'],
       ['Stop', 'streaming'],
@@ -1544,19 +1515,20 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       renderComposer('', codexSession, { enableMobileCollapse: true });
       const bar = document.querySelector('[data-slot=composer-bar]')!;
 
-      // A 28px control plus 6px each side is 40px; 12px apart, neighbouring hit areas meet.
+      // A filled 36px control plus 2px each side is 40px; 8px apart, neighbouring hit areas never meet.
       expect(bar).toHaveClass(
         'pointer-coarse:[&_button]:relative',
         'pointer-coarse:[&_button]:after:absolute',
-        'pointer-coarse:[&_button]:after:-inset-1.5',
-        'pointer-coarse:gap-3',
+        'pointer-coarse:[&_button]:after:-inset-0.5',
+        'pointer-coarse:gap-2',
       );
       for (const cluster of bar.querySelectorAll('[data-slot=composer-left], [data-slot=composer-right]')) {
-        expect(cluster).toHaveClass('pointer-coarse:gap-3');
+        expect(cluster).toHaveClass('pointer-coarse:gap-2');
       }
+      expect(screen.getByRole('button', { name: 'Send' })).toHaveClass('pointer-coarse:h-9', 'pointer-coarse:min-w-9');
       // Every touch rule is coarse-only, so a desktop pointer keeps the bar it had.
       const touchOnly = [bar, ...bar.querySelectorAll('[data-slot^=composer-]')].flatMap((element) =>
-        [...element.classList].filter((name) => name.includes('gap-3') || name.includes('after:')),
+        [...element.classList].filter((name) => name.endsWith(':gap-2') || name.includes('after:')),
       );
       expect(touchOnly.every((name) => name.startsWith('pointer-coarse:'))).toBe(true);
     });
@@ -1882,7 +1854,7 @@ describe('composer bar measurement lifecycle', () => {
         return 0;
       }
       const bar = this.closest('[data-slot=composer-bar]')!;
-      reads.push(['kernel', 'mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).join(','));
+      reads.push(['mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).join(','));
       return requiredWidth;
     });
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
@@ -1890,7 +1862,7 @@ describe('composer bar measurement lifecycle', () => {
         return 0;
       }
       const bar = this.closest('[data-slot=composer-bar]')!;
-      return width + ['kernel', 'mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).length * 30;
+      return width + ['mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).length * 30;
     });
   });
 
@@ -1923,7 +1895,7 @@ describe('composer bar measurement lifecycle', () => {
   it('should fit labels in order and restore them when widened', () => {
     const { container } = renderBar();
     const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
-    expect(reads.slice(0, 3)).toEqual(['', 'kernel', 'kernel,mode']);
+    expect(reads.slice(0, 3)).toEqual(['', 'mode', 'mode,level']);
     act(() => {
       notify(bar);
     });
@@ -1931,7 +1903,6 @@ describe('composer bar measurement lifecycle', () => {
     act(() => {
       notify(bar);
     });
-    expect(Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
     expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
     expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
   });
@@ -1940,9 +1911,9 @@ describe('composer bar measurement lifecycle', () => {
     triggerName.slot = 'trigger-model-placeholder';
     const { container } = renderBar();
     const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
-    expect(reads.slice(0, 3)).toEqual(['', 'kernel', 'kernel,mode']);
-    expect(Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    expect(reads.slice(0, 3)).toEqual(['', 'mode', 'mode,level']);
     expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(true);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(true);
   });
 
   it('should refit genuine height and live font changes even when width is unchanged', async () => {
@@ -1963,11 +1934,11 @@ describe('composer bar measurement lifecycle', () => {
       fonts.resolve(document.fonts);
       await fonts.promise;
     });
-    expect(reads).toEqual(['', 'kernel', 'kernel,mode', 'kernel,mode,level']);
+    expect(reads).toEqual(['', 'mode', 'mode,level']);
     expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(true);
   });
 
-  it.each(['model', 'kernel', 'mode'])('should refit a changed %s label without a resize', async (label) => {
+  it.each(['model', 'mode'])('should refit a changed %s label without a resize', async (label) => {
     execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     const { container } = renderBar({ acpSessionData: codexSession });
     const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
@@ -1979,9 +1950,7 @@ describe('composer bar measurement lifecycle', () => {
     const target =
       label === 'model'
         ? bar.querySelector('[data-slot=trigger-model]')
-        : label === 'kernel'
-          ? screen.getByRole('button', { name: 'Kernel: Manifold' })
-          : screen.getByRole('button', { name: 'Mode: Ask for approval' });
+        : screen.getByRole('button', { name: 'Mode: Ask for approval' });
     if (!target) {
       throw new Error('The actual composer label is missing.');
     }

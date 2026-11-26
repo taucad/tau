@@ -1,3 +1,4 @@
+import { chatComposerGhostPillClassName } from '@taucad/chat-ui/components/chat-input-styles';
 /**
  * The composer's one agent control: who runs the next turn, on which model,
  * how hard it thinks, and where (D5, Direction 1).
@@ -96,7 +97,7 @@ export const reasoningLevelNames: Readonly<Record<ReasoningLevel, string>> = {
 export const openModelSelectorKeyCombination = { key: '/', modKey: true } satisfies KeyCombination;
 
 /** The ghost pill every composer control shares: h-7, round, no boundary at rest, muted until hover. @public */
-export const ghostPillClass = 'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground';
+export const ghostPillClass = chatComposerGhostPillClassName;
 
 type Option = { readonly id: string; readonly name: string; readonly isDisabled?: boolean };
 

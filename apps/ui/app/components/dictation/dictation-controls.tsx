@@ -5,11 +5,15 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
+import {
+  chatComposerTouchCircleClassName,
+  chatComposerTouchFillClassName,
+} from '@taucad/chat-ui/components/chat-input-styles';
 import { dictationLabels } from '#components/dictation/use-dictation.js';
 import type { DictationPhase, DictationWaveform } from '#components/dictation/use-dictation.js';
 
-/** The composer's 28px pill (as `ghostPillClass`), so the expanded microphone lines up with Send. */
-const stopPillClass = 'h-7 rounded-full px-2.5 text-muted-foreground hover:text-foreground';
+/** The composer's 28px pill (filled under touch, as `ghostPillClass`), so the expanded microphone lines up with Send. */
+const stopPillClass = `h-7 rounded-full px-2.5 text-muted-foreground hover:text-foreground ${chatComposerTouchFillClassName}`;
 
 type DictationControlProperties = {
   readonly phase: DictationPhase;
@@ -60,7 +64,7 @@ export const DictationControl = memo(function ({
             size='icon-sm'
             aria-label={dictationLabels.idle}
             aria-disabled={false}
-            className='shrink-0 rounded-full'
+            className={cn('shrink-0 rounded-full', chatComposerTouchCircleClassName)}
             onClick={() => {
               pressed();
               void onStart();
@@ -85,7 +89,7 @@ export const DictationControl = memo(function ({
             variant='ghost'
             size='icon-sm'
             aria-label='Cancel dictation'
-            className='shrink-0 rounded-full text-muted-foreground'
+            className={cn('shrink-0 rounded-full text-muted-foreground', chatComposerTouchCircleClassName)}
             onClick={() => {
               pressed();
               onCancel();

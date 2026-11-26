@@ -24,6 +24,9 @@ export const cancelChatStreamKeyCombination = {
 export const chatComposerActionButtonClassName =
   'rounded-full bg-foreground text-background shadow-xs hover:bg-foreground/85 hover:text-background dark:bg-foreground dark:text-background dark:hover:bg-foreground/85 dark:hover:text-background';
 
+/** Send and Stop under touch: 36px, as the bar's filled controls (`chatComposerTouchFillClassName`). */
+const composerSendTouchClassName = 'pointer-coarse:h-9 pointer-coarse:min-w-9';
+
 type ChatStreamingStopButtonProperties = {
   readonly formattedCancelKeyCombination: string;
   readonly onCancel: () => void;
@@ -44,7 +47,7 @@ const ChatStreamingStopButton = memo(function ({
           size='icon'
           aria-label='Stop'
           aria-keyshortcuts={ariaKeyShortcuts(cancelChatStreamKeyCombination, platform)}
-          className={cn(chatComposerActionButtonClassName, 'size-7')}
+          className={cn(chatComposerActionButtonClassName, 'size-7', composerSendTouchClassName)}
           onClick={(event) => {
             event.stopPropagation();
             onCancel();
@@ -124,6 +127,7 @@ export const ChatTextareaSubmitButton = memo(function ({
           aria-disabled={refusal !== undefined}
           className={cn(
             chatComposerActionButtonClassName,
+            composerSendTouchClassName,
             'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
             '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
           )}
@@ -178,6 +182,7 @@ export function ServedSendButton({ isEmpty }: { readonly isEmpty: boolean }): Re
       aria-disabled={isEmpty}
       className={cn(
         chatComposerActionButtonClassName,
+        composerSendTouchClassName,
         'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
         '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
       )}

@@ -11,10 +11,6 @@ import { ghostPillClass, reasoningLevelNames } from '#components/chat/chat-agent
 
 const composer = vi.hoisted((): { value: Record<string, unknown> } => ({ value: {} }));
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer.value }));
-const picker = vi.hoisted(() => ({ available: true }));
-vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
-  directoryPicker: () => ({ available: picker.available }),
-}));
 
 const haiku = {
   id: 'anthropic/claude-haiku',
@@ -34,7 +30,6 @@ const renderBar = (isEmpty = true): HTMLElement =>
 
 describe('ChatComposerStaticBar', () => {
   beforeEach(() => {
-    picker.available = true;
     composer.value = {
       model: { model: haiku, effort: undefined },
       execution: { execution: { kind: 'tau' } },
@@ -47,16 +42,16 @@ describe('ChatComposerStaticBar', () => {
     const bar = container.querySelector('[data-slot="composer-bar"]');
     expect(bar).toHaveAttribute('inert');
     expect(bar?.querySelector('[aria-label="Add"]')).toHaveClass('h-7', 'w-7', 'rounded-full', 'px-0');
-    expect(bar?.querySelector('[aria-label="Create in Home"]')).toHaveTextContent('Home');
     expect(bar?.querySelector('[data-slot="agent-trigger"]')).toHaveClass(
       ...cn(chatComposerModelTriggerClassName).split(' '),
     );
     expect(bar?.querySelector('[data-slot="trigger-model"]')).toHaveTextContent('Haiku 5.5');
   });
 
-  it('leaves out the location chip where folders cannot be picked, as the rich composer does', () => {
-    picker.available = false;
-    expect(renderBar().querySelector('[aria-label="Create in Home"]')).toBeNull();
+  it('leaves the kernel and the location to the + menu, as the rich composer does', () => {
+    const bar = renderBar();
+    expect(bar.querySelector('[data-slot="kernel-pill"]')).toBeNull();
+    expect(bar.querySelector('[aria-label="Create in Home"]')).toBeNull();
   });
 
   it('refuses Send only while the input is empty, as the rich composer does', () => {
@@ -89,14 +84,5 @@ describe('ChatComposerStaticBar', () => {
       cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground'),
     );
     expect(staticReasoningLevelNames).toEqual(reasoningLevelNames);
-  });
-
-  it('draws the kernel pill beside the location in the location pill’s finish (D8)', () => {
-    const pill = renderBar().querySelector('[data-slot="kernel-pill"]');
-    expect(pill).toHaveAttribute('aria-label', 'Kernel: Auto');
-    expect(pill).toHaveTextContent('Auto');
-    expect(pill).toHaveClass('h-7', 'rounded-full', 'px-2.5', 'text-muted-foreground');
-    const location = pill?.parentElement?.querySelector('[aria-label="Create in Home"]');
-    expect(location?.compareDocumentPosition(pill!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

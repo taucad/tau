@@ -166,6 +166,7 @@ export function ComboBoxResponsive<T>({
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
   const isNested = isNestedProperty ?? isInsideDrawer;
+  const openSubView = subViews?.find(({ id }) => id === stack.view);
   const selectionMadeReference = React.useRef(false);
   const pointerDismissedReference = React.useRef(false);
   const closeFocusReference = React.useRef(false);
@@ -263,11 +264,16 @@ export function ComboBoxResponsive<T>({
                 className='grid grid-cols-[calc(var(--spacing)*11)_minmax(0,1fr)_calc(var(--spacing)*11)]'
               >
                 {/* The matching empty column keeps the title on the drawer's centre line. */}
+                {/* In a sub-view the header's Back steps back to the list, under the sub-view's own title. */}
                 <DrawerAction
                   type='button'
-                  aria-label='Back'
+                  aria-label={openSubView ? `Back to ${title}` : 'Back'}
                   onClick={() => {
-                    handleOpenChange(false);
+                    if (openSubView) {
+                      stack.pop();
+                    } else {
+                      handleOpenChange(false);
+                    }
                   }}
                 >
                   {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
@@ -275,7 +281,7 @@ export function ComboBoxResponsive<T>({
                   <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
                 </DrawerAction>
                 <DrawerTitle className={cn(drawerBarTitleClass, 'text-center')} id='drawer-title'>
-                  {title}
+                  {openSubView?.title ?? title}
                 </DrawerTitle>
                 <span aria-hidden />
               </DrawerBar>
@@ -312,6 +318,7 @@ export function ComboBoxResponsive<T>({
               stack={stack}
               search={search}
               parentTitle={title}
+              isBackInHeader={isNested}
               onSearchChange={onSearchChange}
             />
             {footer}
@@ -396,6 +403,7 @@ function ItemList<T>({
   search: searchProperty,
   onSearchChange,
   parentTitle,
+  isBackInHeader = false,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly onPick: (item: T) => void;
@@ -420,6 +428,8 @@ function ItemList<T>({
   readonly onSearchChange?: (search: string) => void;
   /** The list's name, for the Back row's accessible name. */
   readonly parentTitle: string;
+  /** A nested drawer's header carries Back, so a sub-view draws no Back row of its own. */
+  readonly isBackInHeader?: boolean;
 }) {
   const [ownSearch, setOwnSearch] = React.useState('');
   const search = searchProperty ?? ownSearch;
@@ -597,6 +607,7 @@ function ItemList<T>({
       searchPlaceHolder={searchPlaceHolder}
       emptyListMessage={emptyListMessage}
       parentTitle={parentTitle}
+      isBackInHeader={isBackInHeader}
       getKeywords={getKeywords}
       renderItem={(group, item) => {
         const value = getValue(item);
@@ -685,8 +696,10 @@ function NestedItemList<T>({
   getValue,
   getKeywords,
   parentTitle,
+  isBackInHeader,
 }: {
   readonly parentTitle: string;
+  readonly isBackInHeader: boolean;
   readonly getKeywords: ((item: T) => readonly string[]) | undefined;
   readonly groupedItems: ReadonlyArray<GroupedItems<T>>;
   readonly subViews: ReadonlyArray<ComboBoxSubView<T>>;
@@ -732,7 +745,7 @@ function NestedItemList<T>({
       ) : null}
       <CommandList key={stack.view} className={viewStackEnterClass(stack.direction)}>
         <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
-        {view ? (
+        {view && !isBackInHeader ? (
           <CommandGroup forceMount className={menuViewHeaderClass}>
             <CommandItem
               forceMount

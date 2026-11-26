@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import type {
   ProjectCreationLocationOption,
   ProjectCreationLocationState,
+  SelectedWorkspaceRecovery,
 } from '#hooks/use-project-creation-location.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import {
@@ -29,7 +30,7 @@ type WorkspaceSelectorProperties = Omit<React.HTMLAttributes<HTMLDivElement>, 'o
 const locationValue = (location: ProjectCreationLocation): string =>
   location.kind === 'home' ? 'home' : `workspace:${location.workspaceId}`;
 
-const optionValue = (option: ProjectCreationLocationOption): string =>
+export const optionValue = (option: ProjectCreationLocationOption): string =>
   `${locationValue(option.location)} ${option.label} ${option.detail}`;
 
 /** What the location chip last read, kept so the next load can draw it before the locations are probed (R8). */
@@ -62,8 +63,82 @@ export const useRememberedProjectLocation = (): readonly [
   return [isRememberedLocation(stored) ? stored : homeLocation, setStored] as const;
 };
 
-const isReadyOption = (option: ProjectCreationLocationOption | undefined): boolean =>
+export const isReadyOption = (option: ProjectCreationLocationOption | undefined): boolean =>
   option?.status === 'ready' || option?.status === 'connected';
+
+/** What a location picker can do besides choose: recover the chosen folder, connect one, or manage them. */
+export type ProjectLocationActions = {
+  readonly optionForValue: (value: string) => ProjectCreationLocationOption | undefined;
+  /**
+   * Chooses the option with this value.
+   *
+   * @returns Whether it is ready to create in, so the picker can close.
+   */
+  readonly select: (value: string) => boolean;
+  readonly recovery: SelectedWorkspaceRecovery | undefined;
+  readonly recoveryLabel: string;
+  readonly recover: () => Promise<void>;
+  readonly connect: () => Promise<void>;
+  readonly manage: () => void;
+};
+
+/**
+ * A location picker's choices and actions, and the chip's reading remembered for the next load's first paint (R8).
+ *
+ * @param state - The creation location.
+ * @param onActionComplete - Runs after recover, connect or manage, to close the picker.
+ * @returns The actions.
+ */
+export const useProjectLocationActions = (
+  state: ProjectCreationLocationState,
+  onActionComplete: () => void,
+): ProjectLocationActions => {
+  const navigate = useNavigate();
+  const [, setRemembered] = useRememberedProjectLocation();
+  /* What the chip reads once the locations are known, remembered for the next load's first paint. */
+  const ready = state.phase === 'ready' && state.shouldShowPicker ? state : undefined;
+  const shownKind = ready?.value.kind;
+  const shownLabel = ready?.selectedOption.label;
+  /* Written when this chip's own reading changes, never in answer to the stored value: two selectors that read
+   * different locations (a connect lands in one first) would otherwise overwrite each other without end. */
+  useEffect(() => {
+    if (shownKind !== undefined && shownLabel !== undefined) {
+      setRemembered({ kind: shownKind, label: shownLabel });
+    }
+  }, [setRemembered, shownKind, shownLabel]);
+  const recovery = ready?.selectedWorkspaceRecovery;
+  const optionForValue = (value: string): ProjectCreationLocationOption | undefined =>
+    state.options.find((candidate: ProjectCreationLocationOption) => optionValue(candidate) === value);
+  return {
+    optionForValue,
+    select: (value) => {
+      const option = optionForValue(value);
+      if (!option || !ready) {
+        return false;
+      }
+      ready.select(option.location);
+      return isReadyOption(option);
+    },
+    recovery,
+    recoveryLabel: recovery?.kind === 'grant' ? 'Grant access' : 'Reconnect folder',
+    recover: async () => {
+      await recovery?.run();
+      onActionComplete();
+    },
+    connect: async () => {
+      await ready?.connectWorkspace();
+      onActionComplete();
+    },
+    manage: () => {
+      if (isDesktopTarget()) {
+        void navigate('/files');
+      } else {
+        globalThis.window.open('/files', '_blank', 'noopener,noreferrer');
+      }
+      onActionComplete();
+    },
+  };
+};
 
 /** The trigger's two finishes: the composer's ghost pill, and a form field. The kernel pill shares the first. */
 export const triggerStyles = {
@@ -137,6 +212,32 @@ export function WorkspaceSelectorPlaceholder({
   );
 }
 
+/** One location in a picker: its glyph, name and detail, its status and a check when it is the one chosen. */
+export function ProjectLocationOptionRow({
+  option,
+  isSelected,
+}: {
+  readonly option: ProjectCreationLocationOption;
+  readonly isSelected: boolean;
+}): React.JSX.Element {
+  return (
+    <span className='-mx-3 -my-1 flex min-h-0 w-[calc(100%+1.5rem)] shrink-0 items-center justify-between gap-2 px-3 py-1'>
+      <span className='flex min-w-0 flex-1 items-center gap-2'>
+        {option.location.kind === 'home' ? <House /> : <FolderOpen />}
+        <span className='flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden'>
+          <span className='truncate'>{option.label}</span>
+          <span className='shrink-0 text-xs text-muted-foreground'>{option.detail}</span>
+        </span>
+      </span>
+      <span className='flex shrink-0 items-center gap-2'>
+        {option.status === 'permission' ? <ShieldAlert aria-label='Access required' /> : null}
+        {option.status === 'disconnected' ? <Unplug aria-label='Disconnected' /> : null}
+        {isSelected ? <Check aria-label='Selected location' /> : null}
+      </span>
+    </span>
+  );
+}
+
 export function WorkspaceSelector({
   state,
   variant,
@@ -146,18 +247,10 @@ export function WorkspaceSelector({
   ...properties
 }: WorkspaceSelectorProperties): React.JSX.Element | undefined {
   const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-  const [, setRemembered] = useRememberedProjectLocation();
-  /* What the chip reads once the locations are known, remembered for the next load's first paint. */
-  const shownKind = state.phase === 'ready' && state.shouldShowPicker ? state.value.kind : undefined;
-  const shownLabel = state.phase === 'ready' && state.shouldShowPicker ? state.selectedOption.label : undefined;
-  /* Written when this chip's own reading changes, never in answer to the stored value: two selectors that read
-   * different locations (a connect lands in one first) would otherwise overwrite each other without end. */
-  useEffect(() => {
-    if (shownKind !== undefined && shownLabel !== undefined) {
-      setRemembered({ kind: shownKind, label: shownLabel });
-    }
-  }, [setRemembered, shownKind, shownLabel]);
+  const actions = useProjectLocationActions(state, () => {
+    setOpen(false);
+    onSelectionComplete?.();
+  });
 
   if (!state.shouldShowPicker) {
     return undefined;
@@ -173,45 +266,12 @@ export function WorkspaceSelector({
         ? 'Home keeps projects in a folder on your computer. Select to change location.'
         : 'Home uses browser storage, which can be cleared. Select to change location.'
       : 'Projects are saved directly to this folder on your disk. Select to change location.';
-  const recovery = state.selectedWorkspaceRecovery;
-  const recoveryLabel = recovery?.kind === 'grant' ? 'Grant access' : 'Reconnect folder';
-
-  const optionForValue = (value: string): ProjectCreationLocationOption | undefined =>
-    state.options.find((candidate) => optionValue(candidate) === value);
+  const { recovery, recoveryLabel, optionForValue, recover, connect, manage } = actions;
 
   const select = (value: string): void => {
-    const option = optionForValue(value);
-    if (!option) {
-      return;
-    }
-    state.select(option.location);
-    if (isReadyOption(option)) {
+    if (actions.select(value)) {
       onSelectionComplete?.();
     }
-  };
-
-  const completeAction = (): void => {
-    setOpen(false);
-    onSelectionComplete?.();
-  };
-
-  const recover = async (): Promise<void> => {
-    await recovery?.run();
-    completeAction();
-  };
-
-  const connect = async (): Promise<void> => {
-    await state.connectWorkspace();
-    completeAction();
-  };
-
-  const manage = (): void => {
-    if (isDesktopTarget()) {
-      void navigate('/files');
-    } else {
-      globalThis.window.open('/files', '_blank', 'noopener,noreferrer');
-    }
-    completeAction();
   };
 
   const trigger = (
@@ -228,26 +288,14 @@ export function WorkspaceSelector({
       className={cn("data-[slot='popover-content']:w-64", className)}
       popoverProperties={{ align: 'start' }}
       groupedItems={[{ name: 'Create in', items: [...state.options] }]}
-      renderLabel={(option, selectedOption) => {
-        const selected =
-          selectedOption !== undefined && projectCreationLocationsEqual(option.location, selectedOption.location);
-        return (
-          <span className='-mx-3 -my-1 flex min-h-0 w-[calc(100%+1.5rem)] shrink-0 items-center justify-between gap-2 px-3 py-1'>
-            <span className='flex min-w-0 flex-1 items-center gap-2'>
-              {option.location.kind === 'home' ? <House /> : <FolderOpen />}
-              <span className='flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden'>
-                <span className='truncate'>{option.label}</span>
-                <span className='shrink-0 text-xs text-muted-foreground'>{option.detail}</span>
-              </span>
-            </span>
-            <span className='flex shrink-0 items-center gap-2'>
-              {option.status === 'permission' ? <ShieldAlert aria-label='Access required' /> : null}
-              {option.status === 'disconnected' ? <Unplug aria-label='Disconnected' /> : null}
-              {selected ? <Check aria-label='Selected location' /> : null}
-            </span>
-          </span>
-        );
-      }}
+      renderLabel={(option, selectedOption) => (
+        <ProjectLocationOptionRow
+          option={option}
+          isSelected={
+            selectedOption !== undefined && projectCreationLocationsEqual(option.location, selectedOption.location)
+          }
+        />
+      )}
       getValue={optionValue}
       value={state.selectedOption}
       emptyListMessage='No locations found.'

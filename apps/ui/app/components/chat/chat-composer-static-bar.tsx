@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
@@ -11,11 +10,7 @@ import {
   chatComposerModelTriggerClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
-import { WorkspaceSelectorPlaceholder } from '#components/filesystem/workspace-selector.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
-import { kernelPillFace } from '#components/chat/kernel-picker-layout.js';
-import { KernelPillContent, kernelPillStyles } from '#components/chat/kernel-pill.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { offeredReasoningLevels } from '#utils/model-reasoning.js';
@@ -28,21 +23,6 @@ export const staticReasoningLevelNames = {
   xhigh: 'Extra high',
   max: 'Max',
 } as const;
-
-const subscribeToNothing = (): (() => void) => () => undefined;
-
-/**
- * Whether the composer will offer a location chip: only where folders can be picked. The server
- * cannot tell, so it draws the chip, which is what every desktop build and Chromium browser shows.
- *
- * @returns Whether to draw the location chip.
- */
-const useLocationChipShown = (): boolean =>
-  useSyncExternalStore(
-    subscribeToNothing,
-    () => directoryPicker().available,
-    () => true,
-  );
 
 /**
  * Whether the model's name is still unknown (no catalog row yet), so the trigger holds its width
@@ -91,25 +71,6 @@ function StaticModelTrigger(): React.JSX.Element {
   );
 }
 
-/** The kernel pill's resting face: Auto or the device's manual pick, as the rich bar draws it. */
-function StaticKernelPill(): React.JSX.Element {
-  const {
-    kernel: { preference },
-  } = useChatComposer();
-  const face = kernelPillFace({ preference });
-  return (
-    <Button
-      variant={kernelPillStyles.variant}
-      size='sm'
-      data-slot='kernel-pill'
-      aria-label={face.label}
-      className={cn('min-w-0', kernelPillStyles.button)}
-    >
-      <KernelPillContent face={face} />
-    </Button>
-  );
-}
-
 const noop = (): void => undefined;
 
 /**
@@ -122,25 +83,17 @@ const noop = (): void => undefined;
  * and the accessibility tree so nothing can act on them early.
  */
 export function ChatComposerStaticBar({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
-  const isLocationShown = useLocationChipShown();
   return (
     <div inert data-slot='composer-bar' className={chatComposerBarClassName}>
       <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
         <Button variant='ghost' size='sm' aria-label='Add' className={chatComposerAddTriggerClassName}>
           <Plus className='size-4' aria-hidden='true' />
         </Button>
-        <div
-          data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
-        >
-          {isLocationShown ? <WorkspaceSelectorPlaceholder variant='toolbar' /> : null}
-          <StaticKernelPill />
-        </div>
       </div>
       <div data-slot='composer-right' className={chatComposerBarRightClassName}>
         <div
           data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-2')}
         >
           <StaticModelTrigger />
         </div>

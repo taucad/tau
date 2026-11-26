@@ -1566,7 +1566,8 @@ jobs:
   # `main-ci-success` reads. The suite step continues on error too, so the job ends green and the queue-health report
   # sees no failed lane; the row's result is in its job summary and a warning, and its count is the flake ledger's,
   # from the `test-outcomes-shadow-*` artifact. An invalidated merge group's run is cancelled with its rows (the queue's
-  # own cancel-stale), and a row that was cancelled leaves its count as it was. At 100 consecutive passing runs
+  # own cancel-stale), and a row that was cancelled leaves its count as it was. A merged group's run is left to finish
+  # its rows (`merge-queue-sweep.yml`), so a row slower than the gate still counts. At 100 consecutive passing runs
   # `shadow-row-promotion.yml` proposes moving the suite to `test:e2e:queue`.
   # The desktop-e2e rows (DC-27) need nothing more than the nightly's desktop-e2e job had: the unpackaged Electron shell
   # under the same xvfb, the sandbox step's uv for the Build123d wheels, the API env file and the runner's Docker for

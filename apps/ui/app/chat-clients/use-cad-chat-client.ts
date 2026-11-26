@@ -4,7 +4,6 @@ import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
-import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -34,8 +33,8 @@ export type CadChatSubmitInput = {
  * Public surface of the CAD chat client. UI assembly sites express gestures
  * through these verbs, never a raw SDK request or hand-built host command.
  *
- * `ChatSessionStore` turns each gesture into one command id and a projection
- * watch. The persistence machine retains only chat record/error/composer state;
+ * `ChatSessionStore` turns each gesture into one command id; its run reaches
+ * the transcript through the log's projection. The persistence machine retains only chat record/error/composer state;
  * the host log owns run lifecycle, transcript and settlement.
  *
  * @public
@@ -74,12 +73,10 @@ export type CadChatClient = {
    * A send during an external agent's live turn queues behind that turn.
    */
   steerOrSubmit: (text: string) => Promise<void>;
-  /** Live message list from the bound `Chat` instance. */
+  /** The displayed transcript: the fold of the chat's log, with the accepted gesture (T2). */
   messages: readonly MyUIMessage[];
-  /** Live status from the bound `Chat` instance. */
+  /** The run phase, else the command in flight (T3). A run's failure is its log's, read from the chat's error. */
   status: ChatStatus;
-  /** Live error from the bound `Chat` instance. */
-  error: Error | undefined;
   /**
    * Snapshot of the agent config the next turn's admission will use.
    */
@@ -95,9 +92,8 @@ const promotionToastId = 'chat-attachment-promotion';
  * Composes:
  * - {@link useCadAgentConfig} — the assembler hook that builds the per-turn
  *   `agent` payload from the current UI producer hooks.
- * - {@link useActiveChatInstance} — the module-private accessor for the live
- *   AI SDK `Chat` instance owned by the chat-session store. Exposed via the
- *   client's `messages`/`status`/`error` reads.
+ * - {@link useChatSelector} — the chat's transcript and status, read from the
+ *   chat-session store's fold of the host log.
  * - {@link useChatActions} — the gesture entry point into the session store.
  *
  * Exposes profile-aware verbs (`submit`, `edit`). Verb identities are
@@ -107,12 +103,11 @@ const promotionToastId = 'chat-attachment-promotion';
  * @public
  */
 export const useCadChatClient = (): CadChatClient => {
-  const chat = useActiveChatInstance();
   const actions = useChatActions();
   const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
   // The CAD chat client is session-required by construction (it composes
-  // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
+  // `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
@@ -233,7 +228,6 @@ export const useCadChatClient = (): CadChatClient => {
     steerOrSubmit,
     messages,
     status,
-    error: chat.error,
     agent,
   };
 };

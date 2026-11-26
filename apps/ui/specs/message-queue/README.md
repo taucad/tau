@@ -111,3 +111,5 @@ The launch audit's first fixes re-pinned the drift after `chat-session-store.ts`
 The launch audit's review fixes re-pinned the drift after `use-cad-chat-client.ts` began naming a refused attachment send or edit by its own gesture kind; no action changed.
 
 use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.
+
+use_skill startup latency T3 re-pins the drift after `chat-session-store.ts`, `use-chat.tsx` and `use-cad-chat-client.ts` began reading the chat's status from the run phase and the command in flight, with no SDK stream armed; no action changed.

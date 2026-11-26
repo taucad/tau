@@ -38,7 +38,7 @@ const failedRun = (error: ChatErrorPayload): VisibleFailureSource => {
   });
   const { context } = projection.getSnapshot();
   projection.stop();
-  return { projection: context, attachmentStatus: 'attached', error: undefined, persistedError: undefined };
+  return { projection: context, attachmentStatus: 'attached', persistedError: undefined };
 };
 
 const unauthenticated: ChatErrorPayload = {
@@ -63,7 +63,7 @@ const unreadLog = (): VisibleFailureSource => {
   const projection = createActor(chatProjectionLogic).start();
   const { context } = projection.getSnapshot();
   projection.stop();
-  return { projection: context, attachmentStatus: 'unknown', error: undefined, persistedError: undefined };
+  return { projection: context, attachmentStatus: 'unknown', persistedError: undefined };
 };
 
 /* The return every fact favours: signed in, the chat shown, its transcript loaded, its run waiting for a sign-in. */

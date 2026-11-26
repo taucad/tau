@@ -985,8 +985,10 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
      * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
     const boxes = viewerBoxes();
+    /* The chat pane, still ensured, keeps its lane frame busy with the transcript's shape (rule 15). */
     expect(
-      boxes.length === 0 || document.querySelector('[data-testid="chat-lane-frame"][aria-busy="true"]') !== null,
+      boxes.length === 0 ||
+        document.querySelector('[data-testid="chat-lane-frame"] [data-slot="project-wait"][aria-busy="true"]') !== null,
     ).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);

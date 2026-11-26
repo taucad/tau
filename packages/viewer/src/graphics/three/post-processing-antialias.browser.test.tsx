@@ -28,6 +28,7 @@ import type * as fxaaModule from '#graphics/three/fxaa.js';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
+import { eachWithHardwareClaims } from '#test/hardware-claims.test-utils.js';
 import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
 import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';
 import { graphicsMachine, selectGraphicsFramed } from '#machines/graphics.machine.js';
@@ -200,11 +201,12 @@ afterEach(() => {
   expect(referenceMode.validationErrors.splice(0)).toEqual([]);
 });
 
-it.each(
+eachWithHardwareClaims(
   ['webgl', 'webgpu', 'node-webgl2'].flatMap((execution) => [
     { execution, width: 256, height: 256, dpr: 1 },
     { execution, width: 2560, height: 1440, dpr: 2 },
   ]),
+  (row) => row.width === 2560,
 )(
   'should smooth shader edges in the final $execution image at width $width',
   async ({ execution, width, height, dpr }) => {
@@ -742,7 +744,7 @@ const linearChannel = Array.from({ length: 256 }, (_, value) => {
 
 // Diagnostic qualification: accepted WebGL is the reference. Integrate contrast
 // around isolated strokes so subpixel placement cannot hide width differences.
-it.each(
+eachWithHardwareClaims(
   [
     { dpr: 1, width: 256, height: 256 },
     { dpr: 1.5, width: 256, height: 256 },
@@ -757,6 +759,7 @@ it.each(
       })),
     ),
   ),
+  (row) => row.width === 2560,
 )(
   'should preserve nominal unlit stroke coverage across phases at DPR $dpr color $color width $width line $lineWidth',
   async ({ dpr, color, width, height, lineWidth }) => {
@@ -1071,7 +1074,7 @@ it.each(
   },
 );
 
-it.each(
+eachWithHardwareClaims(
   ['webgl', 'webgpu', 'node-webgl2'].flatMap((execution) =>
     [1, -1].flatMap((side) =>
       (['none', 'neutral'] as const).flatMap((toneMapping) =>
@@ -1084,6 +1087,7 @@ it.each(
       ),
     ),
   ),
+  (row) => row.width === 5120,
 )(
   'should occlude grid and hidden outlines through actual stencil caps: $execution side $side tone $toneMapping width $width',
   async ({ execution, side, toneMapping, width }) => {
@@ -1423,7 +1427,10 @@ it.each(
 
 // Use the live post owner (PBR, AO, retained frame depth, overlays and final encoding),
 // not a standalone mask render. The prior native fusion passed isolated mask pixels.
-it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({ forceNodeWebGl2, width }))))(
+eachWithHardwareClaims(
+  [false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({ forceNodeWebGl2, width }))),
+  (row) => row.width === 2560,
+)(
   'should clear persistent emphasis through the production node frame: WebGL2=$forceNodeWebGl2 width=$width',
   async ({ forceNodeWebGl2, width }) => {
     referenceMode.forceNodeWebGl2 = forceNodeWebGl2;
@@ -1676,10 +1683,11 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
   },
 );
 
-it.each(
+eachWithHardwareClaims(
   (['webgpu', 'node-webgl2'] as const).flatMap((execution) =>
     [384, 5120].flatMap((width) => [0, 1].map((transmission) => ({ execution, width, transmission }))),
   ),
+  (row) => row.width === 5120,
 )(
   'should retain transmissive composition and bounded resources across camera switches: $execution width $width transmission $transmission',
   async ({ execution, width, transmission }) => {
@@ -1758,24 +1766,26 @@ it.each(
     };
     const fixture = (fov: number): ReactNode => (
       <div key={fov} style={{ width: renderWidth, height: renderHeight }}>
-        <GraphicsProvider graphicsRef={actor}>
-          <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
-            <ambientLight intensity={2} />
-            <mesh position={[0, 0, -0.8]}>
-              <planeGeometry args={[4, 4]} />
-              <meshStandardMaterial color='#c03030' />
-            </mesh>
-            <mesh>
-              <boxGeometry args={[1.5, 1.5, 0.5]} />
-              <meshPhysicalMaterial transmission={transmission} thickness={0.5} roughness={0.2} side={DoubleSide} />
-            </mesh>
-            <mesh position={[0.7, -0.4, 0.5]}>
-              <boxGeometry args={[0.5, 0.5, 0.5]} />
-              <meshStandardMaterial color='#2040c0' />
-            </mesh>
-            <Probe />
-          </ThreeCanvasInstance>
-        </GraphicsProvider>
+        <HardwareComposition>
+          <GraphicsProvider graphicsRef={actor}>
+            <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
+              <ambientLight intensity={2} />
+              <mesh position={[0, 0, -0.8]}>
+                <planeGeometry args={[4, 4]} />
+                <meshStandardMaterial color='#c03030' />
+              </mesh>
+              <mesh>
+                <boxGeometry args={[1.5, 1.5, 0.5]} />
+                <meshPhysicalMaterial transmission={transmission} thickness={0.5} roughness={0.2} side={DoubleSide} />
+              </mesh>
+              <mesh position={[0.7, -0.4, 0.5]}>
+                <boxGeometry args={[0.5, 0.5, 0.5]} />
+                <meshStandardMaterial color='#2040c0' />
+              </mesh>
+              <Probe />
+            </ThreeCanvasInstance>
+          </GraphicsProvider>
+        </HardwareComposition>
       </div>
     );
     try {
@@ -1936,10 +1946,11 @@ it.each(
   },
 );
 
-it.each(
+eachWithHardwareClaims(
   (['webgpu', 'node-webgl2'] as const).flatMap((execution) =>
     [false, true].map((aoEnabled) => ({ execution, aoEnabled })),
   ),
+  () => true,
 )(
   'should retain the continuous unlit planetary rim through production composition at 5K on $execution AO $aoEnabled',
   async ({ execution, aoEnabled }) => {
@@ -2079,126 +2090,141 @@ it.each(
   },
 );
 
-it.each(['webgpu', 'node-webgl2'] as const)(
-  'should isolate two 5K node views through sibling resize and remount on %s',
-  async (execution) => {
-    referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
-    referenceMode.manualPreparation = true;
-    await page.viewport(600, 500);
-    const actors = [0, 1].map(() =>
-      createActor(
-        graphicsMachine.provide({
-          actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
-        }),
-        {
-          input: {
-            camera: {
-              cameraFovAngle: 35,
-              cameraView: {
-                frameId: 'tau:root',
-                target: [0, 0, 0],
-                direction: [0.3, 0.2, 1],
-                up: [0, 1, 0],
-                verticalSpan: 4,
-                perspectiveZoom: 1,
-              },
+/**
+ * Two node views side by side, each with its own renderer: a sibling's resize, teardown and remount must leave every
+ * output pixel of the other unchanged. `full` is each view's backing width in pixels (16:9).
+ */
+const isolateTwoNodeViews = async (execution: 'webgpu' | 'node-webgl2', full: number): Promise<void> => {
+  referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
+  referenceMode.manualPreparation = true;
+  await page.viewport(600, 500);
+  const actors = [0, 1].map(() =>
+    createActor(
+      graphicsMachine.provide({
+        actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
+      }),
+      {
+        input: {
+          camera: {
+            cameraFovAngle: 35,
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0.3, 0.2, 1],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
             },
           },
         },
-      ).start(),
-    );
-    const states = new Map<number, RootState>();
-    const Probe = ({ index }: { readonly index: number }): undefined => {
-      states.set(index, useThree());
-      return undefined;
-    };
-    const fixture = (index: number, width: number, generation: number): ReactNode => (
-      <div key={generation} style={{ width, height: (width * 2880) / 5120 }}>
-        <GraphicsProvider graphicsRef={actors[index]}>
-          <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
-            <ambientLight intensity={2} />
-            <mesh position={[0, 0, -0.7]}>
-              <planeGeometry args={[4, 4]} />
-              <meshStandardMaterial color={index ? '#2040c0' : '#c03030'} />
-            </mesh>
-            <mesh>
-              <boxGeometry args={[1.5, 1.5, 0.5]} />
-              <meshStandardMaterial color='#aaaaaa' />
-            </mesh>
-            <Probe index={index} />
-          </ThreeCanvasInstance>
-        </GraphicsProvider>
-      </div>
-    );
-    const capture = async (index: number, width = 5120): Promise<Uint8ClampedArray> => {
-      await vi.waitFor(() => {
-        expect(states.get(index)?.gl.domElement.width).toBe(width);
-      });
-      for (let frame = 0; frame < 4; frame++) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Each frame settles the current resized graph.
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            resolve();
-          });
+      },
+    ).start(),
+  );
+  const states = new Map<number, RootState>();
+  const Probe = ({ index }: { readonly index: number }): undefined => {
+    states.set(index, useThree());
+    return undefined;
+  };
+  const fixture = (index: number, width: number, generation: number): ReactNode => (
+    <div key={generation} style={{ width, height: (width * 9) / 16 }}>
+      <GraphicsProvider graphicsRef={actors[index]}>
+        <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
+          <ambientLight intensity={2} />
+          <mesh position={[0, 0, -0.7]}>
+            <planeGeometry args={[4, 4]} />
+            <meshStandardMaterial color={index ? '#2040c0' : '#c03030'} />
+          </mesh>
+          <mesh>
+            <boxGeometry args={[1.5, 1.5, 0.5]} />
+            <meshStandardMaterial color='#aaaaaa' />
+          </mesh>
+          <Probe index={index} />
+        </ThreeCanvasInstance>
+      </GraphicsProvider>
+    </div>
+  );
+  const capture = async (index: number, width = full): Promise<Uint8ClampedArray> => {
+    await vi.waitFor(() => {
+      expect(states.get(index)?.gl.domElement.width).toBe(width);
+    });
+    for (let frame = 0; frame < 4; frame++) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each frame settles the current resized graph.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
         });
-        states.get(index)!.advance(performance.now(), true);
-      }
-      const renderer = states.get(index)!.gl;
-      expect(isViewportWebGpu(renderer)).toBe(true);
-      if (!isViewportWebGpu(renderer)) {
-        throw new Error('Expected initialized node renderer');
-      }
-      expect(renderer.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
-      expect(renderer.domElement.height).toBe((width * 2880) / 5120);
-      return captureRendererOutput(renderer);
-    };
-    const differences = (actual: Uint8ClampedArray, expected: Uint8ClampedArray): number => {
-      expect(actual.length).toBe(expected.length);
-      let changed = 0;
-      for (const [index, value] of actual.entries()) {
-        changed += Number(value !== expected[index]);
-      }
-      return changed;
-    };
-    try {
-      const first = render(fixture(0, 5120, 0));
-      const firstPixels = await capture(0);
-      render(fixture(1, 5120, 0));
-      const secondPixels = await capture(1);
-      const secondRenderer = states.get(1)!.gl;
-      const secondTextures = secondRenderer.info.memory.textures;
-      expect(states.get(0)!.gl).not.toBe(secondRenderer);
-      expect(differences(secondPixels, firstPixels)).toBeGreaterThan(1000);
-      first.rerender(fixture(0, 2560, 0));
-      await capture(0, 2560);
-      expect(differences(await capture(1), secondPixels), 'Sibling resize must preserve every output pixel').toBe(0);
-      first.rerender(fixture(0, 5120, 0));
-      expect(differences(await capture(0), firstPixels), 'Resize back to 5K must restore exact composition').toBe(0);
-      await disposeRendererOutput(states.get(0)!.gl);
-      first.unmount();
-      expect(differences(await capture(1), secondPixels), 'Sibling teardown must preserve every output pixel').toBe(0);
-      expect(secondRenderer.info.memory.textures).toBe(secondTextures);
-      states.delete(0);
-      render(fixture(0, 5120, 1));
-      expect(differences(await capture(0), firstPixels), 'New renderer must recover exact composition').toBe(0);
-      expect(differences(await capture(1), secondPixels)).toBe(0);
-      expect(states.get(1)!.gl).toBe(secondRenderer);
-    } finally {
-      for (const state of states.values()) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Release each renderer's output observer before owner teardown.
-        await disposeRendererOutput(state.gl);
-      }
-      cleanup();
-      for (const actor of actors) {
-        actor.stop();
-      }
-      referenceMode.manualPreparation = false;
-      expect(referenceMode.preparations.size).toBe(0);
+      });
+      states.get(index)!.advance(performance.now(), true);
     }
-  },
+    const renderer = states.get(index)!.gl;
+    expect(isViewportWebGpu(renderer)).toBe(true);
+    if (!isViewportWebGpu(renderer)) {
+      throw new Error('Expected initialized node renderer');
+    }
+    expect(renderer.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
+    expect(renderer.domElement.height).toBe((width * 9) / 16);
+    return captureRendererOutput(renderer);
+  };
+  const differences = (actual: Uint8ClampedArray, expected: Uint8ClampedArray): number => {
+    expect(actual.length).toBe(expected.length);
+    let changed = 0;
+    for (const [index, value] of actual.entries()) {
+      changed += Number(value !== expected[index]);
+    }
+    return changed;
+  };
+  try {
+    const first = render(fixture(0, full, 0));
+    const firstPixels = await capture(0);
+    render(fixture(1, full, 0));
+    const secondPixels = await capture(1);
+    const secondRenderer = states.get(1)!.gl;
+    const secondTextures = secondRenderer.info.memory.textures;
+    expect(states.get(0)!.gl).not.toBe(secondRenderer);
+    expect(differences(secondPixels, firstPixels)).toBeGreaterThan(1000);
+    first.rerender(fixture(0, full / 2, 0));
+    await capture(0, full / 2);
+    expect(differences(await capture(1), secondPixels), 'Sibling resize must preserve every output pixel').toBe(0);
+    first.rerender(fixture(0, full, 0));
+    expect(differences(await capture(0), firstPixels), 'Resize back to 5K must restore exact composition').toBe(0);
+    await disposeRendererOutput(states.get(0)!.gl);
+    first.unmount();
+    expect(differences(await capture(1), secondPixels), 'Sibling teardown must preserve every output pixel').toBe(0);
+    expect(secondRenderer.info.memory.textures).toBe(secondTextures);
+    states.delete(0);
+    render(fixture(0, full, 1));
+    expect(differences(await capture(0), firstPixels), 'New renderer must recover exact composition').toBe(0);
+    expect(differences(await capture(1), secondPixels)).toBe(0);
+    expect(states.get(1)!.gl).toBe(secondRenderer);
+  } finally {
+    for (const state of states.values()) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Release each renderer's output observer before owner teardown.
+      await disposeRendererOutput(state.gl);
+    }
+    cleanup();
+    for (const actor of actors) {
+      actor.stop();
+    }
+    referenceMode.manualPreparation = false;
+    expect(referenceMode.preparations.size).toBe(0);
+  }
+};
+
+eachWithHardwareClaims(['webgpu', 'node-webgl2'] as const, () => true)(
+  'should isolate two 5K node views through sibling resize and remount on %s',
+  async (execution) => isolateTwoNodeViews(execution, 5120),
 );
 
-it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map((fov) => ({ execution, fov }))))(
+// The same isolation contract on the software lane, at a size SwiftShader draws in well under a second per frame.
+it.each(['webgpu', 'node-webgl2'] as const)(
+  'should isolate two 640 px node views through sibling resize and remount on %s',
+  async (execution) => isolateTwoNodeViews(execution, 640),
+);
+
+eachWithHardwareClaims(
+  (['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map((fov) => ({ execution, fov }))),
+  () => true,
+)(
   'should preserve opaque planetary pixels beneath workspace axes at 5K on $execution FOV $fov',
   async ({ execution, fov }) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
@@ -2333,7 +2359,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
   },
 );
 
-it.each(['webgpu', 'node-webgl2'] as const)(
+eachWithHardwareClaims(['webgpu', 'node-webgl2'] as const, () => true)(
   'should retain planetary surface boundaries and motion with six-step filtering at 5K on %s',
   async (execution) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
@@ -2550,12 +2576,15 @@ it.each(['webgpu', 'node-webgl2'] as const)(
   120_000,
 );
 
-it.each([
-  ['webgpu', true],
-  ['node-webgl2', true],
-  ['webgpu', false],
-  ['node-webgl2', false],
-] as const)(
+eachWithHardwareClaims(
+  [
+    ['webgpu', true],
+    ['node-webgl2', true],
+    ['webgpu', false],
+    ['node-webgl2', false],
+  ] as const,
+  () => true,
+)(
   'should preserve the saved rear planetary section through preparation and cut reset at 5K on %s with AO %s',
   async (execution, aoEnabled) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';

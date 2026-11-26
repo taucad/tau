@@ -2,8 +2,12 @@
  * The reporter list every Tau Vitest config uses: `reporters: testReporters('verbose')`.
  *
  * The list keeps the config's own console reporter, adds `github-actions` on GitHub Actions (a failure becomes a
- * check-run annotation) and adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
- * cache replay restores the original run's rows. A change to how every config reports is one change here.
+ * check-run annotation), adds the {@link OutcomeReporter}, whose file is a declared output of the test target, so a
+ * cache replay restores the original run's rows, then the {@link QuarantineVerdict}, which lets a failure the
+ * project's `quarantine.json` names report without gating, and ends with the {@link RetryPolicyReporter}, which reads
+ * that file at the end of the run (testing policy § 16.1 and § 16.2). The retry policy runs after the quarantine
+ * verdict, so a verdict that lowers the exit code cannot hide a broken retry rule. A change to how every config
+ * reports is one change here. {@link testRetry} is the `retry` every config sets beside it.
  *
  * The outcome recorder is imported through the package's own subpath, not a `#` alias, because the configs that
  * import this module are type-checked under other projects' compiler options, some with a `#*` path alias. The list
@@ -14,11 +18,14 @@ import process from 'node:process';
 
 import { OutcomeReporter } from '@taucad/vitest-ci/outcome-reporter';
 import type { OutcomeEnvironment } from '@taucad/vitest-ci/outcome-reporter';
+import { QuarantineVerdict } from '@taucad/vitest-ci/quarantine-verdict';
+import { onCi, RetryPolicyReporter, retryBudget, underVerification } from '@taucad/vitest-ci/retry-policy';
+import type { RetryEnvironment } from '@taucad/vitest-ci/retry-policy';
 import type { BuiltinReporters } from 'vitest/node';
 
 /**
  * The reporter list for a Tau Vitest config: the config's console reporter, `github-actions` on GitHub Actions,
- * and the {@link OutcomeReporter}.
+ * the {@link OutcomeReporter}, the {@link QuarantineVerdict} and, last, the {@link RetryPolicyReporter}.
  *
  * @param base - The console reporter the config uses, `verbose` or `default` in Tau.
  * @param env - The environment to read `GITHUB_ACTIONS` from. Defaults to `process.env`.
@@ -26,18 +33,43 @@ import type { BuiltinReporters } from 'vitest/node';
  *
  * @example <caption>A config that prints each test name</caption>
  * ```typescript
- * import { testReporters } from '@taucad/vitest-ci';
+ * import { testReporters, testRetry } from '@taucad/vitest-ci';
  * import { defineConfig } from 'vitest/config';
  *
- * export default defineConfig({ test: { reporters: testReporters('verbose') } });
+ * export default defineConfig({ test: { reporters: testReporters('verbose'), retry: testRetry() } });
  * ```
  * @public
  */
 export const testReporters = (
   base: BuiltinReporters = 'default',
   env: OutcomeEnvironment = process.env,
-): Array<BuiltinReporters | OutcomeReporter> => [
-  base,
-  ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
-  new OutcomeReporter(),
-];
+): Array<BuiltinReporters | OutcomeReporter | QuarantineVerdict | RetryPolicyReporter> => {
+  const outcome = new OutcomeReporter();
+  return [
+    base,
+    ...(env['GITHUB_ACTIONS'] === 'true' ? (['github-actions'] as const) : []),
+    outcome,
+    // Both read the outcome file the recorder writes in the same `onTestRunEnd` round. The retry policy comes last:
+    // the quarantine verdict may lower the exit code to 0, and a broken retry rule must still raise it to 1.
+    new QuarantineVerdict(outcome),
+    new RetryPolicyReporter({ outcome }),
+  ];
+};
+
+/**
+ * The `retry` of a Tau Vitest config (RT-1): one in-process retry in CI, none locally or under the flake harness.
+ *
+ * @param env - The environment to read. Defaults to `process.env`.
+ * @returns `1` on CI outside the flake harness, else `0`.
+ *
+ * @example <caption>Every config</caption>
+ * ```typescript
+ * import { testReporters, testRetry } from '@taucad/vitest-ci';
+ * import { defineConfig } from 'vitest/config';
+ *
+ * export default defineConfig({ test: { reporters: testReporters('verbose'), retry: testRetry() } });
+ * ```
+ * @public
+ */
+export const testRetry = (env: RetryEnvironment = process.env): number =>
+  onCi(env) && !underVerification(env) ? retryBudget.retries : 0;

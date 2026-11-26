@@ -4,6 +4,7 @@
  * across deltas and rewrites, the overlay's rebase and retirement, and the counted cost of a delta on a long chat.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentLiveEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
@@ -265,6 +266,63 @@ describe('selectTranscript (T2)', () => {
     const after = selectTranscript(state, before);
 
     // One delta chunk is reduced; no other run is reduced again.
+    expect(reduced.chunks).toBe(1);
+    expect(after.slice(0, -1).every((message, index) => message === before[index])).toBe(true);
+    expect(textsOf(assistantOf(after))).toEqual(['Thinking harder']);
+  });
+
+  it('should reduce only a delta and keep every earlier message identical on the largest fixture log', () => {
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/kinetic-regenerate-resume.jsonl',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line): Record<string, unknown> => JSON.parse(line) as Record<string, unknown>);
+    const tail = rows.at(-1)!;
+    const probe = 'run_cost_probe';
+    /* One more run on the log's own leader, after its last row, streaming text on the live channel. */
+    const next = (offset: number, fields: Readonly<Record<string, unknown>>): Record<string, unknown> => ({
+      ...logRow(Number(tail['sequence']) + offset, { runId: probe, ...fields }),
+      leaderEpoch: tail['leaderEpoch'],
+      epoch: tail['epoch'],
+      recordedAt: '2026-10-05T00:00:00.000Z',
+    });
+    let state = fold(initialChatProjection, rows, 0);
+    const history = selectTranscript(state);
+    expect(history.length).toBeGreaterThan(0);
+    state = fold(
+      state,
+      [
+        next(1, { type: 'run.lifecycle', state: 'admitted', attempt: 1 }),
+        next(2, { type: 'run.lifecycle', state: 'running', attempt: 1 }),
+        next(3, { type: 'message.appended', message: { id: 'user-probe', role: 'user', content: 'One more' } }),
+      ],
+      rows.length,
+    );
+    state = live(
+      state,
+      { type: 'text-start', runId: probe, messageId: 'step-probe', contentIndex: 0 },
+      { type: 'text-delta', runId: probe, messageId: 'step-probe', contentIndex: 0, delta: 'Thinking', offset: 0 },
+    );
+    const before = selectTranscript(state, history);
+    expect(before).toHaveLength(history.length + 2);
+    expect(before.slice(0, history.length).every((message, index) => message === history[index])).toBe(true);
+
+    state = live(state, {
+      type: 'text-delta',
+      runId: probe,
+      messageId: 'step-probe',
+      contentIndex: 0,
+      delta: ' harder',
+      offset: 8,
+    });
+    reduced.chunks = 0;
+    const after = selectTranscript(state, before);
+
     expect(reduced.chunks).toBe(1);
     expect(after.slice(0, -1).every((message, index) => message === before[index])).toBe(true);
     expect(textsOf(assistantOf(after))).toEqual(['Thinking harder']);

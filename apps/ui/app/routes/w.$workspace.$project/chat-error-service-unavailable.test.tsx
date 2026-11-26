@@ -38,8 +38,7 @@ describe('ChatErrorServiceUnavailable', () => {
 
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: new TypeError('network error'),
-        persistedError: undefined,
+        persistedError: parseErrorForPersistence(new TypeError('network error')),
       } as unknown as CombinedChatState),
     );
     render(<ChatErrorBanner />);

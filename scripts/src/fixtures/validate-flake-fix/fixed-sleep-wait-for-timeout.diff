@@ -1,0 +1,11 @@
+--- a/apps/ui-e2e/src/editor.spec.ts
++++ b/apps/ui-e2e/src/editor.spec.ts
+@@
+ import { expect, it } from 'vitest';
+ import { page } from 'vitest/browser';
+
+ it('opens the editor', async () => {
+   await page.getByRole('button', { name: 'Open' }).click();
++  await page.waitForTimeout(2000);
+   await expect.element(page.getByRole('textbox')).toBeVisible();
+ });

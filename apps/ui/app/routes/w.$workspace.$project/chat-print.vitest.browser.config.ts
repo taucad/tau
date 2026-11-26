@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -19,6 +19,7 @@ export default defineConfig({
   },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: [
       'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
       'app/components/select-alignment.browser.test.tsx',

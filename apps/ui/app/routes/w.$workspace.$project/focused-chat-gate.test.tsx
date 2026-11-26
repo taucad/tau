@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import {
   ChatHistoryGate,
   ChatInterfaceSessionGate,
@@ -119,14 +119,17 @@ describe('ChatLaneFrame', () => {
     expect(placeholder.querySelector('[data-slot=skeleton]')).toBeNull();
   });
 
-  it('renders the ensuring wait with the matching aria-label', () => {
-    render(<ChatLaneFrame busyLabel='Preparing chat session…' />);
+  it('is never a live region of its own: a wait inside it is a busy group with the transcript’s shape', () => {
+    render(
+      <ChatLaneFrame>
+        <span data-testid='feed' />
+      </ChatLaneFrame>,
+    );
 
-    const placeholder = screen.getByTestId('chat-lane-frame');
-    expect(placeholder).toBeDefined();
-    expect(placeholder.getAttribute('aria-busy')).toBe('true');
-    expect(placeholder.getAttribute('aria-label')).toContain('Preparing');
-    expect(screen.getByRole('status', { name: /Preparing chat session/u })).toBe(placeholder);
+    const frame = screen.getByTestId('chat-lane-frame');
+    expect(frame.getAttribute('role')).toBeNull();
+    expect(frame.getAttribute('aria-live')).toBeNull();
+    expect(screen.getByTestId('feed')).toBeInTheDocument();
   });
 
   it('carries the floating-panel data-slot so it inherits chat-pane chrome', () => {
@@ -277,7 +280,13 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByText('Loading chat history')).toBeDefined();
+    /* The lane keeps its frame and draws the transcript's shape: no sentence, no live region (rules 15 and 22). */
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.querySelector('[data-slot=project-wait-skeleton]')).toHaveClass('wait-skeleton');
+    expect(lane.textContent).toBe('');
+    expect(lane.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+    expect(screen.queryByText(/Loading chat history|Preparing chat session/u)).toBeNull();
     expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
@@ -293,7 +302,32 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByText('Loading chat history')).toBeDefined();
+    /* The lane keeps its frame and draws the transcript's shape: no sentence, no live region (rules 15 and 22). */
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.querySelector('[data-slot=project-wait-skeleton]')).toHaveClass('wait-skeleton');
+    expect(lane.textContent).toBe('');
+    expect(lane.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+    expect(screen.queryByText(/Loading chat history|Preparing chat session/u)).toBeNull();
+  });
+
+  it('keeps the lane frame and the transcript shape while a known focused chat is established again', () => {
+    mockState.current = buildState({
+      value: { ready: { operation: 'ensuringFocusedChat' } },
+      focusedChatId: 'chat-123',
+    });
+
+    render(
+      <ChatHistoryGate>
+        <div data-testid='chat-pane-child'>chat content</div>
+      </ChatHistoryGate>,
+    );
+
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.textContent).toBe('');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
   it('renders children directly (no provider mount) when ready and not ensuring', () => {
@@ -329,7 +363,8 @@ describe('ChatInterfaceSessionGate', () => {
     );
     const { rerender } = render(content);
     expect(screen.getByTestId('model-pane')).toBeInTheDocument();
-    expect(screen.getByText('Loading chat history')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-lane-frame')).toBeInTheDocument();
+    expect(screen.queryByText('Loading chat history')).not.toBeInTheDocument();
     expect(screen.queryByTestId('active-chat-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('session-gate-fallback')).not.toBeInTheDocument();
     mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'discovered-chat' });
@@ -344,7 +379,7 @@ describe('ChatInterfaceSessionGate', () => {
     expect(screen.getByTestId('active-chat-provider').dataset['chatId']).toBe('discovered-chat');
     expect(screen.getByTestId('model-pane')).toBeInTheDocument();
     expect(screen.getByTestId('chat-pane-child')).toBeInTheDocument();
-    expect(screen.queryByText('Loading chat history')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-lane-frame')).not.toBeInTheDocument();
   });
 
   it('mounts <ActiveChatProvider> with the focused chat id when one is set', () => {

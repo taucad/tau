@@ -71,5 +71,5 @@ export const projectTagVocabulary = {
     'unlayered',
   ],
   protocol: ['agent'],
-  ci: ['browser', 'standalone', 'quarantined', 'shell', 'desktop', 'native-hosts'],
+  ci: ['browser', 'standalone', 'nightly-only', 'shell', 'desktop', 'native-hosts'],
 } as const;

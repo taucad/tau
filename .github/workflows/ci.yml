@@ -704,7 +704,7 @@ jobs:
             typecheck-*) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
             # shellcheck disable=SC2086 # BUILD_TARGETS is a word list
             build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;
-            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
           node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
@@ -812,16 +812,16 @@ jobs:
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
-              # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
+              # this runner. `ci:nightly-only` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
-              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
               # The task graph also holds the tasks `test` depends on (builds and the like),
               # so keep the `test` tasks, and drop an excluded tag again in case another
               # project's `test` ever depends on one of theirs.
               projects=$(jq -c '
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
-                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:nightly-only") | not))' "$RUNNER_TEMP/test-graph.json")
               # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
               # tasks, every one of them, in place of the project; the rest enter as projects.
               units=$(jq -c --argjson projects "$projects" '
@@ -1662,6 +1662,41 @@ jobs:
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
           if [ "$NODE_FLOOR_REQUIRED" = true ]; then test "$NODE_FLOOR_RESULT" = success; fi
           if [ "$BURN_IN_REQUIRED" = true ]; then test "$BURN_IN_RESULT" = success; fi
+
+      # Testing policy § 16.2, RT-4 (CI flake quarantine blueprint FQ-4): more than five retried passes in one run
+      # fail it. Each task's `@taucad/vitest-ci` reporter caps its own (three) and fails a retried pass in a file
+      # the change touches; only this gate sees the whole run, so it counts the `flaky` rows of every lane's
+      # `test-outcomes-*` artifact. Rows a cache replay restored carry the id of the run that executed them and
+      # were counted there, so only this run's rows count.
+      - name: Download test outcomes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-outcomes-*
+          path: ${{ runner.temp }}/test-outcomes
+      - name: Check the run's retried passes
+        env:
+          RUN_BUDGET: 5
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/test-outcomes"
+          retried="$RUNNER_TEMP/retried-passes.json"
+          if [ -d "$dir" ]; then
+            find "$dir" -name '*.outcomes.jsonl' -print0 | xargs -0 -r cat \
+              | jq -s --argjson run "$GITHUB_RUN_ID" \
+                '[.[] | select(.kind == "test" and .flaky == true and .run == $run) | .id] | sort' > "$retried"
+          else
+            echo '[]' > "$retried"
+          fi
+          count=$(jq length "$retried")
+          {
+            echo "### Retried passes in this run: $count (budget $RUN_BUDGET)"
+            jq -r '.[] | "- " + .' "$retried"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -gt "$RUN_BUDGET" ]; then
+            echo "::error title=Retry policy::$count retried passes in this run, over the budget of $RUN_BUDGET (testing policy § 16.2, RT-4): a broken environment or change"
+            exit 1
+          fi
+          echo "$count retried passes in this run, within the budget of $RUN_BUDGET."
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed

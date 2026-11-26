@@ -993,21 +993,19 @@ describe('ActiveChatProvider', () => {
     expect(result.current.draftActorRef).toBeDefined();
   });
 
-  it('should reflect the live AI SDK status via useChatComposer().status', () => {
-    const { result } = renderHook(() => useChatComposer(), {
+  it('should show an admitted run as submitted via useChatComposer().status', () => {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_status'),
     });
 
-    expect(result.current.status).toBe('ready');
-    expect(result.current.agentActivity).toBe('ready');
+    expect(result.current.composer.status).toBe('ready');
+    expect(result.current.composer.agentActivity).toBe('ready');
 
     act(() => {
-      const live = harness.created[0]!;
-      live.status = 'streaming';
-      live.emitStatusChange();
+      publishLogRows(result.current.store, 'chat_status', [lifecycleRow(0, 'admitted')]);
     });
 
-    expect(result.current.status).toBe('streaming');
+    expect(result.current.composer.status).toBe('submitted');
   });
 
   it('names the agent working from its log’s run, not the SDK request (PV-S7, D12)', () => {

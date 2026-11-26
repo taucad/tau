@@ -113,7 +113,7 @@ it.each(['text', 'interrupted-tool', 'approval'] as const)(
     ]);
     await vi.waitFor(() => {
       expect(
-        session.chat.messages
+        session.messages
           .flatMap((message) => message.parts)
           .some((part) => part.type === 'text' && part.text === 'Prior paragraph'),
       ).toBe(true);
@@ -155,7 +155,7 @@ it.each(['text', 'interrupted-tool', 'approval'] as const)(
         );
       });
       await vi.waitFor(() => {
-        expect(session.chat.status).toBe('streaming');
+        expect(store.getChatStatus('chat_1')).toBe('streaming');
       });
       expect(commits.every((messages) => messages.filter((text) => text === 'Prior paragraph').length === 1)).toBe(
         true,
@@ -206,7 +206,7 @@ it.each(['text', 'interrupted-tool', 'approval'] as const)(
         );
       });
       await vi.waitFor(() => {
-        expect(session.chat.status).toBe('ready');
+        expect(store.getChatStatus('chat_1')).toBe('ready');
       });
       await act(async () => {
         publishLogRows(
@@ -217,7 +217,7 @@ it.each(['text', 'interrupted-tool', 'approval'] as const)(
         );
       });
       await vi.waitFor(() => {
-        expect(session.chat.status).toBe('streaming');
+        expect(store.getChatStatus('chat_1')).toBe('streaming');
       });
       expect(screen.getByText(/Prior paragraph/)).toBe(prior);
       expect(session.messages.filter((message) => message.role === 'user').map((message) => message.id)).toEqual([

@@ -245,6 +245,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // The flake reproduction workflow installs the engines the target under stress selects (FQ-7).
     // The apt-install action installs the browsers' system dependencies those workflows used to fetch with
     // `--with-deps`, and its pinning test drives it (APT-1).
+    // The real-GPU viewer smoke's guest installs the Chromium its Browser Mode targets run in on the disposable GPU host.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -267,6 +268,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/ui-asset-integrity.yml',
         '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
+        'apps/desktop/scripts/hosted-linux-gpu-smoke-guest.sh',
         'apps/desktop/scripts/hosted-linux-qualification-guest.sh',
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',

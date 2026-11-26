@@ -194,7 +194,6 @@ const arm = values.arm as 'bypass' | 'memory' | 'durable' | 'poison';
 if (!['bypass', 'memory', 'durable', 'poison'].includes(arm)) throw new Error(`Unknown arm ${arm}`);
 if (arm !== 'memory' && arm !== 'poison' && !values.store)
   throw new Error('--store is required for bypass/durable arms');
-probe.semanticDisabled = arm === 'bypass';
 if (values.captureBrep) probe.captureRecordedBrep = true;
 if (arm === 'poison') {
   if (!values.poisonBrep) throw new Error('arm `poison` requires --poisonBrep <file> (capture one with --captureBrep)');
@@ -462,9 +461,12 @@ const main = async () => {
     transport: inProcessTransport({
       runtime,
       fileSystem,
+      // build123d's bypass arm runs with compute off, so its kernel takes its own off arm: no scope, no compute block.
       compute: computeEngine
         ? { mode: 'durable', store: fromSqlite({ store: computeEngine, workspace: store! }) }
-        : { mode: 'memory' },
+        : model.kernel === 'build123d' && arm === 'bypass'
+          ? { mode: 'off' }
+          : { mode: 'memory' },
     }),
   });
   let telemetry: any[] = [];
@@ -524,6 +526,15 @@ const main = async () => {
       };
       let result = await renderRequest();
       let wallMs = performance.now() - start;
+      // The probe measures only through the loader's module seams: a kernel that no longer imports through them would
+      // otherwise run unmeasured, its counters silently zero.
+      const seams = model.kernel === 'replicad' ? ['replicad', '@taucad/runtime/kernel'] : [];
+      const missing = seams.filter((seam) => !((globalThis as any).__laneBPatched ?? []).includes(seam));
+      if (missing.length > 0)
+        throw new Error(
+          `[lane-b hook] the ${model.kernel} kernel loaded without the module seams ${missing.join(', ')}: ` +
+            'it no longer imports them where apps/runtime-e2e/src/compute-baseline/harness/hook-impl.mjs expects.',
+        );
       let retried = false;
       if (values.failOnRetry) rejectSupersededTimingResult(result);
       if (result.superseded) {

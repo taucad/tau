@@ -9,7 +9,7 @@
  * `--sequence.seed`, or through `flake-repro.yml` (FQ-7).
  *
  * The scope is the target the pull request's own test lanes run: a file is burned in through its Nx project's `test`
- * target (the deepest project root above it, as Nx maps files), outside the `scope:api` and `ci:quarantined` projects
+ * target (the deepest project root above it, as Nx maps files), outside the `scope:api` and `ci:nightly-only` projects
  * the lanes also leave out. A changed file that no such target runs is listed with the reason and not burned in.
  */
 import { resolve } from 'node:path';
@@ -32,7 +32,7 @@ export const isTestFile = (path: string): boolean => /\.(?:test|spec)\.[cm]?[jt]
 /** Project tags the pull request's test lanes leave out, and why. */
 export const excludedTags: Readonly<Record<string, string>> = {
   'scope:api': 'an API suite: it needs PostgreSQL and MinIO, which the API lane provides',
-  'ci:quarantined': 'a `ci:quarantined` project: only the nightly runs its suites',
+  'ci:nightly-only': 'a `ci:nightly-only` project: only the nightly runs its suites',
 };
 
 /** The parts of `nx graph --file` nodes the plan reads. */

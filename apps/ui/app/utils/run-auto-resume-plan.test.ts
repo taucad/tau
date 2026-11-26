@@ -53,7 +53,7 @@ const failedRun = (error: ChatErrorPayload): VisibleFailureSource => {
   });
   const { context } = projection.getSnapshot();
   projection.stop();
-  return { projection: context, attachmentStatus: 'attached', error: undefined, persistedError: error };
+  return { projection: context, attachmentStatus: 'attached', persistedError: error };
 };
 
 const rateLimited = (details?: Record<string, unknown>): ChatErrorPayload => ({

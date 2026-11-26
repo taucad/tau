@@ -426,6 +426,32 @@ describe('WorkspaceFrame', () => {
     expect(chatLane.querySelector('[data-slot=departing-first-message]')).toBeNull();
   });
 
+  it("draws the destination's first message in the phone frame's chat sheet too", () => {
+    departFirstMessage('home/two', 'A wall bracket');
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const sheet = document.querySelector<HTMLElement>('[data-slot=workspace-frame-phone] [data-frame-part=sheet]')!;
+    expect(sheet.querySelector('[data-slot=departing-first-message]')?.textContent).toBe('A wall bracket');
+    act(() => {
+      arriveFirstMessage('home/two');
+    });
+    expect(sheet.querySelector('[data-slot=departing-first-message]')).toBeNull();
+  });
+
   it("does not draw another project's first message", () => {
     departFirstMessage('home/two', 'A wall bracket');
     renderFrame('/w/home/one');

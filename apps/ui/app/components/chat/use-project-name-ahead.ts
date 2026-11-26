@@ -78,8 +78,9 @@ const namesSameDraft = (named: string, submitted: string): boolean => {
 export const createProjectNameAhead = (initialRequest: NameAheadRequest): ProjectNameAhead => {
   let request = initialRequest;
   let latest: (Named & { readonly controller: AbortController }) | undefined;
-  /* The latest name any request of this draft answered with, and the text it named: what a submit takes. */
-  let answered: { readonly text: string; readonly name: string } | undefined;
+  /* The latest name any request of this draft answered with, and the text and attachments it named: what a submit
+   * takes. */
+  let answered: { readonly text: string; readonly attachments: string; readonly name: string } | undefined;
   let requests = 0;
   let projectId = generatePrefixedId(idPrefix.project);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -99,7 +100,7 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
     }
     /* Only an answer for the current draft is kept: a request superseded by a cleared draft is aborted above. */
     if (name !== undefined && !entry.controller.signal.aborted) {
-      answered = { text: entry.text, name };
+      answered = { text: entry.text, attachments: entry.attachments, name };
     }
     return name;
   };
@@ -153,7 +154,10 @@ export const createProjectNameAhead = (initialRequest: NameAheadRequest): Projec
         return undefined;
       }
       /* Never a request at creation, and never a wait on one in flight: the send goes now. */
-      return answered !== undefined && namesSameDraft(answered.text, text)
+      /* A name for other attachments is another draft's, however close its text. */
+      return answered !== undefined &&
+        answered.attachments === attachmentsKey(draft.attachments) &&
+        namesSameDraft(answered.text, text)
         ? answered.name
         : projectNameFromPrompt(text) || defaultProjectName;
     },

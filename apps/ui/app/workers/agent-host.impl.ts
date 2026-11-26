@@ -1360,7 +1360,8 @@ const composeProjectHost = async (
       imageService.dispose();
       revisionsSlot?.close();
       placement.close();
-      runtimeClient.terminate();
+      /* Its visibility and composer-focus subscriptions too, not only the runtime. */
+      stopRuntime();
       computeConnection?.dispose();
       fileSystemSlot.close();
       projectRootSlot.close();

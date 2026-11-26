@@ -287,7 +287,7 @@ function WorkspaceFrameLanes({
           ) : null}
         </div>
       </div>
-      <PhoneFrame />
+      <PhoneFrame pathname={pathname} />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
        * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
@@ -311,9 +311,11 @@ function WorkspaceFrameLanes({
  * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
  * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
  *
+ * @param props - The destination's pathname when the frame is drawn ahead of the route.
  * @returns The phone frame.
  */
-function PhoneFrame(): React.JSX.Element {
+function PhoneFrame({ pathname }: { readonly pathname?: string }): React.JSX.Element {
+  const departing = useDepartingFirstMessage(useProjectComposerHandOff(pathname).scope);
   return (
     <div
       aria-hidden='true'
@@ -360,7 +362,15 @@ function PhoneFrame(): React.JSX.Element {
           <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
         </div>
         {/* The remembered surface's shape, chosen by the tab the pre-paint script selected on `<html>`. */}
-        <FrameWaitSkeleton shape='transcript' label='Chat' className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        {departing === undefined ? (
+          <FrameWaitSkeleton
+            shape='transcript'
+            label='Chat'
+            className='hidden flex-1 [[data-frame-tab=chat]_&]:block'
+          />
+        ) : (
+          <DepartingFirstMessage text={departing} className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        )}
         <FrameWaitSkeleton
           shape='fields'
           label='Parameters'

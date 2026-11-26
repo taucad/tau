@@ -912,8 +912,17 @@ export const useTauCloudIntentConnection = ({
         }
         const connectAfterFirstTurn = async (): Promise<void> => {
           await hold;
-          if (getCloudDeletionState(projectId) === undefined && getRevisionSessionUser()?.id === account) {
+          if (getCloudDeletionState(projectId) !== undefined) {
+            return;
+          }
+          if (getRevisionSessionUser()?.id === account) {
             await connectRemote('tau');
+            return;
+          }
+          /* Another account signed in while the first turn held the backup: back to `noticed`, so the next account
+           * that may connect still does, once. */
+          if (tauCloudIntent.get(projectId) === 'connected') {
+            tauCloudIntent.set(projectId, 'noticed');
           }
         };
         // async-iife: bootstrap -- an effect cannot await; the connect reports its own outcome, as the direct one does.

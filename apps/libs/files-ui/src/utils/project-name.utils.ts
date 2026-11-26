@@ -51,6 +51,6 @@ export const projectNameFromPrompt = (prompt: string): string => {
   const firstLine = prompt.split(/\r?\n/u).find((line) => line.trim() !== '') ?? '';
   const words = firstLine.trim().split(/\s+/u).slice(0, promptNameWords).join(' ');
   const trimmed = words.replace(/[\s\p{P}]+$/u, '');
-  const fitted = fitProjectName(trimmed);
-  return fitted.charAt(0).toLocaleUpperCase() + fitted.slice(1);
+  /* Fitted after capitalising, since an upper-case letter can be longer than its lower case (`ß` is `SS`). */
+  return fitProjectName(trimmed.charAt(0).toLocaleUpperCase() + trimmed.slice(1));
 };

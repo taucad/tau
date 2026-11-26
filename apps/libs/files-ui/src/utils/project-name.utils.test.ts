@@ -80,5 +80,9 @@ describe('projectNameFromPrompt', () => {
   it('should be empty for a prompt with no words, and fit a single overlong word', () => {
     expect(projectNameFromPrompt('  \n ')).toBe('');
     expect(projectNameFromPrompt('x'.repeat(300))).toHaveLength(maxProjectNameLength);
+    /* `ß` capitalises to `SS`, one unit longer: the name is fitted after capitalising. */
+    expect(projectNameFromPrompt(`ß${'x'.repeat(maxProjectNameLength - 1)}`).length).toBeLessThanOrEqual(
+      maxProjectNameLength,
+    );
   });
 });

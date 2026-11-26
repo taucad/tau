@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import type { NameAheadDraft, NameAheadRequest } from '#components/chat/use-project-name-ahead.js';
 
 const mockGenerate =
@@ -123,6 +124,21 @@ describe('createProjectNameAhead', () => {
 
     expect(nameAhead.take(textDraft('A wall bracket for a pipe, 32 mm'))).toBe('Pipe Wall Bracket');
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not give a draft with other attachments the name of the image it replaced', async () => {
+    const { request, calls } = namingFake();
+    const nameAhead = createProjectNameAhead(request);
+    const bracket = storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' });
+    const stand = storedRef({ hash: 'b'.repeat(64), mediaType: 'image/png' });
+    nameAhead.update({ text: 'Make this printable please', attachments: [bracket] }, true);
+    calls[0]?.reply.resolve('Pipe Wall Bracket');
+    await vi.runAllTimersAsync();
+
+    expect(nameAhead.take({ text: 'Make this printable please', attachments: [stand] })).toBe(
+      'Make this printable please',
+    );
+    expect(nameAhead.take({ text: 'Make this printable please', attachments: [bracket] })).toBe('Pipe Wall Bracket');
   });
 
   it("should not wait for a request in flight, taking the earlier answer or the prompt's first words", async () => {

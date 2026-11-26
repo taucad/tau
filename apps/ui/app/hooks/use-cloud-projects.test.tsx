@@ -406,6 +406,23 @@ describe('useTauCloudIntentConnection', () => {
     expect(connectRemote).toHaveBeenCalledWith('tau');
   });
 
+  it('should leave a held first backup to the account signed in when the hold ends, connecting once', async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+
+    setRevisionSessionUser({ id: 'account-b', name: 'B' });
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    /* Account A's continuation skips and puts the intent back to `noticed`; account B's session connects it once. */
+    expect(connectRemote).toHaveBeenCalledOnce();
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+  });
+
   it('should not repeat a step another tab already took', () => {
     tauCloudIntent.set(projectId, 'connected');
 

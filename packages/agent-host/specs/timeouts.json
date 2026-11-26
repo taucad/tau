@@ -1469,6 +1469,14 @@
       "token": "retryDelayMilliseconds * attempt",
       "class": "Backoff",
       "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "LIVE-CONFLATION",
+      "bound": "Live conflation window: 16 ms (liveConflationMilliseconds). The first delta after a quiet window goes at once; later deltas of the same block inside it are merged and sent when it ends, per subscriber and for the leader's BroadcastChannel posts. Cleared on flush and close; unref'd",
+      "site": "packages/agent-host/src/launchers/live-conflater.ts",
+      "token": "timer = setTimeout(",
+      "class": "Presentation",
+      "owner": "chat performance plan WP-08"
     }
   ]
 }

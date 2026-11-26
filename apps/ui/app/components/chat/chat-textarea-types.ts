@@ -295,7 +295,7 @@ export function useChatTextareaLogic({
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
   removeAttachment: (index: number) => void;
-  /** The new-message draft holds at least one comment. */
+  /** This composer's draft holds at least one comment. */
   hasDraftComments: boolean;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
@@ -374,8 +374,9 @@ export function useChatTextareaLogic({
   const attachments = useDraftSelector((state) =>
     mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
   );
-  // Comments belong to a new message; an edit keeps the comments its message was sent with.
-  const annotations = useDraftSelector((state) => (mode === 'main' ? state.draftAnnotations : undefined));
+  const annotations = useDraftSelector((state) =>
+    mode === 'main' ? state.draftAnnotations : state.editDraftAnnotations,
+  );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const pendingImages = useDraftSelector((state) => (mode === 'main' ? state.pendingMain : state.pendingEdit));

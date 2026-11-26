@@ -14,21 +14,6 @@ const { createProjectMock, presentLocationErrorMock, toastMock } = vi.hoisted(()
   toastMock: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('#hooks/use-project-creation-location.js', () => ({
-  useProjectCreationLocation: () => ({
-    phase: 'ready',
-    value: { kind: 'home' },
-    canCreate: true,
-    shouldShowPicker: false,
-    hasWebAccessCapability: false,
-    refresh: vi.fn(),
-  }),
-}));
-
-vi.mock('#components/filesystem/workspace-selector.js', () => ({
-  WorkspaceSelector: () => <p>Home in this browser</p>,
-}));
-
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: toastMock }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({
@@ -133,7 +118,7 @@ describe('CommunityProjectGrid', () => {
     });
   });
 
-  it('should remix a warehouse part with all editable assets through the existing creation location', async () => {
+  it('should remix a warehouse part with all editable assets into Home', async () => {
     const part = warehouseProjects[0];
     if (!part) {
       throw new Error('Expected a warehouse part');
@@ -142,7 +127,6 @@ describe('CommunityProjectGrid', () => {
     renderGrid({ projects: [part] });
     expect(createProjectMock).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: `Remix ${part.name}` }));
-    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
     await waitFor(() => {
       expect(createProjectMock).toHaveBeenCalledExactlyOnceWith({
         project: {
@@ -278,14 +262,11 @@ describe('CommunityProjectGrid', () => {
     vi.unstubAllGlobals();
   });
 
-  it('should Remix through the example page flow: location dialog, fork suffix and toast', async () => {
+  it('should Remix straight into Home with no location dialog, fork suffix and toast', async () => {
     renderGrid();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
-    expect(createProjectMock).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog', { name: 'Remix Community Demo' })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     expect(createProjectMock).toHaveBeenCalledWith({
       project: {
@@ -303,20 +284,18 @@ describe('CommunityProjectGrid', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Remixed to your projects', { description: 'Community Demo' });
   });
 
-  it('should keep the dialog and re-enable Remix after a creation-location failure', async () => {
+  it('should re-enable Remix and stay on the page after a creation-location failure', async () => {
     const error = new Error('disconnected');
     createProjectMock.mockRejectedValue(error);
     presentLocationErrorMock.mockReturnValue(true);
     renderGrid();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
     await waitFor(() => {
       expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
     });
-    expect(screen.getByRole('button', { name: 'Create remix' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Remix Community Demo', hidden: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo' })).toBeEnabled();
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
   });
 
@@ -325,7 +304,6 @@ describe('CommunityProjectGrid', () => {
     renderGrid();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
     await waitFor(() => {
       expect(toastMock.error).toHaveBeenCalledWith('Could not remix Community Demo', { description: 'quota exceeded' });

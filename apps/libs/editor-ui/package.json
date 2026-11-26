@@ -153,6 +153,7 @@
     "rehype-stringify": "catalog:",
     "remark-parse": "catalog:",
     "remark-rehype": "catalog:",
+    "remend": "catalog:",
     "streamdown": "catalog:",
     "uint8array-extras": "catalog:",
     "unified": "catalog:",

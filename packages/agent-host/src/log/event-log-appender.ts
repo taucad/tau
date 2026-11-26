@@ -1,4 +1,5 @@
 import { EventLogError } from '#log/event-log-error.js';
+import { hostTimingNow, recordHostTiming } from '#timing.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
@@ -972,7 +973,12 @@ export const createEventLogAppender = async (
           return { appended: false, endCursor: events.length };
         }
         const bytes = serializeLogEventBytes(event, needsSeparator);
+        /* WP-00: the fence check, write and flush of one row, the time a decision's rows wait per row. */
+        const writeStarted = hostTimingNow();
         await guardedAppend(bytes);
+        if (writeStarted !== undefined) {
+          recordHostTiming('log-write', writeStarted, { type: event.type, bytes: bytes.byteLength });
+        }
         term.commit();
         transition.commit();
         /* Rebuilt from the log when next needed, with this row. */

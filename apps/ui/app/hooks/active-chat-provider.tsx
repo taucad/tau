@@ -30,6 +30,7 @@
  * [`docs/research/chat-composer-context-unification.md`](docs/research/chat-composer-context-unification.md).
  */
 
+import { ShownCommentsProvider } from '#components/comments/shown-comments.js';
 import { useActorRef, useSelector } from '@xstate/react';
 import {
   createContext,
@@ -535,7 +536,9 @@ function ActiveChatSessionProvider({
 
   return (
     <ChatComposerContext.Provider value={composerValue}>
-      <ActiveChatSessionContext.Provider value={sessionValue}>{children}</ActiveChatSessionContext.Provider>
+      <ActiveChatSessionContext.Provider value={sessionValue}>
+        <ShownCommentsProvider chatId={chatId}>{children}</ShownCommentsProvider>
+      </ActiveChatSessionContext.Provider>
     </ChatComposerContext.Provider>
   );
 }

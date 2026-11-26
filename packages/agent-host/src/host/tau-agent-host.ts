@@ -69,7 +69,7 @@ import {
   liveForeignRun,
 } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
-import type { EventLogBatch } from '#log/event-log-appender.js';
+import type { EventLogAppendOutcome, EventLogBatch, EventLogBatchOutcome } from '#log/event-log-appender.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentLogEvent,
@@ -894,7 +894,7 @@ const deferredDriver = (build: Promise<DriverHandle>, report: (report: DriverRep
 export const appendChatRows = async (
   input: Readonly<{
     chatId: string;
-    log: Pick<DurableEventLog, 'append'>;
+    log: Pick<DurableEventLog, 'append' | 'appendMany'>;
     ledger: ChatLedger;
     leaderEpoch: string;
     recordedAt: string;
@@ -934,25 +934,56 @@ export const appendChatRows = async (
       { effect: 'not-applied', ...(gated.code === 'RUN_ID_TAKEN' ? { runId: row.runId } : {}) },
     );
   }
+  const failed = (error: unknown, effect: 'not-applied' | 'unknown'): Error =>
+    Object.assign(error instanceof Error ? error : new Error(String(error)), { effect });
   let landed = 0;
-  for (const row of stamped) {
-    if (isRepeatSettlement(ledger, row)) {
-      continue;
-    }
-    let outcome: Awaited<ReturnType<DurableEventLog['append']>>;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
-      outcome = await log.append(row);
-    } catch (error) {
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-        effect: landed === 0 ? 'not-applied' : 'unknown',
-      });
-    }
+  const land = (row: AgentLogEvent, outcome: EventLogAppendOutcome): void => {
     if (outcome.appended) {
       ledger = foldChatLedger(ledger, [row]);
       landed += 1;
       input.onAppended?.(row, ledger);
     }
+  };
+  if (log.appendMany === undefined) {
+    for (const row of stamped) {
+      if (isRepeatSettlement(ledger, row)) {
+        continue;
+      }
+      let outcome: EventLogAppendOutcome;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
+        outcome = await log.append(row);
+      } catch (error) {
+        throw failed(error, landed === 0 ? 'not-applied' : 'unknown');
+      }
+      land(row, outcome);
+    }
+    return ledger;
+  }
+  /*
+   * WP-10 step A: the batch is one write and one flush. A repeat settlement is skipped as the per-row loop skips it,
+   * against the ledger with the batch's earlier rows folded in. Each landed row is folded and announced once the batch
+   * is durable, never before.
+   */
+  let held = ledger;
+  const kept = stamped.filter((row) => {
+    if (isRepeatSettlement(held, row)) {
+      return false;
+    }
+    held = foldChatLedger(held, [row]);
+    return true;
+  });
+  let batch: EventLogBatchOutcome;
+  try {
+    batch = await log.appendMany(kept);
+  } catch (error) {
+    throw failed(error, 'not-applied');
+  }
+  for (const [index, outcome] of batch.outcomes.entries()) {
+    land(kept[index]!, outcome);
+  }
+  if (batch.failure !== undefined) {
+    throw failed(batch.failure, landed === 0 && batch.known ? 'not-applied' : 'unknown');
   }
   return ledger;
 };
@@ -2975,6 +3006,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               eventLog: log,
               /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
               appendEvent: async (event) => append([event as LogRowBody]),
+              appendEvents: async (events) => append(events as LogRowBody[]),
               ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
               ...(selection === undefined ? {} : { selection }),
               clientContext,

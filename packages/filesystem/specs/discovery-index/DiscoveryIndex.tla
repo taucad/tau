@@ -73,6 +73,12 @@
 \* FW2 re-review (2026-11-26): a read repairs `lost` when no other read of the directory in flight holds an older
 \* capture, so overlapping audits that all read the disk as it is clear it, and `Quiescent` includes `lost = {}` again.
 \* `target-lost-wide` (nightly) checks `target-lost` with the own write and the repeated fact back in.
+\* FW3 (2026-11-26): `probe` and the permanent delete's probes are reads of a directory with evidence (`ReadStart`,
+\* `ReadEnd`): a probe takes the directory's counter before its reads and installs a held reading only under the clear
+\* rule; a reading it cannot install (no identity record, a legacy manifest) marks an entry it contradicts, as any
+\* authority read does. `locationsOf` only reads the index. A fresh listing of a root's names compares and unlists, as
+\* the sweep's does. The removal takes the manifest before the identity record, which no action models. Every action
+\* and verdict is unchanged. Re-pinned again after the probe's helpers took their arguments as records (lint only).
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

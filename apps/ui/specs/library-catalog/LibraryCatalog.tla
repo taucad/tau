@@ -201,6 +201,18 @@
 \* answer naming another directory) instead of a pass, which reads the index (B1); `project-library.ts` remembers an
 \* orphan nominee's undecided proof until the listing changes (M4). Both read storage, `AbsenceProof = "storage"`; the
 \* precheck runs before `MutationJournaled`. No action or correspondence changes.
+\* Fast-path FW3 (2026-11-26, targeted verification): the authority's permanent delete answers what remains of the id
+\* under the same hold of `project:<id>` as the removal: it probes the id's known locations and, when none holds it,
+\* runs `verifyAbsent`, and the settle reads that answer (`project-library-storage.ts`'s `remainingCopiesAfterDelete`
+\* is gone). The removal and the proof of absence were two holds of the lock; they are one now, which is what
+\* `ReplaySettled` already assumed by taking `Applied` and `Absent` over `storage'` in one step, so that residual is
+\* closed and the step is the code's. With `copy` set the authority proves the surviving copy again in that hold and
+\* refuses when none holds the id: a settle that fails `terminal` or `workspace` with storage unchanged, which
+\* `Outcomes` already allows. The permanent-delete precheck proves another copy with a probe in place of
+\* `verifyProjectRoute` and `verifyAbsent`, before `MutationJournaled`; "Use this folder" binds a directory a probe
+\* reads holding the id instead of starting a pass, one fewer environment `EpochBumped`; the manifest read's fallback
+\* probes the known locations before its pass, and a create allocates against a fresh listing of its root's names.
+\* No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids
@@ -471,8 +483,9 @@ Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 \* `workspace-unavailable` keeps its attempts and waits for WorkspaceReturned. Only the recovery loop's
 \* replays count an attempt (ReplayStarted, `settleRecovery`); a mutation's own settle counts none.
 \* A settled row read its project's directory, so the index holds it as it is (FW2). A settled delete reclaims the
-\* id's device state when `AbsenceProof` says no directory still carries it, read after the delete: `verifyAbsent`
-\* holds `project:<id>`, which every Tau writer of the id takes, so the step is atomic for them.
+\* id's device state when `AbsenceProof` says no directory still carries it, read after the delete: the authority
+\* removes the directory and runs `verifyAbsent` in one hold of `project:<id>` (FW3), which every Tau writer of the id
+\* takes, so the removal and its proof are one step for them, as here.
 ReplaySettled(r) ==
   /\ rec[r].st = "replaying"
   /\ \E out \in Outcomes :

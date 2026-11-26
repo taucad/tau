@@ -147,7 +147,7 @@ describe('the Auto wording on onboarding surfaces', () => {
       90_000,
     );
     const tipText = await target.textContent(selectors.getByTestId('tour-tip'));
-    expect(tipText).toMatch(/You can pick a kernel yourself from the Auto menu\./u);
+    expect(tipText).toMatch(/You can pick a kernel yourself from the \+ menu\./u);
     expect(tipText).not.toMatch(/automatic/iu);
 
     const anchor = await target.evaluate((composerSelector) => {

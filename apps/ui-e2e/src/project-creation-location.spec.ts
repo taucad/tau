@@ -37,21 +37,46 @@ const openHomepage = async (): Promise<void> => {
   await target.expectVisible(editorFor(), 60_000);
 };
 
-/* Home picks its kernel from the composer's Auto-first kernel pill (AKS-11, 00cc5c2e4c): the kernel chips are gone. */
-const selectReplicad = async (): Promise<void> => {
-  const pill = selectors.getByRole('button', { name: /^Kernel: /u }).first();
-  if (!(await target.isVisible(pill))) {
+const escapeRegExp = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+/** The + menu's row for a setting, named by the setting and what it is set to. */
+const settingRow = (name: 'Kernel' | 'Location', value?: string) =>
+  selectors.getByRole('option', {
+    name: new RegExp(`^${name}${value === undefined ? '' : `\\s*${escapeRegExp(value)}$`}`, 'u'),
+  });
+
+/* Home's kernel and location live in the composer's + menu, each a view of its own. */
+const openAddMenu = async (): Promise<void> => {
+  const add = selectors.getByRole('button', { name: 'Add', exact: true }).first();
+  if (!(await target.isVisible(add))) {
     /* A resting phone composer can fold its bar away (D18); focusing the editor unfolds it. */
     await target.click(editorFor());
   }
-  await target.click(pill);
-  await target.fill(selectors.getByPlaceholder('Search kernels…'), 'Replicad');
-  await target.click(selectors.getByRole('option', { name: /^Replicad/u }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Kernel: Replicad', exact: true }).first());
+  await target.click(add);
 };
 
-const selectLocation = async (currentLabel: string | RegExp, targetLabel: string): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: currentLabel }));
+const openSettingView = async (name: 'Kernel' | 'Location'): Promise<void> => {
+  await openAddMenu();
+  await target.click(settingRow(name));
+  await target.expectVisible(selectors.getByRole('option', { name: /^Back/u }).first());
+};
+
+/** Expect the + menu to say where Home creates the project, then close it again; `visibleTimeout` is in milliseconds. */
+const expectHomeLocation = async (label: string, visibleTimeout?: number): Promise<void> => {
+  await openAddMenu();
+  await target.expectVisible(settingRow('Location', label), visibleTimeout);
+  await target.keyboardPress('Escape');
+};
+
+const selectReplicad = async (): Promise<void> => {
+  await openSettingView('Kernel');
+  await target.click(selectors.getByRole('option', { name: /^Replicad/u }));
+  await openAddMenu();
+  await target.expectVisible(settingRow('Kernel', 'Replicad'));
+  await target.keyboardPress('Escape');
+};
+
+const selectLocation = async (targetLabel: string): Promise<void> => {
+  await openSettingView('Location');
   await target.click(selectors.getByRole('option', { name: targetLabel }));
 };
 
@@ -144,7 +169,7 @@ describe('project creation locations', () => {
       projectName: 'Home Browser Project',
     });
     await openHomepage();
-    await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }));
+    await expectHomeLocation('Home');
     await selectReplicad();
 
     const config = await createFromHomepage('Create a precise browser fixture');
@@ -163,8 +188,7 @@ describe('project creation locations', () => {
     await installProjectCreationFixture({ pickerFixture: fixture, projectName: 'Disk Browser Project' });
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
-    await target.click(selectors.getByRole('button', { name: /^Create in Home/u }));
-    await target.expectCount(selectors.getByPlaceholder('Search locations…'), 0);
+    await openSettingView('Location');
     const homeOption = selectors.getByRole('option', { name: 'Home in this browser' });
     const workspaceOption = selectors.getByRole('option', { name: `${workspace.name} on your disk` });
     await target.expectVisible(homeOption.getByLabelText('Selected location'));
@@ -191,13 +215,14 @@ describe('project creation locations', () => {
     await installProjectCreationFixture({ pickerFixture: fixture, projectName: 'Remember Disk Project' });
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
-    await selectLocation(/^Create in Home/u, `${workspace.name} on your disk`);
+    await selectLocation(`${workspace.name} on your disk`);
     await createFromHomepage('Remember this disk location');
 
     await openHomepage();
     await target.reload();
 
-    await target.expectVisible(selectors.getByRole('button', { name: `Create in ${workspace.name}` }), 60_000);
+    await target.expectVisible(editorFor(), 60_000);
+    await expectHomeLocation(workspace.name, 60_000);
     const state = await readProjectStorageState();
     expect(state.preference).toEqual({
       kind: 'workspace',
@@ -211,10 +236,10 @@ describe('project creation locations', () => {
     await installProjectCreationFixture({ pickerFixture: fixture, projectName: 'Replace Preference Project' });
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
-    await selectLocation(/^Create in Home/u, `${workspace.name} on your disk`);
+    await selectLocation(`${workspace.name} on your disk`);
     await createFromHomepage('First create on disk');
     await openHomepage();
-    await selectLocation(`Create in ${workspace.name}`, 'Home in this browser');
+    await selectLocation('Home in this browser');
 
     const config = await createFromHomepage('Then create in Home');
 
@@ -223,7 +248,8 @@ describe('project creation locations', () => {
     expect(state.preference).toEqual({ kind: 'home' });
     await openHomepage();
     await target.reload();
-    await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 60_000);
+    await target.expectVisible(editorFor(), 60_000);
+    await expectHomeLocation('Home', 60_000);
   });
 
   test('/projects/new reads the same preference and creates in the exact workspace', async ({ skip }) => {
@@ -232,7 +258,7 @@ describe('project creation locations', () => {
     await installProjectCreationFixture({ pickerFixture: fixture, projectName: 'Seed Route Preference' });
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
-    await selectLocation(/^Create in Home/u, `${workspace.name} on your disk`);
+    await selectLocation(`${workspace.name} on your disk`);
     await createFromHomepage('Seed the shared route preference');
 
     await target.navigate('/projects/new');
@@ -282,10 +308,10 @@ describe('project creation locations', () => {
     await selectReplicad();
     const editor = editorFor();
     await target.fill(editor, 'Keep this draft through folder selection');
-    await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
-    await target.click(selectors.getByText('Connect a folder…', { exact: true }));
+    await openSettingView('Location');
+    await target.click(selectors.getByRole('option', { name: 'Connect a folder…' }));
 
-    await target.expectVisible(selectors.getByRole('button', { name: `Create in ${fixture}` }), 60_000);
+    await expectHomeLocation(fixture, 60_000);
     expect(await target.textContent(editor)).toBe('Keep this draft through folder selection');
     await target.press(editor, 'Enter');
     await target.expectUrl(/\/w\/connected-from-composer\/[^/]+$/u, 60_000);
@@ -301,7 +327,7 @@ describe('project creation locations', () => {
     await installProjectCreationFixture({ pickerFixture: fixture, projectName: 'Must Not Be Created' });
     const workspace = await seedWorkspace(fixture);
     await openHomepage();
-    await selectLocation(/^Create in Home/u, `${workspace.name} on your disk`);
+    await selectLocation(`${workspace.name} on your disk`);
     const editor = editorFor();
     await target.fill(editor, 'Do not silently place this in Home');
     const beforeTree = await readOpfsTree(fixture);
@@ -330,22 +356,15 @@ describe('project creation locations', () => {
     await selectReplicad();
     const editor = editorFor();
     await target.fill(editor, 'Create this from mobile options');
-    // The phone composer is the same bar: the location control sits in it.
-    await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
-    const locationDrawer = selectors.getByRole('dialog', { name: 'Select a project location' });
-    await target.expectVisible(locationDrawer);
-    await target.expectCount(locationDrawer.getByPlaceholder('Search locations…'), 0);
-    await target.press(locationDrawer.getByRole('option', { name: 'Home in this browser' }), 'Escape');
-    await target.expectCount(locationDrawer, 0);
+    // The phone composer is the same bar: the location is a view of its + menu, in a drawer.
+    await openSettingView('Location');
+    const homeOption = selectors.getByRole('option', { name: 'Home in this browser' });
+    await target.press(homeOption, 'Escape');
+    await target.expectCount(homeOption, 0);
     await target.expectFocused(editor);
     expect(await target.textContent(editor)).toBe('Create this from mobile options');
 
-    await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
-    await target.click(
-      selectors
-        .getByRole('dialog', { name: 'Select a project location' })
-        .getByRole('option', { name: `${workspace.name} on your disk` }),
-    );
+    await selectLocation(`${workspace.name} on your disk`);
 
     await target.expectFocused(editor);
     expect(await target.textContent(editor)).toBe('Create this from mobile options');

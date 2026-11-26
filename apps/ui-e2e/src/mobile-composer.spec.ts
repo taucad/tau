@@ -141,7 +141,7 @@ test('rests as + / microphone / Send and unfolds to the model selector → micro
 
 test('opens attachments from + with a tap', async () => {
   await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
-  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Attach image or PDF' }));
+  await target.expectVisible(selectors.getByRole('option', { name: /^Attach image or PDF/u }));
 });
 
 test('leaves a tap just inside the resting editor’s edges to the editor', async () => {

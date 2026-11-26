@@ -250,8 +250,8 @@ describe('onboarding copy audit', () => {
   it('calls the mode Auto and never says "Automatic kernel"', () => {
     expect(matching(/automatic/iu)).toStrictEqual([]);
     expect(setupCopy.howTauWorksCopy.design.auto).toBe('Auto');
-    // Tip 1 points at the composer's Auto menu for anyone who does not make boards or products.
-    expect(pathsMatching(/\bAuto\b/u)).toContain('tour.tourTipCopy(ask).text[2]');
+    // Tip 1 points at the composer's + menu, where the kernel reads Auto, for anyone who does not make boards or products.
+    expect(pathsMatching(/\+ menu/u)).toContain('tour.tourTipCopy(ask).text[2]');
   });
 
   it('names a kernel only as an example of what a project holds, or as the person’s own tool or language', () => {

@@ -131,6 +131,7 @@ export function createCommentPinsStore(): CommentPinsStore {
   const heads = new Map<string, HTMLElement>();
   const screens = new Map<string, CommentPinScreen>();
   const viewHandlers = new Set<(view: CommentPinView) => void>();
+  let pendingView: CommentPinView | undefined;
   const set = (next: Partial<CommentPinsState>): void => {
     state = { ...state, ...next };
     for (const listener of listeners) {
@@ -216,12 +217,22 @@ export function createCommentPinsStore(): CommentPinsStore {
     screens,
     bridge: undefined,
     requestView(view) {
+      // The scene that answers mounts lazily: a request made before it exists waits for it.
+      if (viewHandlers.size === 0) {
+        pendingView = view;
+        return;
+      }
       for (const handler of viewHandlers) {
         handler(view);
       }
     },
     onViewRequest(handler) {
       viewHandlers.add(handler);
+      if (pendingView) {
+        const view = pendingView;
+        pendingView = undefined;
+        handler(view);
+      }
       return () => {
         viewHandlers.delete(handler);
       };

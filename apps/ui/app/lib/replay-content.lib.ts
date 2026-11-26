@@ -20,11 +20,11 @@ export const replayContentSelector = '[data-replay-content], .cm-editor';
  * @public
  */
 export const replayBlockSelector = (
-  currentSelector: string | undefined,
+  currentSelector: string | null | undefined,
   isContentAllowed: boolean,
 ): string | undefined => {
   const contentSuffix = `, ${replayContentSelector}`;
-  let base = currentSelector;
+  let base = currentSelector ?? undefined;
   if (base === replayContentSelector) {
     base = undefined;
   } else if (base?.endsWith(contentSuffix) === true) {

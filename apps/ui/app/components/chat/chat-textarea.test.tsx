@@ -278,8 +278,12 @@ describe('ChatTextarea draft hint', () => {
   });
 
   it('writes the main draft under the URL key with its chat, removes it when the draft empties', () => {
+    vi.useFakeTimers();
     mocks.inputText = 'Fillet the edges';
     const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
     expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toMatchObject({
       text: 'Fillet the edges',
       chatId: 'chat-1',
@@ -287,8 +291,36 @@ describe('ChatTextarea draft hint', () => {
 
     mocks.inputText = '';
     view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
     expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toBeUndefined();
     view.unmount();
+    vi.useRealTimers();
+    globalThis.history.replaceState(null, '', '/');
+    mocks.inputText = '';
+    mocks.activeChatId = undefined;
+  });
+
+  it('waits for a typing pause before writing, and writes a pending draft when the page hides', () => {
+    vi.useFakeTimers();
+    mocks.inputText = 'F';
+    const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    for (const text of ['Fi', 'Fil', 'Fill']) {
+      mocks.inputText = text;
+      view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+    }
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toBeUndefined();
+
+    act(() => {
+      globalThis.dispatchEvent(new Event('pagehide'));
+    });
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toMatchObject({ text: 'Fill' });
+    view.unmount();
+    vi.useRealTimers();
     globalThis.history.replaceState(null, '', '/');
     mocks.inputText = '';
     mocks.activeChatId = undefined;

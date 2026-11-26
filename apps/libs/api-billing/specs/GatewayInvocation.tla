@@ -772,6 +772,8 @@ RowFacts(k) ==
     /\ fin[k] = "final" => "final" \in r.ev /\ sup[k] = "completed"
     /\ req[k] \in {"admitted", "intent", "streaming", "finishing"} => r.ex
     /\ req[k] = "intent" => r.intent >= 0
+    \* AtomicAdmit writes the intent with the row, and nothing clears it, so an admitted request's row has one.
+    /\ AtomicAdmit /\ req[k] = "admitted" => r.intent >= 0
 
 IndInv ==
     /\ TypeInv

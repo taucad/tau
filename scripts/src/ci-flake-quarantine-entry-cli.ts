@@ -413,6 +413,8 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
   outcome.push(`Pushed \`${branch}\` (${files.map((file) => `\`${file.path}\``).join(', ')}).`);
 
   let pull: { number: number; node_id: string } | undefined;
+  // A failure other than a refusal is raised after the issues name the branch, so the pushed entry is never orphaned.
+  let failure: Error | undefined;
   try {
     pull = await github.send<{ number: number; node_id: string }>('POST', `${repo}/pulls`, {
       title,
@@ -422,9 +424,11 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
     });
   } catch (error) {
     if (!(error instanceof GitHubError) || (error.status !== 403 && error.status !== 422)) {
-      throw error;
+      failure = error instanceof Error ? error : new Error(String(error));
     }
-    outcome.push(`Could not open the pull request (${error.message}); the owner issues name the branch to open.`);
+    outcome.push(
+      `Could not open the pull request (${error instanceof Error ? error.message : String(error)}); the owner issues name the branch to open.`,
+    );
   }
   const compare = `https://github.com/${github.repository}/compare/${context.base}...${encodePath(branch)}?expand=1`;
   let merging = false;
@@ -449,7 +453,53 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
     // oxlint-disable-next-line no-await-in-loop -- one comment per issue, in order
     await comment(github, planned.entry.issue, note);
   }
+  if (failure !== undefined) {
+    throw failure;
+  }
   return { issues, branch, pullRequest: pull?.number, autoMerge: merging, outcome };
+};
+
+/**
+ * Open the pull request of every entry branch that has none: a run whose pull request failed, or a token that may not
+ * open one, leaves the branch behind, and `readPending` holds its tests, so a later run with a token that may opens it
+ * from the branch's own commit. Auto-merge stays with whoever reviews it: this run did not validate that tree. Returns
+ * one line per branch.
+ */
+export const reconcileEntryBranches = async (github: Client, base: string): Promise<string[]> => {
+  const repo = `/repos/${github.repository}`;
+  const prefix = `refs/heads/${entryBranchPrefix}`;
+  const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`);
+  const owner = github.repository.split('/')[0] ?? '';
+  const outcome: string[] = [];
+  for (const reference of listed.filter((entry) => entry.ref.startsWith(prefix))) {
+    const branch = reference.ref.slice('refs/heads/'.length);
+    // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+    const pulls = await github.get<Pull[]>(
+      `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
+    );
+    if (pulls.length > 0) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+    const commit = await github.get<{ message: string }>(`${repo}/git/commits/${reference.object.sha}`);
+    const [title = `test(root): Quarantine entries from ${branch}`, ...rest] = commit.message.split('\n');
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+      const pull = await github.send<{ number: number }>('POST', `${repo}/pulls`, {
+        title,
+        head: branch,
+        base,
+        body: `${rest.join('\n').trim()}\n\nOpened by a later run of the flake ledger for an entry branch that had no pull request; auto-merge is left to the reviewer.\n`,
+      });
+      outcome.push(`Opened #${pull.number} for \`${branch}\`, which had no pull request.`);
+    } catch (error) {
+      if (!(error instanceof GitHubError) || (error.status !== 403 && error.status !== 422)) {
+        throw error;
+      }
+      outcome.push(`\`${branch}\` still has no pull request: this token may not open one.`);
+    }
+  }
+  return outcome;
 };
 
 const main = async (args: readonly string[]): Promise<number> => {
@@ -512,6 +562,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const workspace = await readWorkspace(root);
+  const reconciled = dryRun ? [] : await reconcileEntryBranches(github, values.base);
   const pending = offline ? [] : await readPending(github, values.base);
   const planned = planEntries({
     state,
@@ -573,7 +624,7 @@ const main = async (args: readonly string[]): Promise<number> => {
       today: values.today,
     }));
   }
-  const markdown = renderPlanMarkdown(plan, outcome);
+  const markdown = renderPlanMarkdown(plan, [...reconciled, ...outcome]);
   console.log(markdown);
   if (values.summary) {
     await appendFile(values.summary, `${markdown}\n`);

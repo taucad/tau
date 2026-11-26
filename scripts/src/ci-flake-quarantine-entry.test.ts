@@ -8,7 +8,13 @@ import { readQuarantine } from '@taucad/vitest-ci/quarantine';
 import { artifactRows } from '#ci-flake-ledger-ingest-cli.js';
 import { emptyState, ingestRun, meetsEntryRule, parseOutcomes } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState, IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
-import { applyPlan, mayAutoMerge, proposedFiles, validatePlan } from '#ci-flake-quarantine-entry-cli.js';
+import {
+  applyPlan,
+  mayAutoMerge,
+  proposedFiles,
+  reconcileEntryBranches,
+  validatePlan,
+} from '#ci-flake-quarantine-entry-cli.js';
 import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
 import {
   addDays,
@@ -111,7 +117,14 @@ const plan = (state: LedgerState, overrides: Partial<PlanInput> = {}): EntryPlan
 type Request = { readonly method: string; readonly path: string; readonly body?: unknown };
 
 /** A GitHub client that answers the entry job's requests from memory and records each one. */
-const fakeGitHub = (options: { refusePullRequests?: boolean; issues?: unknown[] } = {}) => {
+const fakeGitHub = (
+  options: {
+    refusePullRequests?: boolean;
+    pullStatus?: number;
+    issues?: unknown[];
+    branches?: Array<{ branch: string; pulls: unknown[] }>;
+  } = {},
+) => {
   const requests: Request[] = [];
   let next = 700;
   const github: Client = {
@@ -125,8 +138,23 @@ const fakeGitHub = (options: { refusePullRequests?: boolean; issues?: unknown[] 
       if (path.includes('/labels/') || path.includes('/git/ref/heads/')) {
         throw new GitHubError(`GET ${path}`, 404);
       }
+      if (path.includes('/git/matching-refs/')) {
+        const references: unknown = (options.branches ?? []).map(({ branch }) => ({
+          ref: `refs/heads/${branch}`,
+          object: { sha: `head-${branch}` },
+        }));
+        return references as T;
+      }
+      if (path.includes('/pulls?')) {
+        const head = decodeURIComponent(/head=([^&]+)/u.exec(path)?.[1] ?? '').replace(/^taucad:/u, '');
+        const pulls: unknown = options.branches?.find(({ branch }) => branch === head)?.pulls ?? [];
+        return pulls as T;
+      }
       if (path.includes('/git/commits/')) {
-        const commit: unknown = { tree: { sha: 'base-tree' } };
+        const commit: unknown = {
+          tree: { sha: 'base-tree' },
+          message: 'test(host): Quarantine 1 flaky test\n\n- src/a.test.ts > a (#12)\n',
+        };
         return commit as T;
       }
       throw new Error(`unexpected GET ${path}`);
@@ -141,6 +169,9 @@ const fakeGitHub = (options: { refusePullRequests?: boolean; issues?: unknown[] 
       requests.push({ method, path, body });
       if (path.endsWith('/pulls') && options.refusePullRequests) {
         throw new GitHubError(`${method} ${path}`, 403, 'GitHub Actions is not permitted to create pull requests');
+      }
+      if (path.endsWith('/pulls') && options.pullStatus !== undefined) {
+        throw new GitHubError(`${method} ${path}`, options.pullStatus);
       }
       next += 1;
       if (path.endsWith('/issues')) {
@@ -275,6 +306,60 @@ describe('the replay week (FQ-6 acceptance)', () => {
     expect((first?.body as { body: string } | undefined)?.body).toContain(
       `https://github.com/taucad/tau/compare/main...${result.branch ?? ''}?expand=1`,
     );
+  });
+
+  it('should name the branch on the issues before it raises a pull request failure', async () => {
+    const checked = validatePlan(plan(replayWeek()), {
+      workspace,
+      readTracked: (path) => testFiles.get(path),
+      today: '2026-11-22',
+    });
+    const { github, requests } = fakeGitHub({ pullStatus: 502 });
+
+    await expect(
+      applyPlan(github, checked.plan, {
+        base: 'main',
+        baseSha: sha(1),
+        quarantines: [],
+        problems: checked.problems,
+        today: '2026-11-22',
+      }),
+    ).rejects.toThrow('502');
+    const comments = requests.filter((request) => request.path.endsWith('/comments'));
+    expect(comments).toHaveLength(2);
+    expect((comments[0]?.body as { body: string } | undefined)?.body).toContain('/compare/main...flake-quarantine/');
+  });
+
+  it('should open the pull request of an entry branch left without one, and leave one that has one', async () => {
+    const { github, requests } = fakeGitHub({
+      branches: [
+        { branch: 'flake-quarantine/2026-11-21-aaaaaaaa', pulls: [] },
+        { branch: 'flake-quarantine/2026-11-22-bbbbbbbb', pulls: [{ number: 5, state: 'open' }] },
+      ],
+    });
+
+    const outcome = await reconcileEntryBranches(github, 'main');
+
+    const opened = requests.filter((request) => request.path.endsWith('/pulls'));
+    expect(opened.map((request) => request.body)).toEqual([
+      expect.objectContaining({
+        title: 'test(host): Quarantine 1 flaky test',
+        head: 'flake-quarantine/2026-11-21-aaaaaaaa',
+        base: 'main',
+      }),
+    ]);
+    expect(outcome).toEqual(['Opened #9001 for `flake-quarantine/2026-11-21-aaaaaaaa`, which had no pull request.']);
+  });
+
+  it('should leave an entry branch held when the token may not open its pull request', async () => {
+    const { github } = fakeGitHub({
+      refusePullRequests: true,
+      branches: [{ branch: 'flake-quarantine/2026-11-21-aaaaaaaa', pulls: [] }],
+    });
+
+    expect(await reconcileEntryBranches(github, 'main')).toEqual([
+      '`flake-quarantine/2026-11-21-aaaaaaaa` still has no pull request: this token may not open one.',
+    ]);
   });
 
   it('should link an open owner issue instead of opening another', async () => {

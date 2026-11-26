@@ -137,6 +137,54 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
       }
     `);
   });
+
+  /* Fast-path FW3: the delete answers what remains of the id under the same hold of its lock, from reads of the known
+   * locations; no root is listed and no other directory is read unless no known location holds the id. */
+  it('should delete a copy with its own checks and one probe of the other copy, listing no root', async () => {
+    await profile.service.listProjectManifests();
+    const projectId = discoveryProfileHomeId(0);
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    );
+
+    expect(result).toMatchObject({ status: 'deleted', remaining: [{ relativeDirectory: 'home-000' }] });
+    expect(cost.counters).toEqual({ 'discovery.probe': 1 });
+    /* The target's checks: its manifest and its identity, and whether it, its manifest and then nothing remains. */
+    expect(cost.providers.workspace.kinds).toMatchObject({ manifestRead: 1, identityRead: 1, head: 0 });
+    expect(cost.providers.workspace.fileReads).toBe(2);
+    /* The other copy: two reads, no listing. */
+    expect(cost.providers.home).toMatchObject({ fileReads: 2, listings: 0 });
+  });
+
+  it('should delete a sole copy with its own checks and one identity sweep (until W5)', async () => {
+    await profile.service.listProjectManifests();
+    const [home] = await profile.service.getRootStatuses();
+    const projectId = discoveryProfileHomeId(10);
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'home-010',
+        scope: { backend: 'opfs' },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
+    expect(home?.storageRootKey).toBeDefined();
+    expect(cost.counters).toEqual({ 'discovery.identitySweep': 1, 'discovery.listing': 2 });
+    /* The sweep: one identity read of every other directory; the target: its manifest and its identity. */
+    const { home: homeRoot, workspace } = operatorDiscoveryProfile;
+    expect(cost.providers.home.kinds.identityRead + cost.providers.workspace.kinds.identityRead).toBe(
+      homeRoot - 1 + workspace + 1,
+    );
+    expect(cost.providers.home.kinds.manifestRead).toBe(1);
+  });
 });
 
 /** The per-call figures the library's discovery budget charges every mutation at; see `discovery-unit-cost.json`. */
@@ -149,6 +197,8 @@ const unitCost = JSON.parse(
   directoryRead: UnitCost;
   sweep: UnitCost;
   verification: UnitCost;
+  probe: UnitCost;
+  listing: UnitCost;
 }>;
 
 describe('the discovery unit cost', () => {
@@ -168,7 +218,7 @@ describe('the discovery unit cost', () => {
     browserCalls: cost.browserCalls,
   });
 
-  it('should record what a full read, a warm pass, one directory re-read, an identity sweep and one route verification cost on the profile', async () => {
+  it('should record what a full read, a warm pass, one directory re-read, an identity sweep, one route verification, one probe and one root listing cost on the profile', async () => {
     await profile.service.listProjectManifests();
     profile.index.cold(undefined, 'reset');
     const scan = await profile.measure(async () => profile.service.listProjectManifests());
@@ -181,20 +231,37 @@ describe('the discovery unit cost', () => {
     const verification = await profile.measure(async () =>
       profile.service.verifyProjectRoute({ projectId: discoveryProfileHomeId(0) }),
     );
+    const [, workspaceRoot] = await profile.service.getRootStatuses();
+    /* FW3: one known location of an id read under its locks; and one fresh listing of a root's child names. */
+    const probe = await profile.measure(async () =>
+      profile.service.probeProjectDirectories({
+        projectId: discoveryProfileHomeId(0),
+        locators: [{ backend: 'opfs', storageRootKey: home!.storageRootKey, relativeDirectory: 'home-000' }],
+      }),
+    );
+    const listing = await profile.measure(async () =>
+      profile.service.probeProjectDirectories({ root: workspaceRoot!.storageRootKey }),
+    );
 
     expect(sweep.result.status).toBe('present');
+    expect(probe.result.locations.map((location) => location.status)).toEqual(['held']);
+    expect(listing.result.names).toHaveLength(operatorDiscoveryProfile.workspace);
     expect({
       scan: unitCostOf(scan.cost),
       warmPass: unitCostOf(warmPass.cost),
       directoryRead: unitCostOf(directoryRead.cost),
       sweep: unitCostOf(sweep.cost),
       verification: unitCostOf(verification.cost),
+      probe: unitCostOf(probe.cost),
+      listing: unitCostOf(listing.cost),
     }).toEqual({
       scan: unitCost.scan,
       warmPass: unitCost.warmPass,
       directoryRead: unitCost.directoryRead,
       sweep: unitCost.sweep,
       verification: unitCost.verification,
+      probe: unitCost.probe,
+      listing: unitCost.listing,
     });
   });
 });

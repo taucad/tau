@@ -13,7 +13,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 import type { RootedFileSystem } from '#rooted-views.js';
-import type { WorkspaceScope } from '#mount-table.js';
+import type { ProjectLocator, WorkspaceScope } from '#mount-table.js';
 import type { FileStatEntry } from '@taucad/types';
 
 describe('WorkspaceFileService explicit-workspace contract', () => {
@@ -96,9 +96,13 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
 
     expectTypeOf<Extract<InputScope, { backend: 'memory' }>>().toEqualTypeOf<never>();
     expectTypeOf<Result>().toEqualTypeOf<
-      | { readonly status: 'deleted' | 'absent' }
+      | ({ readonly status: 'deleted' | 'absent' } & {
+          readonly remaining?: readonly ProjectLocator[];
+          readonly absence?: 'absent' | 'unknown';
+        })
       | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
       | { readonly status: 'unidentifiable' }
+      | { readonly status: 'copy-unproven'; readonly reason: 'absent' | 'unknown' }
     >();
   });
 

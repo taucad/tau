@@ -264,13 +264,36 @@ export type PermanentDeleteProjectDirectoryInput = {
   readonly projectId: string;
   readonly providerBasePath: string;
   readonly scope: StorageRootConfig;
+  /**
+   * The journal waived the Trash because another copy was proven (fast-path FW3). The authority re-proves a surviving
+   * copy from storage under `project:<id>` before it removes anything, and refuses (`copy-unproven`) when none holds the
+   * id, so no other tab's delete can leave the id with no copy between the proof and the removal.
+   */
+  readonly copy?: boolean;
+  /** Other known locations of the id the caller nominates (its route's directory); the authority adds its index's. */
+  readonly locations?: readonly ProjectLocator[];
+};
+
+/**
+ * What the authority read about the id's other directories under the same hold of `project:<id>` as the removal
+ * (fast-path FW3). An authority older than FW3 omits both fields; a caller reads their absence as no proof.
+ *
+ * @public
+ */
+export type PermanentDeleteRemaining = {
+  /** The other directories read holding the id: by a probe of a known location, or by the identity sweep. */
+  readonly remaining?: readonly ProjectLocator[];
+  /** Set only when `remaining` is empty: `absent` from the sweep, `unknown` when a root or a read could not answer. */
+  readonly absence?: 'absent' | 'unknown';
 };
 
 /** Identity-safe outcome of permanent project-directory deletion. @public */
 export type PermanentDeleteProjectDirectoryResult =
-  | { readonly status: 'deleted' | 'absent' }
+  | ({ readonly status: 'deleted' | 'absent' } & PermanentDeleteRemaining)
   | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
-  | { readonly status: 'unidentifiable' };
+  | { readonly status: 'unidentifiable' }
+  /** `copy` was set and no other directory holds the id now (`absent`), or one could not be read (`unknown`). */
+  | { readonly status: 'copy-unproven'; readonly reason: 'absent' | 'unknown' };
 
 /** Exact scoped request for committing one journal-backed project directory. @public */
 export type CommitPendingProjectDirectoryInput = {

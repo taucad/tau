@@ -631,7 +631,7 @@ describe('WorkspaceFileService', () => {
           providerBasePath: directory,
           scope,
         }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
 
       expect(await rootProvider.exists(directory)).toBe(false);
     });
@@ -643,7 +643,7 @@ describe('WorkspaceFileService', () => {
           providerBasePath: directory,
           scope,
         }),
-      ).resolves.toEqual({ status: 'absent' });
+      ).resolves.toEqual({ status: 'absent', remaining: [], absence: 'absent' });
     });
 
     it('preserves every byte when the manifest belongs to another project', async () => {
@@ -669,7 +669,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       expect(await rootProvider.exists(directory)).toBe(false);
     });
 
@@ -688,14 +688,16 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(await rootProvider.readFile(`${directory}/user-file.txt`))).toBe('keep me');
     });
 
-    it('preserves an empty manifest-less directory', async () => {
+    /* Fast-path FW3: a removal takes the manifest first and the identity last, so a directory holding nothing is one
+     * cut short after its identity record went; the replay finishes it (blueprint, S4 crash table). */
+    it('finishes an empty manifest-less directory, a removal cut short after its identity record', async () => {
       await rootProvider.mkdir(directory, { recursive: true });
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'unidentifiable' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
 
-      expect(await rootProvider.exists(directory)).toBe(true);
+      expect(await rootProvider.exists(directory)).toBe(false);
     });
 
     it.each([
@@ -720,7 +722,11 @@ describe('WorkspaceFileService', () => {
     });
 
     it.each([
-      { name: 'an absent directory', fixture: 'absent', expected: { status: 'absent' } },
+      {
+        name: 'an absent directory',
+        fixture: 'absent',
+        expected: { status: 'absent', remaining: [], absence: 'absent' },
+      },
       {
         name: 'a foreign manifest',
         fixture: 'foreign',
@@ -736,6 +742,10 @@ describe('WorkspaceFileService', () => {
       context.eventBus.subscribe((event) => events.push(event));
       if (fixture !== 'absent') {
         await deleteProvider.mkdir(directory, { recursive: true });
+      }
+      if (fixture === 'unidentifiable') {
+        /* Holding something besides an identity record, a manifest-less directory is not provably the id's. */
+        await deleteProvider.writeFile(`${directory}/notes.txt`, encoder.encode('keep'));
       }
       if (fixture === 'foreign') {
         await deleteProvider.writeFile(
@@ -789,7 +799,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       expect(await rootProvider.exists(directory)).toBe(false);
     });
 
@@ -830,7 +840,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
     });
 
     it('holds both the logical project lock and exact physical-directory lock', async () => {
@@ -880,7 +890,16 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'other-copy', scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({
+        status: 'deleted',
+        remaining: [
+          {
+            backend: 'indexeddb',
+            storageRootKey: providerRegistry.resolveStorageRootKey(scope),
+            relativeDirectory: 'bound-copy',
+          },
+        ],
+      });
       expect(await rootProvider.exists('other-copy')).toBe(false);
       await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe(
         "export const copy = 'bound-copy';",
@@ -888,7 +907,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'bound-copy', scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).rejects.toThrow();
     });
   });

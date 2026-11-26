@@ -221,6 +221,25 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
   }
 
   /**
+   * The directories whose last reading `match` accepts, dirty ones included (fast-path FW3, `locationsOf`). A
+   * nomination: what the index last read, which a caller proves by reading the directory before anything rests on it.
+   *
+   * @param match - Which readings to nominate.
+   * @returns Each matching directory and its root.
+   */
+  public find(match: (reading: Reading) => boolean): Array<Readonly<{ storageRootKey: string; name: string }>> {
+    const found: Array<Readonly<{ storageRootKey: string; name: string }>> = [];
+    for (const [storageRootKey, root] of this._roots) {
+      for (const [name, entry] of root.entries) {
+        if (match(entry.reading)) {
+          found.push({ storageRootKey, name });
+        }
+      }
+    }
+    return found;
+  }
+
+  /**
    * Take a directory's counters before the first I/O of a read.
    *
    * @param storageRootKey - The root.

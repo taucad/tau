@@ -362,6 +362,45 @@ export type ProjectAbsence =
   | { readonly status: 'present'; readonly locators: readonly ProjectLocator[] }
   | { readonly status: 'unknown'; readonly reason: string };
 
+/**
+ * What a probe read at one known location of an id (fast-path FW3): `held` when its manifest reads and its identity
+ * names the id (or, with no identity record, a legacy manifest declares it); `vacant` when the bytes say otherwise (gone,
+ * no manifest, another id); `unknown` when its root is not available or a read failed with anything but not-found.
+ * Only `held` proves a copy; `unknown` proves nothing either way.
+ *
+ * @public
+ */
+export type ProjectProbeLocation = Readonly<{ locator: ProjectLocator; status: 'held' | 'vacant' | 'unknown' }>;
+
+/**
+ * A probe (fast-path FW3): locations of `projectId`, the caller's `locators` and with `known` the discovery index's,
+ * each read under the id's lock, `except` left out; and, with `root`, a fresh listing of that root's child names.
+ *
+ * @public
+ */
+export type ProjectDirectoryProbeRequest = Readonly<{
+  projectId?: string;
+  locators?: readonly ProjectLocator[];
+  /** Also probe every directory the discovery index last read carrying the id (`locationsOf`). */
+  known?: boolean;
+  except?: Readonly<{ storageRootKey: string; relativeDirectory: string }>;
+  /** A configured root, by key, whose child names to list afresh: what allocating a new project's directory reads. */
+  root?: string;
+}>;
+
+/**
+ * What a probe read (fast-path FW3). `names` is set only when a root was asked for and could be listed.
+ *
+ * @public
+ */
+export type ProjectDirectoryProbe = Readonly<{
+  locations: readonly ProjectProbeLocation[];
+  names?: readonly string[];
+}>;
+
+/** A location the authority probes: the root it is in and the directory under it. */
+type ProbeTarget = Readonly<{ storageRootKey: string; relativeDirectory: string; locator?: ProjectLocator }>;
+
 /** What a discovery root's live channels say about how its index is kept current (A3). @public */
 export type DiscoveryRootChannels = Readonly<{
   /** The root has a snapshot source a poll can walk. */
@@ -679,17 +718,7 @@ export class ProjectDirectories {
         if (!Array.isArray(names)) {
           return { status: 'unknown', reason: errorMessage(names.error) };
         }
-        const indexed = this._index.view(storageRootKey);
-        if (indexed?.currency === 'warm' && indexed.namesListed) {
-          const listed = new Set(names);
-          const differing = [
-            ...names.filter((name) => !indexed.names.includes(name)),
-            ...indexed.names.filter((name) => !listed.has(name)),
-          ];
-          if (differing.length > 0) {
-            this._index.note(storageRootKey, ['', ...differing]);
-          }
-        }
+        this._compareNames(storageRootKey, names);
         const swept = names.filter(
           (name) => options?.except?.storageRootKey !== storageRootKey || options.except.providerBasePath !== name,
         );
@@ -728,6 +757,46 @@ export class ProjectDirectories {
     }
     const locks = [`project:${projectId}`];
     return this._crossTabCoordinator.withLocks(locks, async () => this._resourceQueue.queueForMany(locks, sweep));
+  }
+
+  /**
+   * Read known locations of an id from storage (fast-path FW3, `probe`): the caller's `locators` and the directories
+   * the discovery index last read carrying the id (`locationsOf`), `except` left out, each under the id's lock and its
+   * own physical lock, as `verifyProjectRoute` reads a route. Nothing is decided from the index: it only nominates, and
+   * each location's answer is the bytes read now. What a probe reads is evidence for the index. With `root`, the
+   * root's child names are listed afresh as well, for a new project's directory to be allocated against.
+   *
+   * @param request - The id and its nominations, and the root whose names to list.
+   * @returns Each location's answer, and the root's names when they could be listed.
+   */
+  public async probeProjectDirectories(request: ProjectDirectoryProbeRequest): Promise<ProjectDirectoryProbe> {
+    const { projectId } = request;
+    if (projectId !== undefined && !projectIdSchema.safeParse(projectId).success) {
+      throw new TypeError(`Invalid project id: ${JSON.stringify(projectId)}`);
+    }
+    const names = request.root === undefined ? undefined : await this._rootNames(request.root);
+    const named = names === undefined ? {} : { names };
+    if (projectId === undefined) {
+      return { locations: [], ...named };
+    }
+    const targets = this._nominations(projectId, {
+      locators: request.locators ?? [],
+      except: request.except,
+      known: request.known === true,
+    });
+    if (targets.length === 0) {
+      return { locations: [], ...named };
+    }
+    const locks = [
+      `project:${projectId}`,
+      ...targets
+        .filter((target) => isProjectDirectoryPath(target.relativeDirectory))
+        .map((target) => `${target.storageRootKey}:${target.relativeDirectory}`),
+    ];
+    const locations = await this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => this._probe(projectId, targets)),
+    );
+    return { locations, ...named };
   }
 
   /**
@@ -839,8 +908,19 @@ export class ProjectDirectories {
    * Other directories that carry the same id are untouched, and so is the
    * project route while it is mounted on one of them.
    *
-   * @param input - Exact project identity, physical path, and storage scope.
-   * @returns Identity-safe deletion outcome.
+   * Under the same hold of `project:<id>` it also answers what is left of the id (fast-path FW3, step 5): the other
+   * known locations are probed and, when none holds the id, the identity sweep decides, so no copy can come or go
+   * between the removal and the answer for any Tau writer, all of which hold that lock. With `copy` set (the journal
+   * waived the Trash because another copy was proven), a surviving copy is proven again from storage before anything
+   * is removed, and the delete is refused when none holds the id: two deletes of the last two copies, each proven by
+   * the other, leave one.
+   *
+   * The removal takes every entry but the two identity markers, then the manifest, and the identity record last, as a
+   * commit writes the manifest last. A directory found with no manifest is a removal this authority began and is
+   * finished when it holds nothing, or nothing but an identity record naming the id; anything else is left alone.
+   *
+   * @param input - Exact project identity, physical path, and storage scope; `copy` and the caller's `locations`.
+   * @returns Identity-safe deletion outcome, with the directories that still hold the id or why none is known to.
    */
   public async permanentlyDeleteProjectDirectory(
     input: PermanentDeleteProjectDirectoryInput,
@@ -867,46 +947,68 @@ export class ProjectDirectories {
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
     const physicalLock = `${storageRootKey}:${path}`;
     const locks = [`project:${projectId}`, physicalLock];
+    const target: PhysicalDirectory = { storageRootKey, providerBasePath: path };
     return this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
+      this._resourceQueue.queueForMany(locks, async (): Promise<PermanentDeleteProjectDirectoryResult> => {
+        /* The other known locations, taken before the removal forgets the target's entry. */
+        const others = this._nominations(projectId, {
+          locators: input.locations ?? [],
+          except: { storageRootKey, relativeDirectory: path },
+          known: true,
+        });
         await provider.refresh?.([path]);
         if (!(await provider.exists(path))) {
           this._contradicted(storageRootKey, path, (reading) => reading.kind === 'not-a-project');
-          return { status: 'absent' };
+          return { status: 'absent', ...(await this._remaining(projectId, others, target)) };
         }
 
         const manifestPath = `${path}/tau.json`;
-        if (!(await provider.exists(manifestPath))) {
+        let removal: Readonly<{ manifest: Uint8Array<ArrayBuffer>; identity: Uint8Array<ArrayBuffer> }> | undefined;
+        if (await provider.exists(manifestPath)) {
+          const manifest = await provider.readFile(manifestPath);
+          let identity: ProjectIdentityRecord | undefined;
+          let identityBytes: Uint8Array<ArrayBuffer>;
+          try {
+            identityBytes = await provider.readFile(`${path}/${projectIdentityPath}`);
+            identity = parseProjectIdentityBytes(identityBytes);
+          } catch {
+            this._contradicted(storageRootKey, path, (reading) => reading.kind !== 'identified');
+            return { status: 'unidentifiable' };
+          }
+          if (identity.projectId !== projectId) {
+            const actual = identity.projectId;
+            this._contradicted(
+              storageRootKey,
+              path,
+              (reading) => reading.kind !== 'identified' || reading.projectId === actual,
+            );
+            return { status: 'identity-mismatch', actualProjectId: identity.projectId };
+          }
+          removal = { manifest, identity: identityBytes };
+        } else if (!(await this._interruptedRemoval(provider, path, projectId))) {
           this._contradicted(storageRootKey, path, (reading) => reading.kind !== 'identified');
           return { status: 'unidentifiable' };
-        }
-        const manifest = await provider.readFile(manifestPath);
-        let identity: ProjectIdentityRecord | undefined;
-        let identityBytes: Uint8Array<ArrayBuffer>;
-        try {
-          identityBytes = await provider.readFile(`${path}/${projectIdentityPath}`);
-          identity = parseProjectIdentityBytes(identityBytes);
-        } catch {
-          this._contradicted(storageRootKey, path, (reading) => reading.kind !== 'identified');
-          return { status: 'unidentifiable' };
-        }
-        if (identity.projectId !== projectId) {
-          const actual = identity.projectId;
-          this._contradicted(
-            storageRootKey,
-            path,
-            (reading) => reading.kind !== 'identified' || reading.projectId === actual,
-          );
-          return { status: 'identity-mismatch', actualProjectId: identity.projectId };
         }
 
-        this._revokeProjectRoute(logicalRoot, true, { storageRootKey, providerBasePath: path });
+        /* The waiver of the Trash rests on a copy that holds the id now, under this lock, and not on what the journal
+         * was told: a copy another tab removed since this delete's proof leaves this one in place. A directory whose
+         * removal already began is no longer a copy anyone counts, so finishing it waives nothing. */
+        let proven: readonly ProjectLocator[] | undefined;
+        if (input.copy === true && removal !== undefined) {
+          const survivors = await this._survivors(projectId, others, target);
+          if (survivors.status !== 'held') {
+            return { status: 'copy-unproven', reason: survivors.status };
+          }
+          proven = survivors.locators;
+        }
+
+        this._revokeProjectRoute(logicalRoot, true, target);
         const separator = path.lastIndexOf('/');
         const physicalParent = separator === -1 ? '' : path.slice(0, separator);
         const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;
         const parentAuthority = this._scopedPhysicalAuthority(scope, physicalParent);
         try {
-          await this._deleteProjectDirectory({ provider, directoryPath: path, manifest, identity: identityBytes });
+          await this._deleteProjectDirectory({ provider, directoryPath: path, ...removal });
         } finally {
           this._projectIndexes.clear();
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
@@ -922,7 +1024,10 @@ export class ProjectDirectories {
           throw new Error(`Permanent delete did not remove ${path}`);
         }
         this._index.installGone(storageRootKey, path, version);
-        return { status: 'deleted' };
+        return {
+          status: 'deleted',
+          ...(proven === undefined ? await this._remaining(projectId, others, target) : { remaining: proven }),
+        };
       }),
     );
   }
@@ -1452,6 +1557,347 @@ export class ProjectDirectories {
     }
     const legacy = convertLegacyProjectManifestBytes(manifestBytes);
     return legacy.success ? legacy.data.projectId : undefined;
+  }
+
+  /**
+   * A fresh listing of a root's child directories is evidence: names it differs from the index's on are unlisted.
+   *
+   * @param storageRootKey - The root.
+   * @param names - Its child directories, as listed now.
+   */
+  private _compareNames(storageRootKey: string, names: readonly string[]): void {
+    const indexed = this._index.view(storageRootKey);
+    if (indexed?.currency === 'warm' && indexed.namesListed) {
+      const listed = new Set(names);
+      const differing = [
+        ...names.filter((name) => !indexed.names.includes(name)),
+        ...indexed.names.filter((name) => !listed.has(name)),
+      ];
+      if (differing.length > 0) {
+        this._index.note(storageRootKey, ['', ...differing]);
+      }
+    }
+  }
+
+  /**
+   * Every child name of a configured root, dot-prefixed ones excluded, listed now: the names a new project's directory
+   * must not take, files as much as directories. Undefined when the root is not configured, not available or cannot be
+   * listed.
+   *
+   * @param storageRootKey - The root.
+   * @returns Its child names, sorted, or undefined.
+   */
+  private async _rootNames(storageRootKey: string): Promise<string[] | undefined> {
+    const root = this._discoveryRoots().find((candidate) => candidate.storageRootKey === storageRootKey);
+    const state = this._rootState(storageRootKey);
+    if (root === undefined || (state !== undefined && state !== 'available')) {
+      return undefined;
+    }
+    let entries: Awaited<ReturnType<typeof readDirectoryEntries>>;
+    try {
+      const provider = await this._registry.getProvider(root.scope);
+      workerTimings.count('discovery.listing');
+      entries = await readDirectoryEntries(provider, '');
+    } catch {
+      return undefined;
+    }
+    const visible = entries.filter((entry) => !entry.name.startsWith('.'));
+    this._compareNames(
+      storageRootKey,
+      visible
+        .filter((entry) => entry.kind === 'dir')
+        .map((entry) => entry.name)
+        .sort(),
+    );
+    return visible.map((entry) => entry.name).sort();
+  }
+
+  /**
+   * The known locations of an id (fast-path FW3, `K(P)`): the caller's nominations, then, with `known`, every directory
+   * the index last read carrying the id (`locationsOf`), each once, `except` left out.
+   *
+   * @param projectId - The id.
+   * @param nominated - The caller's locators, the directory to leave out, and whether to add the index's.
+   * @returns The locations to probe.
+   */
+  private _nominations(
+    projectId: string,
+    nominated: Readonly<{
+      locators: readonly ProjectLocator[];
+      except: Readonly<{ storageRootKey: string; relativeDirectory: string }> | undefined;
+      known: boolean;
+    }>,
+  ): ProbeTarget[] {
+    const { locators, except, known } = nominated;
+    const targets: ProbeTarget[] = [];
+    const seen = new Set<string>();
+    if (except !== undefined) {
+      seen.add(`${except.storageRootKey}\0${except.relativeDirectory}`);
+    }
+    const add = (target: ProbeTarget): void => {
+      const key = `${target.storageRootKey}\0${target.relativeDirectory}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        targets.push(target);
+      }
+    };
+    for (const locator of locators) {
+      add({ storageRootKey: locator.storageRootKey, relativeDirectory: locator.relativeDirectory, locator });
+    }
+    if (known) {
+      for (const { storageRootKey, name } of this._index.find(
+        (reading) => reading.kind === 'identified' && reading.projectId === projectId,
+      )) {
+        add({ storageRootKey, relativeDirectory: name });
+      }
+    }
+    return targets;
+  }
+
+  /**
+   * Read each target under locks the caller holds: `project:<id>`, which every Tau writer of the id holds, so no Tau
+   * writer moves a copy of the id while these reads run.
+   *
+   * @param projectId - The id.
+   * @param targets - The locations.
+   * @returns Each location's answer.
+   */
+  private async _probe(projectId: string, targets: readonly ProbeTarget[]): Promise<ProjectProbeLocation[]> {
+    const roots = this._discoveryRoots();
+    const probed = await Promise.all(
+      targets.map(async (target): Promise<ProjectProbeLocation | undefined> => {
+        const root = roots.find((candidate) => candidate.storageRootKey === target.storageRootKey);
+        const locator =
+          target.locator ??
+          (root === undefined
+            ? undefined
+            : projectLocatorFor(root.root, target.storageRootKey, target.relativeDirectory));
+        if (locator === undefined) {
+          return undefined;
+        }
+        const state = root === undefined ? undefined : this._rootState(root.storageRootKey);
+        if (
+          root === undefined ||
+          (state !== undefined && state !== 'available') ||
+          !isProjectDirectoryPath(target.relativeDirectory) ||
+          assertRootedPath(target.relativeDirectory) !== target.relativeDirectory
+        ) {
+          return { locator, status: 'unknown' };
+        }
+        let provider: FileSystemProvider;
+        try {
+          provider = await this._registry.getProvider(root.scope);
+        } catch {
+          return { locator, status: 'unknown' };
+        }
+        return {
+          locator,
+          status: await this._probeOne(provider, projectId, {
+            storageRootKey: target.storageRootKey,
+            directory: target.relativeDirectory,
+          }),
+        };
+      }),
+    );
+    return probed.filter((location) => location !== undefined);
+  }
+
+  /**
+   * Whether one directory holds `projectId`, read now and writing nothing: its manifest and its identity record, two
+   * reads, as a route verification reads them. A not-found is a fact; any other failure is `unknown`. The answer is
+   * evidence for the index: a held reading is installed under the version rule, and an entry the bytes contradict is
+   * marked so the next pass reads it again.
+   *
+   * @param provider - The directory's root's provider.
+   * @param projectId - The id.
+   * @param at - The root and the directory under it.
+   * @returns `held`, `vacant` or `unknown`.
+   */
+  private async _probeOne(
+    provider: FileSystemProvider,
+    projectId: string,
+    at: Readonly<{ storageRootKey: string; directory: string }>,
+  ): Promise<ProjectProbeLocation['status']> {
+    const { storageRootKey, directory } = at;
+    workerTimings.count('discovery.probe');
+    const version = this._index.version(storageRootKey, directory);
+    try {
+      await provider.refresh?.([directory]);
+    } catch {
+      return 'unknown';
+    }
+    const [manifestResult, identityResult] = await Promise.allSettled([
+      provider.readFile(`${directory}/tau.json`),
+      provider.readFile(`${directory}/${projectIdentityPath}`),
+    ]);
+    if (manifestResult.status === 'rejected') {
+      if (!isNotFoundError(manifestResult.reason)) {
+        return 'unknown';
+      }
+      /* Gone, not a project, adoptable, or a removal interrupted after its manifest: no copy. */
+      this._contradicted(storageRootKey, directory, (reading) => reading.kind !== 'identified');
+      return 'vacant';
+    }
+    const manifest = manifestResult.value;
+    const legacy = convertLegacyProjectManifestBytes(manifest);
+    const legacyId = legacy.success ? legacy.data.projectId : undefined;
+    if (identityResult.status === 'rejected') {
+      if (!isNotFoundError(identityResult.reason)) {
+        return 'unknown';
+      }
+      /* No record: a legacy manifest carries its id; a modern one would be minted a new id, never this one. */
+      this._contradicted(
+        storageRootKey,
+        directory,
+        (reading) => reading.kind !== 'identified' || reading.projectId === legacyId,
+      );
+      return legacyId === projectId ? 'held' : 'vacant';
+    }
+    let found: string;
+    try {
+      found = parseProjectIdentityBytes(identityResult.value).projectId;
+    } catch {
+      this._contradicted(storageRootKey, directory, (reading) => reading.kind !== 'identified');
+      return 'vacant';
+    }
+    const read = readProjectManifestBytes(manifest);
+    if (found !== projectId || (!read.success && legacyId === undefined)) {
+      this._contradicted(
+        storageRootKey,
+        directory,
+        (reading) => reading.kind !== 'identified' || (reading.projectId === found && found !== projectId),
+      );
+      return 'vacant';
+    }
+    if (read.success) {
+      this._index.install(storageRootKey, directory, {
+        version,
+        reading: {
+          kind: 'identified',
+          projectId,
+          manifest: read.data,
+          ...(read.issue === undefined ? {} : { issue: read.issue }),
+        },
+        determined: true,
+      });
+    } else {
+      this._contradicted(storageRootKey, directory, (reading) => reading.kind === 'identified');
+    }
+    return 'held';
+  }
+
+  /**
+   * Which other directories still hold the id, read under the hold of `project:<id>` the caller has (fast-path FW3,
+   * step 5): the known locations are probed, and only when none holds the id and none was unreadable does the identity
+   * sweep decide. A location that could not be read proves nothing either way, so the answer is then `unknown`.
+   *
+   * @param projectId - The id.
+   * @param targets - Its other known locations.
+   * @param except - The deleted directory, which the sweep leaves out.
+   * @returns The directories read holding the id, or why none is known to.
+   */
+  private async _remaining(
+    projectId: string,
+    targets: readonly ProbeTarget[],
+    except: PhysicalDirectory,
+  ): Promise<Readonly<{ remaining: readonly ProjectLocator[]; absence?: 'absent' | 'unknown' }>> {
+    const probed = await this._probe(projectId, targets);
+    const held = probed.filter((location) => location.status === 'held').map((location) => location.locator);
+    if (held.length > 0) {
+      return { remaining: held };
+    }
+    if (probed.some((location) => location.status === 'unknown')) {
+      return { remaining: [], absence: 'unknown' };
+    }
+    const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except });
+    if (absence.status === 'present') {
+      return { remaining: [...absence.locators] };
+    }
+    return { remaining: [], absence: absence.status };
+  }
+
+  /**
+   * The copies that let a delete waive the Trash, proven now under the hold of `project:<id>` the caller has (fast-path
+   * FW3, copy proof held through the journal): the known locations other than the target, probed; and when none holds
+   * the id (after a reload the index knows none), the identity sweep's directories other than the target, each probed in
+   * turn, since only a directory read whole proves a copy. `held` names them; otherwise `absent`, or `unknown` when a
+   * root or a read could not answer, which proves nothing.
+   *
+   * @param projectId - The id.
+   * @param targets - Its other known locations.
+   * @param except - The target, which neither the sweep nor a probe counts.
+   * @returns The copies proven, or why none is.
+   */
+  private async _survivors(
+    projectId: string,
+    targets: readonly ProbeTarget[],
+    except: PhysicalDirectory,
+  ): Promise<Readonly<{ status: 'held'; locators: readonly ProjectLocator[] } | { status: 'absent' | 'unknown' }>> {
+    const probed = await this._probe(projectId, targets);
+    let held = probed.filter((location) => location.status === 'held');
+    let unknown = probed.some((location) => location.status === 'unknown');
+    if (held.length === 0) {
+      const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except });
+      if (absence.status === 'unknown') {
+        unknown = true;
+      } else if (absence.status === 'present') {
+        const probedKeys = new Set(
+          probed.map(({ locator }) => `${locator.storageRootKey}\0${locator.relativeDirectory}`),
+        );
+        const swept = await this._probe(
+          projectId,
+          absence.locators
+            .filter((locator) => !probedKeys.has(`${locator.storageRootKey}\0${locator.relativeDirectory}`))
+            .map((locator) => ({
+              storageRootKey: locator.storageRootKey,
+              relativeDirectory: locator.relativeDirectory,
+              locator,
+            })),
+        );
+        held = swept.filter((location) => location.status === 'held');
+        unknown ||= swept.some((location) => location.status === 'unknown');
+      }
+    }
+    if (held.length > 0) {
+      return { status: 'held', locators: held.map((location) => location.locator) };
+    }
+    return { status: unknown ? 'unknown' : 'absent' };
+  }
+
+  /**
+   * Whether a directory with no manifest is a removal of `projectId` this authority began and did not finish (fast-path
+   * FW3): the removal takes the manifest before the identity record, so such a directory holds nothing, or nothing but
+   * `.tau/project.json` naming the id. Anything else in it is not provably the id's, and is left alone.
+   *
+   * @param provider - The directory's root's provider.
+   * @param path - The directory.
+   * @param projectId - The id the removal was for.
+   * @returns Whether a replay may finish the removal.
+   */
+  private async _interruptedRemoval(provider: FileSystemProvider, path: string, projectId: string): Promise<boolean> {
+    const stateDirectory = joinRelativePath(path, '.tau');
+    const entries = await provider.readdir(path);
+    if (entries.some((entry) => entry !== '.tau')) {
+      return false;
+    }
+    if (entries.length === 0) {
+      return true;
+    }
+    const state = await provider.readdir(stateDirectory);
+    if (state.some((entry) => entry !== 'project.json')) {
+      return false;
+    }
+    if (state.length === 0) {
+      return true;
+    }
+    try {
+      return (
+        parseProjectIdentityBytes(await provider.readFile(joinRelativePath(path, projectIdentityPath))).projectId ===
+        projectId
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -2068,25 +2514,43 @@ export class ProjectDirectories {
     await removal(await provider.readdir(stateDirectory), stateDirectory, new Set(['project.json']));
   }
 
+  /**
+   * Remove a verified project directory: every entry but the two identity markers, then the manifest, then the identity
+   * record and the directory (fast-path FW3). The manifest goes first and the identity last, the reverse of a commit, so
+   * a removal cut short at any step leaves either a whole project (manifest and identity), or a directory holding
+   * nothing but its identity record, which a replay recognises and finishes; never a manifest with no identity, which
+   * discovery would give a new id. With no `manifest` the directory is such an interrupted removal, finished here.
+   *
+   * @param input - The provider, the directory, and the manifest and identity bytes verified before it, if any.
+   */
   private async _deleteProjectDirectory(input: {
     provider: FileSystemProvider;
     directoryPath: string;
-    manifest: Uint8Array<ArrayBuffer>;
-    identity: Uint8Array<ArrayBuffer>;
+    manifest?: Uint8Array<ArrayBuffer>;
+    identity?: Uint8Array<ArrayBuffer>;
   }): Promise<void> {
     const { provider, directoryPath, manifest, identity } = input;
     const manifestPath = joinRelativePath(directoryPath, 'tau.json');
     const identityPath = joinRelativePath(directoryPath, projectIdentityPath);
     const stateDirectory = joinRelativePath(directoryPath, '.tau');
-    await this._clearProjectDirectoryContents(provider, directoryPath);
+    if (manifest !== undefined) {
+      await this._clearProjectDirectoryContents(provider, directoryPath);
+    }
     try {
-      await provider.unlink(identityPath);
-      await provider.rmdir(stateDirectory);
-      await provider.unlink(manifestPath);
+      if (manifest !== undefined) {
+        await provider.unlink(manifestPath);
+      }
+      if (await provider.exists(identityPath)) {
+        await provider.unlink(identityPath);
+      }
+      if (await provider.exists(stateDirectory)) {
+        await provider.rmdir(stateDirectory);
+      }
       await provider.rmdir(directoryPath);
     } catch (error) {
       try {
-        if (await provider.exists(directoryPath)) {
+        /* Put back what a whole project holds, identity first, so a failed removal never leaves a manifest alone. */
+        if (manifest !== undefined && identity !== undefined && (await provider.exists(directoryPath))) {
           if (!(await provider.exists(identityPath))) {
             await provider.writeFile(identityPath, identity);
           }

@@ -74,6 +74,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *   and `.tau/project.json`.
  * - `discovery.listing`: listings made to learn what a root or a project directory holds.
  * - `discovery.identitySweep`: sweeps that read every directory's identity record to prove no directory carries an id.
+ * - `discovery.probe`: known locations of an id read under its locks to prove whether each still holds it (FW3): two
+ *   file reads each, `tau.json` and `.tau/project.json`.
  * - `discovery.auditRead` / `discovery.auditMismatch`: directories the discovery index's audit re-read from content,
  *   and those whose reading differed from the index's entry; each mismatch also moves its root kind's counter,
  *   `discovery.auditMismatch.<kind>`. On an `exclusive` root, which only Tau writes, any count is a defect in a tap.
@@ -110,6 +112,7 @@ export const workerTimingCounters = [
   'discovery.directoryRead',
   'discovery.listing',
   'discovery.identitySweep',
+  'discovery.probe',
   'discovery.auditRead',
   'discovery.auditMismatch',
   'discovery.auditMismatch.exclusive',

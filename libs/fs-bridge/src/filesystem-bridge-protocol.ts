@@ -428,6 +428,7 @@ type WorkspaceBridgeMethodName =
   | 'listProjectManifests'
   | 'verifyProjectRoute'
   | 'verifyAbsent'
+  | 'probeProjectDirectories'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -1290,15 +1291,38 @@ const pendingProjectCommitResultSchema = discriminatedResultUnion('status', [
   z.looseObject({ status: z.enum(['committed', 'already-committed', 'unidentifiable-manifest']) }),
   z.looseObject({ status: z.literal('identity-mismatch'), actualProjectId: projectIdSchema }),
 ]);
+/* `copy` and `locations` are optional on the wire (fast-path FW3): an authority from before them ignores both, and a
+ * page only sets `copy` from a probe, a call such an authority refuses. */
 const permanentDeleteInputSchema = z.looseObject({
   projectId: projectIdSchema,
   providerBasePath: projectDirectoryPathSchema,
   scope: storageRootConfigSchema,
+  copy: z.boolean().optional(),
+  locations: z.array(projectLocatorSchema).optional(),
 });
+/* `remaining` and `absence` are optional on the wire: an authority from before them answers without, and the caller
+ * reads their absence as no proof (fast-path FW3). */
 const permanentDeleteResultSchema = discriminatedResultUnion('status', [
-  z.looseObject({ status: z.enum(['deleted', 'absent', 'unidentifiable']) }),
+  z.looseObject({
+    status: z.enum(['deleted', 'absent']),
+    remaining: z.array(projectLocatorSchema).optional(),
+    absence: z.enum(['absent', 'unknown']).optional(),
+  }),
+  z.looseObject({ status: z.literal('unidentifiable') }),
   z.looseObject({ status: z.literal('identity-mismatch'), actualProjectId: projectIdSchema }),
+  z.looseObject({ status: z.literal('copy-unproven'), reason: z.enum(['absent', 'unknown']) }),
 ]);
+const projectDirectoryProbeRequestSchema = z.looseObject({
+  projectId: projectIdSchema.optional(),
+  locators: z.array(projectLocatorSchema).optional(),
+  known: z.boolean().optional(),
+  except: z.looseObject({ storageRootKey: z.string(), relativeDirectory: projectDirectoryPathSchema }).optional(),
+  root: z.string().optional(),
+});
+const projectDirectoryProbeSchema = z.looseObject({
+  locations: z.array(z.looseObject({ locator: projectLocatorSchema, status: z.enum(['held', 'vacant', 'unknown']) })),
+  names: z.array(z.string()).optional(),
+});
 const searchOptionsSchema = z.looseObject({
   maxResults: z.number().optional(),
   includeDirectories: z.boolean().optional(),
@@ -1608,6 +1632,11 @@ const callSchemas = {
       z.looseObject({ status: z.literal('present'), locators: z.array(projectLocatorSchema) }),
       z.looseObject({ status: z.literal('unknown'), reason: z.string() }),
     ]),
+  },
+  /* Fast-path FW3: additive. A peer that predates it refuses the call, and its caller proves no copy. */
+  probeProjectDirectories: {
+    args: z.tuple([projectDirectoryProbeRequestSchema]),
+    result: projectDirectoryProbeSchema,
   },
   commitPendingProjectDirectory: {
     args: z.tuple([pendingProjectCommitInputSchema]),

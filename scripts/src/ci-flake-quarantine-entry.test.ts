@@ -407,8 +407,10 @@ describe('planEntries', () => {
     if (order === undefined) {
       return;
     }
-    // Its target ran it 400 times without an event before the ledger first saw it fail.
-    order.stableBefore = 400;
+    // Its variant ran it 400 times without an event before the ledger first saw it fail.
+    for (const variant of Object.values(order.variants)) {
+      variant.stableBefore = 400;
+    }
 
     const result = plan(state);
 

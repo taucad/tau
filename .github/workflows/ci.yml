@@ -180,7 +180,8 @@ jobs:
           # Shadow rows (`e2e-shadow`, operator ruling Q1, CI flake quarantine blueprint FQ-13): a project with a
           # `test:e2e:shadow` target is affected. Its `dependsOn` lists the suites on probation for `test:e2e:queue`;
           # `e2e-shadow-suites` names one row per suite, in the merge queue and on a push to `main` the queue did not
-          # prove, never on a pull request, and no row is required.
+          # prove, never on a pull request, and no row is required. A project whose `test:e2e:shadow` names a
+          # `metadata.lane` keeps its rows only when that lane is selected or the entry touches the project (DC-27).
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -392,6 +393,21 @@ jobs:
             jq -r --argjson selectors "$LANE_SELECTORS" \
               'to_entries[] | select($selectors[.key].queue == "never") | "Merge queue (never) \(.key): \(.value | tojson)"' <<< "$lanes"
           fi
+          # A project whose `test:e2e:shadow` names a `metadata.lane` (CI decomposition DC-27: desktop-e2e, `desktop`)
+          # keeps its shadow rows only when that lane selected a project or the entry changes a file the project owns,
+          # not whenever the project is affected: desktop-e2e depends on ui-e2e, so a `ui` change alone affects it.
+          lanes=$(printf '%s\n' "$entry_files" \
+            | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" \
+                --slurpfile graph "$RUNNER_TEMP/graph.json" "$owner_def"'
+              ([inputs | select(. != "") | owner]) as $touched
+              | $graph[0].graph.nodes as $nodes
+              | $lanes | ."e2e-shadow" |= map(. as $project
+                  | ($nodes[$project].data.targets["test:e2e:shadow"].metadata.lane // null) as $lane
+                  | if $lane == null then $project
+                    elif $selectors[$lane] == null then
+                      error("\($project):test:e2e:shadow names lane \($lane | tojson), which is not a lane of this plan")
+                    elif ($lanes[$lane] // []) != [] or ($touched | index([$project])) != null then $project
+                    else empty end)')
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
           selected=$lanes
@@ -1550,8 +1566,12 @@ jobs:
   # `main-ci-success` reads. The suite step continues on error too, so the job ends green and the queue-health report
   # sees no failed lane; the row's result is in its job summary and a warning, and its count is the flake ledger's,
   # from the `test-outcomes-shadow-*` artifact. An invalidated merge group's run is cancelled with its rows (the queue's
-  # own cancel-stale), and a row that was cancelled leaves its count as it was. At 100 consecutive passing runs
+  # own cancel-stale), and a row that was cancelled leaves its count as it was. A merged group's run is left to finish
+  # its rows (`merge-queue-sweep.yml`), so a row slower than the gate still counts. At 100 consecutive passing runs
   # `shadow-row-promotion.yml` proposes moving the suite to `test:e2e:queue`.
+  # The desktop-e2e rows (DC-27) need nothing more than the nightly's desktop-e2e job had: the unpackaged Electron shell
+  # under the same xvfb, the sandbox step's uv for the Build123d wheels, the API env file and the runner's Docker for
+  # the services their command starts; their diagnostics are `out/test-results/desktop-e2e`.
   e2e-shadow:
     name: Shadow end-to-end (${{ matrix.suite.label }})
     runs-on: ubuntu-latest
@@ -1652,6 +1672,7 @@ jobs:
           name: e2e-shadow-diagnostics-${{ matrix.suite.slug }}
           path: |
             out/test-results/vitest-browser
+            out/test-results/desktop-e2e
             out/test-results/chat-logs
             out/reports/formal
           if-no-files-found: ignore

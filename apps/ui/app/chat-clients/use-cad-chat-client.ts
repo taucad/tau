@@ -13,6 +13,7 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import type { RefusedGesture } from '#utils/run-auto-resume-plan.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
@@ -146,7 +147,11 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
+    async (
+      gesture: Extract<RefusedGesture, 'send' | 'edit'>,
+      attachments: readonly StoredAttachmentRef[],
+      send: () => void | Promise<void>,
+    ): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -154,7 +159,7 @@ export const useCadChatClient = (): CadChatClient => {
           support: resolved.model?.support,
         });
         if (blocked !== undefined) {
-          surfaceDispatchFailure(new Error(blocked));
+          surfaceDispatchFailure(new Error(blocked), gesture);
           return;
         }
       }
@@ -227,7 +232,7 @@ export const useCadChatClient = (): CadChatClient => {
         ...(send.annotations === undefined ? {} : { annotations: send.annotations }),
       });
       // The untouched originals are kept with the chat beside what is sent, so an edit can start from them again.
-      await withAttachments([...send.attachments, ...send.originals], async () =>
+      await withAttachments('send', [...send.attachments, ...send.originals], async () =>
         actions.sendMessage(userMessage, {
           execution: agent.execution,
           queueIntent,
@@ -247,7 +252,7 @@ export const useCadChatClient = (): CadChatClient => {
           return;
         }
         // The originals stay with the chat beside the edited message, as a send's do.
-        await withAttachments([...send.attachments, ...send.originals], () => {
+        await withAttachments('edit', [...send.attachments, ...send.originals], () => {
           actions.editMessage(messageId, input.text, {
             ...(input.attachments === undefined ? {} : { attachments: send.attachments }),
             ...(input.references === undefined ? {} : { references: input.references }),

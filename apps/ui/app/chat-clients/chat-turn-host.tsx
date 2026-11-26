@@ -244,7 +244,7 @@ export function ChatTurnHost(): ReactNode {
         return track({ runId, leaseTurnId: intent.leaseTurnId, request });
       } catch (error) {
         turnTelemetry.refused(error);
-        surfaceDispatchFailure(error);
+        surfaceDispatchFailure(error, gesture.kind);
         throw error;
       }
     },

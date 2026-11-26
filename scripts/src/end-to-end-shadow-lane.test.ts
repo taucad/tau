@@ -163,7 +163,8 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
 
   it('should register every journey family and the service worker suite as shadow rows, none of them gating', () => {
     expect(families.length).toBeGreaterThanOrEqual(15);
-    expect(shadow).toEqual(['test:e2e:service-worker', ...families]);
+    // DC-27 adds the browser-host row after the families (pinned below).
+    expect(shadow).toEqual(['test:e2e:service-worker', ...families, 'test:e2e:browser-host-chat']);
     // Ruling 7: one row each, never both lists.
     expect(shadow.filter((name) => queued.includes(name))).toEqual([]);
     expect(targets[shadowTarget]?.executor).toBe('nx:noop');
@@ -206,6 +207,18 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
     }
   });
 
+  it('should run each half of the multi-turn admission vertical as its own family', () => {
+    // The whole of chat-multi-turn.spec.ts took 7.5–9.6 min, over the 6.5-min family bound, so it was split in two;
+    // both halves in one family would put that row back over the bound.
+    const halves = families.flatMap((family) => specsOf(family)).filter((spec) => spec.includes('/chat-multi-turn'));
+    expect(halves.toSorted()).toEqual(['src/chat-multi-turn-resume.spec.ts', 'src/chat-multi-turn.spec.ts']);
+    for (const half of halves) {
+      const owners = families.filter((family) => specsOf(family).includes(half));
+      expect(owners, half).toHaveLength(1);
+      expect(specsOf(owners[0] ?? ''), half).toEqual([half]);
+    }
+  });
+
   it("should install the browsers each family's Vitest instances launch, and no other", () => {
     const firefox = instanceFiles('firefox');
     const webkit = instanceFiles('webkit-smoke');
@@ -219,5 +232,98 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
         ...(specs.some((spec) => webkit.includes(spec)) ? ['webkit'] : []),
       ]);
     }
+  });
+});
+
+describe('desktop-e2e and ui-e2e browser-host shadow rows (DC-27)', () => {
+  const desktop = (JSON.parse(read('apps/desktop-e2e/project.json')) as { readonly targets: Record<string, Target> })
+    .targets;
+  const ui = (JSON.parse(read('apps/ui-e2e/project.json')) as { readonly targets: Record<string, Target> }).targets;
+  /** The spec files a target's vitest commands name. */
+  const specsOf = (target: Target | undefined): readonly string[] =>
+    (target?.options?.commands ?? [])
+      .map((command) => (typeof command === 'string' ? command : command.command))
+      .filter((command) => /(?:^|\/)vitest run /u.test(command))
+      .flatMap((command) => command.split(/\s+/u).filter((word) => /^src\/.+\.spec\.ts$/u.test(word)));
+  const families = ['test:e2e:onboarding', 'test:e2e:chat', 'test:e2e:project'];
+  /** The desktop-e2e test:e2e files red on an e2e-nightly from 11-22 to 11-25, with their owner issues. */
+  const heldOut: Record<string, string> = {
+    'src/desktop-adaptive-mode.spec.ts': '#2891',
+    'src/desktop-onboarding-offline.spec.ts': '#2285',
+    'src/two-client.spec.ts': '#2285',
+    'src/sync-refusals.spec.ts': '#2754',
+    'src/desktop-share-link-copy.spec.ts': '#2754',
+    'src/desktop-print-dry-run.spec.ts': '#2754',
+  };
+
+  it('should register the desktop families as shadow rows selected by the desktop lane', () => {
+    const shadowRows = desktop[shadowTarget] as
+      | (Target & { readonly metadata?: { readonly lane?: string } })
+      | undefined;
+    expect(shadowRows?.executor).toBe('nx:noop');
+    expect(shadowRows?.dependsOn).toEqual(families);
+    expect(shadowRows?.metadata?.lane).toBe('desktop');
+    expect(desktop[queueTarget]).toBeUndefined();
+    // The lane exists and selects the tag:ci:desktop projects.
+    const planStep = ci.jobs['plan']?.steps?.find((entry) => entry.id === 'plan');
+    const selectors = JSON.parse(planStep?.env?.['LANE_SELECTORS'] ?? '{}') as Record<string, unknown>;
+    expect(selectors['desktop']).toEqual({ tags: ['ci:desktop'] });
+  });
+
+  it('should split test:e2e into families and held-out files that together are every file it runs, once', () => {
+    const whole = specsOf(desktop['test:e2e']);
+    const split = [...families, 'test:e2e:print'].flatMap((family) => specsOf(desktop[family]));
+    expect(split.length).toBe(new Set(split).size);
+    for (const spec of split) {
+      expect(whole, spec).toContain(spec);
+    }
+    // Two-client and sync-refusals keep their own operator target, test:e2e:two-client; print has its own.
+    expect(specsOf(desktop['test:e2e:two-client'])).toEqual(['src/two-client.spec.ts', 'src/sync-refusals.spec.ts']);
+    expect(specsOf(desktop['test:e2e:print'])).toEqual(['src/desktop-print-dry-run.spec.ts']);
+    const familyFiles = families.flatMap((family) => specsOf(desktop[family]));
+    expect(familyFiles.filter((spec) => spec in heldOut)).toEqual([]);
+    expect([...familyFiles, ...Object.keys(heldOut)].toSorted()).toEqual([...whole].toSorted());
+  });
+
+  it('should run each desktop row as test:e2e runs its files', () => {
+    const suite = desktop['test:e2e'];
+    for (const name of [...families, 'test:e2e:print']) {
+      const target = desktop[name];
+      expect(target?.dependsOn, name).toEqual(suite?.dependsOn);
+      expect(target?.options?.env, name).toEqual(suite?.options?.env);
+      expect(target?.options?.commands?.slice(0, 2), name).toEqual(suite?.options?.commands?.slice(0, 2));
+      expect(target?.options?.commands, name).toHaveLength(3);
+      expect(target?.metadata?.shards, name).toBeUndefined();
+      // Electron needs Chromium's system libraries; no desktop file launches Firefox or WebKit.
+      expect(target?.metadata?.browsers, name).toEqual(['chromium']);
+    }
+  });
+
+  const browserHost = ui['test:e2e:browser-host'];
+  const browserHostRow = ui['test:e2e:browser-host-chat'];
+  /** The command strings of a target, in order. */
+  const commandsOf = (target: Target | undefined): readonly string[] =>
+    (target?.options?.commands ?? []).map((command) => (typeof command === 'string' ? command : command.command));
+
+  it('should run the passing browser-host files under the env and first command of test:e2e:browser-host', () => {
+    expect(browserHostRow?.options?.env).toEqual(browserHost?.options?.env);
+    expect(commandsOf(browserHostRow)[0]).toEqual(commandsOf(browserHost)[0]);
+    expect(browserHostRow?.metadata?.browsers).toEqual(['chromium']);
+    expect(browserHostRow?.metadata?.shards).toBeUndefined();
+  });
+
+  it('should take only the files test:e2e:browser-host runs on Chromium alone, none of the red ones', () => {
+    const [, chromium = '', ...others] = commandsOf(browserHost);
+    expect(chromium).toContain('--project chromium');
+    const files = specsOf(browserHostRow);
+    expect(files).toEqual(['src/chat-questions.spec.ts', 'src/chat-todo-list.spec.ts']);
+    // Each is in the Chromium command and in neither the Firefox nor the WebKit one, so the row's one command is all.
+    expect(files.filter((file) => !chromium.includes(file))).toEqual([]);
+    expect(others.filter((command) => files.some((file) => command.includes(file)))).toEqual([]);
+  });
+
+  it('should keep the desktop diagnostics of a shadow row, as the nightly does', () => {
+    const upload = step(lane, 'Upload Vitest Browser diagnostics');
+    expect(upload?.with?.['path']).toContain('out/test-results/desktop-e2e');
   });
 });

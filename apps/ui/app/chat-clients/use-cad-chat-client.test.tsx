@@ -333,6 +333,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
     captureMessageQueueIntent: vi.fn(() => ({})),
     setTurnPlacement: vi.fn(),
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
+    getAttachmentStatus: () => 'attached',
     /* The turn host reads the fold as it is now; here that is the session's shown messages. */
     getCurrentTranscript(this: ChatSessionStore, chatId: string) {
       return this.get(chatId)?.messages ?? [];

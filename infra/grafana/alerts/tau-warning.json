@@ -2314,7 +2314,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "min by (job) (probe_ssl_earliest_cert_expiry{label_app=~\".*\",label_probe_group=\"outside\"}) - time() < bool 1209600",
+            "expr": "min by (job) (probe_ssl_earliest_cert_expiry{app=~\".*\",probe_group=\"outside\"}) - time() < bool 1209600",
             "intervalMs": 60000,
             "maxDataPoints": 20,
             "refId": "cert_expiring"

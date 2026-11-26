@@ -17,10 +17,12 @@ import type { PathOptions } from '@taucad/xstate-testing/paths';
 
 import {
   acpCancelSettleTimeout,
+  acpDrainTimeout,
   acpKillGrace,
   acpSessionIgnoredEvents,
   acpSessionMachine,
   acpTerminateBackstop,
+  sessionCloseTimeout,
 } from '#acp/acp-session.machine.js';
 import type { AcpLend, AcpSessionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
@@ -722,6 +724,98 @@ describe('acpSession', () => {
     fakes.sendBack('connection', { type: 'adapterExited', stderr: '' });
 
     expect(parent.events.map((event) => event.type)).toEqual(['opened', 'turnEnded', 'closed']);
+  });
+
+  describe('a turn whose own drain never answers (E42)', () => {
+    it('ends a stopped turn from closed when its flush never answers', async () => {
+      const harness = start();
+      await openAndLend(harness);
+      const { fakes, clock, parent, actor, commands } = harness;
+      actor.send({ type: 'cancel' });
+      harness.answer({ stopReason: 'cancelled' });
+      expect(actor.getSnapshot().matches({ busy: 'flushing' })).toBe(true);
+
+      /* The flush waits on storage that does not answer: `flushed` never comes. */
+      clock.advance(acpDrainTimeout - 1);
+      expect(actor.getSnapshot().matches({ busy: 'flushing' })).toBe(true);
+      clock.advance(1);
+
+      expect(commands('connection')).toContainEqual({ type: 'terminate' });
+      expect(actor.getSnapshot().matches('closing')).toBe(true);
+      /* The group may still be running: the turn is answered only once it is gone. */
+      expect(parent.events.map((event) => event.type)).toEqual(['opened']);
+      expect(fakes.releases('lentTurn')).toBe(1);
+
+      fakes.sendBack('connection', { type: 'adapterExited', stderr: '' });
+
+      expect(actor.getSnapshot().status).toBe('done');
+      expect(parent.events.map((event) => event.type)).toEqual(['opened', 'turnEnded', 'closed']);
+      expect(parent.events[1]).toMatchObject({
+        requestId: 'run-1:0',
+        resting: false,
+        outcome: { ok: false, failure: { code: 'EXTERNAL_AGENT_CANCELLED' } },
+      });
+    });
+
+    it('ends a completed turn failed when its session record never answers, with no exit notice', async () => {
+      const harness = start();
+      await openAndLend(harness);
+      const { fakes, clock, parent, actor } = harness;
+      harness.answer({ stopReason: 'end_turn' });
+      fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+      expect(actor.getSnapshot().matches({ busy: 'recording' })).toBe(true);
+
+      clock.advance(acpDrainTimeout);
+      expect(parent.events.map((event) => event.type)).toEqual(['opened']);
+      /* No `adapterExited` either: the backstop ends the close (E18). */
+      clock.advance(acpTerminateBackstop);
+
+      expect(actor.getSnapshot().status).toBe('done');
+      expect(parent.events.map((event) => event.type)).toEqual(['opened', 'turnEnded', 'closed']);
+      expect(parent.events[1]).toMatchObject({
+        resting: false,
+        outcome: { ok: false, failure: { code: 'EXTERNAL_AGENT_FAILED' } },
+      });
+    });
+
+    it('ends a turn whose adapter exited while its flush never answers', async () => {
+      const harness = start();
+      await openAndLend(harness);
+      const { fakes, clock, parent, actor } = harness;
+      actor.send({ type: 'cancel' });
+      harness.answer({ stopReason: 'cancelled' });
+      fakes.sendBack('connection', { type: 'adapterExited', stderr: '' });
+      expect(actor.getSnapshot().matches({ busy: 'flushing' })).toBe(true);
+
+      clock.advance(acpDrainTimeout);
+
+      expect(actor.getSnapshot().status).toBe('done');
+      expect(parent.events.map((event) => event.type)).toEqual(['opened', 'turnEnded', 'closed']);
+    });
+
+    it('leaves a drain that answers in time alone', async () => {
+      const harness = start();
+      await openAndLend(harness);
+      const { fakes, clock, parent, actor, commands } = harness;
+      harness.answer({ stopReason: 'end_turn' });
+      clock.advance(acpDrainTimeout - 1);
+      fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+      clock.advance(acpDrainTimeout - 1);
+      fakes.sendBack('lentTurn', { type: 'recorded', failure: undefined });
+      clock.advance(acpDrainTimeout);
+
+      expect(actor.getSnapshot().hasTag('resting')).toBe(true);
+      expect(commands('connection')).not.toContainEqual({ type: 'terminate' });
+      expect(parent.events.at(-1)).toMatchObject({ type: 'turnEnded', resting: true, outcome: { ok: true } });
+    });
+
+    it('answers a stop inside the agent host stop bound whatever the vendor and the drain do', () => {
+      /* Cancel settlement, the flush, the session record, `session/close`, then the terminating backstop. The agent
+       * host gives a Tau driver 30 s to stop (`driverStopBound`) and sets no bound of its own on an external one. */
+      expect(
+        acpCancelSettleTimeout + 2 * acpDrainTimeout + sessionCloseTimeout + acpTerminateBackstop,
+      ).toBeLessThanOrEqual(30_000);
+    });
   });
 
   it('answers a cancel that races the adapter exiting once, and closes', async () => {

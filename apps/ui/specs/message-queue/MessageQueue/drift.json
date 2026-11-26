@@ -25,18 +25,18 @@
     "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "a9293c32f2cd43071ad44214c879c3d9d30af67491f1c23730998a18cb62a13f",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
     "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
-    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "78a63355978a6111ffc2d54ec68cf4f909552e598ecd1b3d281d62883d768496",
-    "apps/ui/app/chat-clients/chat-turn-host.tsx": "1cf3eff0b34447f56d61ad893b34dd15182a18ef22ed429428a9d672abc85d90",
-    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "ceefd785203df08940d0fd4cdfad7d4ccac508faf40e7123ecc3eec1a9884db6",
+    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
+    "apps/ui/app/chat-clients/chat-turn-host.tsx": "f2037dc8f438aa8a006009909def50e9ba4d558896e77fe539f1613ecb030cd8",
+    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "3749ada815f745fed131d6990868df4733e3279a16f073a780a34513c6b3cbff",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
     "apps/ui/app/components/chat/chat-textarea.tsx": "8f684f3dc647ab0182bffd90ef3c163adde71ef24f06a33ada6807870c25a309",
     "apps/ui/app/hooks/use-chat.tsx": "f5d625771e64c3ea200934d9c7028d19af5293f748a4ffd0277040666603dac5",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "3a2ef4f14fbe21e0688cd995a461a7d13a68797c6d57ed574a80e058dec6d2d1",
+    "apps/ui/app/services/chat-session-store.ts": "defbdc78f0ec6a7c5f57ced26ba87c8281f7ebd845f83db8c1f2d5aaf8311c2b",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "882e96ab44d7eb600de21ada49f3f882f418ce28f98fe429240a804e747de525",
+    "MessageQueue.tla": "07aaefd7a2f8b960640e87d712fc26312003b6fcd9acfd8821ecc5c583d24ec0",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

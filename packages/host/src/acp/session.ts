@@ -237,6 +237,12 @@ export const advertised = (capability: unknown): boolean => capability !== null 
 /** @internal */
 export const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
 
+/* A vendor string a durable row requires to be non-empty: an empty one is absent (launch audit E-3). */
+const named = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+
+/** The `call.toolCallId` recorded for a vendor call that names none. */
+export const unnamedVendorCallId = 'unnamed';
+
 /**
  * A path is inside the session's own directory, and reachable there at the
  * intended access, or it is refused.
@@ -1628,6 +1634,18 @@ export const createTurnProjection = (options: {
       rawOutput?: unknown;
     }
   >();
+  /**
+   * Vendor ids the agent gave a second call while an earlier one was open (two calls with no id share one). A later
+   * update under such an id cannot say which call it means, so for the rest of the turn none is attributed to a call
+   * and no stored input describes a permission request.
+   */
+  const ambiguousToolCalls = new Set<string>();
+  /** Marks a reused open id ambiguous, dropping any persistent decision recorded for it, which no readback can pair. */
+  const markAmbiguous = (toolCallId: string): void => {
+    ambiguousToolCalls.add(toolCallId);
+    ambiguousPermissionCalls.add(toolCallId);
+    permissionDecisions.delete(toolCallId);
+  };
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: options.agentId } };
   const tauMcpMetadata = {
     tauInternal: { ...externalMetadata.tauInternal, presentation: 'tau-mcp' },
@@ -1864,15 +1882,17 @@ export const createTurnProjection = (options: {
    */
   const callFacts = (update: AcpToolUpdate): NonNullable<ToolInputProviderMessage['call']> => {
     const nativeName = nativeToolName(update, options.nativeToolName ?? acpNativeToolNamePaths);
+    /* The row schema refuses an empty id or path; a refused row would blind the rest of the turn (E-3). */
+    const locations = update.locations?.filter((location) => location.path !== '');
     return {
-      toolCallId: update.toolCallId,
+      toolCallId: named(update.toolCallId) ?? unnamedVendorCallId,
       ...(isPresent(update.kind) ? { kind: update.kind } : {}),
       ...(isPresent(update.title) ? { title: update.title } : {}),
       ...(isPresent(update.status) ? { status: update.status } : {}),
       ...(nativeName ? { nativeName } : {}),
-      ...(isPresent(update.locations)
+      ...(isPresent(locations)
         ? {
-            locations: update.locations.map(({ line, ...location }) =>
+            locations: locations.map(({ line, ...location }) =>
               typeof line === 'number' ? { ...location, line } : location,
             ),
           }
@@ -1989,13 +2009,28 @@ export const createTurnProjection = (options: {
     openToolCalls.delete(update.toolCallId);
   };
 
+  /** Ends an open call without a result, keeping the fullest facts seen, as a turn's end does. */
+  const closeAsItStands = async (open: {
+    readonly facts: NonNullable<ToolInputProviderMessage['call']>;
+    readonly inputMessage: ToolInputProviderMessage;
+  }): Promise<void> =>
+    append([
+      {
+        type: 'message.envelope-replaced',
+        messageId: open.inputMessage.id,
+        replacement: { ...open.inputMessage, call: open.facts },
+      },
+    ]);
+
   const projectToolCall = async (update: Extract<SessionUpdate, { sessionUpdate: 'tool_call' }>): Promise<void> => {
     await flushBoundary();
     const callId = options.createId();
     const inputMessageId = options.createId();
     const facts = callFacts(update);
     const tauMcp = normalizedTauMcpCall(update, options.tauMcpServerName, options.agentId);
-    const callToolName = tauMcp?.toolName ?? facts.nativeName ?? update.title;
+    /* The first non-empty name: an empty title is no name, and the row schema refuses an empty one (E-3). */
+    const callToolName =
+      named(tauMcp?.toolName) ?? named(facts.nativeName) ?? named(update.title) ?? named(update.kind) ?? 'tool';
     const input = tauMcp?.arguments ?? asJson(update.rawInput ?? { title: update.title });
     const inputMessage: ToolInputProviderMessage = {
       id: inputMessageId,
@@ -2006,7 +2041,18 @@ export const createTurnProjection = (options: {
       content: input,
       metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
     };
+    const earlier = openToolCalls.get(update.toolCallId);
+    /* The agent named a call it has not finished (two calls with no id share one): no later update can say which call
+     * it means. Both calls close as they stand, as a turn's end closes an open call, rather than either showing the
+     * other's result; only this notification's own facts are the newer call's. */
+    const ambiguous = earlier !== undefined || ambiguousToolCalls.has(update.toolCallId);
+    if (ambiguous) {
+      markAmbiguous(update.toolCallId);
+    }
     openToolCalls.set(update.toolCallId, { toolName: callToolName, callId, facts, tauMcp, input, inputMessage });
+    if (earlier !== undefined) {
+      await closeAsItStands(earlier);
+    }
     await append([
       {
         type: 'message.appended',
@@ -2017,6 +2063,11 @@ export const createTurnProjection = (options: {
      * `tool-input` row with no `tool-output` is a part that hangs until the next
      * user message demotes it to an interruption the user never caused. */
     await projectToolResult(update);
+    const unfinished = openToolCalls.get(update.toolCallId);
+    if (ambiguous && unfinished !== undefined) {
+      openToolCalls.delete(update.toolCallId);
+      await closeAsItStands(unfinished);
+    }
   };
 
   // oxlint-disable-next-line eslint/complexity -- one branch per `session/update` variant is the point (V13): every variant carries an explicit ruling here, and a `default` would turn the next protocol addition into a silent drop.
@@ -2170,6 +2221,10 @@ export const createTurnProjection = (options: {
           return;
         }
         if (update.sessionUpdate === 'tool_call_update' || update.sessionUpdate === 'tool_call') {
+          /* A call that reuses an open id must not have its readback paired with the earlier call's decision. */
+          if (update.sessionUpdate === 'tool_call' && openToolCalls.has(update.toolCallId)) {
+            markAmbiguous(update.toolCallId);
+          }
           const decision = permissionDecisions.get(update.toolCallId);
           const terminal = update.status === 'completed' || update.status === 'failed';
           let observation = options.permissionReadback
@@ -2284,7 +2339,7 @@ export const createTurnProjection = (options: {
       const toolCallId = requestedCall?.['toolCallId'];
       const open = typeof toolCallId === 'string' ? openToolCalls.get(toolCallId) : undefined;
       if (typeof toolCallId === 'string') {
-        if (requestedPermissionCalls.has(toolCallId)) {
+        if (requestedPermissionCalls.has(toolCallId) || ambiguousToolCalls.has(toolCallId)) {
           ambiguousPermissionCalls.add(toolCallId);
         }
         requestedPermissionCalls.add(toolCallId);
@@ -2369,13 +2424,7 @@ export const createTurnProjection = (options: {
       for (const open of openToolCalls.values()) {
         // Preserve undecided media if cancellation or transport loss prevents a terminal result.
         // oxlint-disable-next-line no-await-in-loop -- durable call order is retained.
-        await append([
-          {
-            type: 'message.envelope-replaced',
-            messageId: open.inputMessage.id,
-            replacement: { ...open.inputMessage, call: open.facts },
-          },
-        ]);
+        await closeAsItStands(open);
       }
       openToolCalls.clear();
       const open = [...assistantBlocks.values()].filter((block) => block.text !== '' && !block.finalCommitted);

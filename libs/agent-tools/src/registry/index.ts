@@ -2,6 +2,7 @@ export { createChatToolRegistry, type ChatToolRegistryOptions } from '#registry/
 export type { ShellClient, ShellRunRequest, ShellSource } from '#registry/shell-tool.js';
 export {
   createGatewayWebResearchClient,
+  webResearchAnswerMilliseconds,
   type GatewayWebResearchClientOptions,
   type WebResearchClient,
 } from '#registry/web-tools.js';

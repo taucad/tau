@@ -24,6 +24,15 @@
 # `validate-quarantine`. A never-quarantine offender gets the owner issue and keeps gating. If the token may not open
 # pull requests (the repository does not let Actions create them), the issues name the branch to open instead.
 #
+# Then it releases and expires entries (FQ-9, testing policy § 16.3 and § 16.5). The ingestion counts each quarantined
+# test's gating executions (shadow rows excluded) toward the release bar: 100 consecutive passes after a linked fix
+# lands (a merged `flake/<issue>` pull request, or one labelled `flake` that references the owner issue), or 300
+# without one, over at least two days. An entry that meets it is removed on a `flake-release/*` branch and its owner
+# issue closes once the removal lands; one at or past its `expires` day (14, or 28 after the one operator renewal) is
+# removed on a `flake-expiry/*` branch, the test gates again and its issue goes to the operator, whom the nightly
+# watchdog pages through its existing alert route. The automation never renews an entry. A test that meets the entry
+# rule within 30 days of its release re-enters as the same entry and goes to the operator.
+#
 # It uses no environment and no secret: `actions: read` lists runs and downloads artifacts, `contents: write` writes
 # the state branch and the entry branch (the `main` ruleset keeps `main` out of its reach), `issues: write` opens the
 # owner issues and `pull-requests: write` opens the entry pull request. Outcome rows come from pull-request code in
@@ -34,6 +43,11 @@
 # rows, so every `project.json` is checked out too. The count against the Q1 bar (100 consecutive passing runs) is kept
 # in the state, and `shadow-row-promotion.yml` proposes the promotion of a row that meets it. A test's flake events in
 # a shadow row never count toward the quarantine entry rule: the row gates nothing.
+#
+# Last, it writes the flake quarantine metrics table (FQ-11, blueprint D9) to the job summary on every run: the rows
+# the ledger state, the `quarantine.json` files and the owner issues give. The rows that need every merge-group run's
+# jobs are the weekly `ci-queue-health.yml` report's, which shows them all; the nightly watchdog alerts on a red run of
+# this job, an expired entry, a full debt and a never-quarantine flake.
 name: Flake ledger
 
 on:
@@ -89,6 +103,10 @@ jobs:
             scripts/src/flake-ledger.json
             scripts/src/ci-flake-quarantine-entry.ts
             scripts/src/ci-flake-quarantine-entry-cli.ts
+            scripts/src/ci-flake-quarantine-release.ts
+            scripts/src/ci-flake-quarantine-release-cli.ts
+            scripts/src/ci-flake-metrics.ts
+            scripts/src/ci-flake-metrics-cli.ts
             scripts/src/validate-quarantine.ts
             scripts/src/flake-regression.ts
             scripts/src/flake-repro.ts
@@ -102,6 +120,13 @@ jobs:
         with:
           node-version: '26.13.1'
 
+      # `@taucad/vitest-ci/quarantine` imports only `node:` modules, so it is linked as pnpm links it, without an
+      # install. The ingestion reads the entries on `main` with it to count their release bar.
+      - name: Link the quarantine module
+        run: |
+          mkdir -p node_modules/@taucad
+          ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci
+
       - name: Ingest test outcomes
         id: ingest
         env:
@@ -110,15 +135,29 @@ jobs:
         run: node scripts/src/ci-flake-ledger-ingest-cli.ts --runs "$RUNS" --lookback-hours 72 --max-runs 30
 
       # The entry step reads the state the ingestion wrote, only after a complete ingestion: a partial one may lack a
-      # newer failure of a test it would otherwise quarantine. The next ingestion that completes runs it again.
-      # `@taucad/vitest-ci/quarantine` imports only `node:` modules, so it is linked as pnpm links it, without an
-      # install. The checkout carries every `project.json` and `quarantine.json`; the test files an entry names are
-      # read at the checkout's commit through the API.
+      # newer failure of a test it would otherwise quarantine. The next ingestion that completes runs it again. The
+      # checkout carries every `project.json` and `quarantine.json`; the test files an entry names are read at the
+      # checkout's commit through the API.
       - name: Open quarantine entries
         if: ${{ steps.ingest.outcome == 'success' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p node_modules/@taucad
-          ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci
-          node scripts/src/ci-flake-quarantine-entry-cli.ts
+        run: node scripts/src/ci-flake-quarantine-entry-cli.ts
+
+      # Release and expiry read the count the ingestion wrote. An expiry is due on its day, so neither a failed entry
+      # step nor a failed or partial ingestion holds it back (the failed step still turns the job red). A test is
+      # released only when the ingestion succeeded and counted every pending run (`complete`): a run it did not count
+      # may hold a failure.
+      - name: Release and expire quarantine entries
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INGEST_COMPLETE: ${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}
+        run: node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"
+
+      # The D9 table (FQ-11), whatever the steps before it did: it reads the state as it now stands.
+      - name: Report the flake quarantine metrics
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/src/ci-flake-metrics-cli.ts

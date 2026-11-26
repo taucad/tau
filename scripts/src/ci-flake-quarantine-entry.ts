@@ -14,6 +14,9 @@
  * - **refused** when its project is unknown, or its file is in the never-quarantine set (§ 16.4: it keeps gating, and
  *   its owner issue is still opened so the agent starts at once);
  * - **held** when an entry for the same test is already on `main` or on an open entry branch;
+ * - **returned** when its owner issue closed on a release in the last 30 days (FQ-9, D5): it re-enters as the same
+ *   entry (that issue, its `created`, `expires` and renewal) and goes to the operator, not the agent; it is refused
+ *   when that entry's expiry has passed, and keeps gating;
  * - **refused for the cap** when its project holds 8 entries or the workspace 20, counting open entry branches;
  * - otherwise **admitted**: one entry for the test, narrowed to a browser or an OS when every event in the rule's
  *   window came from one and the test also ran elsewhere, owned by the `flake-ledger.json` owner or the default
@@ -36,6 +39,7 @@ import type { QuarantineClass, QuarantineEntry, QuarantineVariant } from '@tauca
 import { entryRule, meetsEntryRule } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState, LedgerState } from '#ci-flake-ledger-state.js';
 import type { Ledger } from '#ci-flake-ledger.js';
+import type { ReturnRecord } from '#ci-flake-quarantine-release.js';
 import { identityMarker, isFlakyRegression } from '#flake-regression.js';
 
 /** Who owns an entry when `flake-ledger.json` names nobody (testing policy § 16.3; the operator today). */
@@ -75,6 +79,8 @@ export type PlannedEntry = Offender & {
   readonly entry: QuarantineEntry;
   /** The owner issue `flake-ledger.json` already names for it. */
   readonly linkedIssue?: number | undefined;
+  /** The release it returned after, within 30 days: the entry is that one, and the operator takes it. */
+  readonly returned?: ReturnRecord | undefined;
 };
 
 export type RefusalKind =
@@ -84,6 +90,7 @@ export type RefusalKind =
   | 'no-project'
   | 'never-quarantine'
   | 'cap'
+  | 'returned'
   | 'invalid';
 
 /** An offender that does not become an entry, and why. */
@@ -92,6 +99,7 @@ export type Refusal = Offender & {
   readonly reason: string;
   readonly project?: WorkspaceProject | undefined;
   readonly linkedIssue?: number | undefined;
+  readonly returned?: ReturnRecord | undefined;
 };
 
 export type EntryPlan = {
@@ -116,6 +124,8 @@ export type PlanInput = {
   readonly owner?: string | undefined;
   /** Registered shadow-row targets (`<project>:<target>`): their tests' events never count. */
   readonly shadowTargets?: ShadowTargets | undefined;
+  /** Releases of the last 30 days by {@link returnKey} (identity hash and variant): a return is the same entry (FQ-9). */
+  readonly returns?: ReadonlyMap<string, ReturnRecord> | undefined;
 };
 
 /** The widest window of the entry rule: its events are the evidence. */
@@ -288,6 +298,13 @@ const rawKeys = (text: string, today?: string): Array<{ key: string; test: strin
     ];
   });
 
+/** The key of a return: the identity's hash and the entry's variant, so two variant entries of a test stay apart. */
+export const returnKey = (identity: string, variant: QuarantineVariant | undefined): string =>
+  `${identity} ${JSON.stringify([variant?.browser ?? null, variant?.os ?? null, variant?.target ?? null])}`;
+
+/** The hash of an identity's `flake-identity` marker: the key of {@link PlanInput.returns}. */
+export const identityHashOf = (id: string): string => /flake-identity: ([\da-f]+)/u.exec(identityMarker(id))?.[1] ?? '';
+
 /** Decide which offenders become entries. Pure: the CLI does the reading and the writing. */
 export const planEntries = (input: PlanInput): EntryPlan => {
   const occupied = new Map<string, Set<string>>();
@@ -316,9 +333,13 @@ export const planEntries = (input: PlanInput): EntryPlan => {
   }
   for (const offender of offenders(input.state, input.shadowTargets)) {
     const project = input.projects.get(offender.identity.project);
-    const { owner, issue } = ownership(input.owners, offender);
+    const { owner, issue: namedIssue } = ownership(input.owners, offender);
+    // A return is the same entry in the same variant: the variant this offender would be narrowed to.
+    const variant = narrowVariant(offender.identity, offender.events);
+    const returned = input.returns?.get(returnKey(identityHashOf(offender.id), variant));
+    const issue = returned?.issue ?? namedIssue;
     const refuse = (kind: RefusalKind, reason: string): void => {
-      refused.push({ ...offender, kind, reason, project, linkedIssue: issue });
+      refused.push({ ...offender, kind, reason, project, linkedIssue: issue, ...(returned ? { returned } : {}) });
     };
     if (failsEveryAttempt(offender.identity)) {
       refuse(
@@ -349,6 +370,13 @@ export const planEntries = (input: PlanInput): EntryPlan => {
       held.push(offender.id);
       continue;
     }
+    if (returned && returned.expires < input.today) {
+      refuse(
+        'returned',
+        `returned within 30 days of its release on ${returned.released}, so it is the same entry, which expired on ${returned.expires}: it keeps gating and goes to the operator`,
+      );
+      continue;
+    }
     const inProject = occupied.get(path)?.size ?? 0;
     if (inProject >= quarantineBounds.projectEntries) {
       refuse('cap', `${path} holds ${inProject} entries, the most a project may (no new quarantine: fix one first)`);
@@ -358,22 +386,22 @@ export const planEntries = (input: PlanInput): EntryPlan => {
       refuse('cap', `the workspace holds ${total} entries, the most it may: the quarantine debt is full`);
       continue;
     }
-    const variant = narrowVariant(offender.identity, offender.events);
     const entry: QuarantineEntry = {
       test: offender.test,
       ...(variant ? { variant } : {}),
       owner: owner ?? input.owner ?? defaultOwner,
       issue: issue ?? 0,
       class: initialClass(offender.events),
-      created: input.today,
-      expires: addDays(input.today, quarantineBounds.maximumAgeDays),
-      evidence: evidenceLine(offender),
+      created: returned?.created ?? input.today,
+      expires: returned?.expires ?? addDays(input.today, quarantineBounds.maximumAgeDays),
+      ...(returned?.renewal ? { renewal: returned.renewal } : {}),
+      evidence: `${returned ? `returned within 30 days of its release on ${returned.released}; ` : ''}${evidenceLine(offender)}`,
     };
     const key = JSON.stringify([entry.test, variant?.browser ?? null, variant?.os ?? null, variant?.target ?? null]);
     occupied.set(path, (occupied.get(path) ?? new Set()).add(key));
     heldTests.set(path, (heldTests.get(path) ?? new Set()).add(entry.test));
     total += 1;
-    admitted.push({ ...offender, project, path, entry, linkedIssue: issue });
+    admitted.push({ ...offender, project, path, entry, linkedIssue: issue, ...(returned ? { returned } : {}) });
   }
   return { admitted, refused, held };
 };

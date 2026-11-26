@@ -362,6 +362,41 @@ export type IngestedRun = {
   readonly rejected: number;
 };
 
+/**
+ * Run records kept per quarantine track: more than an entry's 28 days of runs at the measured rate (about 41 a day), so
+ * the whole count stays in run order. A count longer than this keeps its newest runs, which only shortens its span.
+ */
+export const maximumStreakRuns = 2400;
+
+/** One run attempt of a track's count: its passing executions. */
+export type StreakRun = {
+  readonly run: number;
+  readonly attempt: number;
+  /** When the run was created: an execution of a run created after a fix merged tested the fix. */
+  readonly at: string;
+  readonly passes: number;
+};
+
+/** A quarantined test's gating executions since its entry reached `main` (`ledger.json` `quarantineTracks`). */
+export type ReleaseTrack = {
+  /** The `quarantine.json` that holds the entry. */
+  readonly path: string;
+  /** The ledger identity: `<project> › <test>`. */
+  readonly id: string;
+  /** When the ingestion first saw the entry on `main` (or, for a track it never opened, the first run counted): only runs created from then on count. */
+  since: string;
+  /** Gating executions counted. */
+  executions: number;
+  /** Executions that failed, or passed only on the recorded retry. */
+  failures: number;
+  /** Consecutive passing executions, up to the newest: the count against the bar without a fix. */
+  streak: number;
+  /** The runs of the current count, oldest first, the newest {@link maximumStreakRuns}. */
+  streakRuns: StreakRun[];
+  /** The newest run with a failure. */
+  lastFailure?: { readonly run: number; readonly attempt: number; readonly at: string } | undefined;
+};
+
 export type LedgerState = {
   readonly schema: typeof ledgerStateSchema;
   updatedAt: string;
@@ -370,6 +405,11 @@ export type LedgerState = {
   tasks: Record<string, TaskState>;
   /** Shadow rows' consecutive passing runs, by `<project>:<target>` (FQ-13, `ci-shadow-rows.ts`). */
   shadowRows?: Record<string, ShadowRowState>;
+  /**
+   * Each quarantined test's gating executions since its entry reached `main`, by entry (FQ-9,
+   * `ci-flake-quarantine-release.ts` counts them): the count against the release bar.
+   */
+  quarantineTracks?: Record<string, ReleaseTrack>;
 };
 
 export const emptyState = (now: Date): LedgerState => ({
@@ -410,6 +450,7 @@ export const serializeState = (state: LedgerState): string =>
       tasks: byKey(state.tasks),
       identities: byKey(state.identities),
       ...(state.shadowRows ? { shadowRows: byKey(state.shadowRows) } : {}),
+      ...(state.quarantineTracks ? { quarantineTracks: byKey(state.quarantineTracks) } : {}),
     },
     undefined,
     2,

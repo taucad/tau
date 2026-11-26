@@ -102,6 +102,12 @@ export const acpKillGrace = 2000;
 export const acpTerminateBackstop = 5000;
 /** E22: milliseconds a cancelled turn waits for the vendor to settle its outstanding call. */
 export const acpCancelSettleTimeout = 2000;
+/**
+ * E42: milliseconds the host's own drain may take in `busy.flushing`, and again in `busy.recording`, before the turn
+ * ends from `closed`. With E22 before it and the close ladder after it (E13, E18), a stopped turn is answered within
+ * 29 s whatever the vendor or the host's storage does: inside the 30 s the agent host gives a Tau driver to stop.
+ */
+export const acpDrainTimeout = 10_000;
 
 /** The `AcpSessions.tla` action a transition refines (MC-R27). */
 export type AcpSessionsAction =
@@ -117,6 +123,7 @@ export type AcpSessionsAction =
   | 'CancelBinding'
   | 'CancelSettled'
   | 'CancelTimedOut'
+  | 'DrainTimedOut'
   | 'Dequeued'
   | 'CancelQueued'
   /** A step that leaves the spec's abstraction unchanged (the spec's `Stutter`). */
@@ -1126,6 +1133,27 @@ const ladder = (enq: Enqueue): void => {
   enq.raise({ type: 'killDue' }, { id: 'killDue', delay: acpKillGrace });
 };
 
+/*
+ * The host's own drain did not answer within acpDrainTimeout (E42): a flush or a session record waits on storage, a
+ * vendor file request or a tool dispatch that never settles. What the turn committed stays; the turn ends as a
+ * timed-out cancel does, from `closed` once the ladder has killed the group, so the chat is not left lent to a turn
+ * nothing will end. A turn the vendor completed is recorded failed, since its last rows may not be durable; a stopped
+ * or failed turn keeps its own outcome.
+ */
+const drainTimedOut = (context: AcpBusyContext, enq: Enqueue) => {
+  ladder(enq);
+  return endTurn(
+    { ...context, closeAfter: true, deferEnd: true },
+    enq,
+    context.outcome?.ok === true
+      ? failed({
+          code: 'EXTERNAL_AGENT_FAILED',
+          message: `Tau Host could not finish recording the ${context.adapter.displayName} turn within ${String(acpDrainTimeout / 1000)} seconds.`,
+        })
+      : (context.outcome ?? failed(cancelled)),
+  );
+};
+
 /* A cancel (or a close) while the vendor is working on the turn. */
 const cancelTurn = (context: AcpBusyContext, enq: Enqueue, closeAfter: boolean) => {
   enq.sendTo('connection', {
@@ -1815,7 +1843,12 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
             ),
           },
         },
+        /* E42: the host's own drain has acpDrainTimeout; see `drainTimedOut`. */
         flushing: {
+          timeout: acpDrainTimeout,
+          onTimeout: refines('DrainTimedOut', ({ context }: Held<AcpBusyContext>, enq: Enqueue) =>
+            drainTimedOut(context, enq),
+          ),
           on: {
             flushed: refines('Stutter', ({ context, event }: On<'flushed', AcpBusyContext>, enq: Enqueue) => {
               const outcome: AcpTurnResult =
@@ -1851,7 +1884,12 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
             })),
           },
         },
+        /* E42 again: the session record is one more write that may not answer. */
         recording: {
+          timeout: acpDrainTimeout,
+          onTimeout: refines('DrainTimedOut', ({ context }: Held<AcpBusyContext>, enq: Enqueue) =>
+            drainTimedOut(context, enq),
+          ),
           on: {
             close: refines('Stutter', (_args: unknown, enq: Enqueue) => {
               ladder(enq);

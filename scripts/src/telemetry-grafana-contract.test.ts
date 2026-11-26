@@ -864,7 +864,8 @@ const lokiSelectors: Readonly<Record<LokiSource['where'], readonly string[]>> = 
  * `app=~".*"` is `tau-api`, `app=~".*storage.*"` is `tau-storage`, `app=~".*mirror.*"` is `tau-mirror`), so
  * a second exporter in that app cannot match. Grafana's own `grafana_*` series and Fly's platform `fly_*`
  * series carry no `service_name`; the `app` matcher alone binds them. Synthetic Monitoring's `probe_*` series
- * carry neither: a check's `app` label arrives as `label_app`, and `label_app=~".*"` alone binds them.
+ * carry neither: a check's own `app` label (the environment's API app) is on every series, and `app=~".*"` alone
+ * binds them.
  */
 const ruleServices: Readonly<Record<string, string>> = {
   [appPlaceholders.rule.api]: appNames.api,
@@ -903,16 +904,16 @@ const selectorSourceProblems = (root: string): string[] => [
                 ];
           }
           if ((groups?.['metric'] ?? '').startsWith('probe_')) {
-            // Synthetic Monitoring's series carry no service_name; a check's `app` label arrives as `label_app`,
-            // which Tau Cloud's `app=~".*"` replacement binds to the environment's API app.
-            const apps = matchers.filter(({ label }) => label === 'label_app' || label === 'app');
+            // Synthetic Monitoring's series carry no service_name; each check's `app` label names the environment's
+            // API app, which Tau Cloud's `app=~".*"` replacement binds.
+            const apps = matchers.filter(({ label }) => label === 'app' || label === 'label_app');
             return apps.length === 1 &&
-              apps[0]!.label === 'label_app' &&
+              apps[0]!.label === 'app' &&
               apps[0]!.op === '=~' &&
               apps[0]!.value === appPlaceholders.rule.api
               ? []
               : [
-                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one label_app=~"${appPlaceholders.rule.api}" matcher`,
+                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app=~"${appPlaceholders.rule.api}" matcher`,
                 ];
           }
           const app = matchers.find(({ label, op }) => label === 'app' && op === '=~');

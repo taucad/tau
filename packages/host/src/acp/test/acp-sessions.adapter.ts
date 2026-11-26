@@ -348,7 +348,8 @@ const resolve = (current: SpecView, act: string, target: SpecView): AcpOp => {
       }
       return { act, r };
     }
-    case 'TurnEnded': {
+    case 'TurnEnded':
+    case 'DrainTimedOut': {
       return { act, r: run('finishing') };
     }
     case 'Cancel': {
@@ -439,9 +440,11 @@ export const perform = (harness: AcpSessionsHarness, op: AcpOp): void => {
       actor.send({ type: 'cancel', requestId: run.requestId ?? '' });
       return;
     }
-    case 'CancelTimedOut': {
+    case 'CancelTimedOut':
+    case 'DrainTimedOut': {
       const proc = procOf(harness, run.key)!;
-      /* The ladder killed the group: `closed` reports the deferred turn, then the close. */
+      /* The ladder killed the group (after a cancel the vendor ignored, or a drain that never answered, E42):
+       * `closed` reports the deferred turn, then the close. */
       report(harness, run.key, {
         type: 'turnEnded',
         key: implKey(run.key),
@@ -540,6 +543,7 @@ export const enabledOps = (harness: AcpSessionsHarness): AcpOp[] => {
       }
       case 'finishing': {
         at('TurnEnded');
+        at('DrainTimedOut');
         break;
       }
       default:

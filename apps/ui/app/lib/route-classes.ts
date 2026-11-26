@@ -5,10 +5,11 @@
  * delivered and, for the guarded classes, what they load on every open. It is the one source for:
  *
  * - the prerender list (`static-paths.ts`, read by `react-router.config.ts`);
- * - the Netlify routing of static shells: the React Router function's `excludedPaths` (`vite.config.ts`) and the
- *   rewrite, redirect and header rules of `netlify.toml`, which {@link renderNetlifyShellRouting} generates and
- *   `route-classes.test.ts` holds equal to the checked-in file, and the Home shell's file, which the marketing edge
- *   function names and the build moves into place (`scripts/place-static-shells.ts`);
+ * - the Netlify routing of static shells: the paths of the static shell edge function, which serves the project shell
+ *   (`netlify/edge-functions/static-shell.ts`), the redirect and header rules of `netlify.toml`, which
+ *   {@link renderNetlifyShellRouting} generates and `route-classes.test.ts` holds equal to the checked-in file, and the
+ *   Home shell's file, which the marketing edge function names and the build moves into place
+ *   (`scripts/place-static-shells.ts`);
  * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`), and the warm manifest the
  *   build writes from them (`scripts/write-warm-manifest.ts`, read by `warm-next-step.ts` and the marketing site);
  * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`);
@@ -83,8 +84,10 @@ export type StaticShellClass = RouteClassBase &
     /**
      * What sends a request to the shell.
      *
-     * - `rewrite`: Netlify, from the URL alone. The function excludes the class's URLs and a generated `netlify.toml`
-     *   rule rewrites them to the shell's prerendered file.
+     * - `rewrite`: Netlify, from the URL alone. The static shell edge function (`netlify/edge-functions/static-shell.ts`)
+     *   runs on exactly the class's URLs ({@link staticShellEdgePaths}) and rewrites them to the shell's prerendered
+     *   file. No `netlify.toml` rule names them: a redirect rule's `:name` matches dotted segments too, and the
+     *   function's `preferStatic` lets such a rule answer the class's `.data` requests before the function does.
      * - `edge`: the marketing edge function (`netlify/edge-functions/marketing.ts`), per request, because the same URL
      *   also serves marketing. The build moves the prerendered file to {@link shellDocumentFile} (`place-static-shells.ts`)
      *   so that a request the edge function passes on reaches the function as before and never a static file.
@@ -368,14 +371,15 @@ export const shellDocumentFile = (routeClass: StaticShellClass): string =>
     : prerenderedFiles(routeClass.shellPath).document;
 
 /**
- * The React Router function's `excludedPaths` (`@netlify/vite-plugin-react-router`): each shell pattern in URLPattern
+ * The static shell edge function's paths (`netlify/edge-functions/static-shell.ts`): each shell pattern in URLPattern
  * syntax, every parameter restricted to {@link shellSegment}. Netlify compiles each to a regular expression with an
- * optional trailing slash (`@netlify/zip-it-and-ship-it` `getRoutes`), so the function keeps exactly the URLs
- * {@link staticShellFor} does not claim, `.data` requests included.
+ * optional trailing slash (`@netlify/edge-bundler`), so the edge function runs on exactly the URLs
+ * {@link staticShellFor} claims and never on a `.data` request. The React Router function excludes none of them: it
+ * renders the same document whenever the edge function passes a request on.
  *
- * @returns The excluded paths.
+ * @returns The edge function's paths.
  */
-export const netlifyFunctionExcludedPaths = (): string[] =>
+export const staticShellEdgePaths = (): string[] =>
   rewriteShellClasses.map((routeClass) =>
     routeClass.match
       .split('/')
@@ -395,22 +399,18 @@ const shellPrefix = (routeClass: StaticShellClass): string => `/${routeClass.mat
 export type NetlifyRedirect = Readonly<{ from: string; to: string; status: number; force: boolean }>;
 
 /**
- * The redirect rules that serve each shell, in the order Netlify must evaluate them (first match wins). They are
- * reached only by the URLs the function excludes, since Netlify runs functions before redirects.
- *
- * 1. On the canonical production host's `www` alias, a permanent redirect to the apex, as the root loader's
- *    `throwRedirectIfSubdomain` answers a function document (path and query kept). Only the URLs the function
- *    excludes reach it, so it changes nothing the function still serves.
- * 2. A 200 rewrite to the shell, with and without the trailing slash the function's route also accepts.
+ * The redirect rules of each shell's URLs: on the canonical production host's `www` alias, a permanent redirect to the
+ * apex, as the root loader's `throwRedirectIfSubdomain` answers a function document (path and query kept). The static
+ * shell edge function passes a `www` request on, and the function's `preferStatic` lets the rule answer before the
+ * function, for every `/w/…` URL. No rule rewrites to a shell: the edge function does, because a rule's `:name` matches
+ * a dotted segment and would serve the shell for a `.data` request.
  *
  * @param canonicalHost - The production hostname (`metaConfig.appDomain`).
  * @returns The rules.
  */
 export const netlifyShellRedirects = (canonicalHost: string): NetlifyRedirect[] =>
   rewriteShellClasses.flatMap((routeClass) => {
-    const placeholders = routeClass.match;
     const prefix = shellPrefix(routeClass);
-    const shellFile = `/${shellDocumentFile(routeClass)}`;
     return [
       {
         from: `https://www.${canonicalHost}${prefix}/*`,
@@ -418,8 +418,6 @@ export const netlifyShellRedirects = (canonicalHost: string): NetlifyRedirect[] 
         status: 301,
         force: true,
       },
-      { from: placeholders, to: shellFile, status: 200, force: false },
-      { from: `${placeholders}/`, to: shellFile, status: 200, force: false },
     ];
   });
 

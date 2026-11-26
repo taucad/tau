@@ -4,11 +4,13 @@
  * spinner or action. The viewer alone says the open, and fails it once; a phone sheet at full that covers the viewer
  * says the failure in its body instead.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
-import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
 import type { ProjectWaitShape } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import {
   CoveringSheetFailure,
@@ -58,6 +60,19 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 
 const clock = { now: (): number => mocks.now };
 
+/* Every case starts from the same doubles, whatever order the cases run in. */
+beforeEach(() => {
+  mocks.send.mockClear();
+  mocks.syncNow.mockClear();
+  mocks.connectRemote.mockClear();
+  mocks.status = undefined;
+  mocks.now = 0;
+  mocks.model = 'ready';
+  mocks.facet = undefined;
+  mocks.isCheckSlow = false;
+  mocks.session = 'settled';
+});
+
 function renderWait(
   state: Exclude<ModelAvailability, 'ready'>,
   options: { shape?: ProjectWaitShape; isCovering?: boolean } = {},
@@ -90,7 +105,7 @@ const liveRegions = (): Element[] => [
 ];
 
 describe('ProjectWaitSkeleton', () => {
-  it.each(['transcript', 'fields', 'tree', 'list', 'code'] as const)(
+  it.each(['transcript', 'fields', 'tree', 'list', 'code', 'tabs'] as const)(
     'should draw the %s shape as aria-hidden bars from 300 ms on the wait clock, with no words, spinner or action',
     (shape) => {
       const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
@@ -297,5 +312,93 @@ describe('the covering sheet header’s status', () => {
     } finally {
       mocks.session = 'settled';
     }
+  });
+});
+
+/*
+ * Editor startup: one wait, one clock (Progressive Loading Policy rule 16). A pane that mounts while the project opens
+ * takes over the workspace frame's bars on the open's clock, so they show at once instead of blinking out for 300 ms;
+ * a pane a person opens after the reveal, or a later wait, counts from its own start.
+ */
+/** An open that began at navigation start and is not revealed yet. */
+const openAtNavigation: OpenWait = { startedAt: 0, isRevealed: false };
+
+describe('a pane’s wait on the open’s clock', () => {
+  beforeEach(() => {
+    mocks.now = 0;
+    mocks.model = 'ready';
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const delay = (): string | undefined => bars()?.style.getPropertyValue('--wait-skeleton-delay');
+  const renderInOpen = (open: OpenWait, element: React.JSX.Element): ReturnType<typeof render> =>
+    render(
+      <WaitClockProvider clock={clock}>
+        <openWaitContext.Provider value={open}>{element}</openWaitContext.Provider>
+      </WaitClockProvider>,
+    );
+
+  it('draws a chunk’s bars at once when it mounts 2 s into the open, before the reveal', () => {
+    mocks.now = 2000;
+    renderInOpen({ startedAt: 0, isRevealed: false }, <PaneWaitSkeleton shape='fields' label='Parameters' />);
+
+    expect(screen.getByRole('group', { name: 'Parameters' })).toHaveAttribute('aria-busy', 'true');
+    expect(delay()).toBe('-1700ms');
+  });
+
+  it('keeps the open’s clock for a project open step, whose wait began with the open', () => {
+    mocks.now = 1500;
+    mocks.model = 'downloading';
+    renderInOpen(
+      { startedAt: 500, isRevealed: false },
+      <ProjectWaitSkeleton state='downloading' shape='tree' label='Files' />,
+    );
+
+    expect(delay()).toBe('-700ms');
+  });
+
+  /* A client navigation's click keeps the page's user activation for a few seconds, so a pane whose code arrives just
+   * after the reveal looks like a gesture's: until the open's slow mark it is still the open's, and its bars do not
+   * blink out for 300 ms after the frame's. */
+  it('keeps the open’s clock for a pane that mounts after the reveal, before the open’s slow mark', () => {
+    vi.stubGlobal('navigator', { ...globalThis.navigator, userActivation: { isActive: true } });
+    mocks.now = 2500;
+    renderInOpen({ startedAt: 500, isRevealed: true }, <PaneWaitSkeleton shape='fields' label='Parameters' />);
+
+    expect(delay()).toBe('-1700ms');
+  });
+
+  it('times a pane opened after the open’s slow mark from its own start', () => {
+    vi.stubGlobal('navigator', { ...globalThis.navigator, userActivation: { isActive: true } });
+    mocks.now = 60_000;
+    renderInOpen({ startedAt: 0, isRevealed: true }, <PaneWaitSkeleton shape='tree' label='Files' />);
+
+    expect(delay()).toBe('300ms');
+  });
+
+  it('times a later wait of the same pane from its own start', () => {
+    mocks.now = 2000;
+    const view = renderInOpen(openAtNavigation, <ProjectWaitSkeleton state='downloading' shape='tree' label='Files' />);
+    expect(delay()).toBe('-1700ms');
+    mocks.now = 4000;
+    view.rerender(
+      <WaitClockProvider clock={clock}>
+        <openWaitContext.Provider value={openAtNavigation}>
+          <ProjectWaitSkeleton state='failed' shape='tree' label='Files' />
+        </openWaitContext.Provider>
+      </WaitClockProvider>,
+    );
+    mocks.now = 5000;
+    view.rerender(
+      <WaitClockProvider clock={clock}>
+        <openWaitContext.Provider value={openAtNavigation}>
+          <ProjectWaitSkeleton state='connecting' shape='tree' label='Files' />
+        </openWaitContext.Provider>
+      </WaitClockProvider>,
+    );
+
+    expect(delay()).toBe('300ms');
   });
 });

@@ -1080,23 +1080,21 @@ const config = [
   },
 
   /**
-   * Restrict who may import the AI SDK raw `Chat` factory / shared transport.
+   * Restrict who may import the chat clients' internal modules.
    *
    * The blueprint (R9) collapses every UI site's per-call `body: { ... }` /
    * `metadata: { ... }` literal into a single profile-scoped chat client. The
-   * raw `Chat` instance, the shared `DefaultChatTransport`, and the
-   * `useActiveChatInstance` accessor live under `chat-clients/_internal/`
-   * and may only be imported by:
+   * turn admission and name-generator internals live under
+   * `chat-clients/_internal/` and may only be imported by:
    *
    *   1. The three profile-scoped clients (`use-cad-chat-client.ts`,
    *      `use-project-name-client.ts`, `use-commit-name-client.ts`) — these
    *      ARE the indirection layer.
    *   2. Their sibling internal modules (e.g. `name-generator-client.ts`,
-   *      `shared-chat-transport.ts` itself, `use-active-chat-instance.ts`).
-   *   3. `services/chat-session-store.ts` — the session store owns the
-   *      live `Chat<MyUIMessage>` instances that clients consume, so it
-   *      needs the factory at construction time. The store does NOT compose
-   *      `body: { agent }` itself; that stays inside the chat clients.
+   *      `use-turn-admission.ts`).
+   *   3. `services/chat-session-store.ts` — the session store dispatches the
+   *      admitted host commands. It does NOT compose the agent config itself;
+   *      that stays inside the chat clients.
    *
    * Any new UI site that wants to send a chat turn must add a chat-client
    * verb, not bypass via `_internal`.

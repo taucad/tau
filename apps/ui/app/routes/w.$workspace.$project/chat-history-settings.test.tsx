@@ -8,17 +8,17 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MemoryRouter, useLocation } from 'react-router';
 
 type ChatState = {
-  chat: { messages: unknown[] } | undefined;
+  persistenceActorRef: Record<string, unknown> | undefined;
   activeChatId: string;
   messages: CombinedChatState['messages'];
 };
-const chatState = vi.hoisted((): ChatState => ({ chat: { messages: [] }, activeChatId: 'chat_active', messages: [] }));
+const chatState = vi.hoisted((): ChatState => ({ persistenceActorRef: {}, activeChatId: 'chat_active', messages: [] }));
 const downloadBlob = vi.fn();
 const serializeTranscript = vi.fn(() => '# transcript');
 const chats = [{ id: 'chat_active', name: 'Bracket design' }];
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatContext: () => ({ chat: chatState.chat, activeChatId: chatState.activeChatId }),
+  useChatContext: () => ({ persistenceActorRef: chatState.persistenceActorRef, activeChatId: chatState.activeChatId }),
   useChatSelector: <Selection,>(selector: (state: Pick<CombinedChatState, 'messages'>) => Selection): Selection =>
     selector({ messages: chatState.messages }),
 }));
@@ -62,7 +62,7 @@ function Location(): React.JSX.Element {
 describe('ChatHistorySettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    chatState.chat = { messages: [] };
+    chatState.persistenceActorRef = {};
     chatState.messages = [];
     chatState.activeChatId = 'chat_active';
   });
@@ -97,7 +97,6 @@ describe('ChatHistorySettings', () => {
 
   it('should hand Rename to the header and keep Export disabled with no messages', async () => {
     const user = userEvent.setup();
-    chatState.chat = { messages: [{ id: 'stale-sdk-message' }] };
     const { onRename } = renderMenu();
 
     await user.click(screen.getByRole('button', { name: 'Chat options' }));

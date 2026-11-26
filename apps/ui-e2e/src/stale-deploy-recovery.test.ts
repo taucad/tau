@@ -365,48 +365,6 @@ describe('a code load that fails once on the build the server still runs (FP9, F
   }, 120_000);
 
   /**
-   * Start a chat from Home's composer, as the production report did (`/w/home/new-project?chat=…`): the chat panel
-   * mounts its activity row, whose spinner loads its own chunk.
-   */
-  const startChatFromHome = async (page: Page, origin: string): Promise<void> => {
-    await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
-    await page
-      .getByRole('button', { name: 'Continue without' })
-      .click({ timeout: 5000 })
-      .catch(() => undefined);
-    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).first();
-    await composer.click();
-    await page.keyboard.type('Make a cube');
-    await page.keyboard.press('Enter');
-    await page.waitForURL(/\/w\/home\/new-project\?chat=/u, { timeout: 30_000 });
-  };
-
-  it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
-    const { page, live, failures } = await open();
-    const spinnerChunk = /^\/assets\/metal-morph-spinner-(?!service-)[\w-]+\.js$/u;
-    // The import's own request: Home's idle prefetch of the project tier (`empty`) may ask for the chunk first.
-    const failed = live.failNext(spinnerChunk, { dest: 'script' });
-
-    await startChatFromHome(page, live.origin);
-    await failed;
-    await page.waitForTimeout(3000);
-
-    // The spinner is optional code: it degrades to the flat spinner instead of taking the chat panel down (D20).
-    expect(
-      await page.getByRole('heading', { name: 'Chat Unavailable' }).count(),
-      `module load errors: ${JSON.stringify(failures)}`,
-    ).toBe(0);
-    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).last();
-    await composer.waitFor({ timeout: 10_000 });
-    await composer.click();
-    await page.keyboard.type('Still here');
-    expect(await composer.textContent()).toContain('Still here');
-    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
-    // The page was worked on, so it never reloads by itself for code it can do without.
-    expect(live.documents).toStrictEqual(['previous']);
-  }, 120_000);
-
-  /**
    * Let a chat turn reach the agent host without an API: the page's model catalog and the self-host deployment answer,
    * as the browser specs' fixtures give them. The run's own model call then fails, which these rows do not read.
    */
@@ -432,6 +390,51 @@ describe('a code load that fails once on the build the server still runs (FP9, F
       route.fulfill(answer({ version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 })),
     );
   };
+
+  /**
+   * Start a chat from Home's composer, as the production report did (`/w/home/new-project?chat=…`): the chat panel
+   * mounts its activity row, whose spinner loads its own chunk.
+   */
+  const startChatFromHome = async (page: Page, origin: string): Promise<void> => {
+    await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+    await page
+      .getByRole('button', { name: 'Continue without' })
+      .click({ timeout: 5000 })
+      .catch(() => undefined);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).first();
+    await composer.click();
+    await page.keyboard.type('Make a cube');
+    await page.keyboard.press('Enter');
+    await page.waitForURL(/\/w\/home\/new-project\?chat=/u, { timeout: 30_000 });
+  };
+
+  it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
+    const { page, live, failures } = await open();
+    const spinnerChunk = /^\/assets\/metal-morph-spinner-(?!service-)[\w-]+\.js$/u;
+    // The import's own request: Home's idle prefetch of the project tier (`empty`) may ask for the chunk first.
+    const failed = live.failNext(spinnerChunk, { dest: 'script' });
+    /* The turn is admitted, so the panel shows its working row and its spinner; without a model list it is refused
+     * before it starts, and the refusal's own card is not what this row reads. */
+    await routeTurnAdmission(live.origin);
+
+    await startChatFromHome(page, live.origin);
+    await failed;
+    await page.waitForTimeout(3000);
+
+    // The spinner is optional code: it degrades to the flat spinner instead of taking the chat panel down (D20).
+    expect(
+      await page.getByRole('heading', { name: 'Chat Unavailable' }).count(),
+      `module load errors: ${JSON.stringify(failures)}`,
+    ).toBe(0);
+    const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' }).last();
+    await composer.waitFor({ timeout: 10_000 });
+    await composer.click();
+    await page.keyboard.type('Still here');
+    expect(await composer.textContent()).toContain('Still here');
+    expect(await page.getByRole('button', { name: /^try again$/iu }).count()).toBe(0);
+    // The page was worked on, so it never reloads by itself for code it can do without.
+    expect(live.documents).toStrictEqual(['previous']);
+  }, 120_000);
 
   const implementation = /^\/assets\/agent-host\.impl-[\w-]+\.js$/u;
   const agentWorkerScript = /^\/assets\/agent-host\.worker-[\w-]+\.js$/u;

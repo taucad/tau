@@ -6,9 +6,14 @@
  * to repair Tau…" with **Cancel** for ten seconds, then installs and restarts. This narrows the updater's rule that a
  * background download never grants install consent (`update-controller.ts`) to this one case.
  *
+ * The countdown runs only while its Cancel is on screen. Closing the recovery window, or its native fallback replacing
+ * it (that dialog has no Cancel), stops the countdown for this launch, as Cancel does; so does a quit or restart under
+ * way, such as Restart in Safe Mode. The manual **Install update and restart** stays.
+ *
  * Each target version is tried once: the ledger records the attempt before the install starts, and a later launch that
  * is still on the old version blocks that target (`boot-health.ts`). It then offers the manual **Install update and
- * restart** and **Download Tau** instead, so an installer that fails quietly cannot restart the app in a loop.
+ * restart** and **Download Tau** instead, so an installer that fails quietly cannot restart the app in a loop. An
+ * install that never went ahead (the save review kept Tau open, or another quit was pending) withdraws the record.
  *
  * Everything here takes its effects as arguments; `main.ts` wires it to the updater, the ledger and the recovery
  * window.
@@ -54,12 +59,18 @@ export const createAutoInstall = (host: {
   readonly mode: LaunchMode;
   /** A target whose automatic install did not take in an earlier launch. */
   readonly blockedTarget: string | undefined;
+  /** Whether the recovery window, which holds the countdown's Cancel, is showing. */
   readonly recoveryShowing: () => boolean;
+  /** Whether a quit or restart is under way (for example Restart in Safe Mode). */
+  readonly quitting: () => boolean;
   /** Make the countdown and its Cancel visible: main opens the recovery window. */
   readonly showCountdown: () => void;
   /** Write `autoInstall` to the ledger. */
   readonly noteAutoInstall: (targetVersion: string) => void;
-  readonly install: () => Promise<void>;
+  /** Remove the `autoInstall` this launch wrote for a target whose install never went ahead. */
+  readonly withdrawAutoInstall: (targetVersion: string) => void;
+  /** Install; resolves whether the restart into the update went ahead. */
+  readonly install: () => Promise<boolean>;
   readonly publish: (state: AutoInstallState | undefined) => void;
   readonly report: (signal: DesktopSignal) => void;
   readonly log: (level: 'info' | 'warn' | 'error', event: string, detail?: unknown) => void;
@@ -101,7 +112,16 @@ export const createAutoInstall = (host: {
     countdown = undefined;
     setState(undefined);
   };
+  /* Why a running countdown may not go on: its Cancel is gone, or a quit or restart is under way. */
+  const interrupted = (): 'recovery-closed' | 'quitting' | undefined =>
+    host.quitting() ? 'quitting' : host.recoveryShowing() ? undefined : 'recovery-closed';
   const run = (targetVersion: string): void => {
+    const reason = interrupted();
+    if (reason !== undefined) {
+      settled.add(targetVersion);
+      stop(reason);
+      return;
+    }
     countdown = undefined;
     settled.add(targetVersion);
     setState(undefined);
@@ -111,22 +131,33 @@ export const createAutoInstall = (host: {
     host.report(autoInstallSignal('started', targetVersion));
     // async-iife: bootstrap -- an install that fails is published by the updater as its own state.
     void (async (): Promise<void> => {
+      let proceeded = false;
       try {
-        await host.install();
+        proceeded = await host.install();
       } catch (error) {
         host.log('error', 'updater.auto-install-failed', { message: String(error) });
+      }
+      if (!proceeded) {
+        /* Tau stayed open on the old version: nothing restarted, so the target is not one that failed to take. */
+        host.withdrawAutoInstall(targetVersion);
+        host.log('warn', 'updater.auto-install-not-started', { targetVersion });
       }
     })();
   };
   const evaluate = (): void => {
     const target = update?.phase === 'ready' ? update.version : undefined;
     if (countdown !== undefined) {
-      if (homeReady || target !== countdown.targetVersion) {
-        stop(homeReady ? 'home-ready' : 'update-changed');
+      const reason = homeReady ? 'home-ready' : target === countdown.targetVersion ? interrupted() : 'update-changed';
+      if (reason === 'recovery-closed' || reason === 'quitting') {
+        /* Like Cancel: the window is not reopened to count down again in this launch. */
+        settled.add(countdown.targetVersion);
+      }
+      if (reason !== undefined) {
+        stop(reason);
       }
       return;
     }
-    if (target === undefined || homeReady || settled.has(target)) {
+    if (target === undefined || homeReady || settled.has(target) || host.quitting()) {
       return;
     }
     if (target === host.blockedTarget) {
@@ -148,6 +179,8 @@ export const createAutoInstall = (host: {
     host.log('warn', 'updater.auto-install-countdown', { targetVersion: target, mode: host.mode });
     setState({ status: 'counting', targetVersion: target, milliseconds: autoInstallCountdownMilliseconds });
     host.showCountdown();
+    /* The recovery window could not show (its native fallback has no Cancel): no countdown without a Cancel. */
+    evaluate();
   };
 
   return {

@@ -21,17 +21,39 @@
  * workflow it dispatches and fails on a red one, so its newest scheduled run being green and in the 36-hour window
  * means it ran and every dispatch it made is green.
  *
+ * It also pages for the flake quarantine (FQ-9 of the CI flake quarantine blueprint; testing policy § 16.3): every
+ * `quarantine.json` entry on `main` at or past its `expires` day (day 14, or 28 after the one operator renewal) is a
+ * problem row, every day until the flake ledger's removal lands and the test gates again.
+ *
+ * And it watches the rest of the flake quarantine (FQ-11, the alerts of blueprint D9), each as its own row:
+ *
+ * - **The ledger job.** A `flake-ledger.yml` run of the last 24 hours that failed or timed out, whatever started it:
+ *   the ingestion runs after every CI run, and its daily schedule (watched above) only catches up a quiet day.
+ * - **A full debt.** The workspace's `quarantine.json` files hold the workspace cap (20) or one holds the project cap
+ *   (8): the next qualifying flake is refused and keeps gating.
+ * - **A never-quarantine flake.** A gating flake event of the last 24 hours, in the ledger state on the `flake-ledger`
+ *   branch, of a test in the never-quarantine set (testing policy § 16.4): it keeps gating and is paged on the event.
+ *
  * Usage: node scripts/src/nightly-watchdog.ts [--summary <file>] [--test-alert]
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY (`owner/name`), CI_ALERT_WEBHOOK_URL (unset: report only and exit 1 on a
  * problem, so the run itself turns red), GITHUB_SERVER_URL, GITHUB_RUN_ID (for the alert's link).
  * Exit codes: 0 every scheduled workflow is healthy or the alert was delivered; 1 a problem with no delivered alert,
  * or a delivery failure; 2 usage.
  */
+import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { load } from 'js-yaml';
+
+import { neverQuarantineArea, parseQuarantine, quarantineBounds } from '@taucad/vitest-ci/quarantine';
+
+import { client } from '#ci-github-client.js';
+import type { LedgerState } from '#ci-flake-ledger-state.js';
+import { branchStore, stateBranch } from '#ci-flake-ledger-store.js';
+import { readWorkspace } from '#ci-flake-quarantine-entry-cli.js';
+import type { WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 
 /** A workflow file with at least one cron schedule. */
 export type ScheduledWorkflow = {
@@ -138,6 +160,179 @@ export const judgeRuns = (workflow: ScheduledWorkflow, runs: readonly ScheduledR
     };
   }
   return newest;
+};
+
+/** A `quarantine.json` on `main`: its workspace-relative path and its text. */
+export type QuarantineFile = { readonly path: string; readonly text: string };
+
+/**
+ * One problem row per quarantine entry at or past its `expires` day (testing policy § 16.3): the operator is paged on
+ * day 14 (28 after a renewal), and every day after until the entry leaves `main`. An entry that is not an object with
+ * a `test` and an `expires` is `validate-quarantine`'s to report.
+ */
+export const judgeQuarantine = (
+  files: readonly QuarantineFile[],
+  today: string,
+  repository = 'taucad/tau',
+): Verdict[] =>
+  files.flatMap((file) =>
+    parseQuarantine(file.text).entries.flatMap((entry): Verdict[] => {
+      if (typeof entry !== 'object' || entry === null) {
+        return [];
+      }
+      const { test, expires, issue, renewal } = entry as Record<string, unknown>;
+      if (typeof test !== 'string' || typeof expires !== 'string' || expires > today) {
+        return [];
+      }
+      const owner = typeof issue === 'number' ? ` (owner issue #${issue})` : '';
+      return [
+        {
+          workflow: { file: file.path, name: 'Flake quarantine expiry', crons: [] },
+          state: 'failed',
+          detail:
+            `${test.replaceAll(/\s+/gu, ' ').slice(0, 200)}${owner} ${expires === today ? 'expires today' : `expired on ${expires}`}: ` +
+            `the flake ledger removes the entry and the test gates again${renewal === undefined ? '; the operator may renew it once, to 28 days' : ''}`,
+          ...(typeof issue === 'number' ? { url: `https://github.com/${repository}/issues/${issue}` } : {}),
+        },
+      ];
+    }),
+  );
+
+/** The flake ledger's workflow, under which its job's verdict is reported. */
+export const ledgerWorkflow: ScheduledWorkflow = { file: 'flake-ledger.yml', name: 'Flake ledger job', crons: [] };
+
+/** A `flake-ledger.yml` run, as the Actions API lists it. */
+export type LedgerRun = ScheduledRun & { readonly event?: string | undefined };
+
+/** Conclusions that make the ledger job red. A cancelled run is one the concurrency group replaced, not a failure. */
+const redLedger = new Set(['failure', 'timed_out', 'startup_failure']);
+
+/**
+ * The ledger job's row: red when a run of the last 24 hours, started by a CI run or by hand, failed. Its scheduled
+ * runs are left to the scheduled-workflow row, so a red schedule is reported once.
+ */
+export const judgeLedgerJob = (runs: readonly LedgerRun[], now: Date): Verdict => {
+  const red = runs
+    .filter(
+      (run) =>
+        run.event !== 'schedule' &&
+        now.getTime() - Date.parse(run.created_at) <= recentWindow &&
+        run.status === 'completed' &&
+        redLedger.has(run.conclusion ?? ''),
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const [newest] = red;
+  if (!newest) {
+    return { workflow: ledgerWorkflow, state: 'ok', detail: 'no red ledger run in the last 24 h' };
+  }
+  return {
+    workflow: ledgerWorkflow,
+    state: 'failed',
+    detail: `${red.length} red ledger run${red.length === 1 ? '' : 's'} in the last 24 h (newest ${newest.conclusion ?? 'no conclusion'}): the ledger stops counting, entering, releasing and expiring until it runs green`,
+    url: newest.html_url,
+  };
+};
+
+/** The name the quarantine debt is reported under. */
+export const debtWorkflow: ScheduledWorkflow = { file: 'quarantine.json', name: 'Flake quarantine debt', crons: [] };
+
+/**
+ * The quarantine debt's row: failed when the workspace holds its cap of entries or one file holds a project's, so the
+ * next qualifying flake is refused (testing policy § 16.3). Every entry on `main` counts, expired or not, until the
+ * ledger removes it.
+ */
+export const judgeDebt = (files: readonly QuarantineFile[]): Verdict => {
+  const counts = files
+    .map((file) => ({
+      path: file.path,
+      entries: parseQuarantine(file.text).entries.filter((entry) => typeof entry === 'object' && entry !== null).length,
+    }))
+    .sort((a, b) => b.entries - a.entries || a.path.localeCompare(b.path));
+  const total = counts.reduce((sum, file) => sum + file.entries, 0);
+  const full = counts.filter((file) => file.entries >= quarantineBounds.projectEntries);
+  const [fullest] = counts;
+  const workspace = `${total} of ${quarantineBounds.workspaceEntries} entries in the workspace`;
+  if (total < quarantineBounds.workspaceEntries && full.length === 0) {
+    return {
+      workflow: debtWorkflow,
+      state: 'ok',
+      detail: `${workspace}${fullest && fullest.entries > 0 ? `; fullest ${fullest.path} ${fullest.entries} of ${quarantineBounds.projectEntries}` : ''}`,
+    };
+  }
+  return {
+    workflow: debtWorkflow,
+    state: 'failed',
+    detail:
+      `the quarantine debt is full: ${workspace}` +
+      `${full.map((file) => `; ${file.path} ${file.entries} of ${quarantineBounds.projectEntries}`).join('')}` +
+      ': a new qualifying flake is refused and keeps gating; the fix loop is behind',
+  };
+};
+
+/** The name a never-quarantine flake is reported under. */
+export const neverQuarantineWorkflow: ScheduledWorkflow = {
+  file: 'flake-ledger',
+  name: 'Never-quarantine flake',
+  crons: [],
+};
+
+/**
+ * One problem row per test in the never-quarantine set (testing policy § 16.4) with a gating flake event in the last
+ * 24 hours: D8 pages the operator on the event, and the test keeps gating. Without a ledger state there is nothing to
+ * read, which is a healthy row; a test whose project the checkout does not hold is left to the entry job's refusal.
+ */
+export const judgeNeverQuarantine = (
+  state: LedgerState | undefined,
+  projects: ReadonlyMap<string, WorkspaceProject>,
+  now: Date,
+): Verdict[] => {
+  if (!state) {
+    return [{ workflow: neverQuarantineWorkflow, state: 'ok', detail: 'no ledger state yet' }];
+  }
+  const problems = Object.entries(state.identities).flatMap(([id, identity]): Verdict[] => {
+    const project = projects.get(identity.project);
+    if (!project || identity.file === undefined) {
+      return [];
+    }
+    const area = neverQuarantineArea(posix.join(project.root, identity.file), project.tags);
+    const events = identity.events.filter(
+      (event) => event.shadow !== true && now.getTime() - Date.parse(event.at) <= recentWindow,
+    );
+    if (area === undefined || events.length === 0) {
+      return [];
+    }
+    const runs = [...new Set(events.map((event) => event.failedRun))];
+    return [
+      {
+        workflow: neverQuarantineWorkflow,
+        state: 'failed',
+        detail:
+          `${id.replaceAll(/\s+/gu, ' ').slice(0, 200)} (${area}): ${events.length} flake event${events.length === 1 ? '' : 's'} in the last 24 h, ` +
+          `failing run${runs.length === 1 ? '' : 's'} ${runs.slice(0, 5).join(', ')}: it keeps gating; the agent owes a class within 24 hours`,
+      },
+    ];
+  });
+  return problems.length > 0
+    ? problems
+    : [
+        {
+          workflow: neverQuarantineWorkflow,
+          state: 'ok',
+          detail: 'no flake event of a never-quarantine test in the last 24 h',
+        },
+      ];
+};
+
+/** Every tracked `quarantine.json` under `root`. */
+export const readQuarantineFiles = async (root: string): Promise<QuarantineFile[]> => {
+  const paths = execFileSync('git', ['ls-files', '-z', '--', ':(glob)**/quarantine.json'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter((path) => path !== '')
+    .sort();
+  return Promise.all(paths.map(async (path) => ({ path, text: await readFile(resolve(root, path), 'utf8') })));
 };
 
 /** Grafana IRM formatted-webhook fields. */
@@ -321,6 +516,87 @@ const recentScheduledRuns = async (
   return body.workflow_runs;
 };
 
+/** One page of a workflow's runs, as the Actions API lists it. */
+export type LedgerRunPage = { readonly total_count: number; readonly workflow_runs: readonly LedgerRun[] };
+
+/** The most results the runs API returns for one filtered listing. */
+const listingCap = 1000;
+
+/**
+ * Every run a listing holds, page by page, counted against the `total_count` of its first page (a page past the end
+ * reports 0). A listing at the API's 1,000-result cap (it may be cut there), or one whose pages end before that count, throws: a partial
+ * list could hide a red run, so it fails closed.
+ */
+export const readAllRuns = async (getPage: (page: number) => Promise<LedgerRunPage>): Promise<LedgerRun[]> => {
+  const first = await getPage(1);
+  const total = first.total_count;
+  if (total >= listingCap) {
+    throw new Error(`${total} ledger runs in a day, at or over the listing cap of ${listingCap}; not read in part`);
+  }
+  const runs: LedgerRun[] = [...first.workflow_runs];
+  for (let page = 2; runs.length < total; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
+    const body = await getPage(page);
+    if (body.workflow_runs.length === 0) {
+      throw new Error(`the listing ended at ${runs.length} of ${total} runs; not read in part`);
+    }
+    runs.push(...body.workflow_runs);
+  }
+  return runs;
+};
+
+/** The ledger job's completed runs of the last 24 hours, any event; the judge picks the red ones. */
+const recentLedgerRuns = async (repository: string, token: string, now: Date): Promise<LedgerRun[]> => {
+  const since = `${new Date(now.getTime() - recentWindow).toISOString().slice(0, 19)}Z`;
+  return readAllRuns(async (page) =>
+    githubGet<LedgerRunPage>(
+      `repos/${repository}/actions/workflows/${ledgerWorkflow.file}/runs?status=completed&created=${encodeURIComponent(`>=${since}`)}&per_page=100&page=${page}`,
+      token,
+    ),
+  );
+};
+
+/**
+ * The ledger job's row from its runs, or a problem row when they cannot be read: a failed read never stops the other
+ * rows from being reported and delivered.
+ */
+export const ledgerJobVerdict = async (read: () => Promise<readonly LedgerRun[]>, now: Date): Promise<Verdict> => {
+  try {
+    return judgeLedgerJob(await read(), now);
+  } catch (error) {
+    return {
+      workflow: ledgerWorkflow,
+      state: 'failed',
+      detail: `the ledger job's runs could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+};
+
+/** The never-quarantine rows from the ledger state, or one problem row when the state cannot be read. */
+const neverQuarantineVerdicts = async (options: {
+  readonly repository: string;
+  readonly token: string;
+  readonly root: string;
+  readonly now: Date;
+}): Promise<Verdict[]> => {
+  const { repository, token, root, now } = options;
+  let state: LedgerState | undefined;
+  try {
+    const github = client({ api: 'https://api.github.com', token, repository, maxRequests: 10 });
+    state = await branchStore(github, stateBranch).read();
+  } catch (error) {
+    return [
+      {
+        workflow: neverQuarantineWorkflow,
+        state: 'failed',
+        detail: `the ledger state could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    ];
+  }
+  const { projects } = await readWorkspace(root);
+  return judgeNeverQuarantine(state, projects, now);
+};
+
 const main = async (args: readonly string[]): Promise<number> => {
   let summary: string | undefined;
   let testAlert = false;
@@ -340,7 +616,9 @@ const main = async (args: readonly string[]): Promise<number> => {
   const runUrl = `${process.env['GITHUB_SERVER_URL'] ?? 'https://github.com'}/${repository}/actions/runs/${process.env['GITHUB_RUN_ID'] ?? ''}`;
   const now = new Date();
 
-  const workflows = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
+  const root = resolve(import.meta.dirname, '../..');
+  const workflows = await scheduledWorkflows(resolve(root, '.github/workflows'));
+  const quarantineFiles = await readQuarantineFiles(root);
   const verdicts = [
     ...(await Promise.all(
       workflows.map(async (workflow) =>
@@ -348,6 +626,10 @@ const main = async (args: readonly string[]): Promise<number> => {
       ),
     )),
     ...(await candidateVerdicts(repository, token, now)),
+    ...judgeQuarantine(quarantineFiles, now.toISOString().slice(0, 10), repository),
+    await ledgerJobVerdict(async () => recentLedgerRuns(repository, token, now), now),
+    judgeDebt(quarantineFiles),
+    ...(await neverQuarantineVerdicts({ repository, token, root, now })),
   ];
   const problems = verdicts.filter((verdict) => verdict.state === 'failed' || verdict.state === 'missing');
 

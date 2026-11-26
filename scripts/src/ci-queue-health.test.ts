@@ -309,6 +309,13 @@ describe('ci queue health', () => {
       expect(firstFailedJob([gate, failFast])).toBeUndefined();
     });
 
+    it('should not count a failed shadow row, which gates nothing (operator ruling Q1)', () => {
+      const shadow = job({ id: 92, name: 'Shadow end-to-end (ui-e2e test:e2e:journey-chat-1)', conclusion: 'failure' });
+      expect(failedJobs([shadow])).toEqual([]);
+      expect(runFailed({ run: queued(6, 5, { conclusion: 'success' }), jobs: [shadow] })).toBe(false);
+      expect(failedJobs([shadow, lane({ id: 1 })]).map((entry) => entry.id)).toEqual([1]);
+    });
+
     it('should judge a run by its first attempt and measure waits on its latest', () => {
       const jobs = [lane({ id: 1, run_attempt: 1 }), lane({ id: 2, conclusion: 'success', run_attempt: 2 })];
       expect(failedJobs(jobs).map((entry) => entry.id)).toEqual([1]);

@@ -44,6 +44,13 @@ export const knownAgentIds: ReadonlySet<string> = new Set(['tau', 'claude', 'cod
 /** Where an agent turn ran. @public */
 export const agentPlacements = ['browser', 'desktop', 'daemon', 'cloud'] as const;
 
+/**
+ * The phases of a turn's submit to admitted (B4, C3): `create` submit to the project existing, `page` to the context
+ * payload ready, `dispatch` to the command sent, `host` received to the `admitted` row appended, `delivery` appended
+ * to folded. @public
+ */
+export const admissionPhases = ['create', 'page', 'dispatch', 'host', 'delivery'] as const;
+
 /** ACP's `ToolKind` taxonomy; Tau's own tools are mapped onto it (`tauToolKinds`). @public */
 export const agentToolKinds = [
   'read',
@@ -211,6 +218,12 @@ const clampedInt = (max: number) =>
 /** Milliseconds; a day bounds any one turn. */
 const agentDurationSchema = clamped(86_400_000);
 
+/** Seconds; a day bounds any one delay. */
+const agentDelaySchema = clamped(86_400);
+
+/** Tool results in one turn; the tool-call rows' own ceiling. */
+const toolResultCountSchema = clampedInt(10_000);
+
 /** Token counts are per turn; one turn never legitimately reports more than this. */
 const tokenCountSchema = clamped(100_000_000);
 
@@ -271,6 +284,34 @@ const agentTurnEntrySchema = z.object({
     errorCode: agentErrorCodeSchema.optional(),
     /** Admission to the first content update, in milliseconds. */
     timeToFirstUpdate: agentDurationSchema.optional(),
+    /*
+     * Tool-result delivery (B4): the three counts are the delay's denominators, so a stuck result is counted rather
+     * than dropped from a maximum (observability rule 7). Absent from a turn whose page reported none.
+     */
+    /** Results the admitting tab timed: a live run, the page visible, the host on this machine's clock. */
+    toolResults: toolResultCountSchema.optional(),
+    /** Results it could not time: a replayed run, a hidden page or a host on another clock. */
+    toolResultsExcluded: toolResultCountSchema.optional(),
+    /** Timed results folded but not shown settled when the turn ended. */
+    toolResultsUnsettled: toolResultCountSchema.optional(),
+    /** The slowest timed result, from its output row's host `recordedAt` to the first frame showing it settled. Seconds. */
+    toolResultDelayMax: agentDelaySchema.optional(),
+    /** Submit to admitted by phase (C3); a phase the page did not measure is absent. Seconds. */
+    admissionDelay: z
+      .strictObject({
+        create: agentDelaySchema.optional(),
+        page: agentDelaySchema.optional(),
+        dispatch: agentDelaySchema.optional(),
+        host: agentDelaySchema.optional(),
+        delivery: agentDelaySchema.optional(),
+      } satisfies Record<(typeof admissionPhases)[number], unknown>)
+      .optional(),
+    /** Whether the project host was composed for this turn (`cold`) or already open (`warm`). */
+    hostStart: z.enum(['cold', 'warm']).optional(),
+    /** Whether the chat was open or re-opened after its idle eviction. */
+    chatState: z.enum(['open', 'reopened']).optional(),
+    /** Whether the admission awaited a deployment-answer request instead of reading a fresh answer (C7). */
+    deploymentRefetched: z.boolean().optional(),
     toolCalls: z
       .array(
         z.object({

@@ -96,7 +96,9 @@ export function TourRuntime(): React.JSX.Element | undefined {
         subscribeChat: (chatId, listener) => chats.subscribeChat(chatId, listener),
         read: (chatId) => {
           const session = chats.get(chatId);
-          return session === undefined ? undefined : { status: session.chat.status, messages: session.messages };
+          return session === undefined
+            ? undefined
+            : { status: chats.getChatStatus(chatId), messages: session.messages };
         },
       },
       actions: subscribeTourActions,

@@ -80,8 +80,8 @@ const persistentStorageRequestMetaKey = 'persistent-storage-request';
 /** Set in the upgrade that creates the database, cleared once the grant file's folders were adopted (R7). */
 const grantsAdoptionMetaKey = 'grants-adoption-pending';
 /**
- * `localStorage` mirror of Home's pin, read only when the database cannot be opened (desktop resilient startup
- * blueprint D1, R7). @public
+ * `localStorage` mirror of Home's pin, read when the database cannot be opened or holds no pin (desktop resilient
+ * startup blueprint D1, R7). @public
  */
 export const homeBackendMirrorKey = 'tau:home-backend';
 /** How long the shell may take to read one granted folder's marker before the folder is adopted under a new id. */
@@ -209,6 +209,12 @@ export type Workspace = {
    * {@link ProjectFileSystemConfig}.
    */
   readonly path?: string;
+  /**
+   * Set on a node row adopted from the grant file after a database reset while its folder's marker could not be read
+   * in time (R7): the row's id is a stand-in, and the first marker read through the file service may hand it the id
+   * the marker names ({@link syncNodeWorkspaceMarker}).
+   */
+  readonly markerUnread?: true;
 };
 
 /** True when this workspace is a picked node folder rather than a webaccess handle. */
@@ -705,7 +711,8 @@ function writeHomeBackendMirror(backend: HomeStorageBackend): void {
  *
  * When the database cannot be opened, Home's engine is its mirror; on the desktop with no mirror it is `node`, the
  * build's data path; on the web with no mirror the failure is rethrown, because a guess could show an empty Home (row
- * S37; desktop resilient startup blueprint D1, R7).
+ * S37; desktop resilient startup blueprint D1, R7). A database that opens with no pin while a mirror exists was
+ * deleted after Home was pinned, so the mirror names Home's engine there too.
  */
 export async function getHomeStorageBackend(): Promise<HomeStorageBackend> {
   let pinned: HomeStorageBackend | undefined;
@@ -724,6 +731,13 @@ export async function getHomeStorageBackend(): Promise<HomeStorageBackend> {
   if (pinned) {
     writeHomeBackendMirror(pinned);
     return pinned;
+  }
+  /* The mirror is written only from a pin, and a pin is never removed but with its database. A mirror beside a
+   * database with no pin is therefore a database that was deleted: a reset another tab blocked completes once that tab
+   * closes, after the reset was refused and before it could pin again. Home stays on its engine (row S37). */
+  const mirrored = readHomeBackendMirror();
+  if (mirrored !== undefined) {
+    return mirrored;
   }
   unpinnedHomeBackend ??= detectHomeStorageBackend();
   return unpinnedHomeBackend;
@@ -1422,7 +1436,8 @@ export type WorkspaceMarkerFiles = {
 /**
  * Anchor a node workspace's identity on disk (D2 step 8), so Locate can recognise the folder after a move. Written on
  * connect, on relink and at a folder's next successful admission. Best-effort: a read-only folder is skipped, and a
- * marker naming another workspace is left alone (Locate refuses that folder; it is not this function's to overwrite).
+ * marker naming another workspace is left alone (Locate refuses that folder; it is not this function's to overwrite),
+ * except on a row adopted before its marker could be read, which takes the marker's id when no other row holds it.
  *
  * @param workspace - The node workspace.
  * @param files - The folder's marker, read and written through the file service.
@@ -1431,7 +1446,7 @@ export type WorkspaceMarkerFiles = {
 export async function syncNodeWorkspaceMarker(
   workspace: Workspace,
   files: WorkspaceMarkerFiles,
-): Promise<'written' | 'unchanged' | 'skipped' | 'conflict'> {
+): Promise<'written' | 'unchanged' | 'skipped' | 'conflict' | 'reclaimed'> {
   let existing: WorkspaceMarker | undefined;
   try {
     const text = await files.read();
@@ -1440,7 +1455,9 @@ export async function syncNodeWorkspaceMarker(
     existing = undefined;
   }
   if (existing !== undefined && existing.workspaceId !== workspace.workspaceId) {
-    return 'conflict';
+    return workspace.markerUnread === true && (await reclaimMarkedWorkspaceId(workspace, existing.workspaceId))
+      ? 'reclaimed'
+      : 'conflict';
   }
   if (existing?.slug === workspace.slug) {
     return 'unchanged';
@@ -1461,22 +1478,76 @@ export async function syncNodeWorkspaceMarker(
   }
 }
 
-/** The marker id a granted folder names, or `undefined` when the shell cannot read one in time. */
-async function readGrantedFolderMarker(path: string): Promise<WorkspaceMarker | undefined> {
+/**
+ * Give a row adopted under a stand-in id the id its folder's marker names (D2 step 8, R7), in one transaction over the
+ * row and the creation-location choice that names it. Refused when the row changed, was not adopted that way, or
+ * another row holds the marker's id.
+ *
+ * @returns Whether the row now carries the marker's id.
+ */
+async function reclaimMarkedWorkspaceId(workspace: Workspace, markedId: string): Promise<boolean> {
+  const reclaimed = await withWorkspaceMintLock(async () =>
+    withStorageWrite(async () =>
+      withDb(async (db) => {
+        const rows = await readAllWorkspaces(db);
+        const current = rows.find((row) => row.workspaceId === workspace.workspaceId);
+        if (
+          current?.markerUnread !== true ||
+          current.path !== workspace.path ||
+          rows.some((row) => row.workspaceId === markedId)
+        ) {
+          return false;
+        }
+        const { markerUnread: _stale, ...row } = current;
+        const tx = db.transaction([workspacesStoreName, metaStoreName], 'readwrite');
+        const done = waitForTransaction(tx);
+        try {
+          tx.objectStore(workspacesStoreName).delete(current.workspaceId);
+          tx.objectStore(workspacesStoreName).put({ ...row, workspaceId: markedId } satisfies Workspace);
+          const meta = tx.objectStore(metaStoreName);
+          const choice = meta.get(projectCreationLocationMetaKey);
+          choice.addEventListener('success', () => {
+            const stored = choice.result as Partial<ProjectCreationLocationMeta> | undefined;
+            const location = parseProjectCreationLocation(stored?.location);
+            if (location?.kind === 'workspace' && location.workspaceId === current.workspaceId) {
+              meta.put({
+                key: projectCreationLocationMetaKey,
+                location: { ...location, workspaceId: markedId },
+              } satisfies ProjectCreationLocationMeta);
+            }
+          });
+        } catch (error) {
+          abortActiveTransaction(tx);
+          await done.catch(() => undefined);
+          throw error;
+        }
+        await done;
+        return true;
+      }),
+    ),
+  );
+  if (reclaimed) {
+    publishProjectRootConfigurationChange();
+  }
+  return reclaimed;
+}
+
+/** The marker a granted folder holds, `undefined` when it has none or it cannot be read, or `late` past the deadline. */
+async function readGrantedFolderMarker(path: string): Promise<WorkspaceMarker | 'late' | undefined> {
   const readMarker = desktopBridge()?.directories?.readMarker;
   if (readMarker === undefined) {
     return undefined;
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
-  /* A folder on a hung mount must not hold the start: past the deadline it is adopted under a new id. */
-  const deadline = new Promise<undefined>((resolve) => {
+  /* A folder on a hung mount must not hold the start: past the deadline it is adopted under a stand-in id. */
+  const deadline = new Promise<'late'>((resolve) => {
     timer = setTimeout(() => {
-      resolve(undefined);
+      resolve('late');
     }, markerReadDeadlineMilliseconds);
   });
   try {
     const text = await Promise.race([readMarker(path), deadline]);
-    return text === undefined ? undefined : parseWorkspaceMarker(text);
+    return text === undefined || text === 'late' ? text : parseWorkspaceMarker(text);
   } catch {
     return undefined;
   } finally {
@@ -1487,7 +1558,8 @@ async function readGrantedFolderMarker(path: string): Promise<WorkspaceMarker | 
 /**
  * Rebuild the folder list from the grant file after the database was created (desktop resilient startup blueprint R7,
  * T-B5.8). Each granted folder with no workspace row gets one, under the id its `.tau/workspace.json` names when no
- * other row holds it, otherwise under a new id. A grant is a folder the person picked in the native dialog, so
+ * other row holds it, otherwise under a new id. A folder whose marker misses the read deadline is adopted under a
+ * stand-in id marked `markerUnread`, which its first marker read replaces with the marker's. A grant is a folder the person picked in the native dialog, so
  * adopting it adds nothing they did not choose. Runs once per created database: the pending row is cleared in the
  * same transaction that writes the rows.
  *
@@ -1518,18 +1590,20 @@ async function adoptGrantedFolders(grants: readonly string[]): Promise<Workspace
       const taken = new Set(existing.map((workspace) => workspace.workspaceId));
       const adopted: Workspace[] = [];
       for (const [index, path] of paths.entries()) {
-        const markedId = markers[index]?.workspaceId;
+        const marker = markers[index];
+        const markedId = marker === 'late' ? undefined : marker?.workspaceId;
         const workspaceId =
           markedId !== undefined && !taken.has(markedId) ? markedId : generatePrefixedId(idPrefix.workspace);
         taken.add(workspaceId);
         const name = hostPathName(path);
-        adopted.push({
+        const row: Workspace = {
           workspaceId,
           name,
           slug: allocateWorkspaceSlug(name, [...existing, ...adopted]),
           lastConnectedAt: Date.now(),
           path,
-        });
+        };
+        adopted.push(marker === 'late' ? { ...row, markerUnread: true } : row);
       }
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction([workspacesStoreName, metaStoreName], 'readwrite');

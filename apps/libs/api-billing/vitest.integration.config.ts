@@ -1,7 +1,7 @@
 import process from 'node:process';
 import path from 'node:path';
 import { config } from 'dotenv';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -29,6 +29,7 @@ export default defineConfig({
     testTimeout: 300_000,
     hookTimeout: 300_000,
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     env: {
       ...forwardedEnv,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name

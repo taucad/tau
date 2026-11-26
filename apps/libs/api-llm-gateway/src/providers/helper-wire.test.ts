@@ -50,7 +50,7 @@ const bodyFor = (model: Model, prompt: HelperPrompt = textPrompt): Record<string
   helperRequestBody(routeOf(model), model, prompt);
 
 const ollamaModel: Model = {
-  ...catalogRow('openai', 'gpt-5.6-luna'),
+  ...catalogRow('openai', 'gpt-6-luna'),
   id: 'llama3.2:latest',
   model: 'llama3.2:latest',
   provider: { id: 'ollama', name: 'Ollama' },
@@ -59,7 +59,7 @@ const ollamaModel: Model = {
 
 describe('helperModelRoute', () => {
   it.each([
-    ['openai', 'gpt-5.6-luna', 'openai-responses'],
+    ['openai', 'gpt-6-luna', 'openai-responses'],
     ['xai', 'grok-4.6', 'openai-responses'],
     ['anthropic', 'claude-haiku-5.5', 'anthropic'],
     ['vertexai', 'gemini-4-hydrogen', 'openai-completions'],
@@ -89,8 +89,8 @@ describe('helperModelRoute', () => {
 
 describe('helperRequestBody', () => {
   it('should send OpenAI no reasoning, the row temperature and the helper output ceiling on the Responses wire', () => {
-    expect(bodyFor(catalogRow('openai', 'gpt-5.6-luna'), imagePrompt)).toEqual({
-      model: 'gpt-5.6-luna',
+    expect(bodyFor(catalogRow('openai', 'gpt-6-luna'), imagePrompt)).toEqual({
+      model: 'gpt-6-luna',
       stream: true,
       max_output_tokens: 64,
       temperature: 1,

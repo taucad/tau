@@ -18,6 +18,7 @@ import {
   fakePlacement,
   hostOptions,
   readLog,
+  rowByRow,
   seedLog,
   tools,
 } from '#host/tau-agent-host.fixture.js';
@@ -789,7 +790,7 @@ describe('terms and fencing (RA-S8)', () => {
     const slow = async () => {
       const opened = await file.open();
       let first = true;
-      return {
+      return rowByRow({
         ...opened,
         append: async (...args: Parameters<typeof opened.append>) => {
           if (first) {
@@ -799,7 +800,7 @@ describe('terms and fencing (RA-S8)', () => {
           }
           return opened.append(...args);
         },
-      };
+      });
     };
     const hostY = createTauAgentHost(
       hostOptions({ openEventLog: slow, transport: heldTransport().transport, toolRegistry: idle, idPrefix: 'y' }),
@@ -852,7 +853,7 @@ describe('terms and fencing (RA-S8)', () => {
       hostOptions({
         openEventLog: async () => {
           const opened = await file.open();
-          return {
+          return rowByRow({
             ...opened,
             append: async (event: Parameters<typeof opened.append>[0]) => {
               if (event.type === 'run.lifecycle' && event.state === 'cancelled') {
@@ -860,7 +861,7 @@ describe('terms and fencing (RA-S8)', () => {
               }
               return opened.append(event);
             },
-          };
+          });
         },
         transport,
         toolRegistry: tools(

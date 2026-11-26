@@ -51,7 +51,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost, pausedRunHoldMilliseconds, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
-export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+export { isResumableRun, isResumableRunFailure, isUserStoppedRun, turnWithdrawnCode } from '#log/resumable.js';
 export {
   emptyChatLedger,
   foldChatLedger,
@@ -98,7 +98,7 @@ export type { PrefixBreakCause, PrefixStamp } from '#log/prefix-stamp.js';
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
-export { defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { defaultSafeguardThresholds, pollingToolNames, summarizeToolEvents } from '#harness/safeguards.js';
 export { canonicalJson } from '#log/canonical-json.js';
 export { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 export type { EventLogErrorCode } from '#log/event-log-error.js';

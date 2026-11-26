@@ -1,5 +1,6 @@
 import { cadReferencesSchema } from '@taucad/chat/references';
 import type { CadReference } from '@taucad/chat/references';
+import { annotationsOf, hasAnnotations, serializeMessageAnnotations } from '@taucad/chat/annotations';
 import type { UIMessage } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentLogEvent, UserProviderMessage } from '@taucad/agent-host';
@@ -194,16 +195,39 @@ export const userProviderMessageOf = <Message extends UIMessage>(messages: reado
       content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
     }
   }
+  const annotations = annotationsOf(message.metadata);
+  /* What the pictures cannot say rides as one more text block, after the person's words. The host log records it as
+   * content, so every host and every replay reads the same bytes; the transcript takes it back out
+   * (`projectAgentHostUserMessage`). */
+  const block = annotations === undefined ? undefined : serializeMessageAnnotations(annotations, imageUrlsOf(message));
+  if (block !== undefined) {
+    content.push({ type: 'text', text: block });
+  }
   const first = content[0];
   const textOnly = content.length === 1 && isRecord(first) && first['type'] === 'text';
   const references = referencesOf(message.metadata);
+  const metadata = {
+    ...(references === undefined ? {} : { references }),
+    ...(hasAnnotations(annotations) ? { annotations: structuredClone(annotations) } : {}),
+  };
   return {
     id: message.id,
     role: 'user',
     content: textOnly && typeof first['text'] === 'string' ? first['text'] : content,
-    ...(references === undefined ? {} : { metadata: { references } }),
+    ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
   };
 };
+
+/**
+ * The URLs of a message's image parts, in part order: the order the model sees them, which the annotations block's
+ * `image` numbers count.
+ *
+ * @param message - A user message.
+ * @returns Its image part URLs.
+ * @public
+ */
+export const imageUrlsOf = (message: Pick<UIMessage, 'parts'>): string[] =>
+  message.parts.flatMap((part) => (part.type === 'file' && part.mediaType.startsWith('image/') ? [part.url] : []));
 
 /** The geometry references a composed message carries (blueprint D6), as the host log records them. */
 const referencesOf = (metadata: unknown): CadReference[] | undefined => {

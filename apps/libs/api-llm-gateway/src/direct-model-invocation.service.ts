@@ -258,7 +258,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
     }
     const available = await this.models.getModels();
     const selected =
-      available.find((model) => model.id === 'openai-gpt-5.6-luna') ??
+      available.find((model) => model.id === 'openai-gpt-6-luna') ??
       available.find((model) => model.recommended) ??
       available[0];
     const route = selected === undefined ? undefined : helperModelRoute(selected);

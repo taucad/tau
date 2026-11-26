@@ -1,5 +1,5 @@
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
@@ -378,6 +378,7 @@ function useProjectParametersSource(): ParametersSource {
         projectRef.send({ type: 'destroyGeometryUnit', entryPath });
       },
       QuickExport: ParametersQuickExport,
+      ManifestWait: ParametersManifestWait,
       usePaneviewPersistence: useParametersPaneviewPersistence,
     }),
     [
@@ -392,6 +393,11 @@ function useProjectParametersSource(): ParametersSource {
       switchParameterGroup,
     ],
   );
+}
+
+/** An entry's rows while its parameter manifest arrives: the parameter form's shape, no words (rule 15). */
+function ParametersManifestWait(): React.JSX.Element {
+  return <PaneWaitSkeleton shape='fields' label='Parameters' />;
 }
 
 function ProjectParametersPane(): React.JSX.Element {

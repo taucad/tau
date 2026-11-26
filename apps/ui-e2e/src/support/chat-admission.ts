@@ -38,6 +38,9 @@ export const reply = (text: string, extra: Partial<GatewayScriptTurn> = {}): Gat
   ...extra,
 });
 
+/** The two-turn script most rows open with: a plain reply per turn. */
+export const twoTurnScript = [reply('Reply one.'), reply('Reply two.')];
+
 /**
  * Every record of one chat's durable log, oldest first.
  *
@@ -154,6 +157,22 @@ export const gatewayRequestCount = async (): Promise<number> => {
 export const gatewayAsksByTurn = async (): Promise<ReadonlyArray<{ readonly turn: string; readonly asks: number }>> => {
   const { turns } = await target.readAgentHostGatewayState();
   return turns.map(({ turn, asks }) => ({ turn, asks }));
+};
+
+/**
+ * One fresh provider ask per turn, read once the last reply is on screen.
+ *
+ * A cumulative `>=` poll returned the instant the expected call landed and the
+ * length read that followed it could not see a call already in flight — the row
+ * passed while the product asked three times (T5 M1/M4/M11). A per-turn ask
+ * count names *which* turn was charged twice, which is the fact the contract is
+ * about: one ask per attempt, and a turn with two attempts is asked twice.
+ *
+ * @param asks - Each turn's text and how many asks it expects, in the order the turns were first asked.
+ * @returns Nothing.
+ */
+export const expectAsksByTurn = async (asks: ReadonlyArray<readonly [string, number]>): Promise<void> => {
+  expect(await gatewayAsksByTurn()).toEqual(asks.map(([turn, count]) => ({ turn, asks: count })));
 };
 
 /**

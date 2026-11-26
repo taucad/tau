@@ -90,22 +90,17 @@ export async function loader({ url, context }: Route.LoaderArgs) {
 
 /**
  * The root loader reads the server environment and the model catalog, neither of which a client navigation changes,
- * so a GET navigation that changes the pathname or the query string does not re-run it, and a click never waits for
- * the server before the URL changes (U23). The client's own catalog query keeps the catalog fresh, through its
- * `staleTime` and `refetchInterval`.
+ * so no GET navigation re-runs it, and a click never waits for the server before the URL changes (U23). The client's
+ * own catalog query keeps the catalog fresh, through its `staleTime` and `refetchInterval`.
  *
- * The default is kept for submissions and an explicit revalidation of the same URL.
+ * That includes a navigation to the URL the router already holds, which React Router treats as a revalidation. On a
+ * static-shell URL it was the only thing that asked the server for the root's `.data`, a request those URLs are built
+ * never to make; its answer could not be decoded and the root error boundary replaced the working page.
+ *
+ * The default is kept for submissions.
  */
-export const shouldRevalidate: ShouldRevalidateFunction = ({
-  currentUrl,
-  nextUrl,
-  formMethod,
-  defaultShouldRevalidate,
-}) => {
-  const isClientNavigation =
-    formMethod === undefined && (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
-  return isClientNavigation ? false : defaultShouldRevalidate;
-};
+export const shouldRevalidate: ShouldRevalidateFunction = ({ formMethod, defaultShouldRevalidate }) =>
+  formMethod === undefined ? false : defaultShouldRevalidate;
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (

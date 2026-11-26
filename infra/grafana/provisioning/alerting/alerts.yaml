@@ -2098,6 +2098,33 @@ groups:
           severity: warning
           service: tau-api
           component: agent
+      - uid: outside-probe-certificate-expiring
+        title: 'P1: Tau Certificate Expires Within 14 Days'
+        condition: cert_expiring
+        data:
+          - refId: cert_expiring
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: synthetic-monitoring
+            model:
+              instant: true
+              range: false
+              expr: min by (job) (probe_ssl_earliest_cert_expiry{label_app=~".*",label_probe_group="outside"}) - time() < bool 1209600
+              intervalMs: 60000
+              maxDataPoints: 20
+              refId: cert_expiring
+        noDataState: OK
+        execErrState: OK
+        for: 1h
+        annotations:
+          summary: The TLS certificate an outside synthetic check saw expires in under 14 days. Netlify and Cloudflare renew on their own, so a renewal has stalled. The job label names the check.
+          runbook_url: docs/handbooks/cloud/playbooks/dns-tls.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: outside-probe
   - orgId: 1
     name: tau-storage-critical
     folder: Tau Alerts

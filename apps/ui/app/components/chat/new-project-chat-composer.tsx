@@ -1,3 +1,4 @@
+import { holdFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -127,6 +128,8 @@ export function NewProjectChatComposer({
           },
           location: location.value,
         });
+        /* WP-12 step 5: the first cloud backup waits for the first turn to stream, or 5 s. */
+        holdFirstTurnBackup(created.id);
         await consumeDraft();
         await navigate(projectUrl(created.slugs));
       } catch (error) {

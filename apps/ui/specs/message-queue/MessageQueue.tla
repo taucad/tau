@@ -10,6 +10,8 @@
 \* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
+\* Letting a new project's first cloud backup go on its first live frame (WP-12
+\* step 5) reads the frame only; delivery, admission and persistence are unchanged.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;

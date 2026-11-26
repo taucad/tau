@@ -32,6 +32,7 @@ import {
 import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
+import { firstTurnBackupHold } from '#lib/first-turn-backup-gate.js';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 
@@ -901,9 +902,22 @@ export const useTauCloudIntentConnection = ({
         }
         if (intent === 'open') {
           void continueCloudOpen({ projectId, account, connect: async () => connectRemote('tau') });
-        } else {
-          void connectRemote('tau');
+          break;
         }
+        /* WP-12 step 5: a project created from Home backs up once its first turn streams, or 5 s on. */
+        const hold = firstTurnBackupHold(projectId);
+        if (hold === undefined) {
+          void connectRemote('tau');
+          break;
+        }
+        const connectAfterFirstTurn = async (): Promise<void> => {
+          await hold;
+          if (getCloudDeletionState(projectId) === undefined && getRevisionSessionUser()?.id === account) {
+            await connectRemote('tau');
+          }
+        };
+        // async-iife: bootstrap -- an effect cannot await; the connect reports its own outcome, as the direct one does.
+        void connectAfterFirstTurn();
         break;
       }
       case 'wait': {

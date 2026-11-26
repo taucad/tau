@@ -43,6 +43,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { ownerWaitOf, sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { releaseFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import type { CommandRefusal } from '#chat-clients/_internal/host-command.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
@@ -3840,6 +3841,10 @@ export class ChatSessionStore {
             if (event.type === 'batch') {
               this.receiveHostReadAnswer(chatId, event.answer);
             } else {
+              /* The project's first turn is streaming, so its model request was answered (WP-12 step 5). */
+              if (event.type === 'live') {
+                releaseFirstTurnBackup(observed.projectId);
+              }
               this.#projectionOf(chatId).send(event);
             }
           },

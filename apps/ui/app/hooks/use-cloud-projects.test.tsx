@@ -1,3 +1,4 @@
+import { holdFirstTurnBackup, releaseFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
@@ -384,6 +385,25 @@ describe('useTauCloudIntentConnection', () => {
     expect(connectRemote).toHaveBeenCalledOnce();
     expect(connectRemote).toHaveBeenCalledWith('tau');
     expect(tauCloudIntent.get(projectId)).toBe('connected');
+  });
+
+  it("should hold a Home-created project's first backup until its first turn streams (WP-12 step 5)", async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(connectRemote).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    expect(connectRemote).toHaveBeenCalledOnce();
+    expect(connectRemote).toHaveBeenCalledWith('tau');
   });
 
   it('should not repeat a step another tab already took', () => {

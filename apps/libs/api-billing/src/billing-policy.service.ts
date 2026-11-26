@@ -14,7 +14,12 @@ import {
   validateCommercialPolicy,
   validatePolicyActivationNotice,
 } from '#billing-policy.js';
-import type { CommercialPolicy, EffectivePolicyRate, FinancialEnvironment } from '#billing-policy.js';
+import type {
+  CommercialPolicy,
+  EffectivePolicyRate,
+  FinancialEnvironment,
+  ValidatedCommercialPolicy,
+} from '#billing-policy.js';
 
 type PolicyDatabase = Pick<DatabaseType, 'execute'>;
 
@@ -90,8 +95,12 @@ const activationRowSchema = z.object({
   activationId: z.string(),
   requestHash: z.string(),
   contentHash: z.string(),
-  canonicalContent: z.string(),
+  canonicalContent: z.string().nullable(),
   selectedAt: z.coerce.date(),
+});
+const observedRowSchema = z.object({
+  observedActivationId: z.string().nullable(),
+  activationId: z.string().nullable(),
 });
 const publicationReplayRowSchema = z.object({ activationId: z.string(), requestHash: z.string() });
 
@@ -126,6 +135,12 @@ export class BillingPolicyService {
   /* ponytail: one entry per activation id this process reads (D9), so the set is bounded by the
    * publications a replica outlives; clear it if a process is ever asked to read thousands. */
   readonly #warnedActivations = new Set<string>();
+  /* Chat performance WP-05 (server audit S-02): the last document this process validated, per environment, keyed
+   * by its stored content hash. A policy is immutable once stored, so a matching hash is the same document. */
+  readonly #validated = new Map<
+    string,
+    { readonly contentHash: string; readonly validated: ValidatedCommercialPolicy }
+  >();
 
   public constructor(@Inject(DatabaseService) private readonly databaseService: Pick<DatabaseService, 'database'>) {}
 
@@ -138,9 +153,33 @@ export class BillingPolicyService {
         this.selectEffectivePolicy(input, transaction),
       );
     }
-    const observationRows = await database
+    /* Chat performance WP-05 (server audit S-02): one statement observes the head and reads the activation, and
+     * the stored document is sent and parsed only when this process has not validated that exact content. */
+    const known = this.#validated.get(input.environment);
+    const rows = await database
       .execute(sql`
-      select billing.observe_policy(${input.environment}) as "activationId"
+      with observed as materialized (
+        select billing.observe_policy(${input.environment}) as activation_id
+      )
+      select
+        observed.activation_id as "observedActivationId",
+        policy.id as "policyId",
+        activation.id as "activationId",
+        activation.request_hash as "requestHash",
+        policy.content_hash as "contentHash",
+        case when policy.content_hash = ${known?.contentHash ?? null}::text then null
+          else policy.canonical_content end as "canonicalContent",
+        transaction_timestamp() as "selectedAt"
+      from observed
+      left join billing.billing_policy_activation activation
+        on activation.environment = ${input.environment}
+        and activation.id = observed.activation_id
+        and activation.effective_at <= transaction_timestamp()
+        and not exists (
+          select 1 from billing.billing_policy_activation_cancellation cancellation
+          where cancellation.activation_id = activation.id
+        )
+      left join billing.billing_policy policy on policy.id = activation.policy_id
     `)
       .catch((error: unknown) => {
         if (error instanceof Error && error.cause instanceof Error) {
@@ -148,41 +187,20 @@ export class BillingPolicyService {
         }
         throw error;
       });
-    const observation = z.object({ activationId: z.string().nullable() }).parse(observationRows[0]);
-    if (observation.activationId === null) {
+    const observation = observedRowSchema.parse(rows[0]);
+    if (observation.observedActivationId === null) {
       throw new BillingPolicyMissingError();
     }
-    const rows = await database.execute(sql`
-      select
-        policy.id as "policyId",
-        activation.id as "activationId",
-        activation.request_hash as "requestHash",
-        policy.content_hash as "contentHash",
-        policy.canonical_content as "canonicalContent",
-        transaction_timestamp() as "selectedAt"
-      from billing.billing_policy_activation activation
-      join billing.billing_policy policy on policy.id = activation.policy_id
-      left join billing.billing_policy_activation_cancellation cancellation
-        on cancellation.activation_id = activation.id
-      where activation.environment = ${input.environment}
-        and activation.id = ${observation.activationId}
-        and activation.effective_at <= transaction_timestamp()
-        and cancellation.activation_id is null
-    `);
-    if (rows[0] === undefined) {
-      throw new BillingPolicyMissingError();
-    }
-    const row = activationRowSchema.parse(rows[0]);
-    /* Read leniently: the stored hash, the environment and the schema floor still gate the document,
-     * but a route this replica cannot dispatch is unreachable anyway (`resolvePolicyRoute` finds no
-     * SKU), so refusing the whole tariff over it only widened the blast radius to every billing read. */
-    const validated = parseCommercialPolicyDocument(row.canonicalContent);
-    if (validated.contentHash !== row.contentHash) {
-      throw new Error('stored policy content hash mismatch');
-    }
-    if (validated.policy.environment !== input.environment) {
-      throw new Error('stored policy environment mismatch');
-    }
+    /* `observe_policy` reads with its own, later snapshot, so an activation it chose in that instant can be
+     * invisible to the outer statement. Read it again in a statement of its own, as before. */
+    const row =
+      observation.activationId === null
+        ? await this.readActivation(database, input.environment, observation.observedActivationId)
+        : activationRowSchema.parse(observation);
+    const validated =
+      row.canonicalContent === null && known?.contentHash === row.contentHash
+        ? known.validated
+        : this.validate(input.environment, row);
     assertPolicySchemaCompatibility(validated.policy, input.replica.schemaVersion);
     this.warnUnknownRoutes(row.activationId, validated.policy, input);
     return {
@@ -413,6 +431,67 @@ export class BillingPolicyService {
   }
 
   /** One structured warning per activation id per process (D9): actionable without a log flood. */
+  /**
+   * Reads one observed activation with its stored document.
+   *
+   * @param database - The transaction the observation ran in.
+   * @param environment - The financial environment.
+   * @param activationId - What `observe_policy` returned.
+   * @returns The activation row.
+   */
+  private async readActivation(
+    database: PolicyDatabase,
+    environment: string,
+    activationId: string,
+  ): Promise<z.infer<typeof activationRowSchema>> {
+    const rows = await database.execute(sql`
+      select
+        policy.id as "policyId",
+        activation.id as "activationId",
+        activation.request_hash as "requestHash",
+        policy.content_hash as "contentHash",
+        policy.canonical_content as "canonicalContent",
+        transaction_timestamp() as "selectedAt"
+      from billing.billing_policy_activation activation
+      join billing.billing_policy policy on policy.id = activation.policy_id
+      left join billing.billing_policy_activation_cancellation cancellation
+        on cancellation.activation_id = activation.id
+      where activation.environment = ${environment}
+        and activation.id = ${activationId}
+        and activation.effective_at <= transaction_timestamp()
+        and cancellation.activation_id is null
+    `);
+    if (rows[0] === undefined) {
+      throw new BillingPolicyMissingError();
+    }
+    return activationRowSchema.parse(rows[0]);
+  }
+
+  /**
+   * Parses, hashes and checks a stored document, then remembers it for the environment.
+   *
+   * @param environment - The financial environment the row was read for.
+   * @param row - The activation row, which must carry its document.
+   * @returns The validated document.
+   */
+  private validate(environment: string, row: z.infer<typeof activationRowSchema>): ValidatedCommercialPolicy {
+    if (row.canonicalContent === null) {
+      throw new Error('stored policy content is unavailable');
+    }
+    /* Read leniently: the stored hash, the environment and the schema floor still gate the document,
+     * but a route this replica cannot dispatch is unreachable anyway (`resolvePolicyRoute` finds no
+     * SKU), so refusing the whole tariff over it only widened the blast radius to every billing read. */
+    const validated = parseCommercialPolicyDocument(row.canonicalContent);
+    if (validated.contentHash !== row.contentHash) {
+      throw new Error('stored policy content hash mismatch');
+    }
+    if (validated.policy.environment !== environment) {
+      throw new Error('stored policy environment mismatch');
+    }
+    this.#validated.set(environment, { contentHash: row.contentHash, validated });
+    return validated;
+  }
+
   private warnUnknownRoutes(activationId: string, policy: CommercialPolicy, input: SelectEffectivePolicyInput): void {
     const supported = new Set(input.replica.meterContractIds);
     const routeIds = policy.routes

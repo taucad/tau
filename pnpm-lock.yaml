@@ -912,6 +912,9 @@ catalogs:
     uint8array-extras:
       specifier: ^1.5.0
       version: 1.6.0
+    undici:
+      specifier: 7.30.0
+      version: 7.30.0
     unified:
       specifier: ^11.0.5
       version: 11.0.5
@@ -3072,6 +3075,9 @@ importers:
       pdf-parse:
         specifier: 'catalog:'
         version: 2.4.5
+      undici:
+        specifier: 'catalog:'
+        version: 7.30.0
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'

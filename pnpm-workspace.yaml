@@ -289,6 +289,7 @@ catalog:
   typescript: ~5.9.3
   typescript-eslint: ^8.61.1
   uint8array-extras: ^1.5.0
+  undici: 7.30.0
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
   vite: 8.0.16

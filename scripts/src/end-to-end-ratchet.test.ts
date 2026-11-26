@@ -327,6 +327,29 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(labels).toEqual(['ui-e2e test:e2e:browser-host']);
   });
 
+  it('should keep desktop-e2e test:e2e and ui-e2e browser-host whole in the nightly and add no DC-27 row to it', () => {
+    const targetsOf = (file: string): Record<string, unknown> =>
+      (JSON.parse(read(file)) as { readonly targets: Record<string, unknown> }).targets;
+    const { status, stderr, labels } = planNightly({
+      'desktop-e2e': { name: 'desktop-e2e', data: { targets: targetsOf('apps/desktop-e2e/project.json') } },
+      'ui-e2e': { name: 'ui-e2e', data: { targets: targetsOf('apps/ui-e2e/project.json') } },
+    });
+    expect(status, stderr).toBe(0);
+    // The split rows run their files in the shadow lane; the whole suites still run every file, red ones included,
+    // for an owner who dispatches the nightly to prove a fix.
+    expect(labels).toContain('desktop-e2e test:e2e');
+    expect(labels).toContain('ui-e2e test:e2e:browser-host');
+    for (const row of [
+      'desktop-e2e test:e2e:onboarding',
+      'desktop-e2e test:e2e:chat',
+      'desktop-e2e test:e2e:project',
+      'desktop-e2e test:e2e:print',
+      'ui-e2e test:e2e:browser-host-chat',
+    ]) {
+      expect(labels, row).not.toContain(row);
+    }
+  });
+
   it('should run ui test:e2e in one place, its merge-queue row, never the nightly (global review ruling 7)', () => {
     const uiProject = JSON.parse(read('apps/ui/project.json')) as {
       readonly targets: Record<string, { readonly metadata?: { readonly shards?: number } }>;

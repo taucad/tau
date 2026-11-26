@@ -251,7 +251,7 @@ describe('the shadow-row registry', () => {
     ]);
   });
 
-  it("should read the workspace's shadow rows, the ui-e2e journey families and the service worker suite (DC-25)", async () => {
+  it("should read the workspace's shadow rows: the ui-e2e journey families and service worker suite (DC-25), and the DC-27 rows", async () => {
     const { readShadowRegistry } = await import('#ci-shadow-rows.js');
     const workspace = await readShadowRegistry(resolve(import.meta.dirname, '../..'));
     // No entry is refused, so none is also a gating suite (ruling 7: a suite is in one list or the other).
@@ -259,7 +259,15 @@ describe('the shadow-row registry', () => {
     const keys = workspace.rows.map((row) => shadowRowKey(row));
     expect(keys).toContain('ui-e2e:test:e2e:service-worker');
     expect(keys.filter((key) => key.startsWith('ui-e2e:test:e2e:journey-')).length).toBeGreaterThanOrEqual(15);
-    expect(new Set(workspace.rows.map((row) => row.projectFile))).toEqual(new Set(['apps/ui-e2e/project.json']));
+    expect(keys).toContain('ui-e2e:test:e2e:browser-host-chat');
+    expect(keys.filter((key) => key.startsWith('desktop-e2e:'))).toEqual([
+      'desktop-e2e:test:e2e:chat',
+      'desktop-e2e:test:e2e:onboarding',
+      'desktop-e2e:test:e2e:project',
+    ]);
+    expect(new Set(workspace.rows.map((row) => row.projectFile))).toEqual(
+      new Set(['apps/desktop-e2e/project.json', 'apps/ui-e2e/project.json']),
+    );
   });
 });
 

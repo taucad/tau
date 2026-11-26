@@ -548,6 +548,49 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
+    it('should start an edit of a commented message from its untouched pictures, with its comments', () => {
+      const flattened = `attachments/${'f'.repeat(64)}.webp`;
+      const original = `attachments/${'a'.repeat(64)}.webp`;
+      // A plain message: a deep mock would answer for fields the record does not have.
+      const sent: MyUIMessage = {
+        id: 'msg-1',
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'Look' },
+          { type: 'file', mediaType: 'image/webp', url: flattened },
+        ],
+        metadata: {
+          createdAt: 1,
+          status: 'pending',
+          annotations: {
+            version: 1,
+            comments: [{ number: 1, text: 'Taller', image: 'img-1', model: { point: [0, 0, 0] } }],
+            images: [
+              {
+                id: 'img-1',
+                attachment: flattened,
+                source: { hash: 'a'.repeat(64), mediaType: 'image/webp' },
+                width: 4,
+                height: 3,
+                marks: [],
+              },
+            ],
+          },
+        },
+      };
+      const { actor } = createHarness();
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: sent });
+
+      const { context } = actor.getSnapshot();
+      expect(context.editDraftAttachments.map((attachment) => attachment.hash)).toEqual(['a'.repeat(64)]);
+      expect(context.editDraftAnnotations?.images).toEqual([
+        { id: 'img-1', attachment: original, width: 4, height: 3, marks: [] },
+      ]);
+      expect(context.editDraftAnnotations?.comments.map(({ text }) => text)).toEqual(['Taller']);
+      actor.stop();
+    });
+
     it('should set edit draft text', () => {
       const { actor } = createHarness();
       actor.start();

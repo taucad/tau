@@ -1,5 +1,6 @@
-import { useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useState, useSyncExternalStore } from 'react';
 import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { slowWaitMilliseconds } from '@taucad/ui/utils/wait-timing';
 import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 /**
@@ -77,6 +78,71 @@ export function useWaitStart(active: boolean): WaitStart {
     restart: () => {
       const startedAt = clock.now();
       setTracked((previous) => ({ ...previous, startedAt, isGesture: true }));
+    },
+  };
+}
+
+/**
+ * The project open the regions under a workspace frame wait in (Progressive Loading Policy rules 16 and 17): when it
+ * started on the wait clock, and whether the workspace has been revealed yet.
+ *
+ * @public
+ */
+export type OpenWait = Readonly<{
+  /** The open's start on the wait clock: navigation start for the document's own open, the click for a later one. */
+  startedAt: number;
+  /** Whether the live workspace has replaced the frame's lanes. */
+  isRevealed: boolean;
+}>;
+
+/**
+ * The open the regions below wait in. The workspace frame provides it; the live layouts mark it revealed. Absent
+ * outside a project route.
+ *
+ * @public
+ */
+export const openWaitContext = createContext<OpenWait | undefined>(undefined);
+
+/**
+ * Whether a wait that starts now belongs to the project open: before the workspace is revealed always, and after it
+ * until the open's slow mark (10 s from its start). A person's click that opened the project still counts as active for a
+ * few seconds (`navigator.userActivation`), so a gesture cannot tell a pane the open restored from one a person
+ * opened; the open's own slow mark bounds the group instead, as it bounds every other part of the open's wait.
+ *
+ * @param open - The open, if any.
+ * @param start - The wait's own start.
+ * @returns `true` when the wait counts on the open's clock.
+ */
+export const isInOpen = (open: OpenWait | undefined, start: Pick<WaitStart, 'startedAt'>): boolean =>
+  open !== undefined && (!open.isRevealed || start.startedAt - open.startedAt < slowWaitMilliseconds);
+
+/**
+ * When a region's wait started, counted on the project open's clock when the wait is the open's own: the region's
+ * first wait, running as it mounts, while the workspace is still being revealed or before the open's slow mark. A region
+ * that takes over another's bars (a lane of the frame, a pane's chunk) then draws them at once rather than 300 ms
+ * later, so one wait has one clock however many mounts draw it. Every later wait, and a first wait that starts after
+ * the open's slow mark (a pane opened later), counts from its own start, as {@link useWaitStart} does.
+ *
+ * @param active - Whether the region is waiting now.
+ * @returns The current wait's start, whether a gesture started it, and a restart for Retry.
+ * @public
+ */
+export function useOpenWaitStart(active: boolean): WaitStart {
+  const open = useContext(openWaitContext);
+  const own = useWaitStart(active);
+  const [isOpenWait, setIsOpenWait] = useState(() => active && isInOpen(open, own));
+  if (isOpenWait && !active) {
+    setIsOpenWait(false);
+  }
+  if (!isOpenWait || open === undefined) {
+    return own;
+  }
+  return {
+    startedAt: Math.min(open.startedAt, own.startedAt),
+    isGesture: false,
+    restart: () => {
+      setIsOpenWait(false);
+      own.restart();
     },
   };
 }

@@ -2383,7 +2383,7 @@ describe('close and continue', () => {
             message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
             timeout: 120_000,
           })
-          .toMatch(/Not backed up · 1 revision/u);
+          .toMatch(/Not backed up · 1 change/u);
         await expect
           .poll(async () => browserHead(client, slug), {
             message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,

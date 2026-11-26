@@ -168,6 +168,10 @@ const samples: Samples = {
   selectSectionCut: [{ type: 'selectSectionCut', payload: undefined }],
   hoverSectionCut: [{ type: 'hoverSectionCut', payload: undefined }],
   commitSectionCuts: [{ type: 'commitSectionCuts', payload: [] }],
+  setCommentActive: [
+    { type: 'setCommentActive', payload: true },
+    { type: 'setCommentActive', payload: false },
+  ],
   setMeasureActive: [
     { type: 'setMeasureActive', payload: true },
     { type: 'setMeasureActive', payload: false },

@@ -426,7 +426,7 @@ Run coverage explicitly when validating coverage thresholds. A normal passing te
 
 A CI or merge-queue failure in a project the change affects, including a crash with no failing assertion, is never re-queued or re-run to green by hand. Root-cause it, fix it in that PR or a prerequisite PR, and show the before/after evidence. Re-queue only a failure in a project the diff does not affect, with evidence that it also fails without the change. The only retry is the recorded one of § 16.2; nothing else re-runs a test, a task, a job or a queue entry.
 
-The thresholds below are the operator's bounds decision (O3 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md#decisions-for-the-operator)); the evidence behind them is that blueprint's [quarantine thresholds from history](../research/ci-flake-quarantine-blueprint.md#quarantine-thresholds-from-history-2026-11-25). Until the shared reporter and `validate-quarantine` enforce § 16.2–16.4, no test is quarantined, and the silent `retry: 2` in `ui-e2e` and `react-e2e` is the only exception to this section, pending its replacement by § 16.2.
+The thresholds below are the operator's bounds decision (O3 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md#decisions-for-the-operator)); the evidence behind them is that blueprint's [quarantine thresholds from history](../research/ci-flake-quarantine-blueprint.md#quarantine-thresholds-from-history-2026-11-25). The shared reporter (`@taucad/vitest-ci`) enforces § 16.2, with the run budget in the `Run affected tasks` gate. Until it and `validate-quarantine` enforce § 16.3–16.4, no test is quarantined.
 
 ### 16.1 Definition of Green
 

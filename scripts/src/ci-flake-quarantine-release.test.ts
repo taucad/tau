@@ -1,0 +1,1295 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Runs and requests are GitHub REST JSON. */
+import { describe, expect, it } from 'vitest';
+
+import type { QuarantineEntry } from '@taucad/vitest-ci/quarantine';
+
+import { emptyState, ingestRun, serializeState, parseState } from '#ci-flake-ledger-state.js';
+import type { IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
+import { identityHashOf } from '#ci-flake-quarantine-entry.js';
+import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
+import {
+  applyRemovals,
+  closeReleased,
+  ensureOwnerNotes,
+  readLinkedFixes,
+  readRemovalBranches,
+  reconcileRemovals,
+  resumeAutoMerge,
+  autoMergeMarker,
+  mayResumeAutoMerge,
+} from '#ci-flake-quarantine-release-cli.js';
+import type { LandedRemoval } from '#ci-flake-quarantine-release-cli.js';
+import {
+  countQuarantineRun,
+  isRecentRelease,
+  openQuarantineTracks,
+  lastLanded,
+  lastRemoval,
+  linkedFix,
+  planRemovals,
+  quarantinedTests,
+  releaseComment,
+  releaseVerdict,
+  removalFiles,
+  removalMarker,
+  removeFromQuarantine,
+  returnMarker,
+  retainQuarantineTracks,
+} from '#ci-flake-quarantine-release.js';
+import type {
+  LinkedFix,
+  PendingRemoval,
+  PlannedRemoval,
+  QuarantinedTest,
+  RemovalPlan,
+} from '#ci-flake-quarantine-release.js';
+import { GitHubError } from '#ci-github-client.js';
+import type { Client } from '#ci-github-client.js';
+
+const hour = 60 * 60 * 1000;
+const path = 'packages/host/quarantine.json';
+const testName = 'src/store.test.ts > store > should keep the order';
+const id = `host › ${testName}`;
+
+const workspaceOf = (entries: readonly unknown[], extra: Partial<Workspace> = {}): Workspace => ({
+  projects: new Map([
+    ['host', { name: 'host', root: 'packages/host', tags: [] }],
+    ['api', { name: 'api', root: 'apps/api', tags: [] }],
+  ]),
+  quarantines: [{ path, text: `${JSON.stringify({ entries }, undefined, 2)}\n` }],
+  ...extra,
+});
+
+const entryOf = (overrides: Partial<QuarantineEntry> = {}): QuarantineEntry => ({
+  test: testName,
+  owner: 'rifont',
+  issue: 12,
+  class: 'race',
+  created: '2026-11-20',
+  expires: '2026-12-04',
+  evidence: '2 flake events (retry 2) in its last 40 executions; runs 1, 2',
+  ...overrides,
+});
+
+const runOf = (runId: number, at: string): IngestRun => ({
+  id: runId,
+  event: 'merge_group',
+  head_branch: `gh-readonly-queue/main/pr-${runId}-base`,
+  head_sha: `sha-${runId}`,
+  status: 'completed',
+  conclusion: 'success',
+  created_at: at,
+  updated_at: at,
+  html_url: `https://github.com/taucad/tau/actions/runs/${runId}`,
+  run_attempt: 1,
+});
+
+const rowOf = (runId: number, overrides: Partial<OutcomeRow> = {}): OutcomeRow => ({
+  kind: 'test',
+  id,
+  project: 'host',
+  target: 'test',
+  targetKey: 'test',
+  file: 'src/store.test.ts',
+  variant: { os: 'linux', arch: 'x64' },
+  state: 'passed',
+  retryCount: 0,
+  flaky: false,
+  durationMs: 12,
+  errors: [],
+  hash: `hash-${runId}`,
+  run: runId,
+  attempt: 1,
+  job: 'affected-test-1',
+  ...overrides,
+});
+
+/**
+ * A history of `count` queue runs, one every `everyHours` from `from`, each with the rows `rows` gives it, counted as
+ * the ingestion counts them: the quarantine tracks first, then the ledger, which records the run as ingested.
+ */
+const history = (
+  state: LedgerState,
+  tests: readonly QuarantinedTest[],
+  options: {
+    count: number;
+    from: string;
+    everyHours?: number;
+    firstRun?: number;
+    rows?: (runId: number, index: number) => OutcomeRow[];
+    shadowTargets?: ReadonlySet<string>;
+  },
+): void => {
+  const first = options.firstRun ?? 1000;
+  for (let index = 0; index < options.count; index += 1) {
+    const runId = first + index;
+    const at = new Date(Date.parse(options.from) + index * (options.everyHours ?? 0.5) * hour).toISOString();
+    const run = runOf(runId, at);
+    const rows = options.rows?.(runId, index) ?? [rowOf(runId)];
+    countQuarantineRun(state, { run, rows, tests, shadowTargets: options.shadowTargets });
+    ingestRun(state, { run, rows, artifacts: 1, rejected: 0 });
+  }
+};
+
+const testsOf = (entries: readonly QuarantineEntry[], today = '2026-11-22'): QuarantinedTest[] =>
+  quarantinedTests(workspaceOf(entries), today);
+
+/** A fix merged a day after the entry was made. */
+const fix: LinkedFix = { pull: 4242, mergedAt: '2026-11-21T00:00:00Z' };
+
+const planOf = (
+  state: LedgerState,
+  tests: readonly QuarantinedTest[],
+  options: { fix?: LinkedFix; today?: string; pending?: PendingRemoval[] } = {},
+): RemovalPlan =>
+  planRemovals({
+    tests,
+    tracks: state.quarantineTracks ?? {},
+    fixes: new Map(tests.map((test) => [test.key, options.fix])),
+    pending: options.pending ?? [],
+    today: options.today ?? '2026-11-24',
+  });
+
+describe('the fixture histories (FQ-9 acceptance)', () => {
+  it('should release a test at 100 straight gating passes after a linked fix', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    // 100 runs, one every 30 minutes from an hour after the fix merged: 49.5 hours.
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+
+    const plan = planOf(state, tests, { fix });
+
+    expect(plan.releases.map((removal) => removal.key)).toEqual([tests[0]?.key]);
+    expect(plan.releases[0]?.verdict).toMatchObject({ met: true, kind: 'fix', passes: 100, bar: 100 });
+  });
+
+  it('should not release the same 100 straight passes without a fix, and release at 300', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+
+    const atHundred = planOf(state, tests);
+    expect(atHundred.releases).toEqual([]);
+    expect(atHundred.waiting[0]?.verdict).toMatchObject({ met: false, kind: 'no-fix', passes: 100, bar: 300 });
+
+    history(state, tests, { count: 200, from: '2026-11-23T02:00:00Z', firstRun: 2000 });
+    const atThreeHundred = planOf(state, tests, { today: '2026-11-27' });
+    expect(atThreeHundred.releases[0]?.verdict).toMatchObject({ met: true, kind: 'no-fix', passes: 300 });
+  });
+
+  it('should remove an unreleased entry at day 14, and not at day 13', () => {
+    const tests = testsOf([entryOf()], '2026-12-03');
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 40, from: '2026-11-21T01:00:00Z' });
+
+    expect(planOf(state, tests, { today: '2026-12-03' }).expiries).toEqual([]);
+    const dayFourteen = planOf(state, testsOf([entryOf()], '2026-12-04'), { today: '2026-12-04' });
+    expect(dayFourteen.expiries.map((removal) => removal.entry.expires)).toEqual(['2026-12-04']);
+    expect(dayFourteen.releases).toEqual([]);
+  });
+});
+
+describe('counting the release bar', () => {
+  it('should count only the passes of runs created after the fix merged', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 60, from: '2026-11-20T00:30:00Z', everyHours: 0.25 });
+    history(state, tests, { count: 99, from: '2026-11-21T01:00:00Z', firstRun: 2000 });
+
+    expect(planOf(state, tests, { fix }).releases).toEqual([]);
+    expect(releaseVerdict(state.quarantineTracks?.[tests[0]?.key ?? ''], fix)).toMatchObject({ passes: 99 });
+
+    history(state, tests, { count: 1, from: '2026-11-23T03:00:00Z', firstRun: 3000 });
+    expect(planOf(state, tests, { fix }).releases).toHaveLength(1);
+  });
+
+  it('should not release 100 passes that span less than two days', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z', everyHours: 0.25 });
+
+    expect(planOf(state, tests, { fix }).waiting[0]?.verdict).toMatchObject({ met: false, passes: 100 });
+  });
+
+  it('should start the count again at a failure and at a pass on the recorded retry', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, {
+      count: 120,
+      from: '2026-11-21T01:00:00Z',
+      rows: (runId, index) =>
+        index === 30
+          ? [rowOf(runId, { state: 'failed', errors: ['timed out'] })]
+          : index === 50
+            ? [rowOf(runId, { flaky: true, retryCount: 1 })]
+            : [rowOf(runId)],
+    });
+
+    const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
+    expect(track).toMatchObject({ executions: 120, failures: 2, streak: 69, lastFailure: { run: 1050 } });
+    expect(planOf(state, tests, { fix }).releases).toEqual([]);
+  });
+
+  it('should exclude shadow rows, marked or registered, and rows a cache replay restored', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, {
+      count: 10,
+      from: '2026-11-21T01:00:00Z',
+      shadowTargets: new Set(['host:test:e2e:journey']),
+      rows: (runId) => [
+        rowOf(runId, { shadow: true, state: 'failed', job: 'shadow' }),
+        rowOf(runId, { targetKey: 'test:e2e:journey', target: 'test:e2e:journey', state: 'failed' }),
+        rowOf(runId, { run: runId - 500, state: 'failed' }),
+        rowOf(runId),
+      ],
+    });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ executions: 10, failures: 0, streak: 10 });
+  });
+
+  it('should count only the variant an entry is narrowed to', () => {
+    const tests = testsOf([entryOf({ variant: { browser: 'firefox' } })]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, {
+      count: 5,
+      from: '2026-11-21T01:00:00Z',
+      rows: (runId) => [
+        rowOf(runId, { variant: { os: 'linux', arch: 'x64', browser: 'chromium' }, state: 'failed' }),
+        rowOf(runId, { variant: { os: 'linux', arch: 'x64', browser: 'firefox' } }),
+      ],
+    });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ executions: 5, failures: 0, streak: 5 });
+  });
+
+  it('should keep the tracks in the serialized state and drop the track of an entry that left main', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 3, from: '2026-11-21T01:00:00Z' });
+
+    expect(parseState(serializeState(state)).quarantineTracks).toEqual(state.quarantineTracks);
+    expect(retainQuarantineTracks(state, [])).toEqual([tests[0]?.key]);
+    expect(state.quarantineTracks).toEqual({});
+  });
+
+  it('should take the newest fix merged on or after the entry was made', () => {
+    const entry = entryOf();
+    const fixes: LinkedFix[] = [
+      { pull: 1, mergedAt: '2026-11-19T10:00:00Z' },
+      { pull: 3, mergedAt: '2026-11-22T10:00:00Z' },
+      { pull: 2, mergedAt: '2026-11-21T10:00:00Z' },
+    ];
+
+    expect(linkedFix(fixes, entry)).toEqual({ pull: 3, mergedAt: '2026-11-22T10:00:00Z' });
+    expect(linkedFix(fixes.slice(0, 1), entry)).toBeUndefined();
+  });
+});
+
+describe('the count in run order', () => {
+  it('should not let a late pass from before the newest failure join the count after it', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, {
+      count: 99,
+      from: '2026-11-21T01:00:00Z',
+      rows: (runId, index) => [rowOf(runId, index === 0 ? { state: 'failed' } : {})],
+    });
+    // A run created before that failure completes late: its pass does not count.
+    history(state, tests, { count: 1, from: '2026-11-21T00:30:00Z', firstRun: 5000 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(98);
+  });
+
+  it('should end the count at a late failure where it ran, keeping the passes after it', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 10, from: '2026-11-21T01:00:00Z' });
+    // A failure in a run created between the 4th and the 5th pass, ingested late.
+    history(state, tests, {
+      count: 1,
+      from: '2026-11-21T02:45:00Z',
+      firstRun: 5000,
+      rows: (runId) => [rowOf(runId, { state: 'failed' })],
+    });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ streak: 6, failures: 1 });
+  });
+
+  it('should keep a long count whole, in run order, from where it started', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 1, from: '2026-11-21T01:00:00Z' });
+    history(state, tests, { count: 300, from: '2026-11-23T02:00:00Z', everyHours: 0.01, firstRun: 2000 });
+
+    const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
+    expect(track?.streak).toBe(301);
+    expect(track?.streakRuns[0]).toMatchObject({ at: '2026-11-21T01:00:00.000Z' });
+    expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix', passes: 301 });
+  });
+
+  it('should keep a pass created at the same instant as a late failure but after it in run order', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const at = '2026-11-21T01:00:00Z';
+    countQuarantineRun(state, { run: runOf(1001, at), rows: [rowOf(1001)], tests });
+    countQuarantineRun(state, { run: runOf(1000, at), rows: [rowOf(1000, { state: 'failed' })], tests });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+  });
+
+  it('should keep every pass after a late failure in an old part of a long count', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    // 100 passes on November 21 (one an hour from 00:00, then every few minutes), then 300 on November 24.
+    history(state, tests, { count: 100, from: '2026-11-21T00:00:00Z', everyHours: 0.2 });
+    history(state, tests, { count: 300, from: '2026-11-24T00:00:00Z', everyHours: 0.01, firstRun: 3000 });
+    // A failure created at 10:30 on November 21, ingested late.
+    history(state, tests, {
+      count: 1,
+      from: '2026-11-21T10:30:00Z',
+      firstRun: 9000,
+      rows: (runId) => [rowOf(runId, { state: 'failed' })],
+    });
+
+    const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
+    // Every pass after 10:30 survives (47 of them, from 10:36 on), however old.
+    expect(track?.streak).toBe(347);
+    expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix' });
+  });
+
+  it('should count no run created at the instant the fix merged, nor before the entry was made', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-19T00:00:00Z'));
+    history(state, tests, { count: 5, from: '2026-11-19T20:00:00Z', firstRun: 500 });
+    history(state, tests, { count: 100, from: '2026-11-21T00:00:00Z' });
+
+    const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
+    expect(track?.executions).toBe(100);
+    expect(releaseVerdict(track, fix)).toMatchObject({ passes: 99, met: false });
+  });
+
+  it('should count a passing re-run attempt after a failing attempt of the same run, in either order', () => {
+    const tests = testsOf([entryOf()]);
+    const inOrder = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const reversed = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const at = '2026-11-21T01:00:00Z';
+    const attempt = (state: LedgerState, number: number, failed: boolean): void => {
+      countQuarantineRun(state, {
+        run: { ...runOf(1000, at), run_attempt: number },
+        rows: [rowOf(1000, { attempt: number, ...(failed ? { state: 'failed' } : {}) })],
+        tests,
+      });
+    };
+    attempt(inOrder, 1, true);
+    attempt(inOrder, 2, false);
+    attempt(reversed, 2, false);
+    attempt(reversed, 1, true);
+
+    expect(inOrder.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+    expect(reversed.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+  });
+
+  it('should count only runs created after the ingestion first saw the entry on main', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    // The entry was made on the 20th but reached main at 12:00 on the 21st.
+    openQuarantineTracks(state, tests, '2026-11-21T12:00:00Z');
+    // A backlog ingested afterwards: 10 runs from before the landing, 10 after.
+    history(state, tests, { count: 10, from: '2026-11-21T06:00:00Z' });
+    history(state, tests, { count: 10, from: '2026-11-21T13:00:00Z', firstRun: 2000 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ executions: 10, streak: 10 });
+  });
+
+  it('should start the count of a returned entry again when it reaches main once more', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    openQuarantineTracks(state, tests, '2026-11-20T12:00:00Z');
+    history(state, tests, { count: 50, from: '2026-11-20T13:00:00Z' });
+    // Released: the entry left main, and its track went with it.
+    retainQuarantineTracks(state, []);
+    // It returns as the same entry (same issue and `created`) and is seen on main again on the 25th.
+    openQuarantineTracks(state, tests, '2026-11-25T00:00:00Z');
+    history(state, tests, { count: 5, from: '2026-11-24T20:00:00Z', firstRun: 3000, everyHours: 1 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ since: '2026-11-25T00:00:00Z', streak: 1 });
+  });
+
+  it('should end the count at a run whose outcome files held unreadable lines', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 10, from: '2026-11-21T01:00:00Z' });
+    // The run's passing row is not counted either: a line it could not read may have been a failure.
+    countQuarantineRun(state, {
+      run: runOf(5000, '2026-11-21T06:00:00Z'),
+      rows: [rowOf(5000)],
+      tests,
+      unreadable: true,
+    });
+    history(state, tests, { count: 2, from: '2026-11-21T07:00:00Z', firstRun: 6000 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ streak: 2, failures: 0 });
+  });
+
+  it('should give an entry that replaces another for the same test a track of its own', () => {
+    const [first] = testsOf([entryOf()]);
+    const [replacement] = testsOf([entryOf({ issue: 99, created: '2026-11-21', expires: '2026-12-05' })]);
+    const [renewed] = testsOf([entryOf({ expires: '2026-12-10', renewal: { by: 'rifont', on: '2026-11-21' } })]);
+
+    expect(replacement?.key).not.toBe(first?.key);
+    expect(renewed?.key).toBe(first?.key);
+  });
+});
+
+describe('expiry and renewal', () => {
+  it('should hold a renewed entry to its renewed expiry: past day 14, removed at day 28', () => {
+    const renewed = entryOf({ expires: '2026-12-18', renewal: { by: 'rifont', on: '2026-12-02' } });
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+
+    expect(planOf(state, testsOf([renewed], '2026-12-04'), { today: '2026-12-04' }).expiries).toEqual([]);
+    expect(planOf(state, testsOf([renewed], '2026-12-18'), { today: '2026-12-18' }).expiries).toHaveLength(1);
+  });
+
+  it('should still remove an entry past its expiry, and leave an entry that breaks another rule alone', () => {
+    const tests = quarantinedTests(
+      workspaceOf([
+        entryOf({ expires: '2026-12-01' }),
+        entryOf({ test: 'src/billing/charge.test.ts > charge > should settle once', issue: 13 }),
+      ]),
+      '2026-12-05',
+    );
+
+    expect(tests.map((test) => test.entry.issue)).toEqual([12]);
+    expect(planOf(emptyState(new Date()), tests, { today: '2026-12-05' }).expiries).toHaveLength(1);
+  });
+
+  it('should release rather than expire a test that meets the bar on its expiry day', () => {
+    const tests = testsOf([entryOf({ expires: '2026-11-24' })], '2026-11-24');
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+
+    const plan = planOf(state, tests, { fix, today: '2026-11-24' });
+    expect(plan.releases).toHaveLength(1);
+    expect(plan.expiries).toEqual([]);
+  });
+});
+
+describe('pending removals', () => {
+  const tests = testsOf([entryOf()]);
+  const removed = [{ path, entry: structuredClone(entryOf()) as unknown }];
+
+  it('should hold an entry an expiry branch removes while it is on main unchanged', () => {
+    const plan = planOf(emptyState(new Date()), tests, {
+      today: '2026-12-04',
+      pending: [{ branch: 'flake-expiry/2026-12-04-abcd1234', kind: 'expiry', removed }],
+    });
+
+    expect(plan.held.map((held) => held.branch)).toEqual(['flake-expiry/2026-12-04-abcd1234']);
+    expect(plan.expiries).toEqual([]);
+  });
+
+  it('should call an expiry stale once the operator renews the entry on main', () => {
+    const renewed = testsOf(
+      [entryOf({ expires: '2026-12-18', renewal: { by: 'rifont', on: '2026-12-03' } })],
+      '2026-12-04',
+    );
+    const plan = planOf(emptyState(new Date()), renewed, {
+      today: '2026-12-04',
+      pending: [{ branch: 'flake-expiry/2026-12-04-abcd1234', kind: 'expiry', pull: 77, removed }],
+    });
+
+    expect(plan.stale).toMatchObject([{ pull: 77, reason: 'an entry it removes is no longer on main as it was' }]);
+    expect(plan.waiting).toHaveLength(1);
+  });
+
+  it('should call a release stale when the test no longer meets the bar', () => {
+    const plan = planOf(emptyState(new Date()), tests, {
+      pending: [{ branch: 'flake-release/2026-11-23-abcd1234', kind: 'release', removed }],
+    });
+
+    expect(plan.stale).toMatchObject([{ reason: 'a test it releases no longer meets the bar' }]);
+  });
+
+  it('should call an expiry stale once the test it expires meets the release bar', () => {
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+
+    const plan = planOf(state, tests, {
+      fix,
+      pending: [{ branch: 'flake-expiry/2026-11-24-abcd1234', kind: 'expiry', pull: 5, removed }],
+    });
+
+    expect(plan.stale).toMatchObject([{ pull: 5, reason: 'a test it expires now meets the release bar' }]);
+    expect(plan.releases).toHaveLength(1);
+  });
+
+  it('should release nothing from a partial count, and leave a pending release as it is', () => {
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+    const pending: PendingRemoval = { branch: 'flake-release/2026-11-24-abcd1234', kind: 'release', removed };
+
+    const partial = planRemovals({
+      tests,
+      tracks: state.quarantineTracks ?? {},
+      fixes: new Map(tests.map((test) => [test.key, fix])),
+      pending: [],
+      today: '2026-12-04',
+      releases: false,
+    });
+    expect(partial.releases).toEqual([]);
+    expect(partial.expiries).toHaveLength(1);
+
+    const held = planRemovals({
+      tests,
+      tracks: {},
+      fixes: new Map(),
+      pending: [pending],
+      today: '2026-11-24',
+      releases: false,
+    });
+    expect(held.stale).toEqual([]);
+    expect(held.held).toHaveLength(1);
+  });
+
+  it('should not let a pending release hold an expired entry on a partial count', () => {
+    const due = testsOf([entryOf()], '2026-12-04');
+    const plan = planRemovals({
+      tests: due,
+      tracks: {},
+      fixes: new Map(),
+      pending: [{ branch: 'flake-release/2026-12-02-abcd1234', kind: 'release', removed }],
+      today: '2026-12-04',
+      releases: false,
+    });
+
+    expect(plan.stale).toMatchObject([
+      { reason: 'a release the partial count cannot confirm does not hold an entry past its expiry' },
+    ]);
+    expect(plan.expiries).toHaveLength(1);
+  });
+
+  it('should list the entries a branch removes against the file it was built on', () => {
+    const before = JSON.stringify({ entries: [entryOf(), entryOf({ issue: 14, test: 'src/a.test.ts > a > b' })] });
+    const after = removeFromQuarantine(before, [entryOf()]);
+
+    expect(JSON.parse(after)).toEqual({ entries: [entryOf({ issue: 14, test: 'src/a.test.ts > a > b' })] });
+    expect(after.endsWith('\n')).toBe(true);
+  });
+});
+
+describe('the release record', () => {
+  it('should round-trip through the marker and keep the newest removal', () => {
+    const record = { identity: 'abcd', path, created: '2026-11-20', expires: '2026-12-04' };
+    const texts = [
+      removalMarker('expiry', record),
+      `text\n${removalMarker('release', { ...record, expires: '2026-12-18' })}`,
+    ];
+
+    expect(lastRemoval(texts)).toEqual({ kind: 'release', record: { ...record, expires: '2026-12-18' } });
+    expect(lastRemoval(['<!-- flake-release: {not json} -->'])).toBeUndefined();
+    expect(removalMarker('release', { ...record, path: 'a-->b' })).not.toContain('a-->b');
+  });
+
+  it('should count a release as recent for 30 days', () => {
+    expect(isRecentRelease('2026-11-01', '2026-12-01')).toBe(true);
+    expect(isRecentRelease('2026-10-31', '2026-12-01')).toBe(false);
+  });
+});
+
+type Request = { readonly method: string; readonly path: string; readonly body?: unknown };
+
+/**
+ * A GitHub client answering from `routes` (the first route whose key the path contains; a function is called with the
+ * path), recording each request. An issue and its comments default to no labels and no comments.
+ */
+const fakeGitHub = (
+  routes: Record<string, unknown> = {},
+  options: { refusePullRequests?: boolean; texts?: Record<string, string> } = {},
+) => {
+  const requests: Request[] = [];
+  const github: Client = {
+    repository: 'taucad/tau',
+    budget: () => 1000,
+    async get<T>(requested: string): Promise<T> {
+      requests.push({ method: 'GET', path: requested });
+      const key = Object.keys(routes).find((candidate) => requested.includes(candidate));
+      if (key === undefined) {
+        if (requested.includes('/git/ref/heads/')) {
+          throw new GitHubError(`GET ${requested}`, 404);
+        }
+        if (/\/issues\/\d+\/comments\?/u.test(requested)) {
+          return [] as T;
+        }
+        if (/\/issues\/\d+$/u.test(requested)) {
+          const issue: unknown = { number: Number(requested.split('/').at(-1)), state: 'open', labels: [] };
+          return issue as T;
+        }
+        throw new Error(`unexpected GET ${requested}`);
+      }
+      const route = routes[key];
+      return (typeof route === 'function' ? (route as (path: string) => unknown)(requested) : route) as T;
+    },
+    async getText(requested: string): Promise<string> {
+      requests.push({ method: 'GET', path: requested });
+      const key = Object.keys(options.texts ?? {}).find((candidate) => requested.includes(candidate));
+      if (key === undefined) {
+        throw new Error(`unexpected getText ${requested}`);
+      }
+      return options.texts?.[key] ?? '';
+    },
+    async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
+      throw new Error('unexpected getBytes');
+    },
+    async send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', requested: string, body: unknown): Promise<T> {
+      requests.push({ method, path: requested, body });
+      if (requested.endsWith('/pulls') && options.refusePullRequests) {
+        throw new GitHubError(`${method} ${requested}`, 403, 'GitHub Actions is not permitted to create pull requests');
+      }
+      const answer: unknown = requested.endsWith('/pulls')
+        ? { number: 9001, node_id: 'PR_node' }
+        : { sha: 'sha-new', data: {} };
+      return answer as T;
+    },
+  };
+  return { github, requests };
+};
+
+const plannedOf = (tests: readonly QuarantinedTest[], state: LedgerState): readonly PlannedRemoval[] =>
+  planOf(state, tests, { fix }).releases;
+
+describe('the release job', () => {
+  it('should push the removal, name the branch on the owner issue and label it releasing', async () => {
+    const tests = testsOf([entryOf(), entryOf({ test: 'src/a.test.ts > a > keeps', issue: 14 })]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests.slice(0, 1), { count: 100, from: '2026-11-21T01:00:00Z' });
+    const releases = plannedOf(tests, state);
+    const { github, requests } = fakeGitHub(
+      { '/git/commits/': { tree: { sha: 'base-tree' } } },
+      { refusePullRequests: true },
+    );
+
+    const outcome = await applyRemovals(github, {
+      kind: 'release',
+      removals: releases,
+      base: 'main',
+      baseSha: 'base-sha',
+      quarantines: workspaceOf(tests.map((test) => test.entry)).quarantines,
+      problems: [],
+      today: '2026-11-24',
+    });
+
+    const tree = requests.find((request) => request.path.endsWith('/git/trees'))?.body as {
+      tree: Array<{ path: string; content: string }>;
+    };
+    expect(tree.tree.map((file) => file.path)).toEqual([path]);
+    expect((JSON.parse(tree.tree[0]?.content ?? '{}') as { entries: QuarantineEntry[] }).entries).toEqual([
+      tests[1]?.entry,
+    ]);
+    const ref = requests.find((request) => request.path.endsWith('/git/refs'))?.body as { ref: string };
+    expect(ref.ref).toMatch(/^refs\/heads\/flake-release\/2026-11-24-[\da-f]{8}$/u);
+    const note = requests.find((request) => request.path.endsWith('/issues/12/comments'))?.body as { body: string };
+    expect(note.body).toContain('https://github.com/taucad/tau/compare/main...flake-release/2026-11-24-');
+    expect(note.body).toContain('100 of 100 consecutive gating passes after fix #4242');
+    expect(lastRemoval([note.body])).toMatchObject({ kind: 'release', record: { created: '2026-11-20' } });
+    expect(requests.find((request) => request.path.endsWith('/issues/12/labels'))?.body).toEqual({
+      labels: ['flake:releasing'],
+    });
+    expect(outcome.some((line) => line.startsWith('Could not open the pull request'))).toBe(true);
+  });
+
+  it('should open the expiry pull request with auto-merge and hand the issue to the operator', async () => {
+    const tests = testsOf([entryOf()], '2026-12-04');
+    const { expiries } = planOf(emptyState(new Date()), tests, { today: '2026-12-04' });
+    const { github, requests } = fakeGitHub({ '/git/commits/': { tree: { sha: 'base-tree' } } });
+
+    await applyRemovals(github, {
+      kind: 'expiry',
+      removals: expiries,
+      base: 'main',
+      baseSha: 'base-sha',
+      quarantines: workspaceOf([entryOf()]).quarantines,
+      problems: [],
+      today: '2026-12-04',
+    });
+
+    const pull = requests.find((request) => request.path.endsWith('/pulls'))?.body as { title: string; head: string };
+    expect(pull.title).toBe('test(host): Expire 1 quarantined test');
+    expect(pull.head).toMatch(/^flake-expiry\//u);
+    expect(requests.some((request) => request.path === '/graphql')).toBe(true);
+    const note = requests.find((request) => request.path.endsWith('/issues/12/comments'))?.body as { body: string };
+    expect(note.body).toContain('The removal is #9001, eligible for squash auto-merge.');
+    expect(note.body).toContain('may renew it once');
+    expect(requests.find((request) => request.path.endsWith('/issues/12/labels'))?.body).toEqual({
+      labels: ['flake:needs-operator'],
+    });
+  });
+
+  it('should find the fixes from a flake/<issue> branch and from merged pull requests labelled flake', async () => {
+    const { github } = fakeGitHub({
+      '/pulls?': [
+        { number: 50, state: 'closed', merged_at: '2026-11-21T00:00:00Z' },
+        { number: 51, state: 'closed', merged_at: null },
+      ],
+      '/timeline': [
+        {
+          event: 'cross-referenced',
+          source: {
+            issue: { number: 60, pull_request: { merged_at: '2026-11-22T00:00:00Z' }, labels: [{ name: 'flake' }] },
+          },
+        },
+        {
+          event: 'cross-referenced',
+          source: { issue: { number: 61, pull_request: { merged_at: '2026-11-23T00:00:00Z' }, labels: [] } },
+        },
+        {
+          event: 'cross-referenced',
+          source: { issue: { number: 62, labels: [{ name: 'flake' }] } },
+        },
+      ],
+    });
+
+    expect(await readLinkedFixes(github, 12)).toEqual([
+      { pull: 50, mergedAt: '2026-11-21T00:00:00Z' },
+      { pull: 60, mergedAt: '2026-11-22T00:00:00Z' },
+    ]);
+  });
+
+  it('should read the entries a pending branch removes, and the releases that merged', async () => {
+    const before = `${JSON.stringify({ entries: [entryOf(), entryOf({ issue: 14, test: 'src/a.test.ts > a > b' })] })}\n`;
+    const after = removeFromQuarantine(before, [entryOf()]);
+    const commit = {
+      commits: [{ commit: { message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n' } }],
+      merge_base_commit: { sha: 'parent-sha' },
+      files: [{ filename: path, status: 'modified' }],
+    };
+    const { github } = fakeGitHub(
+      {
+        'matching-refs/heads/flake-release': [
+          { ref: 'refs/heads/flake-release/2026-11-24-abcd1234', object: { sha: 'branch-sha' } },
+          { ref: 'refs/heads/flake-release/2026-11-19-closed00', object: { sha: 'branch-sha' } },
+        ],
+        'matching-refs/heads/flake-expiry': [],
+        '/pulls?': (requested: string) =>
+          requested.includes('sort=updated')
+            ? [
+                // Merged, its branch since deleted: still found.
+                {
+                  number: 70,
+                  state: 'closed',
+                  merged_at: '2026-11-21T08:00:00Z',
+                  updated_at: '2026-11-21T08:00:00Z',
+                  head: { ref: 'flake-release/2026-11-20-merged00', sha: 'branch-sha' },
+                  base: { ref: 'main', sha: 'main-at-merge' },
+                },
+                // Merged into another branch: it removed nothing from main.
+                {
+                  number: 73,
+                  state: 'closed',
+                  merged_at: '2026-11-21T10:00:00Z',
+                  updated_at: '2026-11-21T10:00:00Z',
+                  head: { ref: 'flake-release/2026-11-20-elsewhere', sha: 'branch-sha' },
+                  base: { ref: 'claude/other' },
+                },
+                {
+                  number: 72,
+                  state: 'closed',
+                  merged_at: '2026-11-21T09:00:00Z',
+                  updated_at: '2026-11-21T09:00:00Z',
+                  head: { ref: 'claude/other', sha: 'other' },
+                },
+                {
+                  number: 71,
+                  state: 'closed',
+                  merged_at: null,
+                  updated_at: '2026-11-20T08:00:00Z',
+                  head: { ref: 'flake-release/2026-11-19-closed00', sha: 'branch-sha' },
+                },
+              ]
+            : requested.includes('closed00')
+              ? [{ number: 71, state: 'closed', merged_at: null }]
+              : [],
+        '/compare/': commit,
+      },
+      { texts: { 'ref=parent-sha': before, 'ref=branch-sha': after } },
+    );
+
+    expect(await readRemovalBranches(github, '2026-10-27T00:00:00Z')).toEqual({
+      pending: [
+        {
+          branch: 'flake-release/2026-11-24-abcd1234',
+          kind: 'release',
+          pull: undefined,
+          message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n',
+          removed: [{ path, entry: entryOf() }],
+        },
+      ],
+      landed: [
+        {
+          kind: 'release',
+          branch: 'flake-release/2026-11-20-merged00',
+          mergedAt: '2026-11-21T08:00:00Z',
+          removed: [{ path, entry: entryOf() }],
+        },
+      ],
+    });
+  });
+
+  it('should open the pull request of a current removal branch and close the one of a stale branch', async () => {
+    const { github, requests } = fakeGitHub();
+    const plan: RemovalPlan = {
+      releases: [],
+      expiries: [],
+      held: [],
+      waiting: [],
+      current: [
+        { branch: 'flake-expiry/2026-12-04-aaaa', kind: 'expiry', message: 'test(host): Expire 1\n\n- x', removed: [] },
+      ],
+      stale: [{ branch: 'flake-release/2026-11-24-bbbb', kind: 'release', pull: 88, removed: [], reason: 'gone' }],
+    };
+
+    const outcome = await reconcileRemovals(github, plan, { base: 'main' });
+
+    expect(requests.find((request) => request.path.endsWith('/pulls'))?.body).toMatchObject({
+      title: 'test(host): Expire 1',
+      head: 'flake-expiry/2026-12-04-aaaa',
+    });
+    expect(requests.find((request) => request.path.endsWith('/pulls/88'))?.body).toEqual({ state: 'closed' });
+    expect(outcome).toEqual([
+      'Opened #9001 for `flake-expiry/2026-12-04-aaaa`, which had no pull request.',
+      'Closed #88 (`flake-release/2026-11-24-bbbb`): gone.',
+    ]);
+  });
+
+  it('should close the owner issue of a merged release, recover one never labelled, and strip the rest', async () => {
+    const branch = 'flake-release/2026-11-24-aaaa';
+    const bot = { type: 'Bot' };
+    const releasing = [{ name: 'flake' }, { name: 'flake:releasing' }];
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [12, 13, 14].map((number) => ({ number, state: 'open', labels: releasing })),
+      // #18's owner update failed before its release merged: no label, but it still closes.
+      '/issues/18/comments': [],
+      '/issues/18': { number: 18, state: 'open', labels: [{ name: 'flake' }] },
+      // #19 was closed by an earlier run: nothing more to do.
+      '/issues/19/comments': [
+        {
+          body: removalMarker('released', {
+            identity: identityHashOf(`host › ${testName}`),
+            path,
+            created: '2026-11-20',
+            expires: '2026-12-04',
+            branch,
+            released: '2026-11-25',
+          }),
+          user: bot,
+        },
+      ],
+      '/issues/19': { number: 19, state: 'closed', labels: [{ name: 'flake' }, { name: 'flake:released' }] },
+      // #21 returned after its release and was reopened for the operator: it stays open.
+      '/issues/21/comments': [
+        {
+          body: removalMarker('released', {
+            identity: identityHashOf(`host › ${testName}`),
+            path,
+            created: '2026-11-20',
+            expires: '2026-12-04',
+            branch,
+            released: '2026-11-25',
+          }),
+          user: bot,
+        },
+        {
+          body: `${returnMarker({ identity: identityHashOf(`host › ${testName}`), released: '2026-11-25' })}\nReturned.`,
+          user: bot,
+        },
+      ],
+      '/issues/21': {
+        number: 21,
+        state: 'open',
+        labels: [{ name: 'flake:released' }, { name: 'flake:needs-operator' }],
+      },
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-25T08:00:00Z',
+        removed: [12, 14, 18, 19, 21].map((issue) => ({ path, entry: entryOf({ issue }) })),
+      },
+      // An expiry merged by hand after its owner update failed: the note and the label are finished.
+      {
+        kind: 'expiry',
+        branch: 'flake-expiry/2026-12-04-cccc',
+        mergedAt: '2026-12-04T09:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 20 }) }],
+      },
+    ];
+
+    const outcome = await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 14 })]),
+      landed,
+      identityOf: (file, test) => (file === path ? `host › ${test}` : undefined),
+    });
+
+    const patched = (issue: number): unknown =>
+      requests.find((request) => request.method === 'PATCH' && request.path.endsWith(`/issues/${issue}`))?.body;
+    // The state alone, and the labels one by one: a label someone added meanwhile is kept.
+    expect(patched(12)).toEqual({ state: 'closed', state_reason: 'completed' });
+    expect(patched(18)).toEqual({ state: 'closed', state_reason: 'completed' });
+    expect(requests.find((request) => request.path.endsWith('/issues/18/labels'))?.body).toEqual({
+      labels: ['flake:released'],
+    });
+    // #13 left main without a landed release: it only loses the label.
+    expect(patched(13)).toBeUndefined();
+    expect(
+      requests.some(
+        (request) => request.method === 'DELETE' && request.path.endsWith('/issues/13/labels/flake%3Areleasing'),
+      ),
+    ).toBe(true);
+    expect(patched(14)).toBeUndefined();
+    expect(patched(19)).toBeUndefined();
+    expect(patched(21)).toBeUndefined();
+    // The closing comment records the day the release merged: the start of the 30-day return window.
+    const closing = requests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/issues/12/comments'),
+    )?.body as { body: string };
+    expect(lastLanded([closing.body])).toMatchObject({ branch, released: '2026-11-25', created: '2026-11-20' });
+    expect(lastRemoval([closing.body])).toBeUndefined();
+    const expiryNote = requests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/issues/20/comments'),
+    )?.body as { body: string };
+    expect(lastRemoval([expiryNote.body])).toMatchObject({
+      kind: 'expiry',
+      record: { branch: 'flake-expiry/2026-12-04-cccc' },
+    });
+    expect(requests.find((request) => request.path.endsWith('/issues/20/labels'))?.body).toEqual({
+      labels: ['flake:needs-operator'],
+    });
+    expect(patched(20)).toBeUndefined();
+    expect(outcome).toHaveLength(4);
+  });
+
+  it('should settle an issue by its newest merged release, whatever order the pull requests come in', async () => {
+    const id = `host › ${testName}`;
+    const first = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch: 'flake-release/2026-11-22-aaaa',
+      released: '2026-11-22',
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // Released once, returned (reopened for the operator), then released again.
+      '/issues/30/comments': [
+        { body: removalMarker('released', first), user: { type: 'Bot' } },
+        { body: `${returnMarker(first)}\nReturned.`, user: { type: 'Bot' } },
+      ],
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch: first.branch,
+        mergedAt: '2026-11-22T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 30 }) }],
+      },
+      {
+        kind: 'release',
+        branch: 'flake-release/2026-11-26-bbbb',
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 30 }) }],
+      },
+    ];
+
+    await closeReleased(github, { tests: [], landed, identityOf: (_file, test) => `host › ${test}` });
+
+    const closing = requests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/issues/30/comments'),
+    )?.body as { body: string };
+    expect(lastLanded([closing.body])).toMatchObject({
+      branch: 'flake-release/2026-11-26-bbbb',
+      released: '2026-11-26',
+    });
+    expect(requests.find((request) => request.method === 'PATCH' && request.path.endsWith('/issues/30'))?.body).toEqual(
+      { state: 'closed', state_reason: 'completed' },
+    );
+  });
+
+  it('should record each variant a release of one owner issue removed', async () => {
+    const { github, requests } = fakeGitHub({ 'labels=flake%3Areleasing': [] });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch: 'flake-release/2026-11-26-bbbb',
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [
+          { path, entry: entryOf({ issue: 31, variant: { browser: 'firefox' } }) },
+          { path, entry: entryOf({ issue: 31, variant: { browser: 'webkit' } }) },
+        ],
+      },
+    ];
+
+    await closeReleased(github, { tests: [], landed, identityOf: (_file, test) => `host › ${test}` });
+
+    const notes = requests
+      .filter((request) => request.method === 'POST' && request.path.endsWith('/issues/31/comments'))
+      .map((request) => lastLanded([(request.body as { body: string }).body])?.variant);
+    expect(notes).toEqual([{ browser: 'firefox' }, { browser: 'webkit' }]);
+  });
+
+  it('should not resume the auto-merge of a pending release on a partial count', () => {
+    const ready = { unnoted: [], problems: [] };
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: false })).toBe(false);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'expiry', releases: false })).toBe(true);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true })).toBe(true);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true, unnoted: ['failed'] })).toBe(false);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'expiry', releases: true, problems: ['invalid'] })).toBe(false);
+  });
+
+  it('should record a released variant while another stays quarantined under the issue, and keep a return open', async () => {
+    const id = `host › ${testName}`;
+    const firefox = { browser: 'firefox' };
+    const webkit = { browser: 'webkit' };
+    const branch = 'flake-release/2026-11-26-bbbb';
+    const webkitRecord = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch,
+      released: '2026-11-26',
+      variant: webkit,
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // #33: WebKit's release was recorded and closed the issue; Firefox then returned and reopened it.
+      '/issues/33/comments': [
+        { body: removalMarker('released', webkitRecord), user: { type: 'Bot' } },
+        {
+          body: `${returnMarker({ identity: identityHashOf(id), released: '2026-11-22', variant: firefox })}\nReturned.`,
+          user: { type: 'Bot' },
+        },
+      ],
+      '/issues/33': {
+        number: 33,
+        state: 'open',
+        labels: [{ name: 'flake:released' }, { name: 'flake:needs-operator' }],
+      },
+    });
+    const landed: LandedRemoval[] = [
+      // #32: Firefox released while WebKit is still on main.
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 32, variant: firefox }) }],
+      },
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 33, variant: webkit }) }],
+      },
+    ];
+
+    const outcome = await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 32, variant: webkit })]),
+      landed,
+      identityOf: (_file, test) => `host › ${test}`,
+    });
+
+    const note = requests.find((request) => request.method === 'POST' && request.path.endsWith('/issues/32/comments'))
+      ?.body as { body: string };
+    expect(lastLanded([note.body])).toMatchObject({ variant: firefox, released: '2026-11-26' });
+    expect(requests.some((request) => request.method === 'PATCH')).toBe(false);
+    expect(outcome).toEqual(['Recorded the release on #32; the issue stays open (another variant, or the operator).']);
+  });
+
+  it('should finish a shared release record whose label failed, and not close an issue the operator holds', async () => {
+    const id = `host › ${testName}`;
+    const branch = 'flake-release/2026-11-26-bbbb';
+    const record = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch,
+      released: '2026-11-26',
+      variant: { browser: 'firefox' },
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // #34: the record was written, its label was not; WebKit is still on main.
+      '/issues/34/comments': [{ body: removalMarker('released', record), user: { type: 'Bot' } }],
+      '/issues/34': { number: 34, state: 'open', labels: [{ name: 'flake' }] },
+      // #35: Firefox returned before WebKit's release was recorded: open, with the operator.
+      '/issues/35/comments': [],
+      '/issues/35': { number: 35, state: 'open', labels: [{ name: 'flake' }, { name: 'flake:needs-operator' }] },
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [
+          { path, entry: entryOf({ issue: 34, variant: { browser: 'firefox' } }) },
+          { path, entry: entryOf({ issue: 35, variant: { browser: 'webkit' } }) },
+        ],
+      },
+    ];
+
+    await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 34, variant: { browser: 'webkit' } })]),
+      landed,
+      identityOf: (_file, test) => `host › ${test}`,
+    });
+
+    const writes = requests
+      .filter((request) => request.method !== 'GET')
+      .map((request) => [request.method, request.path]);
+    expect(writes).toEqual([
+      ['POST', '/repos/taucad/tau/issues/34/labels'],
+      ['POST', '/repos/taucad/tau/issues/35/comments'],
+      ['POST', '/repos/taucad/tau/issues/35/labels'],
+    ]);
+  });
+
+  it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {
+    const pulls: Record<string, unknown> = {
+      '/pulls/1': { node_id: 'A', state: 'open', body: `Body\n${autoMergeMarker}\n`, auto_merge: null },
+      '/pulls/2': {
+        node_id: 'B',
+        state: 'open',
+        body: `Body\n${autoMergeMarker}\n`,
+        auto_merge: { merge_method: 'squash' },
+      },
+      '/pulls/3': { node_id: 'C', state: 'open', body: 'Body, auto-merge left to the reviewer', auto_merge: null },
+    };
+    const { github, requests } = fakeGitHub(pulls);
+
+    expect(await resumeAutoMerge(github, 1)).toBe('Enabled the deferred squash auto-merge on #1.');
+    expect(await resumeAutoMerge(github, 2)).toBeUndefined();
+    expect(await resumeAutoMerge(github, 3)).toBeUndefined();
+    expect(requests.filter((request) => request.path === '/graphql').map((request) => request.body)).toMatchObject([
+      { variables: { id: 'A' } },
+    ]);
+  });
+
+  it('should leave auto-merge off until every owner issue is told', async () => {
+    const tests = testsOf([entryOf()], '2026-12-04');
+    const { expiries } = planOf(emptyState(new Date()), tests, { today: '2026-12-04' });
+    const { github, requests } = fakeGitHub({
+      '/git/commits/': { tree: { sha: 'base-tree' } },
+      '/issues/12/comments': () => {
+        throw new GitHubError('GET comments', 502);
+      },
+    });
+
+    const outcome = await applyRemovals(github, {
+      kind: 'expiry',
+      removals: expiries,
+      base: 'main',
+      baseSha: 'base-sha',
+      quarantines: workspaceOf([entryOf()]).quarantines,
+      problems: [],
+      today: '2026-12-04',
+    });
+
+    expect(requests.some((request) => request.path === '/graphql')).toBe(false);
+    expect(outcome).toContain('Auto-merge left off: an owner issue was not updated; a later run retries it.');
+  });
+
+  it('should write the note once per branch and variant, label first, and leave a label removed since', async () => {
+    const tests = testsOf([entryOf()], '2026-12-04');
+    const [removal] = planOf(emptyState(new Date()), tests, { today: '2026-12-04' }).expiries;
+    if (!removal) {
+      throw new Error('expected an expiry');
+    }
+    const branch = 'flake-expiry/2026-12-04-aaaa';
+    const identity = identityHashOf(`host › ${testName}`);
+    const noted = { identity, path, created: '2026-11-20', expires: '2026-12-04', branch };
+    // #12 has its note (the handoff is done; the operator has since removed the label): nothing is written.
+    const done = fakeGitHub({
+      '/issues/12/comments': [{ body: removalMarker('expiry', noted), user: { type: 'Bot' } }],
+    });
+    await ensureOwnerNotes(done.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
+    expect(done.requests.filter((request) => request.method !== 'GET')).toEqual([]);
+
+    // Another variant's note on the same branch is not this entry's: the label, then the note.
+    const other = fakeGitHub({
+      '/issues/12/comments': [
+        { body: removalMarker('expiry', { ...noted, variant: { browser: 'firefox' } }), user: { type: 'Bot' } },
+      ],
+    });
+    await ensureOwnerNotes(other.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
+    expect(other.requests.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual([
+      '/repos/taucad/tau/issues/12/labels',
+      '/repos/taucad/tau/issues/12/comments',
+    ]);
+  });
+
+  it('should not open a removal whose entry changed on the base since the plan', async () => {
+    const renewed = `${JSON.stringify({ entries: [entryOf({ expires: '2026-12-18', renewal: { by: 'rifont', on: '2026-12-03' } })] })}\n`;
+    const { github, requests } = fakeGitHub({}, { texts: { 'ref=main': renewed } });
+    const plan: RemovalPlan = {
+      releases: [],
+      expiries: [],
+      held: [],
+      waiting: [],
+      stale: [],
+      current: [{ branch: 'flake-expiry/2026-12-04-aaaa', kind: 'expiry', removed: [{ path, entry: entryOf() }] }],
+    };
+
+    const outcome = await reconcileRemovals(github, plan, { base: 'main' });
+
+    expect(requests.some((request) => request.method === 'POST')).toBe(false);
+    expect(outcome).toEqual([
+      '`flake-expiry/2026-12-04-aaaa` is not opened: an entry it removes changed on `main` since this run planned.',
+    ]);
+  });
+
+  it('should read every page of the timeline for a linked fix', async () => {
+    const filler = Array.from({ length: 100 }, () => ({ event: 'commented' }));
+    const { github } = fakeGitHub({
+      '/pulls?': [],
+      '/timeline': (requested: string) =>
+        requested.endsWith('page=1')
+          ? filler
+          : [
+              {
+                event: 'cross-referenced',
+                source: {
+                  issue: { number: 60, pull_request: { merged_at: '2026-11-22T00:00:00Z' }, labels: ['flake'] },
+                },
+              },
+            ],
+    });
+
+    expect(await readLinkedFixes(github, 12)).toEqual([{ pull: 60, mergedAt: '2026-11-22T00:00:00Z' }]);
+  });
+
+  it('should write the release comment with the entry it releases', () => {
+    const tests = testsOf([entryOf({ renewal: { by: 'rifont', on: '2026-11-21' }, expires: '2026-12-10' })]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 100, from: '2026-11-21T01:00:00Z' });
+    const [release] = plannedOf(tests, state);
+    if (!release) {
+      throw new Error('expected a release');
+    }
+
+    expect(
+      lastRemoval([releaseComment(release, { identity: 'abcd', where: 'Here.', branch: 'flake-release/x' })])?.record,
+    ).toEqual({
+      identity: 'abcd',
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-10',
+      renewal: { by: 'rifont', on: '2026-11-21' },
+      branch: 'flake-release/x',
+    });
+    expect(removalFiles(workspaceOf([]).quarantines, [release])).toEqual([
+      { path, text: `${JSON.stringify({ entries: [] }, undefined, 2)}\n` },
+    ]);
+  });
+});

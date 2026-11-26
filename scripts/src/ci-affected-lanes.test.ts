@@ -179,6 +179,7 @@ describe('ci.yml affected-only lanes', () => {
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
       'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
+      'e2e-shadow': { targets: ['test:e2e:shadow'], pr: 'queue' },
       'compute-qualify': { targets: ['compute-qualify-ci'] },
       'node-floor': { tags: ['type:package'], targets: ['test'], pr: 'touched' },
     });
@@ -1262,10 +1263,20 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
     'ui-e2e': {
       root: 'apps/ui-e2e',
-      targets: ['test:e2e', 'test:e2e:development', 'test:e2e:daemon-host', 'test:e2e:queue'],
+      targets: [
+        'test:e2e',
+        'test:e2e:development',
+        'test:e2e:daemon-host',
+        'test:e2e:journey-a',
+        'test:e2e:service-worker',
+        'test:e2e:queue',
+        'test:e2e:shadow',
+      ],
       config: {
         'test:e2e': { metadata: { shards: 12 } },
+        'test:e2e:journey-a': { metadata: { browsers: ['chromium', 'firefox'] } },
         'test:e2e:queue': { executor: 'nx:noop', dependsOn: ['test:e2e:daemon-host', 'test:e2e:development'] },
+        'test:e2e:shadow': { executor: 'nx:noop', dependsOn: ['test:e2e:journey-a', 'test:e2e:service-worker'] },
       },
     },
     host: {
@@ -1275,7 +1286,7 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
     replicad: { root: 'packages/plugins/replicad', type: 'lib', tags: ['type:package'], targets: ['test'] },
-    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: ['test', 'compute-qualify-ci'] },
+    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:nightly-only'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1932,6 +1943,128 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
     expect(status).not.toBe(0);
     expect(stderr).toContain(message);
   });
+
+  it('should run one shadow row per shadow suite of an affected project in the merge queue and on a push, never on a pull request (Q1)', () => {
+    const rows = [
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:journey-a',
+        label: 'ui-e2e test:e2e:journey-a',
+        slug: 'ui-e2e-test-e2e-journey-a',
+        browsers: 'chromium firefox',
+      },
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:service-worker',
+        label: 'ui-e2e test:e2e:service-worker',
+        slug: 'ui-e2e-test-e2e-service-worker',
+        // A suite that names no browsers installs all three, as an e2e-queue row does.
+        browsers: 'chromium firefox webkit',
+      },
+    ];
+    // Affected through a dependency is enough: the shadow bar counts every run that affects the project.
+    for (const event of ['merge_group', 'push']) {
+      const run = plan(event, { affected: ['ui-e2e', 'ui'], files: ['apps/ui/app/root.tsx'] });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.outputs['e2e-shadow'], event).toBe('true');
+      expect(JSON.parse(run.outputs['e2e-shadow-suites'] ?? ''), event).toEqual(rows);
+    }
+    // A pull request runs none, even one that touches the project: a shadow row proves nothing there.
+    const pullRequest = plan('pull_request', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['e2e-shadow']).toBe('false');
+    expect(pullRequest.outputs['e2e-shadow-suites']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.outputs['e2e-shadow']).toBe('false');
+    expect(unrelated.outputs['e2e-shadow-suites']).toBe('[]');
+  });
+
+  it('should run the desktop shadow rows only when the desktop lane is selected or the entry touches desktop-e2e (DC-27)', () => {
+    const desktopNodes = (lane: string): Record<string, Node> => ({
+      ...nodes,
+      'desktop-e2e': {
+        root: 'apps/desktop-e2e',
+        targets: ['test:e2e', 'test:e2e:chat', 'test:e2e:project', 'test:e2e:shadow'],
+        config: {
+          'test:e2e:chat': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:project': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:shadow': {
+            executor: 'nx:noop',
+            dependsOn: ['test:e2e:chat', 'test:e2e:project'],
+            metadata: { lane },
+          },
+        },
+      },
+    });
+    const graphNodes = desktopNodes('desktop');
+    const rows = ['test:e2e:chat', 'test:e2e:project'].map((target) => ({
+      project: 'desktop-e2e',
+      target,
+      label: `desktop-e2e ${target}`,
+      slug: `desktop-e2e-${target.replaceAll(':', '-')}`,
+      browsers: 'chromium',
+    }));
+    const desktopRows = (run: ReturnType<typeof plan>): unknown[] =>
+      (JSON.parse(run.outputs['e2e-shadow-suites'] ?? '[]') as Array<{ readonly project: string }>).filter(
+        ({ project }) => project === 'desktop-e2e',
+      );
+    for (const event of ['merge_group', 'push']) {
+      // A tag:ci:desktop project (`ui` in this fixture) is affected: the desktop lane is selected.
+      const desktopLane = plan(event, { affected: ['desktop-e2e', 'ui'], files: ['apps/ui/app/root.tsx'], graphNodes });
+      expect(desktopLane.status, desktopLane.stderr).toBe(0);
+      expect(desktopRows(desktopLane), event).toEqual(rows);
+      // The entry changes a file desktop-e2e owns, and no desktop project is affected.
+      const own = plan(event, { affected: ['desktop-e2e'], files: ['apps/desktop-e2e/src/a.spec.ts'], graphNodes });
+      expect(own.status, own.stderr).toBe(0);
+      expect(desktopRows(own), event).toEqual(rows);
+      // Affected through another dependency only (here the API): no desktop row, and the lane is off when no other
+      // project has shadow rows.
+      const through = plan(event, { affected: ['desktop-e2e', 'api'], files: ['apps/api/app/main.ts'], graphNodes });
+      expect(through.status, through.stderr).toBe(0);
+      expect(through.outputs['e2e-shadow'], event).toBe('false');
+      expect(through.outputs['e2e-shadow-suites'], event).toBe('[]');
+      // A project that names no lane keeps its rows whenever it is affected.
+      const both = plan(event, {
+        affected: ['desktop-e2e', 'ui-e2e'],
+        files: ['apps/ui-e2e/src/a.spec.ts'],
+        graphNodes,
+      });
+      expect(both.outputs['e2e-shadow'], event).toBe('true');
+      expect(desktopRows(both), event).toEqual([]);
+      expect(JSON.parse(both.outputs['e2e-shadow-suites'] ?? '[]'), event).toHaveLength(2);
+    }
+    const pullRequest = plan('pull_request', {
+      affected: ['desktop-e2e', 'ui'],
+      files: ['apps/desktop-e2e/src/a.spec.ts'],
+      graphNodes,
+    });
+    expect(pullRequest.outputs['e2e-shadow']).toBe('false');
+    const unknown = plan('merge_group', { affected: ['desktop-e2e'], files: [], graphNodes: desktopNodes('electron') });
+    expect(unknown.status).not.toBe(0);
+    expect(unknown.stderr).toContain(
+      'desktop-e2e:test:e2e:shadow names lane "electron", which is not a lane of this plan',
+    );
+  });
+
+  it.each([
+    [['test:e2e:missing'], 'ui-e2e:test:e2e:shadow depends on "test:e2e:missing", which is not a target of ui-e2e'],
+    [['test:e2e'], 'ui-e2e:test:e2e declares shards; the e2e-shadow lane runs a suite as one job'],
+    // Ruling 7: a suite gates or is on probation, never both.
+    [['test:e2e:development'], 'ui-e2e:test:e2e:development is in both test:e2e:shadow and test:e2e:queue'],
+  ])('should fail the plan when the shadow rows list %j', (dependsOn, message) => {
+    const endToEnd = nodes['ui-e2e'];
+    const graphNodes = {
+      ...nodes,
+      'ui-e2e': {
+        ...endToEnd,
+        root: endToEnd?.root ?? '',
+        config: { ...endToEnd?.config, 'test:e2e:shadow': { dependsOn } },
+      },
+    };
+    const { status, stderr } = plan('merge_group', { affected: ['ui-e2e'], files: [], graphNodes });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain(message);
+  });
 });
 
 describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
@@ -2092,7 +2225,7 @@ describe('ci.yml test lanes (CI throughput review ST-1)', () => {
           '#!/usr/bin/env bash',
           'set -euo pipefail',
           'case "$*" in',
-          '  "nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
+          '  "nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
           '  "nx run-many "*) echo "$*" >> "$FIXTURES/calls" ;;',
           '  *) echo "unexpected pnpm $*" >&2; exit 1 ;;',
           'esac',

@@ -40,6 +40,13 @@
 (*                  the admitting generation, as a stop is (taucad/tau#851;*)
 (*                  FALSE left it pending for recovery, and the chat's     *)
 (*                  next step waited on it: agent-host StopSettlement)     *)
+(*   SupplierCutSettles  a step the supplier ended without complete usage  *)
+(*                  (a dropped stream, a request that failed before any    *)
+(*                  response, a deadline cut) is terminalized at once as   *)
+(*                  absorbed under the admitting generation, as a client   *)
+(*                  cut is (launch audit D-2; FALSE left it pending until  *)
+(*                  due_at plus the grace, and the host's retry, a Resume  *)
+(*                  and the chat's next step waited on it)                 *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
@@ -76,6 +83,8 @@ CONSTANTS
     ServiceStops,
     \* @type: Bool;
     CutSettles,
+    \* @type: Bool;
+    SupplierCutSettles,
     \* mutation knobs: TRUE is the code as written
     \* @type: Bool;
     FenceGen,
@@ -472,18 +481,26 @@ ApiServiceStop(k) ==
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
-\* finish(): terminalize under the admitting generation; absorbed_unknown returns without it, unless
-\* the process is stopping (ApiServiceStop). After a settled receipt it hands the settlement to the
+\* finish(): terminalize under the admitting generation. Every end it is handed has no supplier stream
+\* left to observe (ApiObserve recorded it), so absorbed_unknown is terminalized here too
+\* (SupplierCutSettles): recovery would reach the same absorbed receipt from the same stored evidence,
+\* only after due_at plus the grace. After a settled receipt it hands the settlement to the
 \* evidence recorder in the background (T07); that write never touches the row, so it is not modelled.
 \* Its usage and turn-step cache metrics (recordSettledGenAiUsage, recordTurnStepCache) are counters
 \* read from the same evidence; they write nothing the spec observes, so they are not modelled either.
 ApiFinish(k) ==
     /\ req[k] = "finishing"
-    /\ IF fin[k] = "final" /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+    /\ IF (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending" /\ fin[k] = "final"
        THEN Terminal(k, "settled", 1, {}, FALSE, 1)
+       ELSE IF /\ SupplierCutSettles /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+               /\ fin[k] = "unknown"
+       THEN Terminal(k, "absorbed", 0, {"unknown"}, FALSE, 1)   \* finish() records its evidence first
        ELSE UNCHANGED <<row, acctHeld>>   \* a stale generation throws; a terminal row returns its receipt
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
+\* Launch audit review (2026-11-25): finish() now catches the stale generation's throw by its type
+\* (StaleCreditOperationGenerationError) and returns, logging the sweep's settlement as expected
+\* rather than as a failed one. The row is untouched either way, so this action is unchanged.
 
 -----------------------------------------------------------------------------
 (* Recovery sweep (credit-ledger.service.ts claimDueOperations, recover, defer, absorb). *)
@@ -650,13 +667,21 @@ ChargedReplyRecorded ==
 \* D-086: today's uncoded dead end is reachable; the target never reaches it
 NoUncodedDeadEnd == host.ph # "stuck"
 
-\* Vacuity for ApiServiceStop and ApiClientCancel: only a stopping API or a client cut absorbs under
-\* the admitting generation; every recovery absorb runs under a claimed one. Its witness must keep failing.
+\* Vacuity for ApiServiceStop, ApiClientCancel and ApiFinish's absorb: only a stopping API, a client cut
+\* or a supplier cut absorbs under the admitting generation; every recovery absorb runs under a claimed
+\* one. Its witnesses must keep failing.
 NoLiveAbsorb == \A k \in Keys : row[k].cust = "absorbed" => row[k].tgen > 1
 
 \* taucad/tau#851: a client cut under the live generation never waits for recovery, so the chat's next
 \* step finds it settled (agent-host StopSettlement). A claimed row is recovery's, as before.
 ClientCutSettled == \A k \in Keys : "abort" \in row[k].ev /\ row[k].gen = 1 => row[k].cust # "pending"
+
+\* Launch audit D-2: once finish() has run on a step the supplier ended without complete usage, the row
+\* is not pending under the live generation, so the host's retry of a lost reply, a Resume and the
+\* chat's next step find the attempt settled instead of waiting for due_at plus the grace. A claimed row
+\* is recovery's, as before.
+SupplierCutSettled ==
+    \A k \in Keys : req[k] = "done" /\ fin[k] = "unknown" /\ row[k].gen = 1 => row[k].cust # "pending"
 
 -----------------------------------------------------------------------------
 (* GI-S7: the row's inductive invariant for Apalache (MC_GatewayInvocation). *)

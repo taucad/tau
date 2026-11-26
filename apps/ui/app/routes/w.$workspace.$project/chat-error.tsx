@@ -15,7 +15,7 @@ import {
   autoResumableProviderUnavailableCode,
   nextProviderUnavailableRetry,
 } from '@taucad/chat-ui/utils/run-auto-resume';
-import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
+import { selectVisibleChatErrorEntry, selectVisibleFailureResumable } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
@@ -31,20 +31,19 @@ import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-age
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 import { ChatErrorAccountRestricted } from '#routes/w.$workspace.$project/chat-error-account-restricted.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
-import { isResumableRun } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
-import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
+import { selectCurrentRun } from '#machines/chat-projection.logic.js';
 
 /** The chat's visible failure, if any. */
 export function selectVisibleChatError(
-  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): NormalizedChatError | undefined {
   return selectVisibleChatErrorEntry(state)?.error;
 }
 
 /** The visible failure's durable identity (`run:…`, `refusal:…`), which the phone sheet acknowledges by (I5). */
 export function selectVisibleChatErrorId(
-  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): string | undefined {
   return selectVisibleChatErrorEntry(state)?.id;
 }
@@ -577,13 +576,9 @@ function ChatErrorBody({
 }): React.ReactNode {
   /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
    * admitted, which reads the caught-up log's current run — never the error text, which can outlive the run it names
-   * or describe a refusal that left no run. Every other card keeps *Try again* and makes no promise. */
-  const resumable = useChatSelector(
-    (state) =>
-      state.projection !== undefined &&
-      selectCaughtUp(state.projection) &&
-      isResumableRun(selectCurrentRun(state.projection)),
-  );
+   * or describe a refusal that left no run. A refused send, edit or retry is not that run's failure, so its card
+   * makes no promise of it either. Every other card keeps *Try again* and makes no promise. */
+  const resumable = useChatSelector(selectVisibleFailureResumable);
   const currentRunId = useChatSelector((state) =>
     state.projection === undefined ? undefined : selectCurrentRun(state.projection)?.runId,
   );
@@ -661,7 +656,7 @@ function ChatErrorBody({
   const { category } = cardOf(parsedError.code, parsedError.category);
   switch (category) {
     case errorCategory.auth: {
-      return <ChatErrorUnauthorized className={cn('min-w-0', className)} />;
+      return <ChatErrorUnauthorized className={cn('min-w-0', className)} resumable={resumable} />;
     }
 
     case errorCategory.network: {

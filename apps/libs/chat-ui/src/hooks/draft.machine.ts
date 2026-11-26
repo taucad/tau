@@ -39,6 +39,15 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { isAttachmentMediaType } from '@taucad/agent-host/wire';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
+import { unflattened } from '#utils/message-attachments.js';
+import {
+  annotationsOf,
+  brokenAnnotationLimit,
+  withAnnotations,
+  withImageAttachment,
+  withoutAnnotatedImage,
+} from '@taucad/chat/annotations';
+import type { AnnotationLimit, MessageAnnotations } from '@taucad/chat/annotations';
 import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
 
 /**
@@ -71,6 +80,8 @@ type AttachmentQueueEntry = {
   readonly preserveOriginal: boolean;
   /** The file's declared type, for the intake counter only. */
   readonly declaredType?: string;
+  /** The annotated image this picture belongs to; it lands only if the draft still holds that image. */
+  readonly annotationImageId?: string;
   /** Set once the entry is ready for `storing`: at enqueue for a document, after `resizing` for an image. */
   readonly bytes?: Uint8Array<ArrayBuffer>;
 };
@@ -89,6 +100,8 @@ export type DraftMachineContext = {
   // Main draft state
   draftText: string;
   draftAttachments: DraftAttachment[];
+  /** The draft's numbered comments and annotated images (comment pins and image mark up). */
+  draftAnnotations?: MessageAnnotations;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   // Edit draft state
@@ -101,6 +114,7 @@ export type DraftMachineContext = {
   savingEditMessageId?: string;
   editDraftText: string;
   editDraftAttachments: DraftAttachment[];
+  editDraftAnnotations?: MessageAnnotations;
   /** FIFO queue of attachments awaiting `resizing` and `storing`. */
   attachmentQueue: readonly AttachmentQueueEntry[];
   touched: DraftTouched;
@@ -115,7 +129,8 @@ export type DraftMachineContext = {
 export type DraftEmittedEvents =
   | { type: 'imageResizeFailed'; error: Error }
   | { type: 'attachmentStoreFailed'; error: Error }
-  | { type: 'attachmentRefused'; kind: AttachmentKind; mediaType: string; modelName: string };
+  | { type: 'attachmentRefused'; kind: AttachmentKind; mediaType: string; modelName: string }
+  | { type: 'annotationsRefused'; limit: AnnotationLimit };
 
 export type DraftMachineInput = {
   initialDraft?: MyUIMessage;
@@ -144,11 +159,17 @@ type AddAttachment = AttachmentInput & {
   preserveOriginal?: boolean;
   /** The picked or pasted file's declared `type`, counted at intake; never used to label the bytes (I1). */
   declaredType?: string;
+  /** The annotated image this picture belongs to: once stored, that image names the attachment. */
+  annotationImageId?: string;
   model: DraftAttachmentModel;
 };
 
 // Helper to build draft message from text and attachments
-export function buildDraftMessage(text: string, attachments: readonly DraftAttachment[]): MyUIMessage {
+export function buildDraftMessage(
+  text: string,
+  attachments: readonly DraftAttachment[],
+  annotations?: MessageAnnotations,
+): MyUIMessage {
   const parts: MyUIMessage['parts'] = [];
 
   if (text.trim().length > 0) {
@@ -171,10 +192,7 @@ export function buildDraftMessage(text: string, attachments: readonly DraftAttac
     id: 'draft',
     role: 'user',
     /* A draft is not a message yet: the send stamps its time (`buildUserMessage`), so this stays pure (MC-R6). */
-    metadata: {
-      createdAt: 0,
-      status: 'pending',
-    },
+    metadata: withAnnotations({ createdAt: 0, status: 'pending' } as const, annotations),
     parts,
   };
 }
@@ -188,7 +206,7 @@ const editDraftToPersist = (context: DraftMachineContext): MyUIMessage => {
     context.savingEditMessageId === undefined ? undefined : context.messageEdits[context.savingEditMessageId];
   return context.activeEditMessageId === undefined && snapshot !== undefined
     ? snapshot
-    : buildDraftMessage(context.editDraftText, context.editDraftAttachments);
+    : buildDraftMessage(context.editDraftText, context.editDraftAttachments, context.editDraftAnnotations);
 };
 
 // Helper to create empty draft
@@ -235,6 +253,7 @@ const queueEntryFor = (
     filename?: string;
     preserveOriginal: boolean;
     declaredType?: string;
+    annotationImageId?: string;
   },
 ): Enqueued => {
   const mediaType =
@@ -249,6 +268,7 @@ const queueEntryFor = (
     ...(options.editMessageId === undefined ? {} : { editMessageId: options.editMessageId }),
     ...(options.filename === undefined ? {} : { filename: options.filename }),
     ...(options.declaredType === undefined ? {} : { declaredType: options.declaredType }),
+    ...(options.annotationImageId === undefined ? {} : { annotationImageId: options.annotationImageId }),
   };
   if ('bytes' in source) {
     return attachmentKind(mediaType) === 'image'
@@ -266,7 +286,12 @@ const queueEntryFor = (
 
 const modalityOf = (kind: AttachmentKind): ModelInputModality => (kind === 'image' ? 'image' : 'pdf');
 
-type LoadedDraft = { text: string; attachments: DraftAttachment[]; legacy: string[] };
+type LoadedDraft = {
+  text: string;
+  attachments: DraftAttachment[];
+  legacy: string[];
+  annotations: MessageAnnotations | undefined;
+};
 
 /**
  * Split a stored message into what the draft shows now and what must still be
@@ -274,7 +299,7 @@ type LoadedDraft = { text: string; attachments: DraftAttachment[]; legacy: strin
  * next write converts it (D14); anything else cannot be resolved and is dropped.
  */
 const loadMessage = (message: MyUIMessage | undefined): LoadedDraft => {
-  const loaded: LoadedDraft = { text: '', attachments: [], legacy: [] };
+  const loaded: LoadedDraft = { text: '', attachments: [], legacy: [], annotations: annotationsOf(message?.metadata) };
   for (const part of message?.parts ?? []) {
     const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
     if (part.type === 'text' && loaded.text === '') {
@@ -285,6 +310,10 @@ const loadMessage = (message: MyUIMessage | undefined): LoadedDraft => {
       loaded.legacy.push(part.url);
     }
   }
+  // A sent message's flattened images give way to their originals: the draft draws its comments live.
+  const editable = unflattened(loaded.attachments, loaded.annotations);
+  loaded.attachments = editable.attachments;
+  loaded.annotations = editable.annotations;
   return loaded;
 };
 
@@ -302,6 +331,20 @@ const legacyEntries = (
     const result = queueEntryFor({ dataUrl }, { target, editMessageId, preserveOriginal: true });
     return 'entry' in result ? [result.entry] : [];
   });
+
+/** The annotations left when the attachment at `index` goes: its image and the comments pinned on it go with it. */
+const withoutAttachmentAt = (
+  annotations: MessageAnnotations | undefined,
+  attachments: readonly DraftAttachment[],
+  index: number,
+): MessageAnnotations | undefined => {
+  const removed = attachments[index];
+  if (removed === undefined) {
+    return annotations;
+  }
+  const url = attachmentUrl(removed);
+  return withoutAnnotatedImage(annotations, (image) => image.attachment === url);
+};
 
 const touch = (
   touched: DraftTouched,
@@ -371,6 +414,9 @@ type DraftMachineEvents =
     }
   | ({ type: 'addDraftAttachment' } & AddAttachment)
   | { type: 'removeDraftAttachment'; index: number }
+  /** Replace the draft's annotations; a record over a limit is refused and says which. */
+  | { type: 'setDraftAnnotations'; annotations: MessageAnnotations | undefined }
+  | { type: 'setEditDraftAnnotations'; annotations: MessageAnnotations | undefined }
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
   | { type: 'setDraftMode'; mode: ChatMode }
   | { type: 'clearDraft' }
@@ -479,6 +525,7 @@ const enqueueAttachment = (
     filename: event.filename,
     preserveOriginal: event.preserveOriginal ?? false,
     declaredType: event.declaredType,
+    annotationImageId: event.annotationImageId,
   });
   if ('error' in result) {
     enq.emit({ type: 'attachmentStoreFailed', error: result.error });
@@ -549,6 +596,7 @@ export const draftMachine = setup({
     return {
       draftText: loaded.text,
       draftAttachments: loaded.attachments,
+      draftAnnotations: loaded.annotations,
       draftToolChoice: 'auto',
       draftMode: 'agent' as ChatMode,
       messageEdits: {},
@@ -566,7 +614,12 @@ export const draftMachine = setup({
       on: {
         // A (re)loaded chat opens with no edit box; composer fields come from `hydrateDraft`.
         initializeFromChat: {
-          context: { activeEditMessageId: undefined, editDraftText: '', editDraftAttachments: [] },
+          context: {
+            activeEditMessageId: undefined,
+            editDraftText: '',
+            editDraftAttachments: [],
+            editDraftAnnotations: undefined,
+          },
         },
         hydrateDraft: {
           context: ({ context, event }) => {
@@ -579,6 +632,7 @@ export const draftMachine = setup({
               ...(loaded && {
                 draftText: loaded.text,
                 draftAttachments: loaded.attachments,
+                draftAnnotations: loaded.annotations,
                 attachmentQueue: [...context.attachmentQueue, ...legacyEntries(loaded.legacy, 'main')],
               }),
               messageEdits: { ...context.messageEdits, ...Object.fromEntries(storedEdits) },
@@ -592,9 +646,28 @@ export const draftMachine = setup({
             ? /* Idempotent re-delivery: the same text changes nothing. */ {}
             : { context: { draftText: event.text, touched: touch(context.touched, { draft: true }) } },
         addDraftAttachment: enqueueAttachment,
+        setDraftAnnotations: ({ context, event }, enq) => {
+          const limit = event.annotations === undefined ? undefined : brokenAnnotationLimit(event.annotations);
+          if (limit !== undefined) {
+            enq.emit({ type: 'annotationsRefused', limit });
+            return {};
+          }
+          return {
+            context: { draftAnnotations: event.annotations, touched: touch(context.touched, { draft: true }) },
+          };
+        },
+        setEditDraftAnnotations: ({ event }, enq) => {
+          const limit = event.annotations === undefined ? undefined : brokenAnnotationLimit(event.annotations);
+          if (limit !== undefined) {
+            enq.emit({ type: 'annotationsRefused', limit });
+            return {};
+          }
+          return { context: { editDraftAnnotations: event.annotations } };
+        },
         removeDraftAttachment: {
           context: ({ context, event }) => ({
             draftAttachments: context.draftAttachments.filter((_, index) => index !== event.index),
+            draftAnnotations: withoutAttachmentAt(context.draftAnnotations, context.draftAttachments, event.index),
             touched: touch(context.touched, { draft: true }),
           }),
         },
@@ -614,6 +687,7 @@ export const draftMachine = setup({
           context: ({ context }) => ({
             draftText: '',
             draftAttachments: [],
+            draftAnnotations: undefined,
             draftToolChoice: 'auto',
             // Purge any pending main-target entries so a cleared composer
             // doesn't sprout attachments from in-flight uploads.
@@ -627,6 +701,7 @@ export const draftMachine = setup({
             return {
               draftText: loaded.text,
               draftAttachments: loaded.attachments,
+              draftAnnotations: loaded.annotations,
               attachmentQueue: [...context.attachmentQueue, ...legacyEntries(loaded.legacy, 'main')],
               touched: touch(context.touched, { draft: true }),
             };
@@ -640,6 +715,7 @@ export const draftMachine = setup({
               savingEditMessageId: event.messageId,
               editDraftText: loaded.text,
               editDraftAttachments: loaded.attachments,
+              editDraftAnnotations: loaded.annotations,
               attachmentQueue: [...context.attachmentQueue, ...legacyEntries(loaded.legacy, 'edit', event.messageId)],
               touched: touch(context.touched, {}, event.messageId),
             };
@@ -650,7 +726,11 @@ export const draftMachine = setup({
                 ...loadedEdit,
                 messageEdits: {
                   ...context.messageEdits,
-                  [context.activeEditMessageId]: buildDraftMessage(context.editDraftText, context.editDraftAttachments),
+                  [context.activeEditMessageId]: buildDraftMessage(
+                    context.editDraftText,
+                    context.editDraftAttachments,
+                    context.editDraftAnnotations,
+                  ),
                 },
               };
             }
@@ -666,11 +746,16 @@ export const draftMachine = setup({
             context: {
               messageEdits: {
                 ...context.messageEdits,
-                [context.activeEditMessageId]: buildDraftMessage(context.editDraftText, context.editDraftAttachments),
+                [context.activeEditMessageId]: buildDraftMessage(
+                  context.editDraftText,
+                  context.editDraftAttachments,
+                  context.editDraftAnnotations,
+                ),
               },
               activeEditMessageId: undefined,
               editDraftText: '',
               editDraftAttachments: [],
+              editDraftAnnotations: undefined,
             },
           };
         },
@@ -679,12 +764,18 @@ export const draftMachine = setup({
         removeEditDraftAttachment: {
           context: ({ context, event }) => ({
             editDraftAttachments: context.editDraftAttachments.filter((_, index) => index !== event.index),
+            editDraftAnnotations: withoutAttachmentAt(
+              context.editDraftAnnotations,
+              context.editDraftAttachments,
+              event.index,
+            ),
           }),
         },
         clearEditDraft: {
           context: ({ context }) => ({
             editDraftText: '',
             editDraftAttachments: [],
+            editDraftAnnotations: undefined,
             attachmentQueue: context.attachmentQueue.filter((entry) => entry.target !== 'edit'),
           }),
         },
@@ -707,6 +798,7 @@ export const draftMachine = setup({
             // only enqueues.
             attachmentStored: whenStoredFor('main', { target: 'pending' }),
             removeDraftAttachment: { target: 'pending' },
+            setDraftAnnotations: { target: 'pending' },
             // Handle draft clearing with immediate persistence
             clearDraft: { target: 'persisting' },
           },
@@ -719,6 +811,7 @@ export const draftMachine = setup({
             setDraftText: whenDraftTextChanged({ target: 'pending', reenter: true }),
             attachmentStored: whenStoredFor('main', { target: 'pending', reenter: true }),
             removeDraftAttachment: { target: 'pending', reenter: true },
+            setDraftAnnotations: { target: 'pending', reenter: true },
             // Immediately bypass debounce and persist
             flushNow: { target: 'persisting' },
             // Bypass debounce — persist the (now-empty) draft immediately
@@ -729,7 +822,7 @@ export const draftMachine = setup({
           invoke: {
             src: 'persistDraftActor',
             input: ({ context }) => ({
-              draft: buildDraftMessage(context.draftText, context.draftAttachments),
+              draft: buildDraftMessage(context.draftText, context.draftAttachments, context.draftAnnotations),
             }),
             onDone: { target: 'idle' },
             onError: { target: 'idle' },
@@ -739,6 +832,7 @@ export const draftMachine = setup({
             setDraftText: whenDraftTextChanged({ target: 'pending' }),
             attachmentStored: whenStoredFor('main', { target: 'pending' }),
             removeDraftAttachment: { target: 'pending' },
+            setDraftAnnotations: { target: 'pending' },
             // Cancel stale in-flight persist and re-persist with empty draft
             clearDraft: { target: 'persisting', reenter: true },
           },
@@ -755,6 +849,7 @@ export const draftMachine = setup({
             // Persist once the attachment is stored; adding only enqueues.
             attachmentStored: whenStoredFor('edit', { target: 'pending' }),
             removeEditDraftAttachment: { target: 'pending' },
+            setEditDraftAnnotations: { target: 'pending' },
           },
         },
         pending: {
@@ -765,6 +860,7 @@ export const draftMachine = setup({
             setEditDraftText: whenEditDraftTextChanged({ target: 'pending', reenter: true }),
             attachmentStored: whenStoredFor('edit', { target: 'pending', reenter: true }),
             removeEditDraftAttachment: { target: 'pending', reenter: true },
+            setEditDraftAnnotations: { target: 'pending', reenter: true },
             // Immediately bypass debounce and persist
             flushNow: { target: 'persisting' },
             // Closing the box mid-debounce still saves what was typed, under
@@ -787,6 +883,7 @@ export const draftMachine = setup({
             setEditDraftText: whenEditDraftTextChanged({ target: 'pending' }),
             attachmentStored: whenStoredFor('edit', { target: 'pending' }),
             removeEditDraftAttachment: { target: 'pending' },
+            setEditDraftAnnotations: { target: 'pending' },
             // Re-persist the snapshot the exit took over a stale in-flight save
             exitEditMode: { target: 'persisting', reenter: true },
           },
@@ -922,21 +1019,41 @@ export const draftMachine = setup({
               // Only an attachment that lands touches its draft: a refused or failed one changes
               // nothing, so a late hydration still applies the stored draft (D7), and one that
               // lands after a hydration appends to the draft it brought.
+              const [head] = context.attachmentQueue;
+              const imageId = head?.annotationImageId;
+              const url = attachmentUrl(event.attachment);
               if (headAddresses(context, 'main')) {
+                // A picture taken for an annotated image lands only while the draft still holds that image.
+                const annotations =
+                  imageId === undefined
+                    ? context.draftAnnotations
+                    : withImageAttachment(context.draftAnnotations, imageId, url);
+                if (imageId !== undefined && annotations === undefined) {
+                  return { target: 'idle', context: { attachmentQueue: rest } };
+                }
                 return {
                   target: 'idle',
                   context: {
                     draftAttachments: [...context.draftAttachments, event.attachment],
+                    draftAnnotations: annotations,
                     attachmentQueue: rest,
                     touched: touch(context.touched, { draft: true }),
                   },
                 };
               }
               if (headAddresses(context, 'edit')) {
+                const annotations =
+                  imageId === undefined
+                    ? context.editDraftAnnotations
+                    : withImageAttachment(context.editDraftAnnotations, imageId, url);
+                if (imageId !== undefined && annotations === undefined) {
+                  return { target: 'idle', context: { attachmentQueue: rest } };
+                }
                 return {
                   target: 'idle',
                   context: {
                     editDraftAttachments: [...context.editDraftAttachments, event.attachment],
+                    editDraftAnnotations: annotations,
                     attachmentQueue: rest,
                     touched: touch(context.touched, {}, context.activeEditMessageId),
                   },

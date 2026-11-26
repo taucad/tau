@@ -460,6 +460,8 @@ export const createBrowserLeadership =
         }
         return { role: 'none', epoch: 0 };
       },
+      /* The writer is the exclusive handle, taken only under the chat's lock (EQ2). */
+      opensWriter: (chatId) => chats.get(chatId)?.actor.getSnapshot().hasTag('holdsLock') === true,
       stoppability: (chatId) => {
         const snapshot = chats.get(chatId)?.actor.getSnapshot();
         if (snapshot?.hasTag('leading') === true) {

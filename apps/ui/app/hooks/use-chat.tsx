@@ -38,11 +38,12 @@
  *   on missing sessions to keep cross-chat dispatch safe.
  */
 
-import type { ChatView } from '#services/deferred-chat.js';
+import type { ChatStatus } from 'ai';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
@@ -56,7 +57,6 @@ import { noComposerTrays } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type {
   DraftAttachment,
@@ -69,9 +69,7 @@ import { pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
-type ChatInstance = ChatView;
-
-type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
+type SendMessageInput = MyUIMessage;
 
 const emptyMessages: readonly MyUIMessage[] = Object.freeze([]);
 
@@ -86,13 +84,6 @@ export type ChatContextValue = {
    * explicit `chatId` argument).
    */
   activeChatId: string;
-  /**
-   * The live AI SDK `Chat` instance for the resolved chat. Always defined
-   * for the active chat (the provider guarantees the session). May be
-   * `undefined` only when the caller passes an explicit `chatId` that is
-   * not currently mounted (cross-chat read pattern).
-   */
-  chat: ChatInstance | undefined;
   /**
    * Persistence machine for the resolved chat. Always defined for the
    * active chat; may be `undefined` for cross-chat reads of non-mounted
@@ -109,12 +100,10 @@ export type ChatContextValue = {
 };
 
 type SessionSnapshotFields = {
-  chat: ChatInstance | undefined;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined;
 };
 
 const emptySessionSnapshot: SessionSnapshotFields = {
-  chat: undefined,
   persistenceActorRef: undefined,
 };
 
@@ -123,7 +112,6 @@ function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapsho
     return emptySessionSnapshot;
   }
   return {
-    chat: session.chat,
     persistenceActorRef: session.persistenceActorRef,
   };
 }
@@ -141,11 +129,10 @@ export function useChatContext(chatId?: string): ChatContextValue {
   return useMemo<ChatContextValue>(
     () => ({
       activeChatId: resolvedChatId,
-      chat: snapshot.chat,
       persistenceActorRef: snapshot.persistenceActorRef,
       draftActorRef: active.draftActorRef,
     }),
-    [resolvedChatId, snapshot.chat, snapshot.persistenceActorRef, active.draftActorRef],
+    [resolvedChatId, snapshot.persistenceActorRef, active.draftActorRef],
   );
 }
 
@@ -161,10 +148,17 @@ export type CombinedChatState = {
   agentInvocations: string;
   /** The transcript's load state (I21): the lane draws no empty-chat state while it is `loading`. */
   transcript: ChatTranscriptState;
+  /**
+   * The newest request in `messages` while it is still on its way to the host: shown as sent, but not yet a turn of
+   * the transcript, so it cannot be edited or rated yet.
+   */
+  departingMessageId: string | undefined;
+  /** What the chat says while a send waits for its host to take it (PERF-5). */
+  hostWait: string | undefined;
   /** The composer trays whose height the lane reserves while their reads are pending (U10). */
   rememberedComposerTrays: readonly ComposerTray[];
-  status: ChatInstance['status'];
-  error: Error | undefined;
+  /** The run phase, else the command in flight (T3). */
+  status: ChatStatus;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
   /** Durable host facts and the current read-only attachment, not SDK stream state. */
@@ -183,12 +177,16 @@ export type CombinedChatState = {
   activeKernel: KernelId | undefined;
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
 };
 
 function shallowEqual<T>(a: T, b: T): boolean {
@@ -218,26 +216,47 @@ function shallowEqual<T>(a: T, b: T): boolean {
   return aKeys.every((key) => Object.is(aRecord[key], bRecord[key]));
 }
 
+/** Which sources a selector read on its last evaluation; a source it did not read cannot change its result. */
+type SelectorReads = { store: boolean; draft: boolean; persistence: boolean };
+
 /**
- * Primary hook for reading chat + draft state. Combines the live AI SDK
- * snapshot from the store with the draft state from `<ActiveChatProvider>`.
+ * Primary hook for reading chat + draft state. Combines the chat's transcript
+ * and projection from the store with the draft state from `<ActiveChatProvider>`.
  * Session-required — composer-only subtrees should call
  * {@link useDraftSelector} instead.
  *
- * The combined external-store subscription caches the selected value, so a
- * token update only re-renders consumers whose selected data changed.
+ * Every field is read on demand, and a selector is woken only by the sources it
+ * read on its last evaluation (WP-06a, D3): a selector of the transcript does
+ * not run on a draft keystroke, and a selector of the draft does not run on a
+ * streamed delta. The selected value is cached, so a wake only re-renders
+ * consumers whose selected data changed.
  */
 export function useChatSelector<T>(selector: (state: CombinedChatState) => T, chatId?: string): T {
   const { activeChatId, persistenceActorRef, draftActorRef } = useChatContext(chatId);
   const store = useChatSessionStore();
   const cacheRef = useRef<{ readonly value: T } | undefined>(undefined);
+  /* Before the first evaluation every source counts as read. */
+  const readsRef = useRef<SelectorReads>({ store: true, draft: true, persistence: true });
 
   const subscribe = useCallback(
     (listener: () => void) => {
-      const unsubscribeChat = store.subscribeChat(activeChatId, listener);
-      const unsubscribeProjection = store.subscribeProjection(activeChatId, listener);
-      const draftSubscription = draftActorRef.subscribe(listener);
-      const persistenceSubscription = persistenceActorRef?.subscribe(listener);
+      const fromStore = (): void => {
+        if (readsRef.current.store) {
+          listener();
+        }
+      };
+      const unsubscribeChat = store.subscribeChat(activeChatId, fromStore);
+      const unsubscribeProjection = store.subscribeProjection(activeChatId, fromStore);
+      const draftSubscription = draftActorRef.subscribe(() => {
+        if (readsRef.current.draft) {
+          listener();
+        }
+      });
+      const persistenceSubscription = persistenceActorRef?.subscribe(() => {
+        if (readsRef.current.persistence) {
+          listener();
+        }
+      });
       return () => {
         unsubscribeChat();
         unsubscribeProjection();
@@ -248,49 +267,107 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     [activeChatId, draftActorRef, persistenceActorRef, store],
   );
   const getSnapshot = useCallback((): T => {
+    const reads: SelectorReads = { store: false, draft: false, persistence: false };
+    const fromStore = <V,>(read: () => V): V => {
+      reads.store = true;
+      return read();
+    };
     const session = store.get(activeChatId);
-    const chat = session?.chat;
-    const messages = session?.messages ?? emptyMessages;
-    const projection = store.getProjection(activeChatId);
-    const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
-    const draftContext = draftActorRef.getSnapshot().context;
-    const persistenceContext = persistenceActorRef?.getSnapshot().context;
+    const draft = () => {
+      reads.draft = true;
+      return draftActorRef.getSnapshot().context;
+    };
+    const persistence = () => {
+      reads.persistence = true;
+      return persistenceActorRef?.getSnapshot().context;
+    };
+    const status = () => fromStore(() => store.getChatStatus(activeChatId));
     const state: CombinedChatState = {
-      messages,
+      get messages() {
+        return fromStore(() => session?.messages ?? emptyMessages);
+      },
       get messagesById() {
-        return store.getMessagePresentation(activeChatId).messagesById;
+        return fromStore(() => store.getMessagePresentation(activeChatId).messagesById);
       },
       get messageOrder() {
-        return store.getMessagePresentation(activeChatId).order;
+        return fromStore(() => store.getMessagePresentation(activeChatId).order);
       },
       get turnGroups() {
-        return store.getMessagePresentation(activeChatId).groups;
+        return fromStore(() => store.getMessagePresentation(activeChatId).groups);
       },
       get agentInvocations() {
-        return store.getMessagePresentation(activeChatId).agentInvocations;
+        return fromStore(() => store.getMessagePresentation(activeChatId).agentInvocations);
       },
-      transcript: selectChatTranscript(session),
-      rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
-      status,
-      error: chat?.error,
-      persistedError: persistenceContext?.persistedError,
-      projection,
-      attachmentStatus: store.getAttachmentStatus(activeChatId),
-      attachedHostId: store.getAttachedHostId(activeChatId),
-      isLoading: status === 'streaming',
-      activeExecution: persistenceContext?.activeExecution,
-      activeKernel: persistenceContext?.activeKernel,
-      draftText: draftContext.draftText,
-      draftAttachments: draftContext.draftAttachments,
-      draftToolChoice: draftContext.draftToolChoice,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
-      draftMode: draftContext.draftMode as ChatMode,
-      messageEdits: draftContext.messageEdits,
-      activeEditMessageId: draftContext.activeEditMessageId,
-      editDraftText: draftContext.editDraftText,
-      editDraftAttachments: draftContext.editDraftAttachments,
+      get transcript() {
+        return fromStore(() => selectChatTranscript(session));
+      },
+      get departingMessageId() {
+        return fromStore(() => store.departingSendOf(activeChatId));
+      },
+      get hostWait() {
+        return fromStore(() => store.hostWaitOf(activeChatId));
+      },
+      get rememberedComposerTrays() {
+        return fromStore(() => session?.rememberedComposerTrays ?? noComposerTrays);
+      },
+      get status() {
+        return status();
+      },
+      get persistedError() {
+        return persistence()?.persistedError;
+      },
+      get projection() {
+        return fromStore(() => store.getProjection(activeChatId));
+      },
+      get attachmentStatus() {
+        return fromStore(() => store.getAttachmentStatus(activeChatId));
+      },
+      get attachedHostId() {
+        return fromStore(() => store.getAttachedHostId(activeChatId));
+      },
+      get isLoading() {
+        return status() === 'streaming';
+      },
+      get activeExecution() {
+        return persistence()?.activeExecution;
+      },
+      get activeKernel() {
+        return persistence()?.activeKernel;
+      },
+      get draftText() {
+        return draft().draftText;
+      },
+      get draftAttachments() {
+        return draft().draftAttachments;
+      },
+      get draftAnnotations() {
+        return draft().draftAnnotations;
+      },
+      get draftToolChoice() {
+        return draft().draftToolChoice;
+      },
+      get draftMode() {
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
+        return draft().draftMode as ChatMode;
+      },
+      get messageEdits() {
+        return draft().messageEdits;
+      },
+      get activeEditMessageId() {
+        return draft().activeEditMessageId;
+      },
+      get editDraftText() {
+        return draft().editDraftText;
+      },
+      get editDraftAttachments() {
+        return draft().editDraftAttachments;
+      },
+      get editDraftAnnotations() {
+        return draft().editDraftAnnotations;
+      },
     };
     const next = selector(state);
+    readsRef.current = reads;
     const cached = cacheRef.current;
     if (cached && shallowEqual(cached.value, next)) {
       return cached.value;
@@ -330,12 +407,16 @@ export function useChatById<T>(chatId: string, selector: (state: CombinedChatSta
 export type DraftState = {
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
   /** An attachment for the main draft is still resizing or storing, so it is not in `draftAttachments` yet. */
   attachingMain: boolean;
   /** The same for the open edit. */
@@ -367,6 +448,7 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
     () => ({
       draftText: draftContext.draftText,
       draftAttachments: draftContext.draftAttachments,
+      draftAnnotations: draftContext.draftAnnotations,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
@@ -374,6 +456,7 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
       editDraftAttachments: draftContext.editDraftAttachments,
+      editDraftAnnotations: draftContext.editDraftAnnotations,
       attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
       attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
       pendingMain: pending.main,
@@ -399,6 +482,8 @@ export type DraftAttachmentOptions = {
   readonly preserveOriginal?: boolean;
   /** The picked, dropped or pasted file's declared `type`, for the intake counter; the bytes decide the label (I1). */
   readonly declaredType?: string;
+  /** The annotated image this attachment is the picture of: once stored, that image names it. */
+  readonly annotationImageId?: string;
 };
 
 const sourceFields = (
@@ -420,6 +505,8 @@ export type DraftActions = {
    */
   addDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeDraftAttachment: (index: number) => void;
+  /** Replace the new-message draft's comments and annotated pictures; a record over a limit is refused. */
+  setDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
   clearDraft: () => void;
@@ -432,6 +519,8 @@ export type DraftActions = {
    */
   addEditDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeEditDraftAttachment: (index: number) => void;
+  /** Replace the open edit's comments and annotated pictures; a record over a limit is refused. */
+  setEditDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   clearMessageEdit: (messageId: string) => void;
 };
 
@@ -448,6 +537,9 @@ export function useDraftActions(): DraftActions {
       },
       removeDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeDraftAttachment', index });
+      },
+      setDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setDraftAnnotations', annotations });
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
@@ -473,6 +565,9 @@ export function useDraftActions(): DraftActions {
       },
       removeEditDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeEditDraftAttachment', index });
+      },
+      setEditDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setEditDraftAnnotations', annotations });
       },
       clearMessageEdit(messageId: string) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
@@ -510,11 +605,14 @@ export type ChatActions = DraftActions & {
    */
   continueChat: () => void;
   stop: (origin: StopOrigin) => void;
-  setMessages: (messages: MyUIMessage[]) => void;
   editMessage: (
     messageId: string,
     content: string,
-    options?: { attachments?: readonly StoredAttachmentRef[]; references?: readonly CadReference[] },
+    options?: {
+      attachments?: readonly StoredAttachmentRef[];
+      references?: readonly CadReference[];
+      annotations?: MessageAnnotations;
+    },
   ) => void;
 };
 
@@ -569,8 +667,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!requireSession('sendMessage')) {
           return;
         }
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
-        const outgoingMessage = message as MyUIMessage;
+        const outgoingMessage = message;
         /* I5: the composer is this message's only copy until the dispatch
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
@@ -605,17 +702,13 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         store.stopRun(resolvedChatId, origin);
       },
-      setMessages(messages: MyUIMessage[]) {
-        const session = requireSession('setMessages');
-        if (!session) {
-          return;
-        }
-        store.replaceMessages(resolvedChatId, messages);
-      },
-
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {
         const session = resolveSession();
-        const resolved = originalMessage ?? session?.chat.messages.find((m) => m.id === messageId);
+        const resolved =
+          originalMessage ??
+          (session === undefined
+            ? undefined
+            : store.getCurrentTranscript(resolvedChatId).find((m) => m.id === messageId));
         draftActorRef.send({ type: 'startEditingMessage', messageId, originalMessage: resolved });
       },
 
@@ -625,7 +718,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        if (!session.chat.messages.some((m) => m.id === messageId)) {
+        if (!store.getCurrentTranscript(resolvedChatId).some((m) => m.id === messageId)) {
           return;
         }
         void store.requestTurn(resolvedChatId, {
@@ -634,6 +727,7 @@ export function useChatActions(chatId?: string): ChatActions {
           text: content,
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
           ...(options?.references === undefined ? {} : { references: options.references }),
+          ...(options?.annotations === undefined ? {} : { annotations: options.annotations }),
         });
       },
     };

@@ -1861,15 +1861,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
           mode: launchMode,
           blockedTarget: bootHealth.blockedAutoInstallTarget,
           recoveryShowing: () => isRecoveryOpen(),
+          /* A restart under way, such as Restart in Safe Mode, never starts or finishes a countdown. */
+          quitting: () => quitting,
           showCountdown: () => {
             openRecoveryFor('auto-install');
           },
           noteAutoInstall: (targetVersion) => {
             bootHealth.noteAutoInstall(targetVersion);
           },
+          withdrawAutoInstall: (targetVersion) => {
+            bootHealth.withdrawAutoInstall(targetVersion);
+          },
           install: async () => {
             const updater = await updaterReady.promise;
             await updater.install();
+            /* The save review, or a quit already pending, can keep Tau open on the old version. */
+            return updater.snapshot().phase === 'restarting';
           },
           publish: () => {
             publishRecoveryState();
@@ -2496,8 +2503,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
+    /* D0: the launch's first window is the one the watchdog follows. */
+    const bootWindow = !bootWindowCreated;
+    bootWindowCreated = true;
     /* B11: reload once, send a second death within 60 s Home with a notice, and hand a third within 5 minutes to the
-     * recovery window (D0). A hung page the hang rule ended is not a death. */
+     * recovery window (D0). A hung page the hang rule ended is not a death. A death before the boot window's first
+     * load is the watchdog's alone (it opens the recovery window), so one death has one owner. */
     const reloadPolicy = createRendererReloadPolicy({ now: () => performance.now() });
     let pageTitle: string | undefined;
     window.webContents.on('page-title-updated', (_event, title) => {
@@ -2541,6 +2552,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
           return;
         }
         if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+          return;
+        }
+        if (bootWindow && bootWatchdog?.rendererGone() === true) {
           return;
         }
         const decision = reloadPolicy.gone(reason);
@@ -2647,9 +2661,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.once('closed', () => {
       clearTimeout(revealDeadline);
     });
-    /* D0: the launch's first window is the one the watchdog follows. */
-    const bootWindow = !bootWindowCreated;
-    bootWindowCreated = true;
     if (bootWindow && bootWatchdog !== undefined) {
       const watchdog = bootWatchdog;
       bootWatchdog.windowCreated();
@@ -2659,9 +2670,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       });
       window.webContents.on('did-fail-load', (...details) => {
         watchdog.loadFailed({ isMainFrame: details[4], errorCode: details[1] });
-      });
-      window.webContents.on('render-process-gone', () => {
-        watchdog.rendererGone();
       });
       window.once('closed', () => {
         /* Closed by the person, not by a quit: not a hang, and the record ends inconclusive. */
@@ -2973,6 +2981,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     log.log('info', 'main.quit-requested', { purpose, reason });
     quitting = true;
+    /* A restart under way stops an automatic install's countdown (N1). */
+    autoInstall?.reevaluate();
     shutdownPending = new Promise<boolean>((resolve) => {
       settleShutdown = resolve;
     });
@@ -3201,6 +3211,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
     devTools: !app.isPackaged,
     hidden: hideTestWindow,
+    /* The automatic install's Cancel went with it: a running countdown stops (N1). */
+    closed: () => {
+      autoInstall?.reevaluate();
+    },
   });
   isRecoveryWindow = (window) => recoveryController.isRecoveryContents(window.webContents);
   const hooks = createRecoveryHooks({

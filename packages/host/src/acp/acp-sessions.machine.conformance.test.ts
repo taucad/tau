@@ -180,6 +180,7 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
           'CancelBinding',
           'CancelSettled',
           'CancelTimedOut',
+          'DrainTimedOut',
           'Tick',
           'AdapterExited',
           'SoftCloseDone',

@@ -25,11 +25,10 @@ import {
  * window, or a remount no longer stops or restarts it.
  */
 
-/** The facts a chat's visible failure is read from: the host log's projection and the SDK's live and saved errors. */
+/** The facts a chat's visible failure is read from: the host log's projection and the chat's saved error. */
 export type VisibleFailureSource = Readonly<{
   projection?: ChatProjection | undefined;
   attachmentStatus?: 'unknown' | 'attached' | 'lost' | 'refused' | undefined;
-  error?: Error | undefined;
   persistedError?: NormalizedChatError | undefined;
 }>;
 
@@ -61,6 +60,74 @@ function liveErrorId(error: Error | NormalizedChatError): string {
 const refusalId = (refusal: NormalizedChatError): string | undefined =>
   refusal.requestId === undefined ? undefined : `refusal:${refusal.requestId}`;
 
+/** Where a chat's log stands: its current run's attempt, or that it holds no run. */
+const logPositionOf = (run: (Readonly<{ runId: string }> & { readonly attempt: number }) | undefined): string =>
+  run === undefined ? 'none' : `${run.runId}:${String(run.attempt)}`;
+
+/** The detail a refusal of a gesture records its log position under. */
+const refusedAtKey = 'refusedAt';
+
+/** A refusal recorded before the log was read: no later run can be told from an earlier one. */
+const unreadLog = 'unread';
+
+/** The detail a refusal made before the log was read records its time under, the only order it has against a run. */
+const refusedTimeKey = 'refusedTime';
+
+/** The detail a refusal of a gesture records the gesture's kind under. */
+const refusedGestureKey = 'refusedGesture';
+
+/** What the person asked for when the page refused to start a turn. @public */
+export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue';
+
+/**
+ * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume), as the chat keeps it.
+ *
+ * Nothing ran, so the host log holds no trace of it, and the chat's saved error is its only record. It is a fact
+ * about that gesture at that moment: it carries the gesture's own identity, and where the log stood when it was
+ * refused, so a reader can tell it from a run that began afterwards, on this page or another. Without both it was
+ * indistinguishable from a legacy chat-wide error, and was hidden as one on every healthy chat. It also names the
+ * gesture, because the run under it is not the gesture's: only a refused Resume leaves that run as what to resume.
+ *
+ * @param error - The parsed refusal.
+ * @param gesture - What the person asked for, the chat's projection when it was refused (`undefined` until the log
+ *   has been read), and a source of unique ids.
+ * @returns The refusal to persist.
+ * @public
+ */
+export const refusalOfGesture = (
+  error: NormalizedChatError,
+  gesture: Readonly<{ kind: RefusedGesture; projection: ChatProjection | undefined; createId: () => string }>,
+): NormalizedChatError => {
+  const isLogRead = gesture.projection !== undefined && selectCaughtUp(gesture.projection);
+  return {
+    ...error,
+    requestId: error.requestId ?? `gesture:${gesture.createId()}`,
+    details: {
+      ...error.details,
+      [refusedAtKey]: isLogRead ? logPositionOf(selectCurrentRun(gesture.projection)) : unreadLog,
+      ...(isLogRead ? {} : { [refusedTimeKey]: new Date().toISOString() }),
+      [refusedGestureKey]: gesture.kind,
+    },
+  };
+};
+
+/**
+ * Whether a refusal recorded before the log was read is still newer than the log's current run. Its time is the only
+ * order it has: a run admitted, or an attempt of one resumed, after it (on this page or another) retires it, as a later
+ * run or attempt retires a caught-up refusal by its position. A refusal with no time (recorded before times were kept)
+ * stays shown, as it did. Two devices' clocks can disagree by seconds, while a refusal and a later run are a person's
+ * gestures apart.
+ */
+const isUnreadRefusalCurrent = (
+  refusedTime: unknown,
+  projection: ChatProjection,
+  run: ReturnType<typeof selectCurrentRun>,
+): boolean => {
+  const view = run === undefined ? undefined : projection.views[run.runId];
+  const movedAt = view?.lifecycleAt ?? view?.admittedAt;
+  return typeof refusedTime !== 'string' || movedAt === undefined || movedAt <= refusedTime;
+};
+
 /**
  * The chat's visible failure and its durable identity. Only the caught-up host log can retire a legacy chat-wide error.
  *
@@ -72,6 +139,21 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
   const { projection } = state;
   const caughtUp = projection !== undefined && selectCaughtUp(projection);
   const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
+  /* A refusal of a gesture is newer than every run the log held when it was made, so it is shown over that run's own
+   * failure; once the log holds a later run or attempt, that run is the chat's news and the refusal is retired. */
+  const refusedAt = state.persistedError?.details?.[refusedAtKey];
+  const gestureRefusal =
+    state.persistedError?.requestId !== undefined && typeof refusedAt === 'string' ? state.persistedError : undefined;
+  if (
+    caughtUp &&
+    gestureRefusal !== undefined &&
+    (refusedAt === unreadLog
+      ? isUnreadRefusalCurrent(gestureRefusal.details?.[refusedTimeKey], projection, run)
+      : refusedAt === logPositionOf(run))
+  ) {
+    return { error: gestureRefusal, id: `refusal:${String(gestureRefusal.requestId)}` };
+  }
+  const persistedError = caughtUp && gestureRefusal !== undefined ? undefined : state.persistedError;
   if (
     projection !== undefined &&
     (run?.lifecycle === 'failed' || (run?.lifecycle === 'cancelled' && run.failure?.code === 'USER_STOPPED'))
@@ -96,7 +178,7 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     // when a different page admitted that run and this page never cleared the
     // old chat record. A refused Resume still belongs to the same paused run;
     // the persisted command records that run identity, not just its command ID.
-    const refusal = state.persistedError;
+    const refusal = persistedError;
     if (refusal?.requestId === undefined) {
       return undefined;
     }
@@ -110,12 +192,9 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     }
     return { error: refusal, id: `refusal:${refusal.requestId}` };
   }
-  if (state.error) {
-    const error = parseErrorForPersistence(state.error);
-    return { error, id: refusalId(error) ?? liveErrorId(state.error) };
-  }
-  const persisted = state.persistedError;
-  return persisted === undefined ? undefined : { error: persisted, id: refusalId(persisted) ?? liveErrorId(persisted) };
+  return persistedError === undefined
+    ? undefined
+    : { error: persistedError, id: refusalId(persistedError) ?? liveErrorId(persistedError) };
 }
 
 /**
@@ -128,6 +207,25 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
  */
 export const selectRunResumable = (projection: ChatProjection | undefined): boolean =>
   projection !== undefined && selectCaughtUp(projection) && isResumableRun(selectCurrentRun(projection));
+
+/**
+ * Whether Resume answers the chat's visible failure: the run is one the turn host will continue, and the failure is
+ * that run's own or a refusal of a Resume of it. A refused send, edit or retry sits over a run it never touched, so
+ * a card for it may not promise that run, and nothing resumes that run on the refusal's account.
+ *
+ * @param state - The chat's projection, attachment and errors.
+ * @returns `true` where the visible failure's card may say Resume.
+ * @public
+ */
+export const selectVisibleFailureResumable = (state: VisibleFailureSource): boolean => {
+  const error = selectVisibleChatErrorEntry(state)?.error;
+  if (error === undefined || !selectRunResumable(state.projection)) {
+    return false;
+  }
+  const refusedGesture =
+    typeof error.details?.[refusedAtKey] === 'string' ? error.details[refusedGestureKey] : 'continue';
+  return refusedGesture === 'continue';
+};
 
 /** The failed run attempt a failure resumes on its own. @public */
 export type AutoResumeTarget = Readonly<{ runId: string; attempt: number }>;
@@ -220,7 +318,7 @@ export function autoResumePlanOf(
 ): AutoResumePlan | undefined {
   const error = selectVisibleChatErrorEntry(state)?.error;
   const target = selectAutoResumeTarget(state.projection);
-  if (error === undefined || target === undefined || !selectRunResumable(state.projection)) {
+  if (error === undefined || target === undefined || !selectVisibleFailureResumable(state)) {
     return undefined;
   }
   const { code } = error;
@@ -287,9 +385,6 @@ export function autoResumePlanOf(
 export function autoResumeStillAnswers(plan: AutoResumePlan, state: VisibleFailureSource): boolean {
   const target = selectAutoResumeTarget(state.projection);
   return (
-    target !== undefined &&
-    autoResumeKeyOf(plan.kind, target) === plan.key &&
-    selectRunResumable(state.projection) &&
-    selectVisibleChatErrorEntry(state) !== undefined
+    target !== undefined && autoResumeKeyOf(plan.kind, target) === plan.key && selectVisibleFailureResumable(state)
   );
 }

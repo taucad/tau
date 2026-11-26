@@ -301,14 +301,17 @@ describe('ChatInterfaceDesktop', () => {
 
   // C4 (blueprint, § Red-first tests): the frame element before the lanes are laid out is the same element after;
   // no descendant draws a skeleton; no animation class on the lane container.
-  it('C4: the frame before the lanes are laid out is the same element after, with no skeleton and no animation', async () => {
+  it('C4: the frame before the lanes are laid out is the same element after, drawing its lanes’ shapes with no entrance', async () => {
     renderDesktop();
     const frame = document.querySelector('[data-slot="workspace-frame"]');
     const lanes = await screen.findByTestId('allotment');
     const workspace = document.querySelector('[data-project-workspace]');
 
     expect(workspace).not.toHaveAttribute('data-workspace-lanes');
-    expect(frame?.querySelector('[data-slot=skeleton]')).toBeNull();
+    /* The frame's lanes draw their content's shape on the ladder (Progressive Loading Policy rule 15). */
+    expect(
+      frame?.querySelector('[data-slot=workspace-frame-lanes] .wait-skeleton [data-slot=skeleton]'),
+    ).not.toBeNull();
     expect(workspace?.querySelector('[data-testid="workspace-skeleton"]')).toBeNull();
     expect(workspace?.innerHTML).not.toMatch(/animate-in|fade-in/u);
     expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);

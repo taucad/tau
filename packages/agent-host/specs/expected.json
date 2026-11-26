@@ -1087,7 +1087,7 @@
     {
       "tier": "nightly",
       "expect": "NoError",
-      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, unbounded epochs and view lengths)",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, batch writes of up to four rows, unbounded epochs and view lengths)",
       "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
     },
     {

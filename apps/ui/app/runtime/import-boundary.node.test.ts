@@ -3,9 +3,7 @@
  * The runtime's import boundary (app state orchestration charter D5; plan § 4 A1a, R2-F16).
  *
  * The project runtime, the revision lifecycle and the host connector are lazy session children, loaded by dynamic
- * import. (The chat store's AI SDK, progressive loading PL1, lives in `@taucad/chat-ui/services/chat-sdk`; guard G2,
- * `lib/critical-graph.node.test.ts`, holds it off every route's static graph as a `deferredLeaves` entry.) So neither
- * entry nor the root route may reach them, or the project and editor machines, through a static import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
+ * import. So neither entry nor the root route may reach them, or the project and editor machines, through a static import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
  * editor. The first three modules do not exist yet; their paths are named now so the lanes that add them (A6) land
  * behind this test.
  *

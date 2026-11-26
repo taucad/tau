@@ -1,4 +1,4 @@
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -8,5 +8,6 @@ export default defineConfig({
     },
     environment: 'node',
     reporters: testReporters('verbose'),
+    retry: testRetry(),
   },
 });

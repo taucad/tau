@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   burnIn,
   detectionProbability,
+  isRunnableName,
   isTestFile,
   ownerOf,
   planBurnIn,
@@ -30,7 +31,7 @@ const nodes: GraphNodes = {
   core: { data: { root: 'packages/core', tags: ['type:package'], targets: { test: vitestTarget() } } },
   nested: { data: { root: 'packages/core/nested', targets: { test: vitestTarget() } } },
   api: { data: { root: 'apps/api', tags: ['scope:api'], targets: { test: vitestTarget() } } },
-  quarantined: { data: { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: { test: vitestTarget() } } },
+  nightlyOnly: { data: { root: 'apps/runtime-e2e', tags: ['ci:nightly-only'], targets: { test: vitestTarget() } } },
   untested: { data: { root: 'libs/untested', targets: { build: vitestTarget() } } },
   noop: { data: { root: 'apps/react-e2e', targets: { test: { executor: 'nx:noop' } } } },
   listed: {
@@ -131,10 +132,28 @@ describe('file → target mapping', () => {
       ].toSorted(),
     );
     expect(reasons.get('apps/api/src/a.test.ts')).toContain('API suite');
-    expect(reasons.get('apps/runtime-e2e/src/a.test.ts')).toContain('ci:quarantined');
+    expect(reasons.get('apps/runtime-e2e/src/a.test.ts')).toContain('ci:nightly-only');
     expect(reasons.get('libs/untested/src/a.test.ts')).toBe('`untested` has no `test` target');
     expect(reasons.get('apps/react-e2e/src/a.test.ts')).toContain('only nx:run-commands Vitest targets');
     expect(reasons.get('apps/ui-e2e/src/journey.test.ts')).toBe('`listed:test` names its files, and not this one');
+  });
+
+  it('burns in a route test under a `$` folder and leaves out a path the run would refuse', () => {
+    const plan = planBurnIn(
+      ['packages/core/src/w.$workspace.$project/chat.test.tsx', 'packages/core/src/a b.test.ts'],
+      nodes,
+      workspace,
+    );
+    expect(plan.units).toEqual([
+      { project: 'core', target: 'test', files: ['packages/core/src/w.$workspace.$project/chat.test.tsx'] },
+    ]);
+    expect(plan.skipped).toEqual([
+      { file: 'packages/core/src/a b.test.ts', reason: 'its path has characters a burn-in run does not accept' },
+    ]);
+    for (const unit of plan.units) {
+      expect([unit.project, unit.target, ...unit.files].every((name) => isRunnableName(name))).toBe(true);
+    }
+    expect(isRunnableName('packages/../etc/a.test.ts')).toBe(false);
   });
 
   it('plans nothing for a pull request that changes no test file, so it adds no job', () => {

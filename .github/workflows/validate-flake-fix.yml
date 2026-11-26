@@ -1,0 +1,106 @@
+# Validates a flake fix (Brain research/ci-flake-quarantine-blueprint.md, D7 and FQ-14): on a pull request from a
+# `flake/*` branch, or one labelled `flake`, `scripts/src/validate-flake-fix.ts` reads the diff and rejects the
+# transformations that make a flaky test pass without fixing it (a skip, `only`, `todo`, `fails`, `skipIf`,
+# `runIf`; a deleted test or assertion; a raised retry; a raised timeout without a `Timeout-budget:` p99 line; a
+# fixed sleep; any change to a quarantine file, the flake ledger, the validators, `.github/` or policy). It classes
+# the rest as test-only, product or tolerance and publishes that as the job's `classification` output, the step
+# summary and a label: `flake:test-only` (the fixing agent may enable auto-merge with its stress proof, O4) or
+# `flake:needs-operator`.
+#
+# `pull_request_target`, not `pull_request`: the workflow file and the validator come from `main`, so a fix cannot
+# edit the check that judges it (invariant 5). Nothing from the pull request is executed: its commits are fetched
+# as git objects without a working tree and read as text, and its body reaches the validator through a file.
+#
+# Every pull request and merge-queue group gets a `validate-flake-fix` result, so the check can be made required;
+# outside a flake fix it succeeds at once without a checkout. Branch protection is not changed here.
+name: Validate flake fix
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-flake-fix:
+    name: validate-flake-fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # the classification label only
+    outputs:
+      classification: ${{ steps.validate.outputs.classification || 'not-applicable' }}
+      label: ${{ steps.validate.outputs.label }}
+    steps:
+      - name: Decide whether this is a flake fix
+        id: scope
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request_target ] &&
+            { [[ "$HEAD_REF" == flake/* ]] || jq -e 'index("flake") != null' <<< "$LABELS" > /dev/null; }; then
+            echo 'applies=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'applies=false' >> "$GITHUB_OUTPUT"
+            echo 'Not a flake fix (no `flake/*` branch, no `flake` label): nothing to validate.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The validator from `main`, and the history as commits only; trees and blobs are fetched on demand.
+      - name: Checkout the validator
+        if: steps.scope.outputs.applies == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: tree:0
+          sparse-checkout: scripts/src/validate-flake-fix.ts
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.applies == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.20.0
+
+      - name: Fetch the pull request
+        if: steps.scope.outputs.applies == 'true'
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --quiet --no-tags --filter=tree:0 origin "+refs/pull/${NUMBER}/head:refs/remotes/pull/head"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+
+      - name: Validate the flake fix
+        id: validate
+        if: steps.scope.outputs.applies == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$BODY" > "$RUNNER_TEMP/body.md"
+          node scripts/src/validate-flake-fix.ts --base "$BASE_SHA" --head "$HEAD_SHA" --message-file "$RUNNER_TEMP/body.md"
+
+      # Runs when the validator fails too, so a forbidden fix is labelled for the operator.
+      - name: Label the classification
+        if: always() && steps.validate.outputs.label != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          LABEL: ${{ steps.validate.outputs.label }}
+        run: |
+          for other in flake:test-only flake:needs-operator; do
+            if [ "$other" != "$LABEL" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels/${other/:/%3A}" > /dev/null 2>&1 || true
+            fi
+          done
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=$LABEL" > /dev/null

@@ -1,0 +1,14 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+-it.skip('mounts the worker', async () => {
++it('mounts the worker', async () => {
+   expect((await boot()).state).toBe('ready');
+ });
+
+-it('stops the worker', async () => {
++it.skip('stops the worker', async () => {
+   expect((await stop()).state).toBe('stopped');
+ });

@@ -110,7 +110,7 @@ export const MarkdownViewerChat = memo(function ({
 
   return (
     <ChatStreamingFadeProvider content={content}>
-      {(parseBlocks) => (
+      {(parseBlocks, markdown) => (
         <MarkdownViewer
           {...properties}
           className={className}
@@ -123,8 +123,9 @@ export const MarkdownViewerChat = memo(function ({
           rehypePluginsBeforeHarden={chatPreHardenPlugins}
           BlockComponent={ChatStreamingBlock}
           parseMarkdownIntoBlocksFn={parseBlocks}
+          parseIncompleteMarkdown={false}
         >
-          {content}
+          {markdown}
         </MarkdownViewer>
       )}
     </ChatStreamingFadeProvider>

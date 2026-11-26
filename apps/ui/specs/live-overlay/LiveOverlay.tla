@@ -26,7 +26,7 @@
 (*   FoldOutput   `foldLiveRow` -> `projectAgentHostEvent` `tool-output`   *)
 (*   LiveStart/LiveDelta/LiveEnd  `reduceChatProjection` `live` event ->   *)
 (*                `projectAgentHostLiveEvent` `thinking-*`                 *)
-(*   Present      `openRunWatch` drain -> SDK `processUIMessageStream`     *)
+(*   Present      `selectTranscript` -> `reduceChunks` of the projection  *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 

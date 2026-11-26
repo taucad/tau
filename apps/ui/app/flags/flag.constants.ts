@@ -139,6 +139,13 @@ export const flagRegistry = {
     label: 'Open setup on first visit',
     description: 'Open setup automatically for a person who has not finished it. Needs Onboarding',
   },
+  commentPins: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    posthogKey: 'comment-pins',
+    label: 'Comment pins',
+    description: 'Pin numbered comments on the model and mark up images for the chat',
+  },
   tauDebug: {
     showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),

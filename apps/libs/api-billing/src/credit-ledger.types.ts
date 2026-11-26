@@ -62,6 +62,11 @@ export type AdmissionDenial =
   | 'concurrency_unavailable'
   /** An operator paused this route; the gateway answers 503 `MODEL_ROUTE_PAUSED`. */
   | 'route_paused'
+  /**
+   * The route's supplier rates were published with an end date that has passed, so no request on it can be priced
+   * until its successor is published; every other route still answers. The gateway answers 503 `MODEL_ROUTE_PAUSED`.
+   */
+  | 'route_rates_expired'
   | 'policy_unavailable';
 
 export type AdmissionResult =

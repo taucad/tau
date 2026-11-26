@@ -26,7 +26,8 @@ const canonical: ReadonlySet<string> = new Set([
 
 /**
  * Words the open no longer says, matched anywhere in a literal: the step labels and the device sentences one label
- * replaced (2026-11-25), and the lane sentences the seamless review withdrew before they shipped.
+ * replaced (2026-11-25), the lane sentences the seamless review withdrew before they shipped, and the startup sentences
+ * the chat lane and Parameters drew in place of their shapes.
  */
 const retired: readonly string[] = [
   'Downloading project files',
@@ -41,6 +42,12 @@ const retired: readonly string[] = [
   'Your chats open once this project is on this device.',
   'Parameters appear when the model opens.',
   'Send once the project is open',
+  /* Editor startup (2026-11-25): content that loads draws its shape, never a sentence (UI Policy § 5). */
+  'Loading chat history',
+  'Your project files can open while chats arrive.',
+  'Still loading chat',
+  'Preparing chat session',
+  'Loading parameter metadata',
 ];
 
 const isSource = (name: string): boolean =>

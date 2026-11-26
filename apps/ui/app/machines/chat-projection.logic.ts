@@ -12,8 +12,9 @@
  */
 
 import { createLogic } from 'xstate';
-import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import type { UIMessageChunk } from 'ai';
+import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
+import type { ChunkReduction } from '@taucad/chat-ui/services/ui-message-reducer';
 import {
   agentLogEventSchema,
   emptyChatLedger,
@@ -24,6 +25,7 @@ import {
   liveForeignRun,
   mergeSegmentRows,
   parseSegmentFrom,
+  turnWithdrawnCode,
   unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
@@ -43,6 +45,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { TurnRevisionLog } from '@taucad/revisions-ui/lib/chat-turn-revision-state';
 import {
   agentApprovalToolName,
+  endedChunk,
+  reopenedChunk,
   parseAgentHostApproval,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
@@ -73,6 +77,9 @@ type ChunkTree = Readonly<{
 /** Immutable balanced batches keep append and suffix delivery independent of prior chunk count. */
 export type ProjectedChunks = readonly UIMessageChunk[] | Readonly<{ length: number; trees: readonly ChunkTree[] }>;
 
+/** Each appended chunks value and the value it extends, so a reader reduces only the suffix (T2). */
+const extensions = new WeakMap<ProjectedChunks, ProjectedChunks>();
+
 const appendChunks = (previous: ProjectedChunks, items: readonly UIMessageChunk[]): ProjectedChunks => {
   if (items.length === 0) {
     return previous;
@@ -93,7 +100,9 @@ const appendChunks = (previous: ProjectedChunks, items: readonly UIMessageChunk[
     };
   }
   trees.push(tree);
-  return { length: previous.length + items.length, trees };
+  const next = { length: previous.length + items.length, trees };
+  extensions.set(next, previous);
+  return next;
 };
 
 /** Visit only a new suffix; subtree lengths skip the already delivered prefix. */
@@ -153,6 +162,8 @@ export type RunView = Readonly<{
   streamVersion?: number;
   user?: MyUIMessage;
   admittedAt: string;
+  /** When the run's last lifecycle row was recorded: a resumed attempt moves it, where `admittedAt` stays the run's. */
+  lifecycleAt?: string;
   terminal?: 'completed' | 'failed' | 'cancelled';
   /** Prior assistant segments sealed by an authentic steering input. */
   segments?: readonly TranscriptSegment[];
@@ -162,6 +173,11 @@ export type RunView = Readonly<{
   /** Provider identities resolve rewind prefixes independently from context compaction. */
   providerIds?: readonly string[];
   retired?: true;
+  /**
+   * The run's cancelled row says the person took the request back before the turn was kept (`TURN_WITHDRAWN`), read
+   * from whichever log holds the run, so every page and device leaves its request out alike ({@link isRetractedRun}).
+   */
+  withdrawn?: true;
   /** Each history message the active segment appended and its chunk range, so a rewind removes exactly what it dropped. */
   messages?: readonly ProjectedMessageRange[];
 }>;
@@ -414,6 +430,12 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/** The metadata chunk that states when an answer's work ended; a reopened run restates it as `null`. */
+const isEndedChunk = (chunk: UIMessageChunk): boolean =>
+  chunk.type === 'message-metadata' &&
+  isRecord(chunk.messageMetadata) &&
+  typeof chunk.messageMetadata['endedAt'] === 'number';
 
 /**
  * Cut the active segment's dropped messages (the host reducer's prefix cut, at message granularity).
@@ -796,7 +818,8 @@ const foldRunViews = (
             ...(previous?.segments ?? []),
             {
               user: previous?.steering ?? previous?.user,
-              chunks: previous?.chunks ?? [],
+              // The steering input ends the sealed answer's work, as a terminal row ends a run's.
+              chunks: [...chunksOf(previous?.chunks), endedChunk(Date.parse(row.recordedAt))],
               providerIds: previous?.providerIds,
               messages: previous?.messages,
             },
@@ -805,13 +828,23 @@ const foldRunViews = (
       sealedSegment?.chunks ??
       (steering === undefined
         ? reopened
-          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type))
+          ? [...chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type)), reopenedChunk]
           : (previous?.chunks ?? [])
-        : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk]);
+        : [
+            {
+              type: 'start',
+              messageId: segmentId,
+              messageMetadata: { createdAt: Date.parse(row.recordedAt) },
+            } satisfies UIMessageChunk,
+          ]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
-    const { terminal: _terminal, ...prior } = previous ?? {};
+    const { terminal: _terminal, withdrawn: _withdrawn, ...prior } = previous ?? {};
     const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
+    const withdrawn =
+      row.type === 'run.lifecycle'
+        ? terminal === 'cancelled' && row.detail?.code === turnWithdrawnCode
+        : previous?.withdrawn === true;
     const rewrittenPrefix = rewriteMessage ? [...chunksOf(initialChunks)] : undefined;
     const correctedInput =
       rewriteMessage && message.role === 'tool-input'
@@ -899,6 +932,7 @@ const foldRunViews = (
     views[row.runId] = {
       ...prior,
       admittedAt,
+      ...(row.type === 'run.lifecycle' ? { lifecycleAt: row.recordedAt } : {}),
       chunks: nextChunks,
       ...(messages === undefined ? {} : { messages }),
       ...(correctedIds.size === 0 && !rewriteMessage ? {} : { streamVersion: (previous?.streamVersion ?? 0) + 1 }),
@@ -911,6 +945,7 @@ const foldRunViews = (
             providerIds: [...(steering === undefined ? (previous?.providerIds ?? []) : []), providerId],
           }),
       ...(finalState === undefined ? {} : { terminal: finalState }),
+      ...(withdrawn ? { withdrawn: true } : {}),
     };
   }
   for (const [runId, blocks] of blockMaps) {
@@ -936,9 +971,16 @@ const foldLiveRow = (
   }
   const blocks = copyBlocks(live.blocks);
   const chunks = projectAgentHostEvent(row, blocks);
+  // A reopened run has not ended: the watch replays these chunks, so it states that, as the run's view does.
+  const isEnding = (chunk: UIMessageChunk): boolean => terminalChunks.has(chunk.type) || isEndedChunk(chunk);
+  const reopens =
+    row.type === 'run.lifecycle' &&
+    row.state === 'running' &&
+    // A run's ending is its last two chunks at most: the end time, then its terminal chunk.
+    [...chunksSince(live.chunks, Math.max(0, live.chunks.length - 2))].some((chunk) => isEnding(chunk));
   return {
     runId: live.runId,
-    chunks: appendChunks(live.chunks, chunks),
+    chunks: appendChunks(live.chunks, reopens ? [reopenedChunk, ...chunks] : chunks),
     blocks: Object.fromEntries(blocks),
   };
 };
@@ -1020,7 +1062,16 @@ const reconcileCapturedLive = (previous: ChatProjection, captured: ChatProjectio
       continue;
     }
     if (durable === undefined) {
-      if (prior !== undefined || ownsMessage(previous.views[runId], messageId) || ownsMessage(view, messageId)) {
+      /* A durable message drops a block it never held, unless it is still a checkpoint: an open block of it means
+       * the stream continues past it, so later blocks are not durable yet (T2, rebase on a rewrite). */
+      const keyPrefix = JSON.stringify([runId, messageId]).slice(0, -1) + ',';
+      const checkpointed = [...blocks].some(
+        ([other, block]) => other.startsWith(keyPrefix) && block.type !== 'tool' && !block.closed,
+      );
+      if (
+        prior !== undefined ||
+        (!checkpointed && (ownsMessage(previous.views[runId], messageId) || ownsMessage(view, messageId)))
+      ) {
         continue;
       }
     } else if (
@@ -1257,6 +1308,9 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       )
         ? undefined
         : state.live;
+      /* A rewrite in the batch rebases the overlay onto the rewritten durable chunks, as a catch-up does: content
+       * streamed past the last checkpoint stays, and later deltas continue it (I-3). */
+      let rebase = false;
       for (const row of parsedRows) {
         if (live !== undefined) {
           const currentLive = live;
@@ -1284,10 +1338,14 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
               views = { ...views, [row.runId]: { ...view, streamVersion: (view.streamVersion ?? 0) + 1 } };
             }
             live = undefined;
+            rebase = true;
           } else {
             live = foldLiveRow(live, row);
           }
         }
+      }
+      if (rebase) {
+        live = reconcileCapturedLive(state, { ...state, ledger: fold.ledger, views, blocks: rendered.blocks });
       }
       return {
         state: {
@@ -1448,155 +1506,203 @@ export const selectRunElsewhereRecheckDelay = (projection: ChatProjection, now: 
   return changesAt === undefined ? undefined : Math.min(Math.max(0, changesAt - now), longestTimerMilliseconds);
 };
 
-/** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
+/** Framing that can exist even when no assistant content reached the person. */
+const nonOutputChunkTypes: ReadonlySet<string> = new Set([
+  'start',
+  'start-step',
+  'finish-step',
+  'finish',
+  'abort',
+  'message-metadata',
+  'data-acp-session',
+  'data-acp-activity',
+]);
+
+/**
+ * Whether a run's own stream carried anything the person could read: text, reasoning, a tool or data beyond framing.
+ *
+ * @param view - The run's projected view.
+ * @returns `true` once any output chunk is present.
+ * @public
+ */
+export const runViewHasOutput = (view: RunView): boolean =>
+  [...chunksSince(view.chunks)].some((chunk) => !nonOutputChunkTypes.has(chunk.type)) ||
+  (view.segments?.length ?? 0) > 0;
+
+/**
+ * Whether a run is withdrawn from the transcript: the person stopped it before anything came back and before the
+ * agent kept its turn, and asked for the request back (`TURN_WITHDRAWN`, written by the host, so every page and
+ * device agrees). Any other cancellation (a steer, a closed project, a Stop of a kept turn) keeps the request where
+ * it is. A run that produced output keeps its place.
+ *
+ * @param view - The run's projected view.
+ * @returns `true` when the run's request is not shown.
+ * @public
+ */
+export const isRetractedRun = (view: RunView): boolean =>
+  view.withdrawn === true && view.user !== undefined && view.steering === undefined && !runViewHasOutput(view);
+
+/**
+ * Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. A retracted run
+ * ({@link isRetractedRun}) is left out unless `withRetracted` asks for every request the log holds.
+ *
+ * @public
+ */
 export const selectTranscriptSource = (
-  projection: ChatProjection,
-): ReadonlyArray<RunView & { readonly runId: string }> =>
-  Object.entries({ ...projection.remote?.views, ...projection.views })
-    .filter(([, view]) => view.retired !== true)
+  projection: TranscriptProjection,
+  { withRetracted = false }: Readonly<{ withRetracted?: boolean }> = {},
+): ReadonlyArray<RunView & { readonly runId: string }> => {
+  const remote = projection.remote?.views;
+  const cache = withRetracted ? transcriptSourcesWithRetracted : transcriptSources;
+  const known = cache.get(projection.views);
+  if (known !== undefined && known.remote === remote) {
+    return known.runs;
+  }
+  const runs = Object.entries({ ...remote, ...projection.views })
+    .filter(([, view]) => view.retired !== true && (withRetracted || !isRetractedRun(view)))
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
+  cache.set(projection.views, { remote, runs });
+  return runs;
+};
 
-const messagesByChunks = new WeakMap<RunView['chunks'], Promise<MyUIMessage | undefined>>();
+/** What the transcript is folded from: this device's views and live overlay, and other devices' views. @public */
+export type TranscriptProjection = Pick<ChatProjection, 'views' | 'remote' | 'live'>;
+
+/** Run order, memoised on the identity of the views it was sorted from. */
+type TranscriptSources = WeakMap<
+  ChatProjection['views'],
+  Readonly<{ remote: ChatProjection['views'] | undefined; runs: ReturnType<typeof selectTranscriptSource> }>
+>;
+const transcriptSources: TranscriptSources = new WeakMap();
+/** The same order with retracted runs kept, for the readers that ask for every request the log holds. */
+const transcriptSourcesWithRetracted: TranscriptSources = new WeakMap();
+
+/** Each chunks value's reduction; an appended value continues the reduction of the value it extends. */
+const reductions = new WeakMap<ProjectedChunks, ChunkReduction>();
+
+const reductionOf = (chunks: ProjectedChunks): ChunkReduction => {
+  const known = reductions.get(chunks);
+  if (known !== undefined) {
+    return known;
+  }
+  let base: ChunkReduction | undefined;
+  for (let ancestor = extensions.get(chunks); ancestor !== undefined; ancestor = extensions.get(ancestor)) {
+    base = reductions.get(ancestor);
+    if (base !== undefined) {
+      break;
+    }
+  }
+  const reduction = reduceChunks(chunksSince(chunks, base?.length ?? 0), base);
+  reductions.set(chunks, reduction);
+  /* A reduced value is where a later walk stops, so its own ancestors (and their reductions) can be collected: a long
+   * live run otherwise held every displayed snapshot of its answer until the overlay cleared. */
+  extensions.delete(chunks);
+  return reduction;
+};
+
 const finalizedMessages = new WeakMap<MyUIMessage, Map<NonNullable<RunView['terminal']>, MyUIMessage>>();
 
-const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> => {
-  let pending = messagesByChunks.get(view.chunks);
-  if (pending === undefined) {
-    pending = (async () => {
-      if (view.chunks.length === 0) {
-        return undefined;
-      }
-      /* PL1: the SDK's stream processor loads with the first transcript, not with the page. A failed load is not
-       * this run's answer, so it is not kept: the next materialization loads again. */
-      let sdk: Awaited<ReturnType<typeof loadChatSdk>>;
-      try {
-        sdk = await loadChatSdk();
-      } catch (error) {
-        messagesByChunks.delete(view.chunks);
-        throw error;
-      }
-      const { createUIMessageStream: createUiMessageStream, readUIMessageStream: readUiMessageStream } = sdk;
-      const [last] = chunksSince(view.chunks, view.chunks.length - 1);
-      let eligible = false;
-      if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {
-        let hasStart = false;
-        let explicitStarts = true;
-        for (const chunk of chunksSince(view.chunks)) {
-          if (chunk.type === 'start') {
-            hasStart = true;
-            explicitStarts &&= typeof chunk.messageId === 'string';
-          }
-        }
-        eligible = hasStart && explicitStarts;
-      }
-      if (eligible) {
-        let message: MyUIMessage | undefined;
-        const completed = createUiMessageStream<MyUIMessage>({
-          // Eligible starts always provide their own ID; the generated fallback is never published.
-          generateId: () => '',
-          execute({ writer }) {
-            for (const chunk of chunksSince(view.chunks)) {
-              if (chunk.type !== 'error') {
-                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The owned projector produces MyUIMessage chunks; this writer narrows the existing reader's generic chunk input.
-                writer.write(chunk as InferUIMessageChunk<MyUIMessage>);
-              }
-            }
-          },
-          onError(error) {
-            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the SDK processor's exact rejection.
-            throw error;
-          },
-          onFinish({ responseMessage }) {
-            message = structuredClone(responseMessage);
-          },
-        });
-        const reader = completed.getReader();
-        try {
-          for (;;) {
-            // oxlint-disable-next-line no-await-in-loop -- Drain the public processor before publishing its final snapshot.
-            const { done } = await reader.read();
-            if (done) {
-              break;
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        return message;
-      }
-      const stream = new ReadableStream<UIMessageChunk>({
-        start(controller) {
-          for (const chunk of chunksSince(view.chunks)) {
-            // The ledger owns run failure; only malformed SDK reconstruction should reject this transcript.
-            if (chunk.type === 'error') {
-              continue;
-            }
-            controller.enqueue(chunk);
-          }
-          controller.close();
-        },
-      });
-      let message: MyUIMessage | undefined;
-      for await (const next of readUiMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
-        message = next;
-      }
-      return message;
-    })();
-    messagesByChunks.set(view.chunks, pending);
-  }
-  const message = await pending;
-  if (message === undefined || view.terminal === undefined) {
-    return message;
-  }
-  const cause = view.terminal === 'completed' ? 'success' : view.terminal === 'cancelled' ? 'user_stop' : 'error';
+/** Tau's rule at a terminal row, which the SDK does not know: an interrupted tool part is finalized (L1549–1563). */
+const finalizedAt = (message: MyUIMessage, terminal: NonNullable<RunView['terminal']>): MyUIMessage => {
   let finalized = finalizedMessages.get(message);
   if (finalized === undefined) {
     finalized = new Map();
     finalizedMessages.set(message, finalized);
   }
-  const previous = finalized.get(view.terminal);
+  const previous = finalized.get(terminal);
   if (previous !== undefined) {
     return previous;
   }
+  const cause = terminal === 'completed' ? 'success' : terminal === 'cancelled' ? 'user_stop' : 'error';
   const result = finalizeInterruptedToolParts([message], undefined, cause)[0]!;
-  finalized.set(view.terminal, result);
+  finalized.set(terminal, result);
   return result;
 };
 
-/** Materialize one log snapshot; the adapter versions its async result before writing to a ready SDK chat. @public */
-export const materializeTranscript = async (
-  projection: ChatProjection,
-  watchedRunId?: string,
-): Promise<MyUIMessage[]> => {
-  const runs = selectTranscriptSource(projection);
-  const transcripts = await Promise.all(
-    runs.map(async (run) => {
-      const segments = await Promise.all(
-        (run.segments ?? []).map(async (segment) => {
-          const assistant = await materializeRun({
-            ...run,
-            chunks: segment.chunks,
-            terminal: undefined,
-          });
-          return [segment.user, assistant].filter((message): message is MyUIMessage => message !== undefined);
-        }),
-      );
-      const messages = segments.flat();
-      const user = run.steering ?? run.user;
-      if (user !== undefined) {
-        messages.push(user);
-      }
-      if (run.runId !== watchedRunId) {
-        const assistant = await materializeRun(run);
-        if (assistant !== undefined && (user !== undefined || assistant.parts.length > 0)) {
-          messages.push(assistant);
-        }
-      }
-      return messages;
-    }),
+const equalValue = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (typeof left !== 'object' || typeof right !== 'object' || left === null || right === null) {
+    return false;
+  }
+  if (Array.isArray(left) !== Array.isArray(right)) {
+    return false;
+  }
+  const leftEntries = Object.entries(left);
+  const rightRecord = right as Readonly<Record<string, unknown>>;
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(([key, value]) => Object.hasOwn(right, key) && equalValue(value, rightRecord[key]))
   );
-  return transcripts.flat();
+};
+
+/**
+ * Keep the identity of every part a new message shows unchanged, and of the message when nothing changed: a message
+ * reduced from another chunks value (the live overlay retired, a rewrite reduced again) shows equal parts as new
+ * objects, and a row keyed on a part must not see them as changed.
+ */
+const sharedWith = (previous: MyUIMessage | undefined, next: MyUIMessage): MyUIMessage => {
+  if (previous === undefined || previous === next || previous.role !== next.role) {
+    return next;
+  }
+  let same = previous.parts.length === next.parts.length && equalValue(previous.metadata, next.metadata);
+  const parts = next.parts.map((part, index) => {
+    const prior = previous.parts[index];
+    if (prior !== undefined && (prior === part || equalValue(prior, part))) {
+      return prior;
+    }
+    same = false;
+    return part;
+  });
+  return same ? previous : { ...next, parts };
+};
+
+/**
+ * The chat's transcript, as a pure and synchronous fold of the projection (use_skill startup latency blueprint, T2).
+ *
+ * Per run in admission order: each sealed segment's input and answer, then the run's input and its answer, reduced
+ * from the live overlay while this device follows the run, else from the durable chunks. Tau's rules stay: an
+ * interrupted tool part is finalized at a terminal row, an answer with no parts is shown only after an input, and this
+ * device's log wins a run id another device also holds.
+ *
+ * @param projection - What is displayed: this device's views and overlay, and other devices' views.
+ * @param previous - The transcript this one follows; a message and part that did not change keep its identity, and
+ * an unchanged transcript is returned as `previous` itself.
+ * @returns The messages, in order.
+ * @public
+ */
+export const selectTranscript = (
+  projection: TranscriptProjection,
+  previous: readonly MyUIMessage[] = [],
+): readonly MyUIMessage[] => {
+  const prior = new Map(previous.map((message) => [message.id, message]));
+  const messages: MyUIMessage[] = [];
+  const push = (message: MyUIMessage | undefined): void => {
+    if (message !== undefined) {
+      messages.push(sharedWith(prior.get(message.id), message));
+    }
+  };
+  for (const run of selectTranscriptSource(projection)) {
+    for (const segment of run.segments ?? []) {
+      push(segment.user);
+      push(reductionOf(segment.chunks).message);
+    }
+    const user = run.steering ?? run.user;
+    push(user);
+    const { live } = projection;
+    const chunks = live?.runId === run.runId && projection.views[run.runId] !== undefined ? live.chunks : run.chunks;
+    const reduced = reductionOf(chunks).message;
+    const assistant =
+      reduced === undefined || run.terminal === undefined ? reduced : finalizedAt(reduced, run.terminal);
+    if (assistant !== undefined && (user !== undefined || assistant.parts.length > 0)) {
+      push(assistant);
+    }
+  }
+  return messages.length === previous.length && messages.every((message, index) => message === previous[index])
+    ? previous
+    : messages;
 };
 
 /** @public */

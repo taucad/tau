@@ -11,6 +11,14 @@ import type { ReplayView } from '#launchers/replay-view.js';
  * so a slow CI machine records a number instead of failing.
  */
 
+declare global {
+  /** Vite's environment, which the browser test server injects; only `VITE_` names reach the page. */
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- Augmenting the global ImportMeta needs an interface.
+  interface ImportMeta {
+    readonly env: Readonly<Record<string, string | undefined>>;
+  }
+}
+
 const wakes = 100;
 
 /** The 200-run fixture of the chat-projection tests (`chat-projection.transcript.test.ts`), as log bytes. */
@@ -96,7 +104,10 @@ const wake = async (
   return { view: next, milliseconds: performance.now() - started };
 };
 
-it.each([
+/* Opt-in: a timing spike, not a gate. Run with `VITE_HA0_POLL_COST=1 pnpm nx run agent-host:test:e2e -- <this file>`. */
+const enabled = import.meta.env['VITE_HA0_POLL_COST'] === '1';
+
+it.runIf(enabled).each([
   ['the 200-run fixture', async () => twoHundredRuns()],
   ['one long chat (daemon-reattach-hexnut-4runs)', longChat],
 ])(

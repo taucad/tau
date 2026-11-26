@@ -206,6 +206,18 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
     }
   });
 
+  it('should run each half of the multi-turn admission vertical as its own family', () => {
+    // The whole of chat-multi-turn.spec.ts took 7.5–9.6 min, over the 6.5-min family bound, so it was split in two;
+    // both halves in one family would put that row back over the bound.
+    const halves = families.flatMap((family) => specsOf(family)).filter((spec) => spec.includes('/chat-multi-turn'));
+    expect(halves.toSorted()).toEqual(['src/chat-multi-turn-resume.spec.ts', 'src/chat-multi-turn.spec.ts']);
+    for (const half of halves) {
+      const owners = families.filter((family) => specsOf(family).includes(half));
+      expect(owners, half).toHaveLength(1);
+      expect(specsOf(owners[0] ?? ''), half).toEqual([half]);
+    }
+  });
+
   it("should install the browsers each family's Vitest instances launch, and no other", () => {
     const firefox = instanceFiles('firefox');
     const webkit = instanceFiles('webkit-smoke');

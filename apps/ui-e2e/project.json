@@ -38,6 +38,8 @@
         "test:e2e:journey-chat-1",
         "test:e2e:journey-chat-2",
         "test:e2e:journey-chat-3",
+        "test:e2e:journey-chat-4",
+        "test:e2e:journey-chat-5",
         "test:e2e:journey-mobile-1",
         "test:e2e:journey-mobile-2",
         "test:e2e:journey-mobile-3",
@@ -187,6 +189,48 @@
         "commands": [
           { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
           "vitest run --config apps/ui-e2e/vitest.config.ts src/sessions-liveness.spec.ts"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:journey-chat-4": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "A journey family of test:e2e (CI decomposition DC-25, global review ruling 5): 1 spec file, the completed-turn half of the former chat-multi-turn.spec.ts (7.5–9.6 min whole, green on the three e2e-nightly runs of 2026-11-24 and 2026-11-25), about 4.74 min of specs (at most 6.5): the largest of those runs' summed test times for this half. It lists its files, so a spec joins a family on purpose; the specs run as test:e2e runs them (same env fixture, same ui:build first), and test:e2e still runs them all. browsers names the Playwright browsers its files' Vitest instances launch, the only ones its CI row installs.",
+        "browsers": ["chromium"]
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
+          "vitest run --config apps/ui-e2e/vitest.config.ts src/chat-multi-turn.spec.ts"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
+    "test:e2e:journey-chat-5": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "A journey family of test:e2e (CI decomposition DC-25, global review ruling 5): 1 spec file, the resume and queued-gesture half of the former chat-multi-turn.spec.ts (7.5–9.6 min whole, green on the three e2e-nightly runs of 2026-11-24 and 2026-11-25), about 4.91 min of specs (at most 6.5): the largest of those runs' summed test times for this half. It lists its files, so a spec joins a family on purpose; the specs run as test:e2e runs them (same env fixture, same ui:build first), and test:e2e still runs them all. browsers names the Playwright browsers its files' Vitest instances launch, the only ones its CI row installs.",
+        "browsers": ["chromium"]
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
+          "vitest run --config apps/ui-e2e/vitest.config.ts src/chat-multi-turn-resume.spec.ts"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",

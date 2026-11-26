@@ -93,9 +93,9 @@ vi.mock('@taucad/viewer/graphics/graphics-camera', () => ({ getGraphicsCameraSta
 
 // The jsdom environment has no PointerEvent, so fireEvent's pointer events would lose their pointer id.
 class TestPointerEvent extends MouseEvent {
-  readonly pointerId: number;
-  readonly isPrimary: boolean;
-  constructor(type: string, init: PointerEventInit = {}) {
+  public readonly pointerId: number;
+  public readonly isPrimary: boolean;
+  public constructor(type: string, init: PointerEventInit = {}) {
     super(type, init);
     this.pointerId = init.pointerId ?? 0;
     this.isPrimary = init.isPrimary ?? false;

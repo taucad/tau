@@ -158,6 +158,15 @@
 \* this tab's or another tab's, now removes the root or leaves it (`Applied`), and `Ops` needs no third operation. The
 \* gate (`MutationJournaled`, `HeldActive`), the journal-then-apply order and recovery are unchanged; every invariant
 \* and property is unchanged and is checked over the larger set of behaviours.
+\* Fast-path FW1 (2026-11-25): mutations that change no disk fact stop scanning. Trash, Restore and every chat
+\* create, delete, purge and recency touch re-enrich the current pass's listing and write it only while that pass's
+\* epoch is current, as a workspace catalog's publish already does, instead of refetching or bumping the epoch; a
+\* removed bump is one `EpochBumped` the environment no longer takes, and the listing's projects come only from a
+\* pass. A permanent delete's precheck reads its target and root statuses from the current pass (`discover` with
+\* `reuse`) and proves another copy with `verifyProjectRoute`, scanning only for a copy no route binds; it runs
+\* before `MutationJournaled`, which is unchanged. The refetches after a delete's and a duplicate's settle go: the
+\* settled row's `Bump` already owes the pass (`project-library-commands.ts` re-reviewed in its final form). No action
+\* or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

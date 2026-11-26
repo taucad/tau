@@ -116,6 +116,8 @@ export type LibraryProfile = Readonly<{
   locatorOf: (root: 'home' | 'workspace', relativeDirectory: string) => ProjectLocator;
   /** The authority's scope of the folder. */
   workspaceScope: StorageRootConfig;
+  /** Remove a directory behind the library's back, as another program would: no event reaches the library. */
+  removeDirectory: (root: 'home' | 'workspace', relativeDirectory: string) => void;
   /** What the library asked of the authority since the last reset. */
   counts: () => LibraryProfileCounts;
   reset: () => void;
@@ -515,6 +517,14 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     routes,
     locatorOf,
     workspaceScope,
+    removeDirectory: (root, relativeDirectory) => {
+      const index = directories.findIndex(
+        (directory) => directory.root === root && directory.relativeDirectory === relativeDirectory,
+      );
+      if (index !== -1) {
+        directories.splice(index, 1);
+      }
+    },
     counts: () => counts,
     reset: () => {
       counts = { scans: 0, verifications: 0, rootSyncs: 0 };

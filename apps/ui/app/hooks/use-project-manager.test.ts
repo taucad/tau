@@ -4686,6 +4686,11 @@ describe('useProjectManager.createProject', () => {
       mockGetProjectFileSystemConfig.mockResolvedValue(boundConfig);
       mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundConfig]);
       mockListProjectManifests.mockResolvedValue(twoCopies);
+      /* The route's copy reads as the project, so a delete of the other copy is proven to leave one (FW1). */
+      mockVerifyProjectRoute.mockResolvedValue({
+        status: 'verified',
+        project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+      });
       mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pending]);
       const rendered = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
       await act(async () => rendered.result.current.getProjectListing());
@@ -4797,6 +4802,8 @@ describe('useProjectManager.createProject', () => {
           { status: 'inaccessible', root: { backend: 'webaccess', workspaceId: 'wsp_gone' }, reason: 'revoked' },
         ],
       } as ProjectDiscoveryResult);
+      /* The precheck reads the current pass (FW1): the pass that saw the root go is the one it reads. */
+      await act(async () => result.current.getProjectListing());
 
       await expect(result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator)).rejects.toThrow(
         'Project storage is not completely observable',
@@ -5116,7 +5123,7 @@ describe('useProjectManager.createProject', () => {
     await expect(create()).rejects.toMatchObject({ code: 'permission', workspaceId: 'wsp_stale' });
   });
 
-  it('uses committed chat recency for project activity and invalidates both query families', async () => {
+  it('uses committed chat recency for project activity and refetches the chat queries, not the listing', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     const { result } = renderHook(() => useProjectManager(), { wrapper });
@@ -5127,9 +5134,12 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockTouchChatRecency).toHaveBeenCalledWith(activityChat.id, 123);
     expect(mockTouchProjectActivity).toHaveBeenCalledWith(fakeProject.id, 124);
-    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(
-      expect.arrayContaining([['chats', fakeProject.id], ['all-chats'], ['chat', activityChat.id], ['projects']]),
+    const invalidated = invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey);
+    expect(invalidated).toEqual(
+      expect.arrayContaining([['chats', fakeProject.id], ['all-chats'], ['chat', activityChat.id]]),
     );
+    /* Only the project's library row moved: its listing row is rebuilt from the current pass, with no scan (FW1). */
+    expect(invalidated).not.toContainEqual(['projects']);
   });
 
   /* W8: unread, message edits and the draft are this device's composer

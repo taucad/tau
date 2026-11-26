@@ -155,6 +155,7 @@ const projectManagerDouble = await (async () => {
     replayForPerson: notCalled,
     invalidateProjectListing: notCalled,
     invalidateListing: () => undefined,
+    refreshListingRows: notCalled,
     invalidateProject: () => undefined,
     forgetProject: () => undefined,
     noteLibraryChanged: () => undefined,

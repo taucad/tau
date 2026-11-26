@@ -57,7 +57,7 @@ import {
   routeBindsLocator,
   writeProjectLibraryFile,
 } from '#runtime/project-library-storage.js';
-import type { PersistentStorageRoot } from '#runtime/project-library-storage.js';
+import type { PersistentStorageRoot, ProjectOccurrence } from '#runtime/project-library-storage.js';
 import type {
   InitialEditorState,
   ProjectLibraryRootFacade,
@@ -322,7 +322,8 @@ export type ProjectCommandsHost<
   readiedWorker: () => Promise<ObjectStore>;
   whenDiscoveryReady: () => Promise<void>;
   whenReplaysDrained: () => Promise<void>;
-  discover: () => Promise<ProjectDiscoveryResult>;
+  /** A pass's listing; `reuse` accepts the current pass's when its epoch is still current. */
+  discover: (options?: Readonly<{ reuse?: boolean }>) => Promise<ProjectDiscoveryResult>;
   beginMutation: (
     projectId: string,
     options: Readonly<{ gated: boolean }>,
@@ -336,6 +337,8 @@ export type ProjectCommandsHost<
   replayForPerson: (operation: PendingProjectOperation) => Promise<boolean>;
   invalidateProjectListing: () => Promise<unknown>;
   invalidateListing: () => void;
+  /** A library row moved and nothing on disk did: the listing is enriched again from the current pass, with no scan. */
+  refreshListingRows: () => Promise<void>;
   noteLibraryChanged: () => void;
   sessions: () => ProjectLibrarySessions | undefined;
   chatSessions: () => ProjectLibraryChatSessions<Projection> | undefined;
@@ -648,7 +651,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     await mutation.apply(operation, worker);
     /* D19: a copy has no remote of its own, so it backs up by default too. */
     this.#host.services.cloudIntent.set(targetId, 'default');
-    void this.#host.invalidateProjectListing();
+    /* The settled row moved the epoch and owes the pass that lists the copy (fast-path blueprint FW1). */
     return {
       ...operation.manifest,
       id: operation.projectId,
@@ -667,13 +670,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const worker = await this.#host.readiedWorker();
     const trashed = await worker.trashProject(projectId);
     if (trashed?.deletedAt === undefined) {
-      this.#projectChanged(projectId);
+      this.#rowChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, { deletedAt: trashed.deletedAt });
     this.#host.noteLibraryChanged();
-    this.#projectChanged(projectId);
+    this.#rowChanged(projectId);
     return true;
   };
 
@@ -688,13 +691,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const worker = await this.#host.readiedWorker();
     const restored = await worker.restoreProject(projectId);
     if (!restored) {
-      this.#projectChanged(projectId);
+      this.#rowChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, {});
     this.#host.noteLibraryChanged();
-    this.#projectChanged(projectId);
+    this.#rowChanged(projectId);
     return true;
   };
 
@@ -731,7 +734,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     mutation.journaled(operation);
     await mutation.apply(operation, worker);
     this.#host.noteLibraryChanged();
-    void this.#host.invalidateProjectListing();
+    /* The settled row moved the epoch and owes the pass that drops the card (fast-path blueprint FW1). */
     if (survives) {
       // Another copy keeps the project: its queries are read again, from the copy the route binds now.
       this.#host.invalidateProject(projectId);
@@ -883,6 +886,15 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     this.#host.invalidateProject(projectId);
   }
 
+  /**
+   * Only the project's library row moved (the Trash): the listing is enriched again from the current pass, with no
+   * scan, and the project's own queries are read again (fast-path blueprint FW1).
+   */
+  #rowChanged(projectId: string): void {
+    void this.#host.refreshListingRows();
+    this.#host.invalidateProject(projectId);
+  }
+
   async #importStagingOwners(): Promise<string[]> {
     const worker = await this.#host.readiedWorker();
     const operations = await worker.getPendingProjectOperations();
@@ -913,7 +925,12 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
    * Find the one directory a permanent delete removes, in a pass whose roots are all observed: the copy at `locator`,
    * or with none the copy the route binds, or the only copy. The directory must still carry the project id; the
    * authority checks that once more under the project and physical locks before it deletes. `survives` says another
-   * directory carried the id too.
+   * directory carries the id too.
+   *
+   * The target and the root statuses come from the current pass, with no scan (fast-path blueprint FW1). A stale pass
+   * can only make this stricter: `survives`, the one fact that loosens a delete (no Trash needed), is read from disk.
+   * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks.
+   * Only when the pass shows another copy that no route binds does the precheck still scan, as before.
    */
   async #discoverPermanentDeleteStorage(
     projectId: string,
@@ -924,7 +941,44 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       throw new Error(`Project locator unavailable: ${projectId}`);
     }
     const fileManager = await this.#host.facade();
-    const discovery = await fileManager.client.listProjectManifests();
+    const pass = await this.#host.discover({ reuse: true });
+    const target = this.#permanentDeleteTarget({ projectId, locator, configured }, pass);
+    const others = projectOccurrences(pass, projectId).filter((occurrence) => occurrence !== target);
+    if (others.length === 0) {
+      return { storage: locatorToPendingStorage(target.locator), survives: false };
+    }
+    const routeCopy = others.find((occurrence) => routeBindsLocator(configured, occurrence.locator));
+    if (routeCopy !== undefined) {
+      /* The route binds another copy: proven by reading it now, or not at all. With no proof the delete stays a
+       * sole copy's, which only asks for the Trash. */
+      const verification = await fileManager.client.verifyProjectRoute({ projectId });
+      return { storage: locatorToPendingStorage(target.locator), survives: verification.status === 'verified' };
+    }
+    /* Another copy that no route binds: no read proves it without a scan until the authority can probe (FW3). */
+    const scanned = await fileManager.client.listProjectManifests();
+    const scannedTarget = this.#permanentDeleteTarget({ projectId, locator, configured }, scanned);
+    return {
+      storage: locatorToPendingStorage(scannedTarget.locator),
+      survives: projectOccurrences(scanned, projectId).length > 1,
+    };
+  }
+
+  /**
+   * The occurrence a permanent delete targets in `discovery`, once every root is observed: the copy at `locator`, the
+   * copy the route binds, or the only copy.
+   */
+  #permanentDeleteTarget(
+    {
+      projectId,
+      locator,
+      configured,
+    }: Readonly<{
+      projectId: string;
+      locator: ProjectLocator | undefined;
+      configured: Awaited<ReturnType<typeof getProjectFileSystemConfig>>;
+    }>,
+    discovery: ProjectDiscoveryResult,
+  ): ProjectOccurrence {
     const targetRoot =
       locator?.storageRootKey ??
       (configured === undefined || configured.backend === 'memory' ? undefined : persistentStorageRootKey(configured));
@@ -949,7 +1003,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
           : `This folder no longer holds the project: ${projectId}`,
       );
     }
-    return { storage: locatorToPendingStorage(target.locator), survives: occurrences.length > 1 };
+    return target;
   }
 
   /**

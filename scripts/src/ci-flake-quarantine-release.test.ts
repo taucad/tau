@@ -5,6 +5,7 @@ import type { QuarantineEntry } from '@taucad/vitest-ci/quarantine';
 
 import { emptyState, ingestRun, serializeState, parseState } from '#ci-flake-ledger-state.js';
 import type { IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
+import { identityHashOf } from '#ci-flake-quarantine-entry.js';
 import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
 import {
   applyRemovals,
@@ -28,6 +29,7 @@ import {
   removalFiles,
   removalMarker,
   removeFromQuarantine,
+  returnMarker,
   retainQuarantineTracks,
 } from '#ci-flake-quarantine-release.js';
 import type {
@@ -800,13 +802,36 @@ describe('the release job', () => {
         },
       ],
       '/issues/19': { number: 19, state: 'closed', labels: [{ name: 'flake' }, { name: 'flake:released' }] },
+      // #21 returned after its release and was reopened for the operator: it stays open.
+      '/issues/21/comments': [
+        {
+          body: removalMarker('released', {
+            identity: identityHashOf(`host › ${testName}`),
+            path,
+            created: '2026-11-20',
+            expires: '2026-12-04',
+            branch,
+            released: '2026-11-25',
+          }),
+          user: bot,
+        },
+        {
+          body: `${returnMarker({ identity: identityHashOf(`host › ${testName}`), released: '2026-11-25' })}\nReturned.`,
+          user: bot,
+        },
+      ],
+      '/issues/21': {
+        number: 21,
+        state: 'open',
+        labels: [{ name: 'flake:released' }, { name: 'flake:needs-operator' }],
+      },
     });
     const landed: LandedRemoval[] = [
       {
         kind: 'release',
         branch,
         mergedAt: '2026-11-25T08:00:00Z',
-        removed: [12, 14, 18, 19].map((issue) => ({ path, entry: entryOf({ issue }) })),
+        removed: [12, 14, 18, 19, 21].map((issue) => ({ path, entry: entryOf({ issue }) })),
       },
       // An expiry merged by hand after its owner update failed: the note and the label are finished.
       {
@@ -831,6 +856,7 @@ describe('the release job', () => {
     expect(patched(13)).toEqual({ labels: ['flake'] });
     expect(patched(14)).toBeUndefined();
     expect(patched(19)).toBeUndefined();
+    expect(patched(21)).toBeUndefined();
     // The closing comment records the day the release merged: the start of the 30-day return window.
     const closing = requests.find(
       (request) => request.method === 'POST' && request.path.endsWith('/issues/12/comments'),

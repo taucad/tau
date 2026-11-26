@@ -78,6 +78,7 @@ import {
   releaseComment,
   releasedLabel,
   releasingLabel,
+  returnMarker,
   returnWindowDays,
   removalBody,
   removalMarker,
@@ -634,7 +635,9 @@ export const closeReleased = async (
         current.state === 'closed' &&
         labels.length === labelNames(current.labels).length &&
         labelNames(current.labels).includes(releasedLabel);
-      if (done) {
+      // A return after this release reopened the issue for the operator: it is theirs now, never closed again.
+      const returned = comments.some((body) => body.includes(returnMarker({ identity: identityHashOf(id), released })));
+      if (done || returned) {
         continue;
       }
       if (!noted) {

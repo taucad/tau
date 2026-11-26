@@ -24,11 +24,26 @@ export type ReplayView = Readonly<{
 }>;
 
 /**
+ * A read-only replay of one log's bytes as projection facts (HA-I1): the pages a host read would send, its source
+ * health, and `extend` for bytes that keep the held bytes as a prefix (HA-I3). No writer, lock, ledger or history.
+ *
+ * @public
+ */
+export type ReplayFacts = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  generation: string;
+  sourceHealth: ProjectionSourceHealth;
+  projectionBatch: ReplayView['projectionBatch'];
+  /** Fold the bytes past the held ones; the caller checks {@link isBytePrefix} first, as the launcher does. */
+  extend(bytes: Uint8Array<ArrayBuffer>): ReplayFacts;
+}>;
+
+/**
  * Compare current authoritative bytes before reusing any decoded history.
  * @param prefix - Previously acquired bytes.
  * @param bytes - Current authoritative bytes.
  * @returns Whether every prior byte is unchanged.
- * @internal
+ * @public
  */
 export const isBytePrefix = (prefix: Uint8Array<ArrayBuffer>, bytes: Uint8Array<ArrayBuffer>): boolean => {
   if (prefix === bytes) {
@@ -162,3 +177,13 @@ export const createReplayView = (bytes: Uint8Array<ArrayBuffer>, generation: str
   };
   return extend(bytes);
 };
+
+/**
+ * Replay a log's bytes as projection facts, as a page reads its own segment from the file (HA-I1).
+ *
+ * @param bytes - The log's bytes.
+ * @param generation - Opaque identity of this reader's view.
+ * @returns The facts view.
+ * @public
+ */
+export const createReplayFacts: (bytes: Uint8Array<ArrayBuffer>, generation: string) => ReplayFacts = createReplayView;

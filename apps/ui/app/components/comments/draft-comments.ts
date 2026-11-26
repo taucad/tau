@@ -169,3 +169,14 @@ export function sendableAnnotations(annotations: MessageAnnotations): RemovedCom
     orphanedAttachments,
   };
 }
+
+/**
+ * The part a comment is pinned on, when the model names it.
+ *
+ * @param comment - The comment.
+ * @returns The part's label.
+ */
+export const partLabelOf = (comment: AnnotationComment): string | undefined => {
+  const label = comment.model?.part?.label;
+  return label === undefined || label === '' ? undefined : label;
+};

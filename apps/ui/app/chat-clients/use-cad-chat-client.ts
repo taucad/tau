@@ -180,15 +180,11 @@ export const useCadChatClient = (): CadChatClient => {
       if (input.annotations !== undefined) {
         try {
           // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
-          const [{ prepareAnnotatedSend }, { flattenImage }] = await Promise.all([
-            loadCode(async () => import('#components/comments/prepare-annotated-send.js')),
-            loadCode(async () => import('#components/comments/flatten-image.js')),
-          ]);
-          send = await prepareAnnotatedSend({
+          const { sendAnnotated } = await loadCode(async () => import('#components/comments/annotated-send.js'));
+          send = await sendAnnotated({
             attachments: send.attachments,
             annotations: input.annotations,
             store: store.draftAttachmentBytes(activeChatId),
-            flatten: flattenImage,
           });
         } catch (error) {
           console.error('[useCadChatClient] annotated images could not be prepared', error);

@@ -253,6 +253,7 @@
 \* the draft's attachment bytes, `use-chat.tsx` the draft's annotations and their setter, and `chat-textarea.tsx` a
 \* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
 \* changes.
+\* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

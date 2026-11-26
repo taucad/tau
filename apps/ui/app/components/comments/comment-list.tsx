@@ -1,24 +1,13 @@
 import { annotationLimits } from '@taucad/chat/annotations';
 import { X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import type { AnnotationComment, MessageAnnotations } from '@taucad/chat/annotations';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
-import { removeComments, setCommentText } from '#components/comments/draft-comments.js';
+import { partLabelOf, removeComments, setCommentText } from '#components/comments/draft-comments.js';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 
 const badgeClass =
   'flex size-5 shrink-0 items-center justify-center rounded-full bg-markup-ink text-xs font-semibold text-white';
-
-/**
- * The part a comment is pinned on, when the model names it.
- *
- * @param comment - The comment.
- * @returns The part's label.
- */
-export const partLabelOf = (comment: AnnotationComment): string | undefined => {
-  const label = comment.model?.part?.label;
-  return label === undefined || label === '' ? undefined : label;
-};
 
 const whereOf = partLabelOf;
 

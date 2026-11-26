@@ -12,6 +12,7 @@ import {
   createCachedSystemPromptBlocks,
   createGatewayModelTransport as createGatewayModelTransportWithModel,
   GatewayModelTransportError,
+  promptCacheKeyShards,
   resetGatewayGzipOrigins,
 } from '#transport/gateway-model-transport.js';
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
@@ -1711,7 +1712,7 @@ describe('createGatewayModelTransport', () => {
     });
 
     it.each(['openai', 'xai'] as const)(
-      'routes a %s chat by its hashed id and hands the supplier no Tau id',
+      'routes a %s chat by its static prefix and chat shard and hands the supplier no Tau id',
       async (providerKind) => {
         let headerNames: string[] | undefined;
         let body: Record<string, unknown> | undefined;
@@ -1728,8 +1729,11 @@ describe('createGatewayModelTransport', () => {
           ),
         );
 
-        const key = createHash('sha256').update('chat_fixture').digest('hex').slice(0, 32);
-        expect(body?.['prompt_cache_key']).toBe(key);
+        const hex = (text: string): string => createHash('sha256').update(text).digest('hex');
+        const fixture = request({ providerKind, chatId: 'chat_fixture' });
+        const prefix = hex(JSON.stringify([fixture.modelId, fixture.tools, 'static']));
+        const shard = Number.parseInt(hex('chat_fixture').slice(0, 8), 16) % promptCacheKeyShards;
+        expect(body?.['prompt_cache_key']).toBe(hex(`${prefix}:${String(shard)}`).slice(0, 32));
         expect(JSON.stringify(body)).not.toContain('chat_fixture');
         // Retention stays the provider's own: the longer controls are refused or deprecated.
         expect(body).not.toHaveProperty('prompt_cache_retention');
@@ -1747,6 +1751,22 @@ describe('createGatewayModelTransport', () => {
         expect(body).not.toHaveProperty('prompt_cache_key');
       },
     );
+
+    it('gives chats on one model a few shared keys, and a new prefix new keys', async () => {
+      /* WP-15 (O-5): a new chat must land where the shared prefix is cached. Chat-id keys gave every chat its own. */
+      const keyFor = async (overrides: Partial<ModelStreamRequest>): Promise<unknown> => {
+        const body = await bodyFor({ providerKind: 'openai', ...overrides });
+        return body['prompt_cache_key'];
+      };
+      const chats = await Promise.all(
+        Array.from({ length: 24 }, async (_, index) => keyFor({ chatId: `chat_${String(index)}` })),
+      );
+
+      expect(new Set(chats).size).toBeLessThanOrEqual(promptCacheKeyShards);
+      expect(new Set(chats).size).toBeGreaterThan(1);
+      expect(await keyFor({ chatId: 'chat_0' })).toBe(chats[0]);
+      expect(await keyFor({ chatId: 'chat_0', modelId: 'other-model' })).not.toBe(chats[0]);
+    });
 
     it.each(['vertexai', 'cerebras', 'together', 'morph', 'moonshot'] as const)(
       'never puts a cache key or retention on a %s Completions body, which the gateway refuses',

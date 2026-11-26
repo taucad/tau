@@ -493,6 +493,8 @@ export const reconnectingCueMilliseconds = 2000;
  */
 export const overlayRedialFirstMilliseconds = 250;
 export const overlayRedialLongestMilliseconds = 30_000;
+/** A subscription that held this long resets the overlay's redial backoff; one dropped sooner keeps backing off. */
+export const overlayHeldMilliseconds = 2000;
 
 /**
  * HA-I4: how long a queued command may wait on a `wait` code before that code's line shows; it stays queued after.
@@ -849,14 +851,28 @@ type HostWait = Readonly<{
   /** What the chat says while the send waits, once it has waited {@link outboxWaitLineMilliseconds} (HA-I4). */
   sentence: string;
   lineShown: boolean;
-  /** The answer was lost (its effect unknown), not a coded wait: only this re-send is a "Reconnecting…" cause. */
-  lost: boolean;
+  /** Its code has no line of its own (a transport or handoff code, or a lost answer): a "Reconnecting…" cause. */
+  cue: boolean;
   timer: ReturnType<typeof setTimeout>;
-  /** Shows the line at the bound; kept across this command's re-sends. */
-  line: ReturnType<typeof setTimeout>;
+  /** Shows a lined code's line at the bound; kept across this command's re-sends. */
+  line: ReturnType<typeof setTimeout> | undefined;
 }>;
 
 /** What a send that waits for its host reads as: queued, with why and when it goes (PERF-5). */
+/**
+ * The `wait` codes with a line of their own in the HA5 code table (blueprint, "HA5 code→copy table"): a queued command
+ * held on one shows that line after {@link outboxWaitLineMilliseconds}, and never "Reconnecting…". Every other `wait`
+ * code (the transport and handoff codes) and an answer lost past its bound show no line: the cue applies (HA-I8).
+ */
+const linedWaitCodes: ReadonlySet<string> = new Set([
+  'WRITER_LOCKED',
+  'CHAT_RUN_LIVE',
+  'LEADER_VERSION_MISMATCH',
+  'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+  'SEGMENTS_UNREADABLE',
+  'REVISIONS_UNAVAILABLE',
+]);
+
 const hostWaitSentence = (refusal: CommandRefusal): string =>
   refusal.code === 'WRITER_LOCKED' || refusal.code === 'LEADER_VERSION_MISMATCH'
     ? 'Queued. Another tab still has this chat open for writing. Your message is sent when that tab resumes or closes.'
@@ -1012,8 +1028,12 @@ type ObservedChat = {
    * its first subscription. The next own read past {@link ObservedChat.overlayRedialAt} starts a waiting one again.
    */
   subscribed?: boolean;
-  /** Losses of the overlay since it last subscribed, and the monotonic time before which it is not dialled again. */
+  /**
+   * Losses of the overlay since a subscription last held {@link overlayHeldMilliseconds}, and the monotonic time before
+   * which it is not dialled again; `subscribedAt` is when the current subscription began.
+   */
   overlayLosses?: number;
+  subscribedAt?: number;
   overlayRedialAt?: number;
   /** The overlay's last loss was a coded terminal cause, not a transient one: no "Reconnecting…" over it (HA-I8). */
   overlayTerminal?: boolean;
@@ -3142,15 +3162,20 @@ export class ChatSessionStore {
       },
       Math.min(hostWaitFirstDelay * 2 ** attempt, hostWaitLongestDelay),
     );
-    const line =
-      same?.line ??
-      setTimeout(() => {
-        const current = session.hostWait;
-        if (this.#sessions.get(session.chatId) === session && current?.line === line) {
-          session.hostWait = { ...current, lineShown: true };
-          this.#chatTopics.get(session.chatId)?.emit();
-        }
-      }, outboxWaitLineMilliseconds);
+    const lined = linedWaitCodes.has(refusal.code);
+    if (!lined) {
+      clearTimeout(same?.line);
+    }
+    const line = lined
+      ? (same?.line ??
+        setTimeout(() => {
+          const current = session.hostWait;
+          if (this.#sessions.get(session.chatId) === session && current !== undefined && current.line === line) {
+            session.hostWait = { ...current, lineShown: true };
+            this.#chatTopics.get(session.chatId)?.emit();
+          }
+        }, outboxWaitLineMilliseconds))
+      : undefined;
     session.hostWait = {
       queueId,
       commandId: command.commandId,
@@ -3158,8 +3183,8 @@ export class ChatSessionStore {
       attempt,
       due: false,
       sentence: hostWaitSentence(refusal),
-      lineShown: same?.lineShown ?? false,
-      lost: refusal.effect === 'unknown',
+      lineShown: lined && (same?.lineShown ?? false),
+      cue: !lined,
       timer,
       line,
     };
@@ -4270,6 +4295,11 @@ export class ChatSessionStore {
   readonly #sendHostCommand: typeof sendHostCommand = async (connect, command, options) => {
     const answer = await sendHostCommand(connect, command, options);
     const { chatId } = command.payload as { readonly chatId?: string };
+    const observed = chatId === undefined ? undefined : this.#observed.get(chatId);
+    if (observed !== undefined && answer.status !== 'refused') {
+      /* The host answers: a waiting overlay is dialled on the next own read, not after its backoff. */
+      observed.overlayRedialAt = undefined;
+    }
     const { cursor } = answer as { readonly cursor?: unknown };
     const projection = chatId === undefined ? undefined : this.#projectionContext(chatId);
     if (
@@ -4278,7 +4308,7 @@ export class ChatSessionStore {
       projection !== undefined &&
       cursor >= projection.ledger.position.cursor
     ) {
-      this.#observed.get(chatId)?.source?.wake();
+      observed?.source?.wake();
     }
     return answer;
   };
@@ -4419,7 +4449,10 @@ export class ChatSessionStore {
      * or a `never` code is terminal and has its own residual. */
     const code = getErrno(event.error);
     observed.overlayTerminal = code === undefined ? event.error !== undefined : refusalOf(code).retry !== 'wait';
-    const losses = observed.overlayLosses ?? 0;
+    const held =
+      observed.subscribedAt !== undefined && performance.now() - observed.subscribedAt >= overlayHeldMilliseconds;
+    observed.subscribedAt = undefined;
+    const losses = held ? 0 : (observed.overlayLosses ?? 0);
     observed.overlayLosses = losses + 1;
     observed.overlayRedialAt =
       performance.now() + Math.min(overlayRedialFirstMilliseconds * 2 ** losses, overlayRedialLongestMilliseconds);
@@ -4460,6 +4493,7 @@ export class ChatSessionStore {
   /** The chat is not local after all: its overlay is the remote host read, whose retry is D17's, not this backoff. */
   #overlayIsRemote(chatId: string, observed: ObservedChat): void {
     observed.overlayLosses = undefined;
+    observed.subscribedAt = undefined;
     observed.overlayRedialAt = undefined;
     observed.overlayTerminal = undefined;
     queueMicrotask(() => {
@@ -4468,7 +4502,8 @@ export class ChatSessionStore {
   }
 
   /**
-   * HA-I8's cause facts: the outbox head re-sends after a lost answer (a coded wait has its own line), or a local
+   * HA-I8's cause facts: the outbox head re-sends after a lost answer or a `wait` code with no line of its own
+   * ({@link linedWaitCodes}), or a local
    * chat's live overlay that was subscribed waits again for a transient cause while its own run is unsettled. Never in
    * a `paused` phase (an approval or a question), on a cold open's first connect, or over a coded terminal cause.
    */
@@ -4478,7 +4513,7 @@ export class ChatSessionStore {
     if (phase === 'paused') {
       return false;
     }
-    if (this.#sessions.get(chatId)?.hostWait?.lost === true) {
+    if (this.#sessions.get(chatId)?.hostWait?.cue === true) {
       return true;
     }
     return (
@@ -4533,7 +4568,7 @@ export class ChatSessionStore {
         onSubscribed: () => {
           observed.subscriptions = (observed.subscriptions ?? 0) + 1;
           observed.subscribed = true;
-          observed.overlayLosses = undefined;
+          observed.subscribedAt = performance.now();
           observed.overlayRedialAt = undefined;
           observed.overlayTerminal = undefined;
           this.#refreshReconnecting(chatId);
@@ -6298,6 +6333,12 @@ export class ChatSessionStore {
                   observed.ownCurrent = undefined;
                   observed.ownHeldUnsettled = heldUnsettled || undefined;
                   this.#stopObservedAttachment(input.chatId, observed);
+                  /* A new route: its overlay starts fresh, with no backoff or cue carried from the old one. */
+                  observed.subscribed = undefined;
+                  observed.subscribedAt = undefined;
+                  observed.overlayLosses = undefined;
+                  observed.overlayRedialAt = undefined;
+                  observed.overlayTerminal = undefined;
                   this.#projectionTopics.get(input.chatId)?.emit();
                   observed.attempts = 0;
                   observed.local = this.#startOwnSource(input.chatId, observed);

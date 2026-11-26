@@ -931,7 +931,7 @@
     },
     {
       "id": "HA2-RECONNECTING-CUE",
-      "bound": "The chat says Reconnecting only once an HA-I8 cause fact has held for reconnectingCueMilliseconds (2 s): a local chat's live overlay waiting while its own run is unsettled and not paused, or the outbox head re-sending after a lost answer or a wait code; never in a paused phase. A debounce on cause facts, not a silence detector",
+      "bound": "The chat says Reconnecting only once an HA-I8 cause fact has held for reconnectingCueMilliseconds (2 s): a local chat's live overlay that was subscribed waiting again for a transient cause while its own run is unsettled and not paused, or the outbox head re-sending after a lost answer or a wait code with no line of its own in the HA5 table (the transport and handoff codes); never in a paused phase, on a cold open's first connect, over a coded terminal cause, or over a lined code (WRITER_LOCKED, CHAT_RUN_LIVE, LEADER_VERSION_MISMATCH, RUN_ACTIVE_ON_ANOTHER_DEVICE, SEGMENTS_UNREADABLE, REVISIONS_UNAVAILABLE). A debounce on cause facts, not a silence detector",
       "site": "apps/ui/app/services/chat-session-store.ts",
       "token": "observed.cueTimer = setTimeout",
       "class": "Debounce",
@@ -939,7 +939,7 @@
     },
     {
       "id": "HA2-OVERLAY-REDIAL",
-      "bound": "A local chat's lost live overlay is dialled again only on an own read at least overlayRedialFirstMilliseconds (250 ms) after the loss, doubling per loss to overlayRedialLongestMilliseconds (30 s); a subscription resets it. No timer: the own read is the wait's publisher (HA-I9)",
+      "bound": "A local chat's lost live overlay is dialled again only on an own read at least overlayRedialFirstMilliseconds (250 ms) after the loss, doubling per loss to overlayRedialLongestMilliseconds (30 s); a subscription that held overlayHeldMilliseconds (2 s) resets the doubling, a pick that restarts the route resets it, and an applied host answer clears the wait. No timer: the own read is the wait's publisher (HA-I9)",
       "site": "apps/ui/app/services/chat-session-store.ts",
       "token": "Math.min(overlayRedialFirstMilliseconds * 2 ** losses, overlayRedialLongestMilliseconds)",
       "class": "Backoff",
@@ -947,7 +947,7 @@
     },
     {
       "id": "HA2-OUTBOX-WAIT-LINE",
-      "bound": "A queued command refused with a wait code, or whose answer was lost past its 30 s bound, stays queued and is sent again by its id; its code's line shows only once it has waited outboxWaitLineMilliseconds (10 s, equal to the still-closing bound WRITER_LOCKED waits on); the item stays queued after (HA-I4)",
+      "bound": "A queued command refused with a wait code, or whose answer was lost past its 30 s bound, stays queued and is sent again by its id; a code with a line of its own in the HA5 table shows it only once it has waited outboxWaitLineMilliseconds (10 s, equal to the still-closing bound WRITER_LOCKED waits on); every other wait code shows no line, only the Reconnecting cue (HA-I4, HA-I8)",
       "site": "apps/ui/app/services/chat-session-store.ts",
       "token": "session.hostWait = { ...current, lineShown: true }",
       "class": "Presentation",

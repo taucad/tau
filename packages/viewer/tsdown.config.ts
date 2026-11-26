@@ -31,6 +31,7 @@ const workerUrlPlugin = {
 const baseConfig: UserConfig = {
   entry: [
     'src/cad/cad-viewer.tsx',
+    'src/cad/comment-pins.tsx',
     'src/cad/fit-view-control.tsx',
     'src/cad/fullscreen-view-control.tsx',
     'src/cad/kernel-settings.tsx',

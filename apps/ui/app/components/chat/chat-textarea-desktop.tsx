@@ -159,6 +159,8 @@ type ChatTextareaDesktopProperties = {
   readonly handleTextareaFocus?: () => void;
   readonly handleTextareaBlur: () => void;
   readonly removeAttachment: (index: number) => void;
+  /** The draft's comments, drawn under its attachments. */
+  readonly comments?: React.ReactNode;
 };
 
 /** Map one ACP command to the composer menu; its chip's text is the agent's exact invocation. @public */
@@ -355,6 +357,7 @@ export const ChatTextareaDesktop = memo(function ({
   handleTextareaFocus,
   handleTextareaBlur,
   removeAttachment,
+  comments,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const catalog = useSkillsCatalogState();
   /* `closed` is a real close: an absent or idle catalog reports `registering` (use-observation). */
@@ -911,6 +914,7 @@ export const ChatTextareaDesktop = memo(function ({
           size='desktop'
           onRemove={removeAttachment}
         />
+        {comments}
 
         {/* Editor */}
         <div

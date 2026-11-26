@@ -14,7 +14,8 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import { providerPermissionResolutionSchema } from '@taucad/agent-host/wire';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -85,12 +86,36 @@ import {
   sanitizeAgentPath,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
+import { annotationsOf } from '@taucad/chat/annotations';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import { isSafeRelativePath } from '@taucad/utils/path';
 import { isRecord } from '@taucad/utils/schema';
 import { CadReferenceChip } from '@taucad/chat-ui/components/cad-reference-chip';
+
+/* Loaded when a sent message first shows comments: most messages carry none. */
+const MessageCommentList = lazyCode(async () => {
+  const module = await import('#components/comments/comment-list.js');
+  return { default: module.MessageCommentList };
+});
+
+/** A sent message's comments, under its pictures. */
+function SentComments({
+  annotations,
+}: {
+  readonly annotations: MessageAnnotations | undefined;
+}): React.JSX.Element | undefined {
+  if (!annotations || annotations.comments.length === 0) {
+    return undefined;
+  }
+  return (
+    <Suspense fallback={null}>
+      <MessageCommentList annotations={annotations} />
+    </Suspense>
+  );
+}
 
 function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], index: number): string {
   if (segment.type === 'atReference') {
@@ -1140,6 +1165,7 @@ export const ChatMessage = memo(function ({
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
+              {isUser ? <SentComments annotations={annotationsOf(displayMessage.metadata)} /> : null}
               {isUser ? (
                 <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (

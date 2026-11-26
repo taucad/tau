@@ -247,6 +247,13 @@
 \* prepared send no delivery holds and the host never accepted may now be withdrawn, dropping its command.
 \* PERF-8 (2026-11-26): a reload between a send's outbox write and its composer clear restored the queued message
 \* as a draft. The composer lets go of a restored draft that an outbox entry composes; no action or verdict changes.
+\* Comment pins S1 review (2026-11-26): `use-cad-chat-client.ts` flattens a message's commented images before it
+\* builds the message, only for a submit that carries annotations and after the gesture's queue intent is captured, as
+\* attachment promotion already waits there; a failed flatten sends nothing. `chat-session-store.ts` gains a reader of
+\* the draft's attachment bytes, `use-chat.tsx` the draft's annotations and their setter, and `chat-textarea.tsx` a
+\* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
+\* changes.
+\* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

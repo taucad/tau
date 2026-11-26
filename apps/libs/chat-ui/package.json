@@ -26,8 +26,6 @@
   },
   "exports": {
     "./chat-clients/_internal/browser-agent-host-snapshot-context": "./src/chat-clients/_internal/browser-agent-host-snapshot-context.ts",
-    "./chat-clients/_internal/browser-agent-host-transport": "./src/chat-clients/_internal/browser-agent-host-transport.ts",
-    "./chat-clients/_internal/shared-chat-transport": "./src/chat-clients/_internal/shared-chat-transport.ts",
     "./chat-clients/turn-intent": "./src/chat-clients/turn-intent.ts",
     "./components/animated-shiny-text": "./src/components/animated-shiny-text.tsx",
     "./components/at-reference-context": "./src/components/at-reference-context.tsx",
@@ -79,8 +77,6 @@
     "./services/agent-host-event-projection": "./src/services/agent-host-event-projection.ts",
     "./services/agent-host-transport": "./src/services/agent-host-transport.ts",
     "./services/chat-composer-trays": "./src/services/chat-composer-trays.ts",
-    "./services/chat-sdk-loader": "./src/services/chat-sdk-loader.ts",
-    "./services/chat-sdk": "./src/services/chat-sdk.ts",
     "./services/daemon-agent-host-client": "./src/services/daemon-agent-host-client.ts",
     "./services/rpc-ledger": "./src/services/rpc-ledger.ts",
     "./services/ui-message-reducer": "./src/services/ui-message-reducer.ts",

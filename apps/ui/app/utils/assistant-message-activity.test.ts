@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent } from '@taucad/agent-host';
-import { readUIMessageStream } from 'ai';
+import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ActivityGroup } from '@taucad/chat-ui/utils/assistant-message-activity';
-import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { initialChatProjection, reduceChatProjection, selectTranscript } from '#machines/chat-projection.logic.js';
 import { projectAgentHostEvent, projectAgentHostLiveEvent } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   activityFamily,
@@ -381,7 +381,7 @@ describe('a finished turn split at its last tool call', () => {
  * reads, then its interrupted tool parts are finalized.
  */
 describe('desktop in-project turn replay', () => {
-  const replayed = async (): Promise<readonly MyUIMessage[]> => {
+  const replayed = (): readonly MyUIMessage[] => {
     const events = pingPongTurnLog
       .split('\n')
       .filter((line) => line.trim() !== '')
@@ -396,7 +396,7 @@ describe('desktop in-project turn replay', () => {
         events,
       },
     }).state;
-    const derived = await materializeTranscript(projected);
+    const derived = selectTranscript(projected);
     return finalizeInterruptedToolParts([...derived], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
   };
 
@@ -415,8 +415,8 @@ describe('desktop in-project turn replay', () => {
     input: { targetFile: 'main.scad', content: '' },
   } satisfies Extract<AgentLiveEvent, { readonly type: 'tool-input-end' }>;
 
-  it('should leave every tool part of the replayed turn settled, never output-error', async () => {
-    const messages = await replayed();
+  it('should leave every tool part of the replayed turn settled, never output-error', () => {
+    const messages = replayed();
     const states = messages
       .flatMap((message) => message.parts)
       .filter((part) => part.type.startsWith('tool-') || part.type === 'dynamic-tool')
@@ -425,8 +425,8 @@ describe('desktop in-project turn replay', () => {
     expect(states).toEqual(Array.from({ length: 6 }, () => 'output-available'));
   });
 
-  it('should summarize the ping-pong turn as its four successful rounds, never as a failure', async () => {
-    const messages = await replayed();
+  it('should summarize the ping-pong turn as its four successful rounds, never as a failure', () => {
+    const messages = replayed();
     const summaries = messages
       .filter((message) => message.role === 'assistant')
       .map((message) =>
@@ -449,17 +449,17 @@ describe('desktop in-project turn replay', () => {
    * `for await` loops — nothing orders one against the other. The transport
    * feeds both into one queue in arrival order and returns from `enqueueEvent`
    * for a live event *before* its `leaderEpoch:sequence` dedup
-   * (`browser-agent-host-transport.ts:652-661`), so a live row is never
+   * (the since-deleted `browser-agent-host-transport.ts`), so a live row was never
    * deduplicated or dropped on the native path. Projected late
    * (`agent-host-event-projection.ts:583-592`), `tool-input-end` becomes a
    * second `tool-input-available`, and the AI SDK rewinds the settled part to
-   * `input-available` and drops its output — after which the clean-finish
+   * `input-available` and drops its output (as the transcript fold does, T4) — after which the clean-finish
    * finalize stamps `ORPHANED_TOOL_CALL` over a tool that succeeded. One tool
    * call loses the race, which is why only the third round was mislabelled.
    *
    * The projection fences every settled call, so the late row projects to nothing.
    */
-  it('should ignore a live tool-input row that arrives after the tool settled', async () => {
+  it('should ignore a live tool-input row that arrives after the tool settled', () => {
     const blocks = new Map();
     const chunks: UIMessageChunk[] = [];
     for (const event of pingPongTurnLog
@@ -476,18 +476,7 @@ describe('desktop in-project turn replay', () => {
         chunks.push(...projectAgentHostLiveEvent(lateToolInputEnd, blocks));
       }
     }
-    const stream = new ReadableStream<UIMessageChunk>({
-      start: (controller) => {
-        for (const chunk of chunks) {
-          controller.enqueue(chunk);
-        }
-        controller.close();
-      },
-    });
-    let streamed: MyUIMessage | undefined;
-    for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
-      streamed = next;
-    }
+    const streamed = reduceChunks(chunks).message;
     const [message] = finalizeInterruptedToolParts([streamed!], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
 
     expect(

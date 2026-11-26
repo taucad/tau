@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, screen, cleanup } from '@testing-library/react';
 import { useLayoutEffect } from 'react';
-import { beforeAll, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSession, ChatSessionDeps } from '#services/chat-session-store.js';
@@ -23,12 +22,6 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   },
 }));
 const { useChatSelector } = await import('#hooks/use-chat.js');
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 it.each(['text', 'interrupted-tool', 'approval'] as const)(
   'should preserve coherent assistant presentation and DOM identity throughout cumulative Resume replay with %s',

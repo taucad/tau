@@ -21,6 +21,7 @@ import type { UIMessage, UIMessageChunk } from 'ai';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
+import type { MyUIMessage } from '@taucad/chat';
 import { projectAgentHostEvent, runFailureText } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   chatProjectionLogic,
@@ -39,6 +40,7 @@ import {
   selectRunFailure,
   selectPosition,
   selectRunPhase,
+  selectTranscript,
   selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
@@ -58,7 +60,10 @@ const logs = [
 ] as const;
 
 const terminalChunk = new Set(['finish', 'error', 'abort']);
+/** What a reopen keeps: everything but the terminal marker. */
 const durable = (chunks: ReadonlyArray<{ type: string }>) => chunks.filter((chunk) => !terminalChunk.has(chunk.type));
+/** What a reopen appends: the end time taken back, since chunks only append. */
+const reopenedEnd = { type: 'message-metadata', messageMetadata: { endedAt: null } };
 
 const readLog = (name: string): AgentLogEvent[] =>
   readFileSync(
@@ -823,7 +828,11 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(chunksOf(failed.chunks).at(-1)?.type).toBe('error');
 
     const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
-    expect(chunksOf(reopened.chunks)).toEqual([...durable(chunksOf(failed.chunks)), { type: 'start-step' }]);
+    expect(chunksOf(reopened.chunks)).toEqual([
+      ...durable(chunksOf(failed.chunks)),
+      reopenedEnd,
+      { type: 'start-step' },
+    ]);
     const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
     const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
     expect(chunksOf(continued.chunks).slice(0, chunksOf(paused.chunks).length)).toEqual(chunksOf(paused.chunks));
@@ -2589,5 +2598,129 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
       calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
     );
     expect(message?.parts.filter((part) => part.type === 'reasoning')).toMatchObject([{ text, state: 'done' }]);
+  });
+});
+
+describe('the time an answer worked', () => {
+  const at = (row: Readonly<Record<string, unknown>>, recordedAt: string) => ({ ...row, recordedAt });
+  const assistantTimes = (messages: readonly MyUIMessage[]) =>
+    messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => [message.id, message.metadata?.createdAt, message.metadata?.endedAt]);
+  /** The times the displayed transcript shows, after checking they match the SDK materialization's. */
+  const shownTimes = async (projection: ChatProjection) => {
+    const shown = assistantTimes(selectTranscript(projection));
+    expect(shown).toEqual(assistantTimes(await materializeTranscript(projection)));
+    return shown;
+  };
+
+  it('should end each recorded answer at its run settling row, wall clock from its admission', async () => {
+    const hexnutProjection = project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7);
+    await shownTimes(hexnutProjection);
+    const hexnut = await materializeTranscript(hexnutProjection);
+    expect(
+      hexnut
+        .filter((message) => message.role === 'assistant')
+        .map((message) => message.metadata!.endedAt! - message.metadata!.createdAt!),
+    ).toEqual([38_768, 7532, 27_790, 4225]);
+
+    // Stopped for an approval at 04:58:49, failed by a later host at 05:07:09: wall clock counts the wait.
+    const kineticProjection = project(readLog('recorded/kinetic-regenerate-resume'), 7);
+    await shownTimes(kineticProjection);
+    const kinetic = await materializeTranscript(kineticProjection);
+    const [, last] = kinetic.filter((message) => message.role === 'assistant');
+    expect(last?.metadata?.endedAt).toBe(Date.parse('2026-10-04T05:07:09.700Z'));
+    expect(last!.metadata!.endedAt! - last!.metadata!.createdAt!).toBe(832_628);
+  });
+
+  it('should take the end away when a stopped run resumes, and state the later end once it settles again', async () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(2, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Working' } }),
+        '2026-09-28T00:00:10.000Z',
+      ),
+      at(lifecycleRow(3, 'cancelled'), '2026-09-28T00:00:39.000Z'),
+      at(lifecycleRow(4, 'running'), '2026-09-28T00:13:00.000Z'),
+      at(lifecycleRow(5, 'completed'), '2026-09-28T00:14:06.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(await shownTimes(project(rows.slice(0, 4), 1))).toEqual([['run_1', start, start + 39_000]]);
+    expect(await shownTimes(project(rows.slice(0, 5), 1))).toEqual([['run_1', start, null]]);
+    expect(await shownTimes(project(rows, 1))).toEqual([['run_1', start, start + 846_000]]);
+  });
+
+  it('should take the end back in the live watch too when a stopped run resumes', () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+    ];
+    const watched = reduceChatProjection(project(rows, 2), {
+      type: 'live',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'live-text',
+        contentIndex: 0,
+        delta: 'Working',
+        offset: 0,
+      },
+    }).state;
+    /** The end a replay of the watch's chunks leaves on the message: metadata merges last write wins. */
+    const replayedEnd = (state: ChatProjection): unknown =>
+      chunksOf(state.live?.chunks)
+        .flatMap((chunk) =>
+          chunk.type === 'message-metadata' && typeof chunk.messageMetadata === 'object' && chunk.messageMetadata
+            ? [chunk.messageMetadata as Readonly<Record<string, unknown>>]
+            : [],
+        )
+        .findLast((metadata) => 'endedAt' in metadata)?.['endedAt'];
+    const stopped = reduceChatProjection(watched, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(2, 'cancelled'), '2026-09-28T00:00:39.000Z')], 2, 3),
+    }).state;
+    expect(replayedEnd(stopped)).toBe(Date.parse('2026-09-28T00:00:39.000Z'));
+
+    const resumed = reduceChatProjection(stopped, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(3, 'running'), '2026-09-28T00:13:00.000Z')], 3, 4),
+    }).state;
+    expect(replayedEnd(resumed)).toBeNull();
+    // Chunks only append, so a watch's delivered offset stays valid.
+    expect(resumed.live!.chunks.length).toBeGreaterThan(stopped.live!.chunks.length);
+  });
+
+  it('should end a steered answer at the steering input and start the next one there', async () => {
+    const user = { id: 'user-1', role: 'user', content: 'Build it' } as const;
+    const rows = [
+      at(
+        { ...lifecycleRow(0, 'admitted'), admission: { kind: 'tau', turnId: user.id, message: user } },
+        '2026-09-28T00:00:00.000Z',
+      ),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(logRow(2, { type: 'message.appended', message: user }), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(3, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Before' } }),
+        '2026-09-28T00:00:05.000Z',
+      ),
+      at(
+        logRow(4, { type: 'message.appended', message: { id: 'steer:c-1', role: 'user', content: 'Steer' } }),
+        '2026-09-28T00:00:20.000Z',
+      ),
+      at(
+        logRow(5, { type: 'message.appended', message: { id: 'a-2', role: 'assistant', content: 'After' } }),
+        '2026-09-28T00:00:25.000Z',
+      ),
+      at(lifecycleRow(6, 'completed'), '2026-09-28T00:01:00.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(await shownTimes(project(rows, 2))).toEqual([
+      ['run_1', start, start + 20_000],
+      ['run_1:steer:c-1', start + 20_000, start + 60_000],
+    ]);
   });
 });

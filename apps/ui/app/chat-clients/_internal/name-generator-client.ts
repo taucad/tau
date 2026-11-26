@@ -32,7 +32,7 @@ export class NameGeneratorRequestError extends Error {
 type NameProfile = 'project_name' | 'commit_name';
 
 type GenerateName = (prompt: string, projectId: string) => Promise<string>;
-type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string) => Promise<string>;
+type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * Public surface of the simple-text name clients (project + commit). These
@@ -96,7 +96,7 @@ const isAccountRefusal = (error: unknown): boolean =>
  */
 export const useNameGeneratorPartsClient = (profile: NameProfile): NameGeneratorPartsClient => {
   const generateFromParts = useCallback<GenerateNameFromParts>(
-    async (parts, projectId) => {
+    async (parts, projectId, signal) => {
       /* The naming profiles need a session. Once the identity owner has answered that nobody is signed in, the request
        * is certain to be refused, so none is made (launch audit N-7). The answer is read when a name is asked for; an
        * unknown or unverified identity is left to the API. */
@@ -133,7 +133,8 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
               idempotencyKey: generatePrefixedId(idPrefix.request),
             },
           },
-          abortSignal: AbortSignal.timeout(10_000),
+          /* A caller's signal cancels the request on the wire (a superseded name ahead, C1); the bound stays 10 s. */
+          abortSignal: AbortSignal.any([AbortSignal.timeout(10_000), ...(signal === undefined ? [] : [signal])]),
         });
       } catch (error) {
         if (isAccountRefusal(error)) {

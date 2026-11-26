@@ -69,3 +69,27 @@ export function conflictReasonOf(code: string | undefined): string | undefined {
     }
   }
 }
+
+/* One-shot claims, held by the root file manager they belong to, so they end with its runtime's page load. */
+const claimsByFileManager = new WeakMap<RootStatusSource, Set<string>>();
+
+/**
+ * Claim a side effect that runs once for the root file manager's life: a folder's marker write, a notice shown once.
+ * The claims belong to that actor, so a new runtime (a new page load) starts with none.
+ *
+ * @param fileManagerRef - The root file manager.
+ * @param key - What is claimed.
+ * @returns Whether this call made the claim; `false` when it was made before.
+ */
+export function claimOncePerFileManager(fileManagerRef: RootStatusSource, key: string): boolean {
+  let claims = claimsByFileManager.get(fileManagerRef);
+  if (claims === undefined) {
+    claims = new Set();
+    claimsByFileManager.set(fileManagerRef, claims);
+  }
+  if (claims.has(key)) {
+    return false;
+  }
+  claims.add(key);
+  return true;
+}

@@ -46,6 +46,7 @@
     "./components/chat-tool-inline": "./src/components/chat-tool-inline.tsx",
     "./components/chat-tool-label": "./src/components/chat-tool-label.tsx",
     "./components/chat-tool-text": "./src/components/chat-tool-text.tsx",
+    "./components/chat-worked-fold": "./src/components/chat-worked-fold.tsx",
     "./components/context-chip": "./src/components/context-chip.tsx",
     "./components/model-pin-button": "./src/components/model-pin-button.tsx",
     "./components/requirement-indicator": "./src/components/requirement-indicator.tsx",

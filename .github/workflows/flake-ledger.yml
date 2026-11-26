@@ -137,12 +137,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/ci-flake-quarantine-entry-cli.ts
 
-      # Release and expiry read the count the ingestion wrote; a failed entry step does not hold them back, since an
-      # expiry is due on its day. A test is released only when the ingestion counted every pending run (`complete`):
-      # a run it left for the next invocation may hold a failure.
+      # Release and expiry read the count the ingestion wrote. An expiry is due on its day, so neither a failed entry
+      # step nor a failed or partial ingestion holds it back (the failed step still turns the job red). A test is
+      # released only when the ingestion succeeded and counted every pending run (`complete`): a run it did not count
+      # may hold a failure.
       - name: Release and expire quarantine entries
-        if: ${{ !cancelled() && steps.ingest.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          INGEST_COMPLETE: ${{ steps.ingest.outputs.complete }}
+          INGEST_COMPLETE: ${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}
         run: node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"

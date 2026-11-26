@@ -59,6 +59,7 @@ import {
   quarantinePath,
   renderPlanMarkdown,
   renderQuarantine,
+  returnKey,
 } from '#ci-flake-quarantine-entry.js';
 import { identityMarker } from '#flake-regression.js';
 import type {
@@ -71,7 +72,7 @@ import type {
 } from '#ci-flake-quarantine-entry.js';
 import {
   isRecentRelease,
-  lastLanded,
+  markersIn,
   operatorLabel,
   releasedLabel,
   returnMarker,
@@ -507,38 +508,38 @@ export const readReturns = async (github: Client, today: string): Promise<Map<st
   const repo = `/repos/${github.repository}`;
   const since = `${addDays(today, -returnWindowDays)}T00:00:00Z`;
   const returns = new Map<string, ReturnRecord>();
-  for (let page = 1; page <= 3; page += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- pages are read in order
-    const issues = await github.get<ReleasedIssue[]>(
-      `${repo}/issues?state=all&labels=${encodeURIComponent(releasedLabel)}&since=${since}&per_page=100&page=${page}`,
-    );
-    for (const issue of issues) {
-      if (issue.pull_request !== undefined) {
+  const issues = await readPages<ReleasedIssue>(
+    github,
+    `${repo}/issues?state=all&labels=${encodeURIComponent(releasedLabel)}&since=${since}`,
+  );
+  for (const issue of issues) {
+    if (issue.pull_request !== undefined) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one issue's comments at a time
+    const comments = await automationComments(github, issue.number);
+    const labels = new Set((issue.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name)));
+    // Each variant entry of the test has its own release: the newest of each.
+    for (const { kind, record } of markersIn(comments)) {
+      const { released } = record;
+      if (kind !== 'released' || released === undefined || !isRecentRelease(released, today)) {
         continue;
       }
-      // oxlint-disable-next-line no-await-in-loop -- one issue's comments at a time
-      const comments = await automationComments(github, issue.number);
-      const landed = lastLanded(comments);
-      const known = landed ? returns.get(landed.identity) : undefined;
-      if (
-        landed &&
-        isRecentRelease(landed.released, today) &&
-        (known === undefined || known.released < landed.released)
-      ) {
-        const labels = (issue.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name));
-        returns.set(landed.identity, {
-          ...landed,
-          issue: issue.number,
-          handoff: {
-            labelled: labels.includes(operatorLabel),
-            noted: comments.some((body) => body.includes(returnMarker(landed))),
-            open: issue.state === 'open',
-          },
-        });
+      const key = returnKey(record.identity, record.variant);
+      const known = returns.get(key);
+      if (known !== undefined && known.released >= released) {
+        continue;
       }
-    }
-    if (issues.length < 100) {
-      break;
+      returns.set(key, {
+        ...record,
+        released,
+        issue: issue.number,
+        handoff: {
+          labelled: labels.has(operatorLabel),
+          noted: comments.some((body) => body.includes(returnMarker({ ...record, released }))),
+          open: issue.state === 'open',
+        },
+      });
     }
   }
   return returns;
@@ -763,12 +764,14 @@ export const reconcileEntryBranches = async (github: Client, base: string, today
       `${repo}/git/commits/${reference.object.sha}`,
     );
     const pushed = commit.committer?.date?.slice(0, 10);
-    // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
-    const proposed = await proposedEntries(github, reference.object.sha);
-    if (
-      (pushed !== undefined && addDays(pushed, quarantineBounds.maximumAgeDays) < today) ||
-      proposed.some((entry) => typeof entry['expires'] === 'string' && entry['expires'] < today)
-    ) {
+    const tooOld = pushed !== undefined && addDays(pushed, quarantineBounds.maximumAgeDays) < today;
+    // A branch past 14 days is skipped without reading its entries; a younger one may hold a returned entry that
+    // keeps its first, earlier expiry.
+    const proposed = tooOld
+      ? []
+      : // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+        await proposedEntries(github, reference.object.sha);
+    if (tooOld || proposed.some((entry) => typeof entry['expires'] === 'string' && entry['expires'] < today)) {
       outcome.push(`\`${branch}\` holds an expired proposal; it is not opened and reserves nothing.`);
       continue;
     }

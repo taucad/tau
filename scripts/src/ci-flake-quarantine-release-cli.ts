@@ -42,7 +42,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { dayNumber, utcDay } from '@taucad/vitest-ci/quarantine';
-import type { QuarantineRenewal } from '@taucad/vitest-ci/quarantine';
+import type { QuarantineRenewal, QuarantineVariant } from '@taucad/vitest-ci/quarantine';
 
 import { client, GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
@@ -473,7 +473,7 @@ export const applyRemovals = async (github: Client, context: RemovalContext): Pr
       title,
       head: branch,
       base: context.base,
-      body: removalBody(kind, removals, { autoMerge, problems: context.problems }),
+      body: `${removalBody(kind, removals, { autoMerge, problems: context.problems })}${autoMerge ? `${autoMergeMarker}\n` : ''}`,
     });
   } catch (error) {
     if (!(error instanceof GitHubError) || (error.status !== 403 && error.status !== 422)) {
@@ -514,6 +514,50 @@ export const applyRemovals = async (github: Client, context: RemovalContext): Pr
   return outcome;
 };
 
+/** Remove one label from an issue; one already gone is not an error. */
+const removeLabel = async (github: Client, issue: number, label: string): Promise<void> => {
+  try {
+    await github.send(
+      'DELETE',
+      `/repos/${github.repository}/issues/${issue}/labels/${encodeURIComponent(label)}`,
+      undefined,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubError) || error.status !== 404) {
+      throw error;
+    }
+  }
+};
+
+/** Marks the body of a removal pull request the ledger means to auto-merge once every owner issue is told. */
+export const autoMergeMarker = '<!-- flake-ledger: auto-merge -->';
+
+/**
+ * Request the auto-merge a removal pull request deferred: one whose body carries {@link autoMergeMarker}, that has no
+ * auto-merge yet, whose owner issues are all told and whose removal still validates.
+ */
+export const resumeAutoMerge = async (github: Client, pull: number): Promise<string | undefined> => {
+  const current = await github.get<{
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+    readonly node_id: string;
+    readonly body?: string;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+    readonly auto_merge?: unknown;
+    readonly state?: string;
+  }>(`/repos/${github.repository}/pulls/${pull}`);
+  if (
+    current.state !== 'open' ||
+    !(current.body ?? '').includes(autoMergeMarker) ||
+    (current.auto_merge !== undefined && current.auto_merge !== null)
+  ) {
+    return undefined;
+  }
+  const refused = await enableAutoMerge(github, current.node_id);
+  return refused === undefined
+    ? `Enabled the deferred squash auto-merge on #${pull}.`
+    : `Auto-merge refused on #${pull}: ${refused}.`;
+};
+
 /**
  * Make sure the owner issue of every expiry that merged carries its note and `flake:needs-operator`: an update that
  * failed before someone merged the expiry by hand is finished here.
@@ -530,7 +574,7 @@ const settleExpiry = async (
   const outcome: string[] = [];
   for (const { path, entry } of context.release.removed) {
     const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
-    const { issue, test, created, expires, renewal } = fields;
+    const { issue, test, created, expires, renewal, variant } = fields;
     const id = typeof test === 'string' ? context.identityOf(path, test) : undefined;
     if (
       typeof issue !== 'number' ||
@@ -557,6 +601,7 @@ const settleExpiry = async (
         expires,
         ...(typeof renewal === 'object' && renewal !== null ? { renewal: renewal as QuarantineRenewal } : {}),
         branch: context.release.branch,
+        ...(typeof variant === 'object' && variant !== null ? { variant: variant as QuarantineVariant } : {}),
       };
       // oxlint-disable-next-line no-await-in-loop -- one issue at a time
       await comment(
@@ -597,7 +642,9 @@ export const closeReleased = async (
   const onMain = new Set(context.tests.map((test) => test.entry.issue));
   const outcome: string[] = [];
   const handled = new Set<number>();
-  for (const release of context.landed) {
+  // Newest merge first: when two releases of one issue landed, the newer settles it.
+  const landed = [...context.landed].sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+  for (const release of landed) {
     const released = release.mergedAt.slice(0, 10);
     if (release.kind === 'expiry') {
       // oxlint-disable-next-line no-await-in-loop -- one merged expiry at a time
@@ -606,7 +653,7 @@ export const closeReleased = async (
     }
     for (const { path, entry } of release.removed) {
       const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
-      const { issue, test, created, expires, renewal } = fields;
+      const { issue, test, created, expires, renewal, variant } = fields;
       const id = typeof test === 'string' ? context.identityOf(path, test) : undefined;
       if (
         typeof issue !== 'number' ||
@@ -627,16 +674,19 @@ export const closeReleased = async (
       const noted = markersIn(comments).some(
         (marker) => marker.kind === 'released' && marker.record.branch === release.branch,
       );
-      const labels = [
-        ...new Set([...labelNames(current.labels).filter((name) => name !== releasingLabel), releasedLabel]),
-      ];
+      const labels = labelNames(current.labels);
       const done =
-        noted &&
-        current.state === 'closed' &&
-        labels.length === labelNames(current.labels).length &&
-        labelNames(current.labels).includes(releasedLabel);
+        noted && current.state === 'closed' && labels.includes(releasedLabel) && !labels.includes(releasingLabel);
       // A return after this release reopened the issue for the operator: it is theirs now, never closed again.
-      const returned = comments.some((body) => body.includes(returnMarker({ identity: identityHashOf(id), released })));
+      const returned = comments.some((body) =>
+        body.includes(
+          returnMarker({
+            identity: identityHashOf(id),
+            released,
+            variant: typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined,
+          }),
+        ),
+      );
       if (done || returned) {
         continue;
       }
@@ -649,6 +699,7 @@ export const closeReleased = async (
           ...(typeof renewal === 'object' && renewal !== null ? { renewal: renewal as QuarantineRenewal } : {}),
           branch: release.branch,
           released,
+          ...(typeof variant === 'object' && variant !== null ? { variant: variant as QuarantineVariant } : {}),
         };
         // oxlint-disable-next-line no-await-in-loop -- one issue at a time
         await comment(
@@ -657,13 +708,23 @@ export const closeReleased = async (
           `${removalMarker('released', record)}\nThe release merged on ${released}: the entry is no longer on main and the test gates again. A return within 30 days reopens this issue as the same entry, for the operator.`,
         );
       }
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-      await github.send(
-        'PATCH',
-        `${repo}/issues/${issue}`,
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
-        current.state === 'open' ? { state: 'closed', state_reason: 'completed', labels } : { labels },
-      );
+      // Label by label, and the state alone: a label someone added meanwhile is kept.
+      if (!labels.includes(releasedLabel)) {
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+        await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [releasedLabel] });
+      }
+      if (labels.includes(releasingLabel)) {
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+        await removeLabel(github, issue, releasingLabel);
+      }
+      if (current.state === 'open') {
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+        await github.send('PATCH', `${repo}/issues/${issue}`, {
+          state: 'closed',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+          state_reason: 'completed',
+        });
+      }
       outcome.push(`Closed #${issue}: released on ${released}.`);
     }
   }
@@ -675,9 +736,8 @@ export const closeReleased = async (
     if (issue.pull_request !== undefined || onMain.has(issue.number) || handled.has(issue.number)) {
       continue;
     }
-    const others = labelNames(issue.labels).filter((name) => name !== releasingLabel);
     // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-    await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels: others });
+    await removeLabel(github, issue.number, releasingLabel);
     outcome.push(
       `#${issue.number} left quarantine without its release landing: \`${releasingLabel}\` removed, the issue stays as it is.`,
     );
@@ -756,8 +816,9 @@ const main = async (args: readonly string[]): Promise<number> => {
   const { pending, landed } = offline
     ? { pending: [], landed: [] }
     : await readRemovalBranches(github, `${addDays(values.today, -returnWindowDays)}T00:00:00Z`);
-  const fixes = offline ? new Map<string, LinkedFix | undefined>() : await readFixes(github, tests, state);
   const releases = values.releases === 'true';
+  // An expiry-only run needs no fix: its lookups could only stop the expiries.
+  const fixes = offline || !releases ? new Map<string, LinkedFix | undefined>() : await readFixes(github, tests, state);
   const plan = planRemovals({
     tests,
     tracks: state.quarantineTracks ?? {},
@@ -801,26 +862,25 @@ const main = async (args: readonly string[]): Promise<number> => {
         kinds: releases ? undefined : new Set<RemovalKind>(['expiry']),
       })),
     );
-    // The owner issues of pending removals: a comment or label an earlier run failed to write.
-    const branches = new Map(plan.current.map((pending) => [pending.branch, pending]));
-    outcome.push(
-      ...(await ensureOwnerNotes(
+    // The owner issues of pending removals: a comment or label an earlier run failed to write. Once a branch's owners
+    // are all told, the auto-merge its pull request deferred is requested, if its removal still validates.
+    for (const pending of plan.current) {
+      const held = plan.held.filter((entry) => entry.branch === pending.branch);
+      const where = whereOf(repository, values.base, pending);
+      // oxlint-disable-next-line no-await-in-loop -- one branch at a time
+      const unnoted = await ensureOwnerNotes(
         github,
-        plan.held.flatMap((held) => {
-          const pending = branches.get(held.branch);
-          return pending
-            ? [
-                {
-                  kind: pending.kind,
-                  removal: held,
-                  branch: held.branch,
-                  where: whereOf(repository, values.base, pending),
-                },
-              ]
-            : [];
-        }),
-      )),
-    );
+        held.map((removal) => ({ kind: pending.kind, removal, branch: pending.branch, where })),
+      );
+      outcome.push(...unnoted);
+      if (unnoted.length === 0 && pending.pull !== undefined && problemsOf(held).length === 0) {
+        // oxlint-disable-next-line no-await-in-loop -- one branch at a time
+        const resumed = await resumeAutoMerge(github, pending.pull);
+        if (resumed !== undefined) {
+          outcome.push(resumed);
+        }
+      }
+    }
     for (const [kind, planned] of [
       ['release', plan.releases],
       ['expiry', plan.expiries],

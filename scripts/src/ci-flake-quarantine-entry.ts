@@ -124,7 +124,7 @@ export type PlanInput = {
   readonly owner?: string | undefined;
   /** Registered shadow-row targets (`<project>:<target>`): their tests' events never count. */
   readonly shadowTargets?: ShadowTargets | undefined;
-  /** Releases of the last 30 days by identity hash (`flake-identity` marker): a return is the same entry (FQ-9). */
+  /** Releases of the last 30 days by {@link returnKey} (identity hash and variant): a return is the same entry (FQ-9). */
   readonly returns?: ReadonlyMap<string, ReturnRecord> | undefined;
 };
 
@@ -298,6 +298,10 @@ const rawKeys = (text: string, today?: string): Array<{ key: string; test: strin
     ];
   });
 
+/** The key of a return: the identity's hash and the entry's variant, so two variant entries of a test stay apart. */
+export const returnKey = (identity: string, variant: QuarantineVariant | undefined): string =>
+  `${identity} ${JSON.stringify([variant?.browser ?? null, variant?.os ?? null, variant?.target ?? null])}`;
+
 /** The hash of an identity's `flake-identity` marker: the key of {@link PlanInput.returns}. */
 export const identityHashOf = (id: string): string => /flake-identity: ([\da-f]+)/u.exec(identityMarker(id))?.[1] ?? '';
 
@@ -330,7 +334,9 @@ export const planEntries = (input: PlanInput): EntryPlan => {
   for (const offender of offenders(input.state, input.shadowTargets)) {
     const project = input.projects.get(offender.identity.project);
     const { owner, issue: namedIssue } = ownership(input.owners, offender);
-    const returned = input.returns?.get(identityHashOf(offender.id));
+    // A return is the same entry in the same variant: the variant this offender would be narrowed to.
+    const variant = narrowVariant(offender.identity, offender.events);
+    const returned = input.returns?.get(returnKey(identityHashOf(offender.id), variant));
     const issue = returned?.issue ?? namedIssue;
     const refuse = (kind: RefusalKind, reason: string): void => {
       refused.push({ ...offender, kind, reason, project, linkedIssue: issue, ...(returned ? { returned } : {}) });
@@ -380,7 +386,6 @@ export const planEntries = (input: PlanInput): EntryPlan => {
       refuse('cap', `the workspace holds ${total} entries, the most it may: the quarantine debt is full`);
       continue;
     }
-    const variant = narrowVariant(offender.identity, offender.events);
     const entry: QuarantineEntry = {
       test: offender.test,
       ...(variant ? { variant } : {}),

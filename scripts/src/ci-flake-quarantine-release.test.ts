@@ -14,6 +14,8 @@ import {
   readLinkedFixes,
   readRemovalBranches,
   reconcileRemovals,
+  resumeAutoMerge,
+  autoMergeMarker,
 } from '#ci-flake-quarantine-release-cli.js';
 import type { LandedRemoval } from '#ci-flake-quarantine-release-cli.js';
 import {
@@ -568,7 +570,7 @@ const fakeGitHub = (
     async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
       throw new Error('unexpected getBytes');
     },
-    async send<T>(method: 'POST' | 'PATCH' | 'PUT', requested: string, body: unknown): Promise<T> {
+    async send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', requested: string, body: unknown): Promise<T> {
       requests.push({ method, path: requested, body });
       if (requested.endsWith('/pulls') && options.refusePullRequests) {
         throw new GitHubError(`${method} ${requested}`, 403, 'GitHub Actions is not permitted to create pull requests');
@@ -850,10 +852,19 @@ describe('the release job', () => {
 
     const patched = (issue: number): unknown =>
       requests.find((request) => request.method === 'PATCH' && request.path.endsWith(`/issues/${issue}`))?.body;
-    expect(patched(12)).toEqual({ state: 'closed', state_reason: 'completed', labels: ['flake:released'] });
-    expect(patched(18)).toEqual({ state: 'closed', state_reason: 'completed', labels: ['flake', 'flake:released'] });
+    // The state alone, and the labels one by one: a label someone added meanwhile is kept.
+    expect(patched(12)).toEqual({ state: 'closed', state_reason: 'completed' });
+    expect(patched(18)).toEqual({ state: 'closed', state_reason: 'completed' });
+    expect(requests.find((request) => request.path.endsWith('/issues/18/labels'))?.body).toEqual({
+      labels: ['flake:released'],
+    });
     // #13 left main without a landed release: it only loses the label.
-    expect(patched(13)).toEqual({ labels: ['flake'] });
+    expect(patched(13)).toBeUndefined();
+    expect(
+      requests.some(
+        (request) => request.method === 'DELETE' && request.path.endsWith('/issues/13/labels/flake%3Areleasing'),
+      ),
+    ).toBe(true);
     expect(patched(14)).toBeUndefined();
     expect(patched(19)).toBeUndefined();
     expect(patched(21)).toBeUndefined();
@@ -875,6 +886,74 @@ describe('the release job', () => {
     });
     expect(patched(20)).toBeUndefined();
     expect(outcome).toHaveLength(4);
+  });
+
+  it('should settle an issue by its newest merged release, whatever order the pull requests come in', async () => {
+    const id = `host › ${testName}`;
+    const first = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch: 'flake-release/2026-11-22-aaaa',
+      released: '2026-11-22',
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // Released once, returned (reopened for the operator), then released again.
+      '/issues/30/comments': [
+        { body: removalMarker('released', first), user: { type: 'Bot' } },
+        { body: `${returnMarker(first)}\nReturned.`, user: { type: 'Bot' } },
+      ],
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch: first.branch,
+        mergedAt: '2026-11-22T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 30 }) }],
+      },
+      {
+        kind: 'release',
+        branch: 'flake-release/2026-11-26-bbbb',
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 30 }) }],
+      },
+    ];
+
+    await closeReleased(github, { tests: [], landed, identityOf: (_file, test) => `host › ${test}` });
+
+    const closing = requests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/issues/30/comments'),
+    )?.body as { body: string };
+    expect(lastLanded([closing.body])).toMatchObject({
+      branch: 'flake-release/2026-11-26-bbbb',
+      released: '2026-11-26',
+    });
+    expect(requests.find((request) => request.method === 'PATCH' && request.path.endsWith('/issues/30'))?.body).toEqual(
+      { state: 'closed', state_reason: 'completed' },
+    );
+  });
+
+  it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {
+    const pulls: Record<string, unknown> = {
+      '/pulls/1': { node_id: 'A', state: 'open', body: `Body\n${autoMergeMarker}\n`, auto_merge: null },
+      '/pulls/2': {
+        node_id: 'B',
+        state: 'open',
+        body: `Body\n${autoMergeMarker}\n`,
+        auto_merge: { merge_method: 'squash' },
+      },
+      '/pulls/3': { node_id: 'C', state: 'open', body: 'Body, auto-merge left to the reviewer', auto_merge: null },
+    };
+    const { github, requests } = fakeGitHub(pulls);
+
+    expect(await resumeAutoMerge(github, 1)).toBe('Enabled the deferred squash auto-merge on #1.');
+    expect(await resumeAutoMerge(github, 2)).toBeUndefined();
+    expect(await resumeAutoMerge(github, 3)).toBeUndefined();
+    expect(requests.filter((request) => request.path === '/graphql').map((request) => request.body)).toMatchObject([
+      { variables: { id: 'A' } },
+    ]);
   });
 
   it('should leave auto-merge off until every owner issue is told', async () => {

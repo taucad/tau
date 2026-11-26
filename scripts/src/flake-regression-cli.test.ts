@@ -54,7 +54,7 @@ const fakeGitHub = (
     get: async <T>(path: string): Promise<T> => answer('GET', path) as T,
     getText: async (path: string): Promise<string> => answer('GET', path) as string,
     getBytes: async (path: string): Promise<Uint8Array<ArrayBuffer>> => answer('GET', path) as Uint8Array<ArrayBuffer>,
-    send: async <T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> =>
+    send: async <T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<T> =>
       answer(method, path, body) as T,
   };
   return { github, calls };

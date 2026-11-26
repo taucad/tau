@@ -140,11 +140,12 @@ describe('flake ledger workflow', () => {
       'node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"',
     );
     expect((steps[release] as { env?: Record<string, string> } | undefined)?.env?.['INGEST_COMPLETE']).toBe(
-      `\${{ steps.ingest.outputs.complete }}`,
+      `\${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}`,
     );
     expect(release).toBeGreaterThan(steps.indexOf(entry ?? {}));
+    // An expiry is due on its day: a failed or partial ingestion releases nothing but still expires.
     expect((steps[release] as { if?: string } | undefined)?.if).toBe(
-      `\${{ !cancelled() && steps.ingest.outcome == 'success' }}`,
+      `\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`,
     );
   });
 });

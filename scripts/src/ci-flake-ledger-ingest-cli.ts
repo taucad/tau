@@ -20,7 +20,8 @@
  * `--state-file` reads and writes a local file instead of the branch (a replay; nothing is written to GitHub).
  * Env: GITHUB_TOKEN (`actions: read`; `contents: write` to update the branch), GITHUB_REPOSITORY (default
  * taucad/tau), GITHUB_API_URL.
- * With `GITHUB_OUTPUT` set it writes `complete`: `true` when every pending run was counted (the release step needs it).
+ * With `GITHUB_OUTPUT` set it writes `complete`: `true` when every pending run of the lookback was counted (never for
+ * `--runs`), which the release step needs before it releases anything.
  * Exit codes: 0 ingested, or nothing to ingest; 1 API failure (what was counted before it is still written), or the
  * branch moved while this ran; 2 usage, or an
  * invalid `flake-ledger.json`; 3 state written, but outcome lines were rejected (unknown schema or malformed).
@@ -363,7 +364,8 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   // Whether every pending run was counted: the release step releases nothing on a partial count, which may miss a
   // newer failure of a test it would release (FQ-9).
-  const complete = !failed && ingested.length === pending.length;
+  // A `--runs` backfill is never complete: a newer run it did not name may hold a failure.
+  const complete = !failed && runIds.length === 0 && ingested.length === pending.length;
   if (process.env['GITHUB_OUTPUT']) {
     await appendFile(process.env['GITHUB_OUTPUT'], `complete=${String(complete)}\n`);
   }

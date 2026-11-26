@@ -25,6 +25,7 @@ import {
   pullRequestBody,
   identityHashOf,
   narrowVariant,
+  returnKey,
   offenders,
   planEntries,
   renderQuarantine,
@@ -198,7 +199,7 @@ const fakeGitHub = (
     async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
       throw new Error('unexpected getBytes');
     },
-    async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
+    async send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<T> {
       requests.push({ method, path, body });
       if (path.endsWith('/pulls') && options.refusePullRequests) {
         throw new GitHubError(`${method} ${path}`, 403, 'GitHub Actions is not permitted to create pull requests');
@@ -788,7 +789,7 @@ describe('the 30-day return (FQ-9)', () => {
   };
 
   it('should re-enter a test released in the last 30 days as the same entry, for the operator', () => {
-    const result = plan(replayWeek(), { returns: new Map([[record.identity, record]]) });
+    const result = plan(replayWeek(), { returns: new Map([[returnKey(record.identity, undefined), record]]) });
     const returned = result.admitted.find((planned) => planned.id === id.order);
 
     expect(returned).toMatchObject({
@@ -806,9 +807,19 @@ describe('the 30-day return (FQ-9)', () => {
     ).toEqual([]);
   });
 
+  it('should take a return record only for the variant it was released in', () => {
+    const firefox = { ...record, variant: { browser: 'firefox' } };
+    const result = plan(replayWeek(), {
+      returns: new Map([[returnKey(record.identity, firefox.variant), firefox]]),
+    });
+
+    // The order test runs on no browser: a Firefox release of it is a different entry.
+    expect(result.admitted.find((planned) => planned.id === id.order)?.returned).toBeUndefined();
+  });
+
   it('should refuse a return whose entry has expired: it keeps gating and goes to the operator', () => {
     const expired = { ...record, expires: '2026-11-21' };
-    const result = plan(replayWeek(), { returns: new Map([[record.identity, expired]]) });
+    const result = plan(replayWeek(), { returns: new Map([[returnKey(record.identity, undefined), expired]]) });
 
     expect(result.refused.find((refusal) => refusal.id === id.order)).toMatchObject({
       kind: 'returned',
@@ -818,7 +829,7 @@ describe('the 30-day return (FQ-9)', () => {
   });
 
   it('should reopen the owner issue of a return for the operator, whether it re-enters or not', async () => {
-    const returns = new Map([[record.identity, record]]);
+    const returns = new Map([[returnKey(record.identity, undefined), record]]);
     const checked = validatePlan(plan(replayWeek(), { returns }), {
       workspace,
       readTracked: (path) => testFiles.get(path),
@@ -854,7 +865,7 @@ describe('the 30-day return (FQ-9)', () => {
         admitted: [],
         held: [],
         refused: plan(replayWeek(), {
-          returns: new Map([[record.identity, { ...record, expires: '2026-11-21' }]]),
+          returns: new Map([[returnKey(record.identity, undefined), { ...record, expires: '2026-11-21' }]]),
         }).refused.filter((refusal) => refusal.kind === 'returned'),
       },
       { base: 'main', baseSha: sha(1), quarantines: [], problems: [], today: '2026-11-22' },
@@ -864,9 +875,9 @@ describe('the 30-day return (FQ-9)', () => {
 
   it('should not reopen or comment again on a return an earlier run handed to the operator', async () => {
     const open = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: true, open: true } };
-    const refused = plan(replayWeek(), { returns: new Map([[record.identity, open]]) }).refused.filter(
-      (refusal) => refusal.kind === 'returned',
-    );
+    const refused = plan(replayWeek(), {
+      returns: new Map([[returnKey(record.identity, undefined), open]]),
+    }).refused.filter((refusal) => refusal.kind === 'returned');
     const { github, requests } = fakeGitHub();
 
     const result = await applyPlan(
@@ -881,9 +892,9 @@ describe('the 30-day return (FQ-9)', () => {
 
   it('should finish a handoff an earlier run left half-done, without a second note', async () => {
     const half = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: true, open: false } };
-    const refused = plan(replayWeek(), { returns: new Map([[record.identity, half]]) }).refused.filter(
-      (refusal) => refusal.kind === 'returned',
-    );
+    const refused = plan(replayWeek(), {
+      returns: new Map([[returnKey(record.identity, undefined), half]]),
+    }).refused.filter((refusal) => refusal.kind === 'returned');
     const { github, requests } = fakeGitHub();
 
     await applyPlan(
@@ -899,9 +910,9 @@ describe('the 30-day return (FQ-9)', () => {
 
   it('should post only the missing note of an open, labelled issue whose note failed', async () => {
     const half = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: false, open: true } };
-    const refused = plan(replayWeek(), { returns: new Map([[record.identity, half]]) }).refused.filter(
-      (refusal) => refusal.kind === 'returned',
-    );
+    const refused = plan(replayWeek(), {
+      returns: new Map([[returnKey(record.identity, undefined), half]]),
+    }).refused.filter((refusal) => refusal.kind === 'returned');
     const { github, requests } = fakeGitHub();
 
     await applyPlan(

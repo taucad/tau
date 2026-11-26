@@ -26,11 +26,11 @@
  * renewal) and goes to the operator, not the agent (`ci-flake-quarantine-entry.ts`).
  */
 import { entryKey, entryProblems, parseQuarantine, readQuarantine, variantCovers } from '@taucad/vitest-ci/quarantine';
-import type { QuarantineEntry, QuarantineRenewal } from '@taucad/vitest-ci/quarantine';
+import type { QuarantineEntry, QuarantineRenewal, QuarantineVariant } from '@taucad/vitest-ci/quarantine';
 
 import { maximumStreakRuns } from '#ci-flake-ledger-state.js';
 import type { IngestRun, LedgerState, OutcomeRow, ReleaseTrack, StreakRun } from '#ci-flake-ledger-state.js';
-import { addDays, quarantinePath } from '#ci-flake-quarantine-entry.js';
+import { addDays, quarantinePath, returnKey } from '#ci-flake-quarantine-entry.js';
 import type { QuarantineText, WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 
 /** The release bar of testing policy § 16.5 (the operator's Q1 bar, the same as a shadow row's). */
@@ -560,6 +560,8 @@ export type ReleaseRecord = {
   readonly released?: string | undefined;
   /** The removal branch that proposed it: ties a release to the pull request that must land. */
   readonly branch?: string | undefined;
+  /** The variant the entry was narrowed to: a return is the same entry only in the same variant. */
+  readonly variant?: QuarantineVariant | undefined;
 };
 
 /** The markers the ledger leaves on an owner issue: a removal proposed, and a release that landed. */
@@ -594,6 +596,7 @@ export const markersIn = (
           const renewal = isRecord(value['renewal']) ? (value['renewal'] as QuarantineRenewal) : undefined;
           const released = typeof value['released'] === 'string' ? value['released'] : undefined;
           const branch = typeof value['branch'] === 'string' ? value['branch'] : undefined;
+          const variant = isRecord(value['variant']) ? (value['variant'] as QuarantineVariant) : undefined;
           found.push({
             kind: match[1] as MarkerKind,
             record: {
@@ -604,6 +607,7 @@ export const markersIn = (
               ...(renewal ? { renewal } : {}),
               ...(released ? { released } : {}),
               ...(branch ? { branch } : {}),
+              ...(variant ? { variant } : {}),
             },
           });
         }
@@ -641,8 +645,12 @@ export type ReturnRecord = ReleaseRecord & {
 };
 
 /** The marker of the note that hands a return to the operator: one per landed release, so it is written once. */
-export const returnMarker = (record: { readonly identity: string; readonly released: string }): string =>
-  `<!-- flake-returned: ${record.identity} ${record.released} -->`;
+export const returnMarker = (record: {
+  readonly identity: string;
+  readonly released: string;
+  readonly variant?: QuarantineVariant | undefined;
+}): string =>
+  `<!-- flake-returned: ${encodeURIComponent(returnKey(record.identity, record.variant))} ${record.released} -->`;
 
 /** Whether a release is recent enough that the test's return is the same entry (D5). */
 export const isRecentRelease = (released: string, today: string): boolean =>
@@ -661,6 +669,7 @@ export const releaseComment = (
       expires: removal.entry.expires,
       ...(removal.entry.renewal ? { renewal: removal.entry.renewal } : {}),
       branch: context.branch,
+      ...(removal.entry.variant ? { variant: removal.entry.variant } : {}),
     }),
     `**Released**: ${verdictLine(removal)} (testing policy § 16.5). ${context.where} Once it lands the test gates again and this issue closes. A return within ${returnWindowDays} days re-enters as the same entry and goes to the operator.`,
   ].join('\n');
@@ -678,6 +687,7 @@ export const expiryComment = (
       expires: removal.entry.expires,
       ...(removal.entry.renewal ? { renewal: removal.entry.renewal } : {}),
       branch: context.branch,
+      ...(removal.entry.variant ? { variant: removal.entry.variant } : {}),
     }),
     `**Expired** on ${removal.entry.expires} (${removal.entry.renewal ? 'day 28, after the one operator renewal' : 'day 14'}) at ${verdictLine(removal)}: the entry is removed and the test gates again (testing policy § 16.3). ${context.where} The nightly watchdog pages the operator while the entry is on main at or past its expiry.` +
       (removal.entry.renewal

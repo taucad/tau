@@ -699,18 +699,18 @@ export const closeReleased = async (
         ),
       );
       const noted = notedAt !== -1;
-      // A return of any variant after this release was recorded reopened the issue for the operator: leave it open.
-      const returnedSince = noted && comments.slice(notedAt + 1).some((body) => body.includes('<!-- flake-returned:'));
-      // Another variant of the test is still quarantined under this issue: record this release, keep the issue open.
-      const shared = onMain.has(issue);
       const labels = labelNames(current.labels);
+      // The issue stays open, and only this release is recorded, when another variant of the test is still
+      // quarantined under it, or when it is open with the operator (a return of any variant, before or after this
+      // release was recorded, an expiry, or a person): the operator closes it.
+      const keepOpen = onMain.has(issue) || (current.state === 'open' && labels.includes(operatorLabel));
       const done =
         noted && current.state === 'closed' && labels.includes(releasedLabel) && !labels.includes(releasingLabel);
       // A return after this release reopened the issue for the operator: it is theirs now, never closed again.
       const returned = comments.some((body) =>
         body.includes(returnMarker({ identity: identityHashOf(id), released, variant: entryVariant })),
       );
-      if (done || returned || returnedSince || (noted && shared)) {
+      if (done || returned) {
         continue;
       }
       if (!noted) {
@@ -736,9 +736,11 @@ export const closeReleased = async (
         // oxlint-disable-next-line no-await-in-loop -- one issue at a time
         await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [releasedLabel] });
       }
-      if (shared) {
-        // `flake:released` lets the 30-day return find this record; the issue stays with the variant on main.
-        outcome.push(`Recorded the release of one variant on #${issue}; another is still quarantined under it.`);
+      if (keepOpen) {
+        // `flake:released` (added above, again on a retry) lets the 30-day return find this record.
+        if (!noted) {
+          outcome.push(`Recorded the release on #${issue}; the issue stays open (another variant, or the operator).`);
+        }
         continue;
       }
       if (labels.includes(releasingLabel)) {

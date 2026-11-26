@@ -1001,6 +1001,11 @@ describe('the release job', () => {
           user: { type: 'Bot' },
         },
       ],
+      '/issues/33': {
+        number: 33,
+        state: 'open',
+        labels: [{ name: 'flake:released' }, { name: 'flake:needs-operator' }],
+      },
     });
     const landed: LandedRemoval[] = [
       // #32: Firefox released while WebKit is still on main.
@@ -1028,7 +1033,56 @@ describe('the release job', () => {
       ?.body as { body: string };
     expect(lastLanded([note.body])).toMatchObject({ variant: firefox, released: '2026-11-26' });
     expect(requests.some((request) => request.method === 'PATCH')).toBe(false);
-    expect(outcome).toEqual(['Recorded the release of one variant on #32; another is still quarantined under it.']);
+    expect(outcome).toEqual(['Recorded the release on #32; the issue stays open (another variant, or the operator).']);
+  });
+
+  it('should finish a shared release record whose label failed, and not close an issue the operator holds', async () => {
+    const id = `host › ${testName}`;
+    const branch = 'flake-release/2026-11-26-bbbb';
+    const record = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch,
+      released: '2026-11-26',
+      variant: { browser: 'firefox' },
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // #34: the record was written, its label was not; WebKit is still on main.
+      '/issues/34/comments': [{ body: removalMarker('released', record), user: { type: 'Bot' } }],
+      '/issues/34': { number: 34, state: 'open', labels: [{ name: 'flake' }] },
+      // #35: Firefox returned before WebKit's release was recorded: open, with the operator.
+      '/issues/35/comments': [],
+      '/issues/35': { number: 35, state: 'open', labels: [{ name: 'flake' }, { name: 'flake:needs-operator' }] },
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [
+          { path, entry: entryOf({ issue: 34, variant: { browser: 'firefox' } }) },
+          { path, entry: entryOf({ issue: 35, variant: { browser: 'webkit' } }) },
+        ],
+      },
+    ];
+
+    await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 34, variant: { browser: 'webkit' } })]),
+      landed,
+      identityOf: (_file, test) => `host › ${test}`,
+    });
+
+    const writes = requests
+      .filter((request) => request.method !== 'GET')
+      .map((request) => [request.method, request.path]);
+    expect(writes).toEqual([
+      ['POST', '/repos/taucad/tau/issues/34/labels'],
+      ['POST', '/repos/taucad/tau/issues/35/comments'],
+      ['POST', '/repos/taucad/tau/issues/35/labels'],
+    ]);
   });
 
   it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {

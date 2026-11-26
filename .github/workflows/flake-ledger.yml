@@ -84,6 +84,8 @@ jobs:
             scripts/src/ci-flake-quarantine-entry.ts
             scripts/src/ci-flake-quarantine-entry-cli.ts
             scripts/src/validate-quarantine.ts
+            scripts/src/flake-regression.ts
+            scripts/src/flake-repro.ts
             tools/vitest-ci/package.json
             tools/vitest-ci/src/quarantine.ts
             project.json

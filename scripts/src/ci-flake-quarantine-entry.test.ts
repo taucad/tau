@@ -12,13 +12,13 @@ import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
 import {
   addDays,
   failsEveryAttempt,
-  identityMarker,
   issueBody,
   narrowVariant,
   offenders,
   planEntries,
   renderQuarantine,
 } from '#ci-flake-quarantine-entry.js';
+import { identityMarker } from '#flake-regression.js';
 import type { EntryPlan, PlanInput, WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 import { GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
@@ -363,6 +363,22 @@ describe('planEntries', () => {
     });
 
     expect(result.admitted[0]).toMatchObject({ linkedIssue: 2787, entry: { owner: 'octocat', issue: 2787 } });
+  });
+
+  it('should never quarantine a flaky regression: a test stable for 300 executions before its burst', () => {
+    const state = replayWeek();
+    const order = state.identities[id.order];
+    expect(order).toBeDefined();
+    if (order === undefined) {
+      return;
+    }
+    // Its target ran it 400 times without an event before the ledger first saw it fail.
+    order.stableBefore = 400;
+
+    const result = plan(state);
+
+    expect(result.admitted.map((planned) => planned.id)).toEqual([id.render]);
+    expect(result.refused.find((refusal) => refusal.id === id.order)?.kind).toBe('flaky-regression');
   });
 
   it('should refuse a test whose project is not in the workspace', () => {

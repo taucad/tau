@@ -8,6 +8,8 @@
  *
  * - **refused as a failure** when its newest execution failed every attempt and has not passed since: a test that
  *   fails every attempt is a failure whatever its history (D1, invariant 2), and the queue is right to catch it;
+ * - **refused as a flaky regression** when it ran 300 executions without an event before this burst
+ *   (`flake-regression.ts`): FQ-12 takes it to the operator with its culprit, never to quarantine;
  * - **refused** when its project is unknown, or its file is in the never-quarantine set (§ 16.4: it keeps gating, and
  *   its owner issue is still opened so the agent starts at once);
  * - **held** when an entry for the same test is already on `main` or on an open entry branch;
@@ -18,7 +20,6 @@
  *
  * The validator (`validate-quarantine.ts`) has the last word: the CLI drops an admitted entry that it rejects.
  */
-import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 
 import {
@@ -34,6 +35,7 @@ import type { QuarantineClass, QuarantineEntry, QuarantineVariant } from '@tauca
 import { entryRule, meetsEntryRule } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState, LedgerState } from '#ci-flake-ledger-state.js';
 import type { Ledger } from '#ci-flake-ledger.js';
+import { identityMarker, isFlakyRegression } from '#flake-regression.js';
 
 /** Who owns an entry when `flake-ledger.json` names nobody (testing policy § 16.3; the operator today). */
 export const defaultOwner = 'rifont';
@@ -74,7 +76,7 @@ export type PlannedEntry = Offender & {
   readonly linkedIssue?: number | undefined;
 };
 
-export type RefusalKind = 'failing' | 'no-project' | 'never-quarantine' | 'cap' | 'invalid';
+export type RefusalKind = 'failing' | 'flaky-regression' | 'no-project' | 'never-quarantine' | 'cap' | 'invalid';
 
 /** An offender that does not become an entry, and why. */
 export type Refusal = Offender & {
@@ -254,6 +256,13 @@ export const planEntries = (input: PlanInput): EntryPlan => {
       );
       continue;
     }
+    if (isFlakyRegression(offender.identity)) {
+      refuse(
+        'flaky-regression',
+        'stable for 300 executions before this burst: a flaky regression goes to the operator with its culprit (FQ-12), never to quarantine',
+      );
+      continue;
+    }
     const split = splitTest(offender.test);
     if (project === undefined || split === undefined || split.file !== offender.identity.file) {
       refuse('no-project', `no Nx project named ${offender.identity.project} owns ${offender.test}`);
@@ -309,15 +318,6 @@ export const renderQuarantine = (path: string, text: string | undefined, add: re
   return `${JSON.stringify({ ...file, entries: [...entries, ...add] }, undefined, 2)}\n`;
 };
 
-/** The hidden line that ties an owner issue to its identity, so the job finds it again. */
-export const identityMarker = (id: string): string =>
-  `<!-- flake-identity: ${createHash('sha256').update(id).digest('hex').slice(0, 32)} -->`;
-
-/** Text from test output or test titles, made inert in Markdown: one line, no backticks, no mention. */
-const inert = (content: string, limit = 300): string => {
-  const line = content.replaceAll(/\s+/gu, ' ').replaceAll('`', "'").trim();
-  return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
-};
 
 const code = (content: string, limit?: number): string => `\`${inert(content, limit)}\``;
 

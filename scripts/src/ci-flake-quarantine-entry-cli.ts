@@ -43,7 +43,6 @@ import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 import {
   entryBranchPrefix,
   flakeLabel,
-  identityMarker,
   issueBody,
   issueTitle,
   planEntries,
@@ -53,6 +52,7 @@ import {
   renderPlanMarkdown,
   renderQuarantine,
 } from '#ci-flake-quarantine-entry.js';
+import { identityMarker } from '#flake-regression.js';
 import type {
   EntryPlan,
   Offender,
@@ -260,7 +260,7 @@ const openIssues = async (github: Client): Promise<Map<string, number>> => {
       `/repos/${github.repository}/issues?state=open&labels=${flakeLabel}&per_page=100&page=${page}`,
     );
     for (const issue of issues) {
-      const marker = /<!-- flake-identity: [\da-f]{32} -->/u.exec(issue.body ?? '')?.[0];
+      const marker = /<!-- flake-identity: [\da-f]+ -->/u.exec(issue.body ?? '')?.[0];
       if (marker && issue.pull_request === undefined) {
         byMarker.set(marker, issue.number);
       }

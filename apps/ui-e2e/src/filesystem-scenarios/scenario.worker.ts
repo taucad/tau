@@ -285,7 +285,8 @@ const stagedFiles = async (): Promise<number> => {
   const root = await navigator.storage.getDirectory();
   let staging: FileSystemDirectoryHandle;
   try {
-    staging = await (await root.getDirectoryHandle('.tau')).getDirectoryHandle('staging');
+    const tau = await root.getDirectoryHandle('.tau');
+    staging = await tau.getDirectoryHandle('staging');
   } catch {
     return 0;
   }

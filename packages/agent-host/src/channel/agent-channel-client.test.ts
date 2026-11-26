@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChannelClosedError, createChannelServer, wrapMessagePort } from '@taucad/rpc';
 import type { ChannelServer, CloseInfo, MessagePortLike, Port } from '@taucad/rpc';
 
+import { v1RequestFor, v1RequestSchema } from '#channel/wire-v1.js';
 import type { AgentWireCompatProtocol } from '#channel/wire-v1.js';
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
 import { serveAgentChannel } from '#launchers/agent-channel.js';
@@ -365,6 +366,13 @@ describe('createAgentChannelClient', () => {
       return values;
     };
     await (tagged ? expect(received()).resolves.toEqual(frames) : expect(received()).rejects.toThrow());
+  });
+
+  it('should send a v1 owner a withdrawing cancel as a plain cancel its strict schema reads', () => {
+    const request = v1RequestFor({ ...cancel, payload: { ...cancel.payload, withdraw: true } });
+
+    expect(request).toEqual({ type: 'cancel', chatId: 'chat-1', runId: 'run-1' });
+    expect(v1RequestSchema.safeParse(request).success).toBe(true);
   });
 
   it('refuses legacy v1 authoritative reads and streams instead of inventing source facts', async () => {

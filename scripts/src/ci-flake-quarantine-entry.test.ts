@@ -20,6 +20,7 @@ import {
   addDays,
   failsEveryAttempt,
   issueBody,
+  pullRequestBody,
   narrowVariant,
   offenders,
   planEntries,
@@ -122,7 +123,8 @@ const fakeGitHub = (
     refusePullRequests?: boolean;
     pullStatus?: number;
     issues?: unknown[];
-    branches?: Array<{ branch: string; pulls: unknown[] }>;
+    branches?: Array<{ branch: string; pulls: unknown[]; pushed?: string }>;
+    failComment?: number;
   } = {},
 ) => {
   const requests: Request[] = [];
@@ -150,6 +152,15 @@ const fakeGitHub = (
         const pulls: unknown = options.branches?.find(({ branch }) => branch === head)?.pulls ?? [];
         return pulls as T;
       }
+      if (path.includes('/git/commits/head-')) {
+        const branch = path.slice(path.indexOf('/git/commits/head-') + '/git/commits/head-'.length);
+        const pushed = options.branches?.find((entry) => entry.branch === branch)?.pushed ?? '2026-11-21';
+        const commit: unknown = {
+          message: 'test(host): Quarantine 1 flaky test\n\n- src/a.test.ts > a (#12)\n',
+          committer: { date: `${pushed}T10:00:00Z` },
+        };
+        return commit as T;
+      }
       if (path.includes('/git/commits/')) {
         const commit: unknown = {
           tree: { sha: 'base-tree' },
@@ -169,6 +180,9 @@ const fakeGitHub = (
       requests.push({ method, path, body });
       if (path.endsWith('/pulls') && options.refusePullRequests) {
         throw new GitHubError(`${method} ${path}`, 403, 'GitHub Actions is not permitted to create pull requests');
+      }
+      if (path.endsWith(`/issues/${options.failComment ?? 0}/comments`)) {
+        throw new GitHubError(`${method} ${path}`, 502);
       }
       if (path.endsWith('/pulls') && options.pullStatus !== undefined) {
         throw new GitHubError(`${method} ${path}`, options.pullStatus);
@@ -202,6 +216,9 @@ describe('the replay week (FQ-6 acceptance)', () => {
       [id.tick, 'failing'],
     ]);
     expect(held).toEqual([]);
+    // The ledger keeps the newest outcome whether or not the failure paired.
+    expect(state.identities[id.tick]?.lastOutcome).toBe('failed');
+    expect(state.identities[id.order]?.lastOutcome).toBe('passed');
     // Failed every attempt on every run it failed: never a flake event, never an offender.
     expect(state.identities[id.write]?.failures).toBe(4);
     expect(state.identities[id.write]?.events).toEqual([]);
@@ -338,7 +355,7 @@ describe('the replay week (FQ-6 acceptance)', () => {
       ],
     });
 
-    const outcome = await reconcileEntryBranches(github, 'main');
+    const outcome = await reconcileEntryBranches(github, 'main', '2026-11-22');
 
     const opened = requests.filter((request) => request.path.endsWith('/pulls'));
     expect(opened.map((request) => request.body)).toEqual([
@@ -357,9 +374,74 @@ describe('the replay week (FQ-6 acceptance)', () => {
       branches: [{ branch: 'flake-quarantine/2026-11-21-aaaaaaaa', pulls: [] }],
     });
 
-    expect(await reconcileEntryBranches(github, 'main')).toEqual([
+    expect(await reconcileEntryBranches(github, 'main', '2026-11-22')).toEqual([
       '`flake-quarantine/2026-11-21-aaaaaaaa` still has no pull request: this token may not open one.',
     ]);
+  });
+
+  it('should not open the pull request of an entry branch whose proposal has expired', async () => {
+    const { github, requests } = fakeGitHub({
+      branches: [{ branch: 'flake-quarantine/2026-11-01-aaaaaaaa', pulls: [], pushed: '2026-11-01' }],
+    });
+
+    expect(await reconcileEntryBranches(github, 'main', '2026-11-22')).toEqual([
+      '`flake-quarantine/2026-11-01-aaaaaaaa` holds an expired proposal; it is not opened and reserves nothing.',
+    ]);
+    expect(requests.some((request) => request.path.endsWith('/pulls'))).toBe(false);
+  });
+
+  it('should comment on every other owner issue when one comment fails', async () => {
+    const checked = validatePlan(plan(replayWeek()), {
+      workspace,
+      readTracked: (path) => testFiles.get(path),
+      today: '2026-11-22',
+    });
+    // The label takes 701; the issues are 702 (the billing test's), 703 and 704.
+    const { github, requests } = fakeGitHub({ refusePullRequests: true, failComment: 703 });
+
+    const result = await applyPlan(github, checked.plan, {
+      base: 'main',
+      baseSha: sha(1),
+      quarantines: [],
+      problems: checked.problems,
+      today: '2026-11-22',
+    });
+
+    const comments = requests.filter((request) => request.path.endsWith('/comments'));
+    expect(comments.map((request) => request.path)).toEqual([
+      '/repos/taucad/tau/issues/703/comments',
+      '/repos/taucad/tau/issues/704/comments',
+    ]);
+    expect(result.outcome.some((line) => line.startsWith('Could not comment on #703'))).toBe(true);
+  });
+
+  it('should refuse the entry of a project whose quarantine.json is not an object, and check the rest', () => {
+    const broken: Workspace = { projects, quarantines: [{ path: 'packages/host/quarantine.json', text: 'null' }] };
+
+    const checked = validatePlan(plan(replayWeek(), { quarantines: broken.quarantines }), {
+      workspace: broken,
+      readTracked: (path) => testFiles.get(path),
+      today: '2026-11-22',
+    });
+
+    expect(checked.plan.admitted.map((planned) => planned.id)).toEqual([id.render]);
+    expect(checked.plan.refused.find((refusal) => refusal.id === id.order)?.kind).toBe('invalid');
+  });
+
+  it('should escape pipes in the table cells of the issue and the pull request', () => {
+    const [first] = plan(replayWeek()).admitted;
+    expect(first).toBeDefined();
+    if (first === undefined) {
+      return;
+    }
+    const piped = {
+      ...first,
+      events: first.events.map((event) => ({ ...event, error: 'expected a | b' })),
+      entry: { ...first.entry, test: 'src/store.test.ts > store > a | b' },
+    };
+
+    expect(issueBody(piped, { repository: 'taucad/tau' })).toContain('`expected a \\| b`');
+    expect(pullRequestBody([piped], { autoMerge: true, problems: [] })).toContain('store > a \\| b`');
   });
 
   it('should link an open owner issue instead of opening another', async () => {
@@ -412,6 +494,45 @@ describe('shadow rows (DC-25)', () => {
 });
 
 describe('planEntries', () => {
+  it('should refuse a test whose newest execution failed every attempt on a hash that passed before', () => {
+    const state = replayWeek();
+    const order = state.identities[id.order];
+    expect(order).toBeDefined();
+    if (order === undefined) {
+      return;
+    }
+    // A same-hash failure pairs at once and leaves no open failure, but the test is failing now.
+    order.lastOutcome = 'failed';
+    order.openFailures = [];
+
+    expect(plan(state).refused.find((refusal) => refusal.id === id.order)?.kind).toBe('failing');
+  });
+
+  it('should reserve no capacity for an expired entry of an unmerged proposal', () => {
+    const entries = Array.from({ length: 8 }, (_, index) => ({
+      test: `src/other.test.ts > t${index}`,
+      expires: '2026-11-20',
+    }));
+
+    const result = plan(replayWeek(), {
+      pending: [{ path: 'packages/host/quarantine.json', text: JSON.stringify({ entries }) }],
+    });
+
+    expect(result.admitted.map((planned) => planned.id)).toEqual([id.order, id.render]);
+  });
+
+  it('should count no event of a test whose target is a registered shadow row, marked or not', () => {
+    const state = replayWeek();
+    for (const event of state.identities[id.render]?.events ?? []) {
+      expect(event.shadow).toBeUndefined();
+    }
+
+    const result = plan(state, { shadowTargets: new Set(['ui-e2e:test:e2e']) });
+
+    expect(result.admitted.map((planned) => planned.id)).toEqual([id.order]);
+    expect(result.refused.find((refusal) => refusal.id === id.render)?.kind).toBe('shadow');
+  });
+
   it('should hold a test already on main or on an open entry branch', () => {
     const state = replayWeek();
     const entry = (test: string): string =>

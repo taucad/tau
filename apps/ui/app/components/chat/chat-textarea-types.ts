@@ -327,9 +327,11 @@ export function useChatTextareaLogic({
     attachmentSource,
     agentActivity,
   } = useChatComposer();
+  /* A turn being admitted, or a send leaving for one, is stoppable before any byte streams: Stop puts it back. */
   const canStop =
     status === 'streaming' ||
     status === 'submitted' ||
+    agentActivity === 'working' ||
     agentActivity === 'approval-required' ||
     agentActivity === 'stopping';
   const attachmentModel = useMemo(

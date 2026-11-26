@@ -9,6 +9,8 @@ import {
   loadChatInterfaceMobile,
 } from '#routes/w.$workspace.$project/chat-interface-layouts.js';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+import { useProjectRole } from '#hooks/use-revision-status.js';
+import { useMarkReplayForeignContent } from '#lib/replay-content.lib.js';
 
 /* B-27, D-UI-16: each layout is its own chunk, so a phone never loads the
  * desktop shell (the dockview workbench and its panels) and a desktop never
@@ -42,6 +44,9 @@ const subscribeToNothing = (): (() => void) => {
  */
 export const ChatInterface = memo(function (): React.JSX.Element {
   const isMobile = useIsMobile();
+  const role = useProjectRole();
+  /* A collaborator's own switch does not reach the owner's chats and code: replay blocks them here. */
+  useMarkReplayForeignContent(role === 'read' || role === 'write');
   const isClientRender = useSyncExternalStore(
     subscribeToNothing,
     () => true,

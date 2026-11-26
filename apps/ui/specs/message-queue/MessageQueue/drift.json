@@ -30,13 +30,13 @@
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "3749ada815f745fed131d6990868df4733e3279a16f073a780a34513c6b3cbff",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
     "apps/ui/app/components/chat/chat-textarea.tsx": "8f684f3dc647ab0182bffd90ef3c163adde71ef24f06a33ada6807870c25a309",
-    "apps/ui/app/hooks/use-chat.tsx": "496d74fa89b50ef34da87d72475df71f232ff58539cffcbdedcac86e2c2d5f11",
+    "apps/ui/app/hooks/use-chat.tsx": "31b598f35717dca5c2be31a7540e37af62ac920600c4a78f7679fd6fe059a814",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "3499e429c06fe4449b86e645b6185cb0e1593355fdf14a44b7e201424768c38d",
+    "apps/ui/app/services/chat-session-store.ts": "53a6555d7f595f00df5f8e2e96e3cdd3342f469f013c502e8e5b3eef0a798889",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "d221a4823366946d68829bcb00e03fd97e1e37dcf3d686ec359fb81d6f0bb01e",
+    "MessageQueue.tla": "350b341030e31d97003e9bb4da22e8f9fcd399ada5f7266e2568aff502896d50",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

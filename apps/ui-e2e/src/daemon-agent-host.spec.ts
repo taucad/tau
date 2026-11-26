@@ -306,6 +306,53 @@ describe('daemon agent host (AV-4, rung 1)', () => {
   }, 300_000);
 
   /**
+   * HA3: the daemon is unplugged and plugged back in under an open chat.
+   *
+   * The page keeps its document while `tau serve` is gone; the chat's read is the remote read loop in the host
+   * attachment, which dials again on its backoff (or a wake) with no give-up. Nothing here reloads: the follow-up
+   * turn's answer can only render if that loop reattached by itself. The Reconnecting cue is not asserted: HA-I8 shows
+   * it for a local overlay or the outbox, never for a remote read, which keeps the transcript and says nothing.
+   */
+  test('reattaches the read by itself after the daemon restarts, with no reload and the transcript kept', async () => {
+    const { origin, workspace } = await target.startTauServeFixture();
+    try {
+      await target.setViewport({ width: 1440, height: 900 });
+      await createProject(origin);
+      await selectTauHost(workspace);
+      await sendFirstPrompt('Create the Tau Host proof file.');
+      await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
+      await target.releaseTauServeGateway();
+      await expect.poll(async () => renderedCount(finalText), { timeout: 120_000 }).toBe(1);
+      await expect.poll(durableLog, { timeout: 120_000 }).toContain('"state":"completed"');
+
+      await target.restartTauServeFixture();
+
+      /* Nothing the page had read is lost, and no attachment failure is shown. */
+      expect(await renderedCount(finalText)).toBe(1);
+      const failure = /agent host could not be reached|connection to the agent host was refused|host attachment/iu;
+      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- what a reader sees.
+      expect(await target.evaluate(() => document.body.innerText)).not.toMatch(failure);
+
+      /* The follow-up turn: its answer reaches this page only through the reattached read. The stub gateway answers
+       * every request after the first turn's two with the final text. */
+      const submit = selectors.getByCss('button:has(svg.lucide-arrow-up)').last();
+      await target.type(composer, 'Describe the model.');
+      await expect.poll(async () => target.getAttribute(submit, 'disabled'), { timeout: 120_000 }).toBeNull();
+      await target.click(submit);
+      await expect.poll(async () => renderedCount(finalText), { timeout: 120_000 }).toBe(2);
+      const completedRuns = async (): Promise<number> => {
+        const log = await durableLog();
+        return log.split('\n').filter((line) => line.includes('"state":"completed"')).length;
+      };
+      await expect.poll(completedRuns, { timeout: 120_000 }).toBe(2);
+      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- what a reader sees.
+      expect(await target.evaluate(() => document.body.innerText)).not.toMatch(failure);
+    } finally {
+      await target.stopTauServeFixture();
+    }
+  }, 300_000);
+
+  /**
    * The same placement, chosen one step earlier — before the project exists.
    *
    * The leg above selects the daemon *inside* a project, which is why the ladder

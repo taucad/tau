@@ -1698,6 +1698,11 @@ export const uiReadTauServeFile: BrowserCommand<[relativePath: string], string |
 export const uiListTauServeChats: BrowserCommand<[], readonly string[]> = async (commandContext) =>
   listTauServeChats(tauServeFor(commandContext).workspace);
 
+/** HA3: unplug and replug the daemon; the page keeps its document while the daemon is gone. */
+export const uiRestartTauServeFixture: BrowserCommand = async (commandContext) => {
+  await tauServeFor(commandContext).restart();
+};
+
 export const uiStopTauServeFixture: BrowserCommand = async (commandContext) => {
   const fixture = tauServeFixtures.get(commandContext.sessionId);
   if (!fixture) {
@@ -4228,6 +4233,7 @@ export const uiBrowserCommands = {
   uiProjectionImportWork,
   uiWorkerCatchUpFlow,
   uiStopTauServeFixture,
+  uiRestartTauServeFixture,
   uiReleaseTauServeGateway,
   uiIsTauServeGatewayHeld,
   uiReadTauServeFile,

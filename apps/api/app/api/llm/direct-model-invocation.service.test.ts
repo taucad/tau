@@ -44,7 +44,7 @@ const gatewayIntent = (): ModelInvocationIntent => ({
   surface: 'gateway',
   attempt: { version: 1, key: 'attempt_0000000001' },
   providerWire: 'openai-responses',
-  body: { model: 'openai-gpt-5.6-luna', input: 'fixture', stream: true, max_output_tokens: 16 },
+  body: { model: 'openai-gpt-6-luna', input: 'fixture', stream: true, max_output_tokens: 16 },
   priceHeaders: {},
   activity: 'agent',
   signal: new AbortController().signal,
@@ -203,7 +203,7 @@ describe('DirectModelInvocationService', () => {
   it.each([
     {
       wire: 'openai-responses',
-      row: catalogRow('openai', 'gpt-5.6-luna'),
+      row: catalogRow('openai', 'gpt-6-luna'),
       url: 'https://api.openai.com/v1/responses',
       usage: { input_tokens: 30, output_tokens: 12, cached: 20, reasoning: 8 },
     },
@@ -420,8 +420,8 @@ describe('DirectModelInvocationService', () => {
     expect(warn).toHaveBeenCalledWith(
       {
         providerId: 'openai',
-        routeId: 'openai-gpt-5.6-luna',
-        modelId: 'gpt-5.6-luna',
+        routeId: 'openai-gpt-6-luna',
+        modelId: 'gpt-6-luna',
         upstreamStatus: 400,
         upstreamBody: providerDiagnostic(vertexSchemaRefusal),
       },
@@ -585,7 +585,7 @@ describe('DirectModelInvocationService', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(exhaustedBody), { status: 429, headers: { 'content-type': 'application/json' } }),
     );
-    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-6-luna')));
 
     try {
       await service.invoke(helperIntent());
@@ -601,7 +601,7 @@ describe('DirectModelInvocationService', () => {
 
   it('should refuse a helper turn before streaming when the account refusal arrives as the first stream frame', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(providerSse([{ type: 'error', ...exhaustedBody }]));
-    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-6-luna')));
 
     const refused = await service.invoke(helperIntent()).then(
       () => expect.fail('The helper should refuse before it answers 200'),
@@ -627,7 +627,7 @@ describe('DirectModelInvocationService', () => {
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     vi.spyOn(globalThis, 'fetch').mockImplementation(answer);
-    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-6-luna')));
 
     try {
       await service.invoke(helperIntent());
@@ -647,7 +647,7 @@ describe('DirectModelInvocationService', () => {
       await Promise.resolve();
       throw abort;
     });
-    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-5.6-luna')));
+    const service = new DirectModelInvocationService(keyedConfig, helperModels(catalogRow('openai', 'gpt-6-luna')));
 
     await expect(service.invoke({ ...helperIntent(), signal: controller.signal })).rejects.toBe(abort);
   });

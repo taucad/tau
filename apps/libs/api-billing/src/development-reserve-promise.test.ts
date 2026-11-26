@@ -102,10 +102,6 @@ describe('development reserve promise', () => {
       'openai-gpt-6-astra:long-context',
       'openai-gpt-6-sol:long-context',
       'openai-gpt-6-luna:long-context',
-      'openai-gpt-5.6-sol:long-context',
-      'openai-gpt-5.6-terra:long-context',
-      'openai-gpt-5.6-luna:long-context',
-      'openai-gpt-5.5:long-context',
       'xai-grok-4.7:long-context',
       'xai-grok-4.6:long-context',
     ]);

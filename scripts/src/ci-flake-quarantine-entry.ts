@@ -114,6 +114,8 @@ export type PlanInput = {
   /** `YYYY-MM-DD` (UTC). */
   readonly today: string;
   readonly owner?: string | undefined;
+  /** Registered shadow-row targets (`<project>:<target>`): their tests' events never count. */
+  readonly shadowTargets?: ShadowTargets | undefined;
 };
 
 /** The widest window of the entry rule: its events are the evidence. */
@@ -122,25 +124,38 @@ const evidenceWindow = Math.max(...entryRule.map((rule) => rule.executions));
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** The events that count toward the entry rule: those of gating tasks, never of a non-gating shadow row (DC-25). */
-const gatingEvents = (identity: IdentityState): FlakeEvent[] =>
-  identity.events.filter((event) => event.shadow !== true);
+/** Shadow-row targets as `<project>:<target>` (FQ-13's registry, `readShadowRegistry`). */
+export type ShadowTargets = ReadonlySet<string>;
+
+const noShadowTargets: ShadowTargets = new Set();
+
+/**
+ * The events that count toward the entry rule: those of gating tasks, never of a non-gating shadow row (DC-25). An
+ * event the ingestion marked `shadow` never counts; neither does any event of a test whose target is a registered
+ * shadow row (shadow families hold spec files no gating suite runs), which covers events recorded before the marker.
+ */
+const gatingEvents = (identity: IdentityState, shadowTargets: ShadowTargets): FlakeEvent[] =>
+  shadowTargets.has(`${identity.project}:${identity.targetKey}`)
+    ? []
+    : identity.events.filter((event) => event.shadow !== true);
 
 /** Whether an identity's gating events meet the entry rule. */
-export const meetsGatingEntryRule = (identity: IdentityState): boolean => {
-  const events = gatingEvents(identity);
+export const meetsGatingEntryRule = (identity: IdentityState, shadowTargets = noShadowTargets): boolean => {
+  const events = gatingEvents(identity, shadowTargets);
   return entryRule.some(
     (rule) => events.filter((event) => event.execution > identity.executions - rule.executions).length >= rule.events,
   );
 };
 
-const offender = (id: string, identity: IdentityState): Offender => {
+const offender = (id: string, identity: IdentityState, shadowTargets: ShadowTargets): Offender => {
   const separator = id.indexOf(projectSeparator);
   return {
     id,
     identity,
     test: separator === -1 ? id : id.slice(separator + projectSeparator.length),
-    events: gatingEvents(identity).filter((event) => event.execution > identity.executions - evidenceWindow),
+    events: gatingEvents(identity, shadowTargets).filter(
+      (event) => event.execution > identity.executions - evidenceWindow,
+    ),
   };
 };
 
@@ -151,25 +166,28 @@ const byEvents = (a: Offender, b: Offender): number =>
  * Every identity whose gating events meet the entry rule, most events in the window first. Events seen only in a
  * shadow row do not count: the test is already non-gating there, and an entry would only spend the caps.
  */
-export const offenders = (state: LedgerState): Offender[] =>
+export const offenders = (state: LedgerState, shadowTargets = noShadowTargets): Offender[] =>
   Object.entries(state.identities)
-    .filter(([, identity]) => meetsGatingEntryRule(identity))
-    .map(([id, identity]) => offender(id, identity))
+    .filter(([, identity]) => meetsGatingEntryRule(identity, shadowTargets))
+    .map(([id, identity]) => offender(id, identity, shadowTargets))
     .sort(byEvents);
 
 /** Identities that meet the entry rule only by counting their shadow-row events. */
-export const shadowOnlyOffenders = (state: LedgerState): Offender[] =>
+export const shadowOnlyOffenders = (state: LedgerState, shadowTargets = noShadowTargets): Offender[] =>
   Object.entries(state.identities)
-    .filter(([, identity]) => meetsEntryRule(identity) && !meetsGatingEntryRule(identity))
-    .map(([id, identity]) => offender(id, identity))
+    .filter(([, identity]) => meetsEntryRule(identity) && !meetsGatingEntryRule(identity, shadowTargets))
+    .map(([id, identity]) => ({ ...offender(id, identity, noShadowTargets), events: identity.events }))
     .sort(byEvents);
 
 /**
- * Whether the identity's newest execution failed every attempt and is still unpaired: no pass on its hash, inside the
- * task or in its lineage, has followed it. Such a test is failing now, not flaking.
+ * Whether the identity's newest execution failed every attempt, paired or not: a failure on a hash that passed before
+ * is a flake event, but the test is still failing now, not flaking. A state written before `lastOutcome` falls back to
+ * an unpaired newest failure.
  */
 export const failsEveryAttempt = (identity: IdentityState): boolean =>
-  identity.openFailures.some((failure) => failure.execution === identity.executions);
+  identity.lastOutcome === undefined
+    ? identity.openFailures.some((failure) => failure.execution === identity.executions)
+    : identity.lastOutcome === 'failed';
 
 /** A ledger variant key (`linux-x64 browser=firefox`) as the parts an entry may narrow by. */
 const variantParts = (key: string): { os: string; browser: string | undefined } => {
@@ -244,10 +262,16 @@ const ownership = (owners: Ledger | undefined, offender: Offender): { owner?: st
 export const quarantinePath = (root: string): string =>
   root === '' ? quarantineFileName : `${root}/${quarantineFileName}`;
 
-/** The entries a file holds, as `[test, browser, os, target]` keys; a malformed file holds none. */
-const rawKeys = (text: string): Array<{ key: string; test: string }> =>
+/**
+ * The entries a file holds, as `[test, browser, os, target]` keys; a malformed file holds none. With `today`, an
+ * entry that has expired holds nothing: an unmerged proposal past its expiry reserves no capacity.
+ */
+const rawKeys = (text: string, today?: string): Array<{ key: string; test: string }> =>
   parseQuarantine(text).entries.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry['test'] !== 'string') {
+      return [];
+    }
+    if (today !== undefined && typeof entry['expires'] === 'string' && entry['expires'] < today) {
       return [];
     }
     const variant = isRecord(entry['variant']) ? entry['variant'] : {};
@@ -268,8 +292,12 @@ const rawKeys = (text: string): Array<{ key: string; test: string }> =>
 export const planEntries = (input: PlanInput): EntryPlan => {
   const occupied = new Map<string, Set<string>>();
   const heldTests = new Map<string, Set<string>>();
-  for (const file of [...input.quarantines, ...input.pending]) {
-    for (const { key, test } of rawKeys(file.text)) {
+  const files = [
+    ...input.quarantines.map((file) => ({ file, today: undefined })),
+    ...input.pending.map((file) => ({ file, today: input.today })),
+  ];
+  for (const { file, today } of files) {
+    for (const { key, test } of rawKeys(file.text, today)) {
       occupied.set(file.path, (occupied.get(file.path) ?? new Set()).add(key));
       heldTests.set(file.path, (heldTests.get(file.path) ?? new Set()).add(test));
     }
@@ -278,7 +306,7 @@ export const planEntries = (input: PlanInput): EntryPlan => {
   const admitted: PlannedEntry[] = [];
   const refused: Refusal[] = [];
   const held: string[] = [];
-  for (const shadow of shadowOnlyOffenders(input.state)) {
+  for (const shadow of shadowOnlyOffenders(input.state, input.shadowTargets)) {
     refused.push({
       ...shadow,
       kind: 'shadow',
@@ -286,7 +314,7 @@ export const planEntries = (input: PlanInput): EntryPlan => {
       project: input.projects.get(shadow.identity.project),
     });
   }
-  for (const offender of offenders(input.state)) {
+  for (const offender of offenders(input.state, input.shadowTargets)) {
     const project = input.projects.get(offender.identity.project);
     const { owner, issue } = ownership(input.owners, offender);
     const refuse = (kind: RefusalKind, reason: string): void => {
@@ -369,6 +397,9 @@ const inert = (content: string, limit = 300): string => {
 
 const code = (content: string, limit?: number): string => `\`${inert(content, limit)}\``;
 
+/** A table cell: GitHub splits a row at every unescaped pipe, even inside a code span. */
+const cell = (content: string): string => content.replaceAll('|', String.raw`\|`);
+
 const runLink = (repository: string, run: number): string =>
   `[${run}](https://github.com/${repository}/actions/runs/${run})`;
 
@@ -396,7 +427,7 @@ export const issueBody = (
     '| --- | --- | --- | --- | --- |',
     ...offender.events.map(
       (event) =>
-        `| ${event.kind} | ${runLink(context.repository, event.run)} | ${runLink(context.repository, event.failedRun)} | ${code(event.variant)} | ${event.error ? code(event.error, 200) : ''} |`,
+        `| ${event.kind} | ${runLink(context.repository, event.run)} | ${runLink(context.repository, event.failedRun)} | ${cell(code(event.variant))} | ${event.error ? cell(code(event.error, 200)) : ''} |`,
     ),
     '',
     'An event is a pass and a failure of this test on the same inputs: inside one task (`retry`), on one Nx task hash (`same-hash`), or on the next run of the same unchanged pull request (`lineage`). The entry rule is two events in the last 80 executions or three in 230 (testing policy § 16.3).',
@@ -445,11 +476,11 @@ export const pullRequestBody = (
     '| --- | --- | --- | --- | --- | --- |',
     ...admitted.map(
       (planned) =>
-        `| ${code(planned.entry.test, 200)} | ${planned.project.name} | ${planned.entry.variant ? code(JSON.stringify(planned.entry.variant)) : 'all'} | ${planned.entry.expires} | #${planned.entry.issue} | ${inert(planned.entry.evidence, 200)} |`,
+        `| ${cell(code(planned.entry.test, 200))} | ${planned.project.name} | ${planned.entry.variant ? cell(code(JSON.stringify(planned.entry.variant))) : 'all'} | ${planned.entry.expires} | #${planned.entry.issue} | ${cell(inert(planned.entry.evidence, 200))} |`,
     ),
     '',
     context.autoMerge
-      ? 'Touches only `quarantine.json` files and passes `validate-quarantine` on the tree it proposes, so it lands through the merge queue without a person (blueprint O2).'
+      ? 'Touches only `quarantine.json` files and passes `validate-quarantine` on the tree it proposes, so it is eligible to land through the merge queue without a person (blueprint O2): the job requests squash auto-merge after opening it, and reports whether GitHub accepted on the owner issues and in its summary.'
       : `Auto-merge is off: ${context.problems.length > 0 ? `\`validate-quarantine\` reports problems on the proposed tree:\n\n${context.problems.map((problem) => `- ${inert(problem)}`).join('\n')}` : 'the change touches more than `quarantine.json` files'}.`,
     '',
     '_Opened by the flake ledger (`.github/workflows/flake-ledger.yml`, FQ-6)._',

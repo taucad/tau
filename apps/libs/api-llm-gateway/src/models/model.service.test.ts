@@ -23,10 +23,6 @@ const cappedModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
   'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
@@ -58,10 +54,6 @@ const pdfInputModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
   'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
@@ -172,9 +164,6 @@ describe('modelList', () => {
         'openai-gpt-6-astra',
         'openai-gpt-6-sol',
         'openai-gpt-6-luna',
-        'openai-gpt-5.6-sol',
-        'openai-gpt-5.6-terra',
-        'openai-gpt-5.6-luna',
       ]);
     });
 
@@ -369,18 +358,14 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
   });
 
-  it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
-    const service = createModelService();
-    const listedModels = await service.getModels();
-    const gpt56ModelIds = ['openai-gpt-5.6-sol', 'openai-gpt-5.6-terra', 'openai-gpt-5.6-luna'];
-    const listedModelIds = listedModels.map((model) => model.id);
+  it('lists no GPT-5 generation model', async () => {
+    const listedModels = await createModelService().getModels();
 
-    expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
-    expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
-    expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
+    expect(listedModels.filter((model) => model.id.startsWith('openai-gpt-5'))).toEqual([]);
+    expect(Object.keys(modelList.openai).filter((key) => key.startsWith('gpt-5'))).toEqual([]);
   });
 
-  it('should recommend GPT-6.1 Terra while retaining GPT-5.6 Terra as non-recommended', async () => {
+  it('should recommend GPT-6.1 Terra', async () => {
     const listedModels = await createModelService().getModels();
     expect(listedModels.find((model) => model.id === 'openai-gpt-6.1-terra')).toMatchObject({
       recommended: true,
@@ -398,7 +383,6 @@ describe('ModelService', () => {
       },
       configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
     });
-    expect(listedModels.find((model) => model.id === 'openai-gpt-5.6-terra')).toMatchObject({ recommended: false });
     expect(gatewayModelRoutes()).toContainEqual({
       routeId: 'openai-gpt-6.1-terra',
       modelId: 'gpt-6.1-terra',

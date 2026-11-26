@@ -271,9 +271,14 @@
 \* before it is sent. No action or verdict changes.
 \* Chat performance WP-04 review (2026-11-26): the composer's draft hint is held and written when the page hides instead of
 \* written per keystroke (`chat-textarea.tsx`), and `useDraftSelector` selects inside the draft actor's subscription
-\* (`use-chat.tsx`). Neither touches the outbox, a send or a turn request. No action or verdict changes.
+\* (`use-chat.tsx`, beside WP-06's live view). Neither touches the outbox, a send or a turn request. No action or verdict changes.
 \* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
 \* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
+\* Its per-evaluation view is a class instance (`ChatStateView`), not an object literal of accessors. No action or verdict
+\* changes.
+\* Chat performance WP-06 (2026-11-26): `ChatSessionStore` publishes a projection change that touches only the live
+\* preview from the next animation frame (`LiveOverlay.tla` `FrameClock`); ledger and durable changes, which this
+\* model reads, still publish at once. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -47,7 +47,7 @@ import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
-import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -219,6 +219,169 @@ function shallowEqual<T>(a: T, b: T): boolean {
 /** Which sources a selector read on its last evaluation; a source it did not read cannot change its result. */
 type SelectorReads = { store: boolean; draft: boolean; persistence: boolean };
 
+type DraftActorRef = ActorRefFrom<typeof draftMachine>;
+type PersistenceActorRef = ActorRefFrom<typeof chatPersistenceMachine>;
+type DraftContext = ReturnType<DraftActorRef['getSnapshot']>['context'];
+type PersistenceContext = ReturnType<PersistenceActorRef['getSnapshot']>['context'];
+type ChatSessionStore = ReturnType<typeof useChatSessionStore>;
+
+/**
+ * One evaluation's view of a chat for {@link useChatSelector}: each field is read on demand and records which source it
+ * read (WP-06a, D3). The accessors live on the prototype, so a view is a small fast-mode object; an object literal with
+ * this many accessors is built in dictionary mode on every call, which cost more than the selectors it served.
+ */
+class ChatStateView implements CombinedChatState {
+  public readonly reads: SelectorReads = { store: false, draft: false, persistence: false };
+  readonly #store: ChatSessionStore;
+  readonly #chatId: string;
+  readonly #session: ChatSession | undefined;
+  readonly #draftActorRef: DraftActorRef;
+  readonly #persistenceActorRef: PersistenceActorRef | undefined;
+
+  public constructor(
+    sources: Readonly<{
+      store: ChatSessionStore;
+      chatId: string;
+      draftActorRef: DraftActorRef;
+      persistenceActorRef: PersistenceActorRef | undefined;
+    }>,
+  ) {
+    this.#store = sources.store;
+    this.#chatId = sources.chatId;
+    this.#session = sources.store.get(sources.chatId);
+    this.#draftActorRef = sources.draftActorRef;
+    this.#persistenceActorRef = sources.persistenceActorRef;
+  }
+
+  public get messages() {
+    return this.#fromStore(() => this.#session?.messages ?? emptyMessages);
+  }
+
+  public get messagesById() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).messagesById);
+  }
+
+  public get messageOrder() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).order);
+  }
+
+  public get turnGroups() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).groups);
+  }
+
+  public get agentInvocations() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).agentInvocations);
+  }
+
+  public get transcript() {
+    return this.#fromStore(() => selectChatTranscript(this.#session));
+  }
+
+  public get departingMessageId() {
+    return this.#fromStore(() => this.#store.departingSendOf(this.#chatId));
+  }
+
+  public get hostWait() {
+    return this.#fromStore(() => this.#store.hostWaitOf(this.#chatId));
+  }
+
+  public get rememberedComposerTrays() {
+    return this.#fromStore(() => this.#session?.rememberedComposerTrays ?? noComposerTrays);
+  }
+
+  public get status() {
+    return this.#status();
+  }
+
+  public get persistedError() {
+    return this.#persistence()?.persistedError;
+  }
+
+  public get projection() {
+    return this.#fromStore(() => this.#store.getProjection(this.#chatId));
+  }
+
+  public get attachmentStatus() {
+    return this.#fromStore(() => this.#store.getAttachmentStatus(this.#chatId));
+  }
+
+  public get attachedHostId() {
+    return this.#fromStore(() => this.#store.getAttachedHostId(this.#chatId));
+  }
+
+  public get isLoading() {
+    return this.#status() === 'streaming';
+  }
+
+  public get activeExecution() {
+    return this.#persistence()?.activeExecution;
+  }
+
+  public get activeKernel() {
+    return this.#persistence()?.activeKernel;
+  }
+
+  public get draftText() {
+    return this.#draft().draftText;
+  }
+
+  public get draftAttachments() {
+    return this.#draft().draftAttachments;
+  }
+
+  public get draftAnnotations() {
+    return this.#draft().draftAnnotations;
+  }
+
+  public get draftToolChoice() {
+    return this.#draft().draftToolChoice;
+  }
+
+  public get draftMode() {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
+    return this.#draft().draftMode as ChatMode;
+  }
+
+  public get messageEdits() {
+    return this.#draft().messageEdits;
+  }
+
+  public get activeEditMessageId() {
+    return this.#draft().activeEditMessageId;
+  }
+
+  public get editDraftText() {
+    return this.#draft().editDraftText;
+  }
+
+  public get editDraftAttachments() {
+    return this.#draft().editDraftAttachments;
+  }
+
+  public get editDraftAnnotations() {
+    return this.#draft().editDraftAnnotations;
+  }
+
+  #fromStore<V>(read: () => V): V {
+    this.reads.store = true;
+    return read();
+  }
+
+  #draft(): DraftContext {
+    this.reads.draft = true;
+    return this.#draftActorRef.getSnapshot().context;
+  }
+
+  #persistence(): PersistenceContext | undefined {
+    this.reads.persistence = true;
+    return this.#persistenceActorRef?.getSnapshot().context;
+  }
+
+  #status(): ChatStatus {
+    return this.#fromStore(() => this.#store.getChatStatus(this.#chatId));
+  }
+}
+
 /**
  * Primary hook for reading chat + draft state. Combines the chat's transcript
  * and projection from the store with the draft state from `<ActiveChatProvider>`.
@@ -267,107 +430,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     [activeChatId, draftActorRef, persistenceActorRef, store],
   );
   const getSnapshot = useCallback((): T => {
-    const reads: SelectorReads = { store: false, draft: false, persistence: false };
-    const fromStore = <V,>(read: () => V): V => {
-      reads.store = true;
-      return read();
-    };
-    const session = store.get(activeChatId);
-    const draft = () => {
-      reads.draft = true;
-      return draftActorRef.getSnapshot().context;
-    };
-    const persistence = () => {
-      reads.persistence = true;
-      return persistenceActorRef?.getSnapshot().context;
-    };
-    const status = () => fromStore(() => store.getChatStatus(activeChatId));
-    const state: CombinedChatState = {
-      get messages() {
-        return fromStore(() => session?.messages ?? emptyMessages);
-      },
-      get messagesById() {
-        return fromStore(() => store.getMessagePresentation(activeChatId).messagesById);
-      },
-      get messageOrder() {
-        return fromStore(() => store.getMessagePresentation(activeChatId).order);
-      },
-      get turnGroups() {
-        return fromStore(() => store.getMessagePresentation(activeChatId).groups);
-      },
-      get agentInvocations() {
-        return fromStore(() => store.getMessagePresentation(activeChatId).agentInvocations);
-      },
-      get transcript() {
-        return fromStore(() => selectChatTranscript(session));
-      },
-      get departingMessageId() {
-        return fromStore(() => store.departingSendOf(activeChatId));
-      },
-      get hostWait() {
-        return fromStore(() => store.hostWaitOf(activeChatId));
-      },
-      get rememberedComposerTrays() {
-        return fromStore(() => session?.rememberedComposerTrays ?? noComposerTrays);
-      },
-      get status() {
-        return status();
-      },
-      get persistedError() {
-        return persistence()?.persistedError;
-      },
-      get projection() {
-        return fromStore(() => store.getProjection(activeChatId));
-      },
-      get attachmentStatus() {
-        return fromStore(() => store.getAttachmentStatus(activeChatId));
-      },
-      get attachedHostId() {
-        return fromStore(() => store.getAttachedHostId(activeChatId));
-      },
-      get isLoading() {
-        return status() === 'streaming';
-      },
-      get activeExecution() {
-        return persistence()?.activeExecution;
-      },
-      get activeKernel() {
-        return persistence()?.activeKernel;
-      },
-      get draftText() {
-        return draft().draftText;
-      },
-      get draftAttachments() {
-        return draft().draftAttachments;
-      },
-      get draftAnnotations() {
-        return draft().draftAnnotations;
-      },
-      get draftToolChoice() {
-        return draft().draftToolChoice;
-      },
-      get draftMode() {
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
-        return draft().draftMode as ChatMode;
-      },
-      get messageEdits() {
-        return draft().messageEdits;
-      },
-      get activeEditMessageId() {
-        return draft().activeEditMessageId;
-      },
-      get editDraftText() {
-        return draft().editDraftText;
-      },
-      get editDraftAttachments() {
-        return draft().editDraftAttachments;
-      },
-      get editDraftAnnotations() {
-        return draft().editDraftAnnotations;
-      },
-    };
+    const state = new ChatStateView({ store, chatId: activeChatId, draftActorRef, persistenceActorRef });
     const next = selector(state);
-    readsRef.current = reads;
+    readsRef.current = state.reads;
     const cached = cacheRef.current;
     if (cached && shallowEqual(cached.value, next)) {
       return cached.value;
@@ -426,8 +491,6 @@ export type DraftState = {
   /** The same for the open edit. */
   pendingEdit: readonly PendingDraftImage[];
 };
-
-type DraftContext = SnapshotFrom<typeof draftMachine>['context'];
 
 /** The pending image lists per queue, so a keystroke, which keeps the queue, keeps the lists' identity. */
 const pendingByQueue = new WeakMap<

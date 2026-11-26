@@ -133,27 +133,60 @@ const labelNames = (labels: LabelledIssue['labels']): string[] =>
 
 const isQuarantineFile = (path: string): boolean => path === 'quarantine.json' || path.endsWith('/quarantine.json');
 
-/** A release whose pull request merged: the entries it removed and when. */
-export type LandedRelease = {
+/** A removal whose pull request merged: the entries it removed and when. */
+export type LandedRemoval = {
+  readonly kind: RemovalKind;
   readonly branch: string;
   readonly mergedAt: string;
   readonly removed: PendingRemoval['removed'];
 };
 
+/** A closed pull request, as the list of closed pull requests gives it. */
+type ClosedPull = Pull & {
+  readonly head?: { readonly ref?: string; readonly sha?: string };
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+  readonly updated_at?: string;
+};
+
+/** The commit a removal branch pushed: its message and the entries it removes against the commit it was built on. */
+const readRemoval = async (
+  github: Client,
+  sha: string,
+): Promise<{ message: string | undefined; removed: Array<{ path: string; entry: unknown }> }> => {
+  const repo = `/repos/${github.repository}`;
+  const commit = await github.get<BranchCommit>(`${repo}/commits/${sha}`);
+  const parent = commit.parents?.[0]?.sha;
+  const removed: Array<{ path: string; entry: unknown }> = [];
+  for (const file of commit.files ?? []) {
+    if (!isQuarantineFile(file.filename) || file.status !== 'modified' || parent === undefined) {
+      continue;
+    }
+    const read = async (ref: string): Promise<string> =>
+      github.getText(`${repo}/contents/${encodePath(file.filename)}?ref=${ref}`, 'application/vnd.github.raw+json');
+    // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
+    const [before, after] = await Promise.all([read(parent), read(sha)]);
+    removed.push(...removedEntries(before, after).map((entry) => ({ path: file.filename, entry })));
+  }
+  return { message: commit.commit?.message, removed };
+};
+
+/** The most pages of closed pull requests read for removals that landed: newest updated first. */
+const maximumClosedPages = 10;
+
 /**
- * Every removal branch still in play: one whose pull request is open, or that has none yet; and every release branch
- * whose pull request merged on or after `since`, whose owner issues close (`closeReleased`). A branch whose pull
- * request was closed unmerged holds nothing. Each lists the entries it removes, read from the commit it was built on
- * and its own: entries added to `main` since are not removals.
+ * Every removal branch still in play: one whose pull request is open, or that has none yet; a branch whose pull
+ * request was closed or merged holds nothing. And every removal whose pull request merged on or after `since`, found
+ * from the merged pull request itself, so a branch deleted after its merge is still settled (`closeReleased`). Each
+ * lists the entries it removes, read from the commit it was built on and its own: entries added to `main` since are
+ * not removals.
  */
 export const readRemovalBranches = async (
   github: Client,
   since: string,
-): Promise<{ pending: PendingRemoval[]; landed: LandedRelease[] }> => {
+): Promise<{ pending: PendingRemoval[]; landed: LandedRemoval[] }> => {
   const repo = `/repos/${github.repository}`;
   const owner = github.repository.split('/')[0] ?? '';
   const pending: PendingRemoval[] = [];
-  const landed: LandedRelease[] = [];
   for (const [kind, prefix] of prefixes) {
     // oxlint-disable-next-line no-await-in-loop -- two prefixes, read in order
     const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/heads/${prefix.slice(0, -1)}`);
@@ -163,36 +196,34 @@ export const readRemovalBranches = async (
       const pulls = await github.get<Pull[]>(
         `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
       );
-      const merged = pulls.find((pull) => pull.merged_at)?.merged_at;
-      const isLanded = kind === 'release' && typeof merged === 'string' && merged >= since;
-      if (pulls.some((pull) => pull.state === 'closed') && !isLanded) {
+      if (pulls.some((pull) => pull.state === 'closed')) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one commit per branch
-      const commit = await github.get<BranchCommit>(`${repo}/commits/${reference.object.sha}`);
-      const parent = commit.parents?.[0]?.sha;
-      const removed: Array<{ path: string; entry: unknown }> = [];
-      for (const file of commit.files ?? []) {
-        if (!isQuarantineFile(file.filename) || file.status !== 'modified' || parent === undefined) {
-          continue;
-        }
-        const read = async (ref: string): Promise<string> =>
-          github.getText(`${repo}/contents/${encodePath(file.filename)}?ref=${ref}`, 'application/vnd.github.raw+json');
-        // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
-        const [before, after] = await Promise.all([read(parent), read(reference.object.sha)]);
-        removed.push(...removedEntries(before, after).map((entry) => ({ path: file.filename, entry })));
-      }
-      if (isLanded) {
-        landed.push({ branch, mergedAt: merged, removed });
+      const { message, removed } = await readRemoval(github, reference.object.sha);
+      pending.push({ branch, kind, pull: pulls.find((pull) => pull.state === 'open')?.number, message, removed });
+    }
+  }
+  const landed: LandedRemoval[] = [];
+  for (let page = 1; page <= maximumClosedPages; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order, newest first
+    const pulls = await github.get<ClosedPull[]>(
+      `${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
+    );
+    for (const pull of pulls) {
+      const branch = pull.head?.ref ?? '';
+      const kind = prefixes.find(([, prefix]) => branch.startsWith(prefix))?.[0];
+      const sha = pull.head?.sha;
+      if (kind === undefined || sha === undefined || typeof pull.merged_at !== 'string' || pull.merged_at < since) {
         continue;
       }
-      pending.push({
-        branch,
-        kind,
-        pull: pulls.find((pull) => pull.state === 'open')?.number,
-        message: commit.commit?.message,
-        removed,
-      });
+      // oxlint-disable-next-line no-await-in-loop -- one commit per merged removal
+      const { removed } = await readRemoval(github, sha);
+      landed.push({ kind, branch, mergedAt: pull.merged_at, removed });
+    }
+    // A pull request merged after `since` was updated after it too, so the list stops being of use there.
+    if (pulls.length < 100 || pulls.some((pull) => (pull.updated_at ?? '') < since)) {
+      break;
     }
   }
   return { pending, landed };
@@ -483,6 +514,68 @@ export const applyRemovals = async (github: Client, context: RemovalContext): Pr
 };
 
 /**
+ * Make sure the owner issue of every expiry that merged carries its note and `flake:needs-operator`: an update that
+ * failed before someone merged the expiry by hand is finished here.
+ */
+const settleExpiry = async (
+  github: Client,
+  context: {
+    readonly release: LandedRemoval;
+    readonly identityOf: (path: string, test: string) => string | undefined;
+    readonly onMain: ReadonlySet<number>;
+  },
+): Promise<string[]> => {
+  const repo = `/repos/${github.repository}`;
+  const outcome: string[] = [];
+  for (const { path, entry } of context.release.removed) {
+    const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+    const { issue, test, created, expires, renewal } = fields;
+    const id = typeof test === 'string' ? context.identityOf(path, test) : undefined;
+    if (
+      typeof issue !== 'number' ||
+      id === undefined ||
+      typeof created !== 'string' ||
+      typeof expires !== 'string' ||
+      context.onMain.has(issue)
+    ) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+    const [current, comments] = await Promise.all([
+      github.get<LabelledIssue>(`${repo}/issues/${issue}`),
+      automationComments(github, issue),
+    ]);
+    const noted = markersIn(comments).some(
+      (marker) => marker.kind === 'expiry' && marker.record.branch === context.release.branch,
+    );
+    if (!noted) {
+      const record = {
+        identity: identityHashOf(id),
+        path,
+        created,
+        expires,
+        ...(typeof renewal === 'object' && renewal !== null ? { renewal: renewal as QuarantineRenewal } : {}),
+        branch: context.release.branch,
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+      await comment(
+        github,
+        issue,
+        `${removalMarker('expiry', record)}\n**Expired** on ${expires}: the removal merged on ${context.release.mergedAt.slice(0, 10)} and the test gates again (testing policy § 16.3). It goes to the operator.`,
+      );
+    }
+    if (!labelNames(current.labels).includes(operatorLabel)) {
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+      await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
+    }
+    if (!noted || !labelNames(current.labels).includes(operatorLabel)) {
+      outcome.push(`Finished the expiry note on #${issue}.`);
+    }
+  }
+  return outcome;
+};
+
+/**
  * Close the owner issue of every release that landed: for each release branch whose pull request merged (and whose
  * entry is no longer on `main`), the issue gets one comment recording the entry and the day it merged, the start of
  * the 30-day return window, and closes as completed, labelled `flake:released`. It is found through the merged branch,
@@ -494,7 +587,7 @@ export const closeReleased = async (
   github: Client,
   context: {
     readonly tests: readonly QuarantinedTest[];
-    readonly landed: readonly LandedRelease[];
+    readonly landed: readonly LandedRemoval[];
     /** The ledger identity of a test in a `quarantine.json`, or `undefined` when no project owns the file. */
     readonly identityOf: (path: string, test: string) => string | undefined;
   },
@@ -505,6 +598,11 @@ export const closeReleased = async (
   const handled = new Set<number>();
   for (const release of context.landed) {
     const released = release.mergedAt.slice(0, 10);
+    if (release.kind === 'expiry') {
+      // oxlint-disable-next-line no-await-in-loop -- one merged expiry at a time
+      outcome.push(...(await settleExpiry(github, { release, identityOf: context.identityOf, onMain })));
+      continue;
+    }
     for (const { path, entry } of release.removed) {
       const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
       const { issue, test, created, expires, renewal } = fields;

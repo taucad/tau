@@ -14,6 +14,7 @@ import {
   readRemovalBranches,
   reconcileRemovals,
 } from '#ci-flake-quarantine-release-cli.js';
+import type { LandedRemoval } from '#ci-flake-quarantine-release-cli.js';
 import {
   countQuarantineRun,
   isRecentRelease,
@@ -316,9 +317,29 @@ describe('the count in run order', () => {
     history(state, tests, { count: 300, from: '2026-11-23T02:00:00Z', everyHours: 0.01, firstRun: 2000 });
 
     const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
-    expect(track).toMatchObject({ streak: 301, trimmed: { passes: 1, from: '2026-11-21T01:00:00.000Z' } });
+    expect(track).toMatchObject({ streak: 301, trimmed: [{ passes: 1, from: '2026-11-21T01:00:00.000Z' }] });
     expect(track?.streakRuns).toHaveLength(300);
     expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix', passes: 301 });
+  });
+
+  it('should keep the trimmed passes after a late failure among them, dropping only its hour and before', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    // 100 passes on November 21 (one an hour from 00:00, then every few minutes), then 300 on November 24.
+    history(state, tests, { count: 100, from: '2026-11-21T00:00:00Z', everyHours: 0.2 });
+    history(state, tests, { count: 300, from: '2026-11-24T00:00:00Z', everyHours: 0.01, firstRun: 3000 });
+    // A failure created at 10:30 on November 21, ingested late.
+    history(state, tests, {
+      count: 1,
+      from: '2026-11-21T10:30:00Z',
+      firstRun: 9000,
+      rows: (runId) => [rowOf(runId, { state: 'failed' })],
+    });
+
+    const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
+    // Passes from 11:00 to 19:48 survive (45 of them): the 10:00 hour is dropped with everything before it.
+    expect(track?.streak).toBe(345);
+    expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix' });
   });
 
   it('should count no run created at the instant the fix merged, nor before the entry was made', () => {
@@ -671,13 +692,35 @@ describe('the release job', () => {
       {
         'matching-refs/heads/flake-release': [
           { ref: 'refs/heads/flake-release/2026-11-24-abcd1234', object: { sha: 'branch-sha' } },
-          { ref: 'refs/heads/flake-release/2026-11-20-merged00', object: { sha: 'branch-sha' } },
           { ref: 'refs/heads/flake-release/2026-11-19-closed00', object: { sha: 'branch-sha' } },
         ],
         'matching-refs/heads/flake-expiry': [],
         '/pulls?': (requested: string) =>
-          requested.includes('merged00')
-            ? [{ number: 70, state: 'closed', merged_at: '2026-11-21T08:00:00Z' }]
+          requested.includes('sort=updated')
+            ? [
+                // Merged, its branch since deleted: still found.
+                {
+                  number: 70,
+                  state: 'closed',
+                  merged_at: '2026-11-21T08:00:00Z',
+                  updated_at: '2026-11-21T08:00:00Z',
+                  head: { ref: 'flake-release/2026-11-20-merged00', sha: 'branch-sha' },
+                },
+                {
+                  number: 72,
+                  state: 'closed',
+                  merged_at: '2026-11-21T09:00:00Z',
+                  updated_at: '2026-11-21T09:00:00Z',
+                  head: { ref: 'claude/other', sha: 'other' },
+                },
+                {
+                  number: 71,
+                  state: 'closed',
+                  merged_at: null,
+                  updated_at: '2026-11-20T08:00:00Z',
+                  head: { ref: 'flake-release/2026-11-19-closed00', sha: 'branch-sha' },
+                },
+              ]
             : requested.includes('closed00')
               ? [{ number: 71, state: 'closed', merged_at: null }]
               : [],
@@ -698,6 +741,7 @@ describe('the release job', () => {
       ],
       landed: [
         {
+          kind: 'release',
           branch: 'flake-release/2026-11-20-merged00',
           mergedAt: '2026-11-21T08:00:00Z',
           removed: [{ path, entry: entryOf() }],
@@ -757,11 +801,19 @@ describe('the release job', () => {
       ],
       '/issues/19': { number: 19, state: 'closed', labels: [{ name: 'flake' }, { name: 'flake:released' }] },
     });
-    const landed = [
+    const landed: LandedRemoval[] = [
       {
+        kind: 'release',
         branch,
         mergedAt: '2026-11-25T08:00:00Z',
         removed: [12, 14, 18, 19].map((issue) => ({ path, entry: entryOf({ issue }) })),
+      },
+      // An expiry merged by hand after its owner update failed: the note and the label are finished.
+      {
+        kind: 'expiry',
+        branch: 'flake-expiry/2026-12-04-cccc',
+        mergedAt: '2026-12-04T09:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 20 }) }],
       },
     ];
 
@@ -785,7 +837,18 @@ describe('the release job', () => {
     )?.body as { body: string };
     expect(lastLanded([closing.body])).toMatchObject({ branch, released: '2026-11-25', created: '2026-11-20' });
     expect(lastRemoval([closing.body])).toBeUndefined();
-    expect(outcome).toHaveLength(3);
+    const expiryNote = requests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/issues/20/comments'),
+    )?.body as { body: string };
+    expect(lastRemoval([expiryNote.body])).toMatchObject({
+      kind: 'expiry',
+      record: { branch: 'flake-expiry/2026-12-04-cccc' },
+    });
+    expect(requests.find((request) => request.path.endsWith('/issues/20/labels'))?.body).toEqual({
+      labels: ['flake:needs-operator'],
+    });
+    expect(patched(20)).toBeUndefined();
+    expect(outcome).toHaveLength(4);
   });
 
   it('should leave auto-merge off until every owner issue is told', async () => {

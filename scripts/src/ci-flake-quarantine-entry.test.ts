@@ -897,6 +897,26 @@ describe('the 30-day return (FQ-9)', () => {
     ]);
   });
 
+  it('should post only the missing note of an open, labelled issue whose note failed', async () => {
+    const half = { ...record, expires: '2026-11-21', handoff: { labelled: true, noted: false, open: true } };
+    const refused = plan(replayWeek(), { returns: new Map([[record.identity, half]]) }).refused.filter(
+      (refusal) => refusal.kind === 'returned',
+    );
+    const { github, requests } = fakeGitHub();
+
+    await applyPlan(
+      github,
+      { admitted: [], held: [], refused },
+      { base: 'main', baseSha: sha(1), quarantines: [], problems: [], today: '2026-11-22' },
+    );
+
+    const writes = requests.filter((request) => request.method !== 'GET');
+    expect(writes.map((request) => [request.method, request.path])).toEqual([
+      ['POST', '/repos/taucad/tau/issues/77/comments'],
+    ]);
+    expect(writes[0]?.body).toMatchObject({ body: expect.stringContaining(returnMarker(half)) as unknown });
+  });
+
   it('should fail closed on a list longer than it reads', async () => {
     const github: Client = {
       repository: 'taucad/tau',

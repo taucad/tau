@@ -919,7 +919,7 @@ export const useTauCloudIntentConnection = ({
             await connectRemote('tau');
             return;
           }
-          /* Another account signed in while the first turn held the backup: back to `noticed`, so the next account
+          /* A different person signed in while the first turn held the backup: back to `noticed`, so the next account
            * that may connect still does, once. */
           if (tauCloudIntent.get(projectId) === 'connected') {
             tauCloudIntent.set(projectId, 'noticed');

@@ -312,6 +312,9 @@
 \* HA1 review (2026-11-27): the hold is lifted only by the pick that set it, so a newer pick that supersedes a deferred
 \* one keeps the queue held until its own writes are done. Only a chat whose own run the file shows defers a pick.
 \* The pick's mark is a symbol of its own. No action or verdict changes.
+\* HA1 review round 3 (2026-11-27): an applied pick decides again whether the chat is read from the file before its
+\* observer restarts, so a chat moved to a paired computer reads that host, and the own watch follows new
+\* dependencies. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

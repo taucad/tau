@@ -36,6 +36,9 @@ export const unsettledReadPollMilliseconds = 1000;
  */
 export const readRefusalMilliseconds = 30_000;
 
+/** The longest wait between HA-I5 in-page `attach` sends while a complete stale span stays unsettled. Milliseconds. */
+export const inPageAttachBackoffMilliseconds = 8000;
+
 /** What a pass decided about the chat's own segment (HA-I3a). @public */
 export type OwnSegmentVerdict =
   /** The projection holds the file: its own rows, or an authoritative empty own read. */
@@ -162,6 +165,9 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
   let unreadable = false;
   /** The settler span (HA-I5): when it started, and the row and mtime it last saw. */
   let staleSince: number | undefined;
+  /* The in-page `attach`s this complete span sent, and when the next may go (1 s doubling to the cap). */
+  let staleTries = 0;
+  let nextAttachAt = 0;
   let lastChange: string | undefined;
 
   const projection = (): ChatProjection => input.projection.getSnapshot().context;
@@ -318,11 +324,17 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
     input.onVerdict('current', 'rows');
   };
 
+  const restartSpan = (): void => {
+    staleSince = undefined;
+    staleTries = 0;
+    nextAttachAt = 0;
+  };
+
   /** HA-I5: whether an unsettled own run has looked stale long enough for an in-page `attach`. */
   const checkSpan = async (): Promise<boolean> => {
     const phase = selectRunPhase(projection());
     if (view === undefined || ended.has(phase)) {
-      staleSince = undefined;
+      restartSpan();
       lastChange = undefined;
       return false;
     }
@@ -338,15 +350,20 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
     if (change !== lastChange) {
       /* Any change restarts the span: a live writer's touch can never let it complete. */
       lastChange = change;
-      staleSince = undefined;
+      restartSpan();
     }
     if (now() - Math.max(rowAt ?? 0, markerAt ?? 0) < foreignRunStaleMilliseconds) {
-      staleSince = undefined;
+      restartSpan();
       return true;
     }
     /* Never backdated: the span starts at the first poll that sees the run stale, so a sleep cannot complete it. */
     staleSince ??= monotonicNow();
-    if (monotonicNow() - staleSince >= 2 * runHeartbeatMilliseconds) {
+    const at = monotonicNow();
+    if (at - staleSince >= 2 * runHeartbeatMilliseconds && at >= nextAttachAt) {
+      /* The first `attach` goes on the poll that completes the span (XD3 + 2 x heartbeat + one poll); one that does not
+       * settle the run is sent again, backing off to the cap, so an unanswering host is not asked every second. */
+      staleTries += 1;
+      nextAttachAt = at + Math.min(1000 * 2 ** (staleTries - 1), inPageAttachBackoffMilliseconds);
       input.onStaleRun();
     }
     return true;

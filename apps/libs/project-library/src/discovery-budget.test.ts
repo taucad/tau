@@ -345,6 +345,41 @@ describe('mutations that change no disk fact', () => {
   });
 });
 
+describe('listing rows refreshed with no scan', () => {
+  it('should keep the newer listing when an earlier refresh of the same pass finishes last', async () => {
+    const harness = await startLibrary();
+    const projectId = homeId(12);
+    const { worker } = harness.profile;
+    await worker.trashProject(projectId);
+    /* The first refresh reads the rows while the project is in the Trash, and its read answers only once released. */
+    const released = Promise.withResolvers<void>();
+    const readStates = worker.getProjectLibraryStates.bind(worker);
+    vi.spyOn(worker, 'getProjectLibraryStates').mockImplementationOnce(async (projectIds) => {
+      const states = await readStates(projectIds);
+      await released.promise;
+      return states;
+    });
+    const earlier = harness.library.refreshListingRows();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    /* Restore, and a second refresh of the same pass reads and publishes the restored row first. */
+    await worker.restoreProject(projectId);
+    await harness.library.refreshListingRows();
+    const deletedAtOf = (): number | undefined =>
+      harness.queryClient
+        .getQueryData<ProjectListing>(['projects'])
+        ?.projects.find((project) => project.projectId === projectId)?.library.deletedAt;
+    expect(deletedAtOf()).toBeUndefined();
+
+    released.resolve();
+    await earlier;
+
+    expect(deletedAtOf()).toBeUndefined();
+  });
+});
+
 describe('a copy delete proves the other copy from disk', () => {
   it('should journal a copy delete with copy once it has read the route copy', async () => {
     const harness = await startLibrary();

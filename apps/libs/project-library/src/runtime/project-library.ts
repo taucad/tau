@@ -382,6 +382,8 @@ export class ProjectLibrary<
   readonly #subscriptions: Array<() => void> = [];
   /** Request ids for the machines' questions; they count from 0 in each life of the tab. */
   #requests = 0;
+  /** Counts `refreshListingRows` calls, so only the latest one publishes the listing it built. */
+  #listingPublications = 0;
   /** What each scan read, by its pass's epoch, until that pass plans its writes. */
   readonly #scans = new Map<number, DiscoveryScan>();
   /*
@@ -902,6 +904,8 @@ export class ProjectLibrary<
    * is owed already, and the listing is refetched to take it; so is one whose rows could not be read. It never rejects.
    */
   public readonly refreshListingRows = async (): Promise<void> => {
+    this.#listingPublications += 1;
+    const publication = this.#listingPublications;
     const { snapshot } = this.discovery.getSnapshot().context;
     if (snapshot === undefined || !selectEpochCurrent(this.discovery.getSnapshot(), snapshot.epoch)) {
       await this.invalidateProjectListing();
@@ -915,7 +919,8 @@ export class ProjectLibrary<
       await this.invalidateProjectListing();
       return;
     }
-    if (selectEpochCurrent(this.discovery.getSnapshot(), snapshot.epoch)) {
+    /* A later call read the rows after this one did: its listing is the newer, whichever finishes first. */
+    if (publication === this.#listingPublications && selectEpochCurrent(this.discovery.getSnapshot(), snapshot.epoch)) {
       this.queryClient.setQueryData(['projects'], listing);
     }
   };

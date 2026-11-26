@@ -247,8 +247,8 @@ const mutations: Readonly<Record<string, (harness: Harness) => Promise<unknown>>
 
 /**
  * What `counts` cost at the per-call figures the ceiling's `scan` and `verification` rows carry. Those rows are held to
- * what the filesystem cost test measures by that test (`project-directories.discovery-cost.test.ts`), so they cannot
- * drift from the authority's real cost.
+ * the unit costs the filesystem cost test measures (`packages/filesystem/src/testing/discovery-unit-cost.json`), so
+ * they cannot drift from the authority's real cost.
  */
 const budgetOf = ({
   scans,
@@ -265,6 +265,20 @@ const budgetOf = ({
 });
 
 describe('discovery budget per library mutation', () => {
+  it('should charge a scan and a verification at the unit costs the filesystem measures', () => {
+    const unitCost = JSON.parse(
+      readFileSync(
+        path.join(import.meta.dirname, '../../../../packages/filesystem/src/testing/discovery-unit-cost.json'),
+        'utf8',
+      ),
+    ) as Readonly<{ scan: unknown; verification: unknown }>;
+
+    expect({ scan: ceiling.scan, verification: ceiling.verification }).toEqual({
+      scan: unitCost.scan,
+      verification: unitCost.verification,
+    });
+  });
+
   it('should hold one budget row for every mutation it runs, and no other', () => {
     expect(Object.keys(ceiling.mutations).toSorted()).toEqual(Object.keys(mutations).toSorted());
   });

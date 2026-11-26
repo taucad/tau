@@ -47,7 +47,10 @@ export type LogLeadershipAction =
   | 'Answer'
   | 'Heartbeat'
   | 'QueueReconcile'
-  | 'TimeOut';
+  | 'TimeOut'
+  | 'RefuseClaim'
+  | 'OpenClaim'
+  | 'ReleaseRefused';
 
 /** A transition's label: the spec action it refines, or `Unmodelled`. */
 export type LeadershipTransitionLabel = LogLeadershipAction | 'Unmodelled';
@@ -72,7 +75,21 @@ export type LeadershipInput = Readonly<{
    * release or a successor before it is answered (C11); 10 s when absent.
    */
   closedHostBound?: number | undefined;
+  /** How long a claim refused `WRITER_LOCKED` is retried before the lock goes (HA4); {@link claimRefusalRetryMilliseconds}. */
+  claimRefusalRetry?: number | undefined;
+  /** The pause between two claims of a chat whose last claim was refused `WRITER_LOCKED` (HA4); 1 s when absent. */
+  claimRetry?: number | undefined;
 }>;
+
+/**
+ * HA4 (AR3-6): how long M2 keeps retrying a claim refused `WRITER_LOCKED` after its grant, before it lets the lock go.
+ * The still-closing bound (`chatClosingWaitMilliseconds`, `CreateTauAgentHostOptions.delays.closingWait`): a closing
+ * incarnation that outlives it is not one that is about to close. Any other refusal releases at once.
+ */
+export const claimRefusalRetryMilliseconds = 10_000;
+
+/** HA4: the pause between two claims of a chat whose last claim was refused `WRITER_LOCKED`. */
+export const claimRetryMilliseconds = 1000;
 
 /** A Web Lock request in flight, or held once `granted` (finding 1: hiding drops only one not yet granted). */
 type Lock = Readonly<{ corr: string; mode: LockMode; granted: boolean }>;
@@ -123,6 +140,12 @@ type LeadershipContext = Readonly<{
   quiet: boolean;
   /** C11: how long a write refused by a draining holder waits for its release or a successor. */
   closedHostBound: number;
+  /** HA4: how long a claim refused `WRITER_LOCKED` is retried before the lock goes. */
+  claimRefusalRetry: number;
+  /** HA4: the pause between two claims of a refused term. */
+  claimRetry: number;
+  /** HA4: this term's claim was refused `WRITER_LOCKED` and no retry has opened the writer yet. */
+  refusedClaim: boolean;
 }>;
 
 /** `claiming` and `leading` hold a granted lock: no read or claim runs without its correlation (finding 1). */
@@ -141,7 +164,8 @@ export type LeadershipEffectArgs = Readonly<{
   releaseLock: Readonly<{ corr: string }>;
   broadcast: Readonly<{ kind: 'hb' | 'cmd' | 'ans' | 'es'; epoch: number; body: Readonly<Record<string, unknown>> }>;
   readView: Readonly<{ corr: string }>;
-  claim: Readonly<{ epoch: number }>;
+  /** `corr` is the grant's: the binding reports a refused claim as `claimRefused`, an opened one as `claimed`. */
+  claim: Readonly<{ corr: string; epoch: number }>;
   runLocal: Readonly<{ corr: string; command: HostCommand; epoch: number }>;
   answer: Readonly<{ corr: string; answer: CommandAnswer }>;
   readLocal: Readonly<{ corr: string; request: ReadRequest }>;
@@ -167,6 +191,11 @@ export const leadershipIgnoredEvents: ReadonlyArray<readonly [state: string, eve
   ['*', 'viewRead'],
   ['*', 'viewRefused'],
   ['*', 'viewFailed'],
+  /* A claim's report, a retry or the refusal bound, after the grant it served was let go (HA4). */
+  ['*', 'claimRefused'],
+  ['*', 'claimed'],
+  ['*', 'claimRetry'],
+  ['*', 'claimRefusalBound'],
   /* A fenced append outside a term this worker leads: its relinquish already closed that writer. */
   ['*', 'fenced'],
   /* A bound's report, or a page that resumed, after this worker stopped waiting on a heartbeat. */
@@ -246,6 +275,10 @@ const run = <Name extends keyof LeadershipEffectArgs>(
 
 /** The delayed `closedHostBound` event of one write refused by a draining holder. */
 const closedBoundId = (corr: string): string => `closedHost:${corr}`;
+
+/** The delayed events of one grant's refused claim (HA4). */
+const claimRetryId = (corr: string): string => `claimRetry:${corr}`;
+const claimRefusalId = (corr: string): string => `claimRefusal:${corr}`;
 
 /** A forwarded admission the holder refused only because it is draining: held once for its successor (T3). */
 const refusedByDrain = (write: Write, answer: CommandAnswer): boolean =>
@@ -536,12 +569,25 @@ const releaseIfQuiet = (
   if (!releasable(context)) {
     return { context };
   }
+  return releaseNow(context, enq, actions);
+};
+
+/** Relinquish the writer, then release the lock, then say so: what quiescence does, and a refused claim's end (HA4). */
+const releaseNow = (
+  context: LeadingContext,
+  enq: unknown,
+  actions: Effects,
+): Readonly<{ target: '#ready'; context: LeadershipContext }> => {
   run(enq, actions, 'relinquish', {});
   const next = release(context, enq, actions);
   /* Last: a follower that hears it finds the writer relinquished and the lock released (the binding orders it so). */
   run(enq, actions, 'broadcast', { kind: 'hb', epoch: context.epoch, body: { state: 'released' } });
-  return { target: '#ready', context: next };
+  return { target: '#ready', context: { ...next, refusedClaim: false } };
 };
+
+/** A claim report or retry for the term this worker leads now: its grant and its epoch (HA4). */
+const thisTerm = (context: LeadingContext, event: Readonly<{ corr: string; epoch: number }>): boolean =>
+  event.corr === context.lock.corr && event.epoch === context.epoch;
 
 /* oxlint-enable eslint/max-params */
 
@@ -564,6 +610,12 @@ const machineDefinition = setup({
       viewRead: types<Readonly<{ corr: string; epoch: number }>>(),
       viewRefused: types<Readonly<{ corr: string; code: string }>>(),
       viewFailed: types<Readonly<{ corr: string; message: string }>>(),
+      /* HA4: the binding's report of a claim (`claim`'s effect): refused with its code, or opened. */
+      claimRefused: types<Readonly<{ corr: string; epoch: number; code: string }>>(),
+      claimed: types<Readonly<{ corr: string; epoch: number }>>(),
+      /* HA4: the pause after a refused claim passed, and the refusal bound passed. */
+      claimRetry: types<Readonly<{ corr: string; epoch: number }>>(),
+      claimRefusalBound: types<Readonly<{ corr: string; epoch: number }>>(),
       executed: types<Readonly<{ corr: string; answer: CommandAnswer }>>(),
       appended: types<Readonly<{ endCursor: number }>>(),
       fenced: types<Readonly<Record<string, never>>>(),
@@ -627,7 +679,7 @@ const machineDefinition = setup({
  */
 export const leadershipMachine = machineDefinition.createMachine({
   id: 'leadership',
-  version: '2',
+  version: '3',
   context: ({ input }) => ({
     chatId: input.chatId,
     sender: input.sender,
@@ -645,6 +697,9 @@ export const leadershipMachine = machineDefinition.createMachine({
     reconcile: false,
     quiet: true,
     closedHostBound: input.closedHostBound ?? 10_000,
+    claimRefusalRetry: input.claimRefusalRetry ?? claimRefusalRetryMilliseconds,
+    claimRetry: input.claimRetry ?? claimRetryMilliseconds,
+    refusedClaim: false,
   }),
   initial: 'idle',
   /* A fault (MC-R12, D-092): everything owed is answered, the lock and the writer are let go, and the project host
@@ -800,9 +855,15 @@ export const leadershipMachine = machineDefinition.createMachine({
           }
           /* RH-R16: post the grantee's heartbeat so followers hear it, then assume and claim (RH-R9). */
           run(enq, actions, 'broadcast', { kind: 'hb', epoch: event.epoch, body: { state: 'leading' } });
-          run(enq, actions, 'claim', { epoch: event.epoch });
+          run(enq, actions, 'claim', { corr: context.lock.corr, epoch: event.epoch });
           const leading = runHeld(
-            { ...context, epoch: event.epoch, floor: Math.max(context.floor, event.epoch), reconcile: false },
+            {
+              ...context,
+              epoch: event.epoch,
+              floor: Math.max(context.floor, event.epoch),
+              reconcile: false,
+              refusedClaim: false,
+            },
             enq,
             actions,
           );
@@ -876,8 +937,54 @@ export const leadershipMachine = machineDefinition.createMachine({
         /* Leading reconciles at once: the claim opens M1, which reconciles when it is next quiescent (W7). `QueueReconcile`
          * is enabled only without a term, so this is no spec step. */
         reconcile: refines('Unmodelled', ({ context, actions }, enq) => {
-          run(enq, actions, 'claim', { epoch: context.epoch });
+          run(enq, actions, 'claim', { corr: context.lock.corr, epoch: context.epoch });
           return {};
+        }),
+        /* HA4 (RC3, H22): the claim after this grant was refused, so no writer is open and nothing here can write. A
+         * closing incarnation (`WRITER_LOCKED`) is waited out: the claim is retried each `claimRetry`
+         * until `claimRefusalRetry` passes. Any other refusal lets the lock go at once, so another tab, or this one's
+         * next reconcile, may claim the chat. */
+        claimRefused: branches(
+          refines('Unmodelled', ({ context, event }) => (thisTerm(context, event) ? undefined : {})),
+          refines('ReleaseRefused', ({ context, event, actions }, enq) =>
+            event.code === 'WRITER_LOCKED' ? undefined : releaseNow(context, enq, actions),
+          ),
+          refines('RefuseClaim', ({ context, event }, enq) => {
+            const { corr, epoch } = event;
+            enq.cancel(claimRetryId(corr));
+            enq.raise({ type: 'claimRetry', corr, epoch }, { id: claimRetryId(corr), delay: context.claimRetry }); // Bound: claimRetryMilliseconds.
+            if (!context.refusedClaim) {
+              enq.raise(
+                { type: 'claimRefusalBound', corr, epoch },
+                { id: claimRefusalId(corr), delay: context.claimRefusalRetry },
+              ); // Bound: claimRefusalRetryMilliseconds.
+            }
+            return { context: { ...context, refusedClaim: true } };
+          }),
+        ),
+        /* HA4: a retry opened the writer: the term writes, and the bound is off. */
+        claimed: refines('OpenClaim', ({ context, event }, enq) => {
+          if (!thisTerm(context, event) || !context.refusedClaim) {
+            return {};
+          }
+          enq.cancel(claimRetryId(event.corr));
+          enq.cancel(claimRefusalId(event.corr));
+          return { context: { ...context, refusedClaim: false } };
+        }),
+        claimRetry: refines('Unmodelled', ({ context, event, actions }, enq) => {
+          if (!thisTerm(context, event) || !context.refusedClaim) {
+            return {};
+          }
+          run(enq, actions, 'claim', { corr: context.lock.corr, epoch: context.epoch });
+          return {};
+        }),
+        /* HA4 (AR3-6): still refused at the still-closing bound: the lock goes, and the orphan waits for the next claim. */
+        claimRefusalBound: refines('ReleaseRefused', ({ context, event, actions }, enq) => {
+          if (!thisTerm(context, event) || !context.refusedClaim) {
+            return {};
+          }
+          enq.cancel(claimRetryId(event.corr));
+          return releaseNow(context, enq, actions);
         }),
         /* EQ4: quiescent with nothing in flight releases the lock and closes the writer (RH-R8). */
         quiescent: branches(

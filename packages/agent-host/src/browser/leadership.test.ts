@@ -128,6 +128,48 @@ describe('browser leadership', () => {
 describe('browser leadership binding', () => {
   afterEach(closePorts);
 
+  /* HA0 row 8b (H22, HA4): a claim refused after the grant settles within its bound. A closing incarnation's refusal is
+   * claimed again until a claim opens the writer, which then abandons the orphan; one never answered lets the lock go
+   * at the still-closing bound. */
+  it('should claim again after a WRITER_LOCKED claim and keep the lock once one opens', async () => {
+    const project = uniqueProject();
+    const { lock } = chatLeadershipNames(project, 'chat-1');
+    const answers: Array<string | undefined> = ['WRITER_LOCKED', 'WRITER_LOCKED', undefined];
+    const { host, calls } = scriptedHost({
+      claim: async () => {
+        calls.push('claim');
+        return answers.shift();
+      },
+    });
+    const port = bindTab(host, { project });
+    port.reconcile('chat-1', { wait: false });
+    await until(() => calls.filter((call) => call === 'claim').length === 3);
+    await wait(bindingDelays.claimRefusalRetry + 100);
+    expect(calls.filter((call) => call === 'claim')).toHaveLength(3);
+    expect(calls).not.toContain('relinquish');
+    expect(await heldLocks()).toContain(lock);
+  });
+
+  it('should release the lock when the claim is still refused at the bound', async () => {
+    const project = uniqueProject();
+    const { lock } = chatLeadershipNames(project, 'chat-1');
+    const { host, calls } = scriptedHost({
+      claim: async () => {
+        calls.push('claim');
+        return 'WRITER_LOCKED';
+      },
+    });
+    const port = bindTab(host, { project });
+    port.reconcile('chat-1', { wait: false });
+    await until(() => calls.includes('relinquish'));
+    expect(calls.filter((call) => call === 'claim').length).toBeGreaterThan(1);
+    await until(async () => {
+      const held = await heldLocks();
+      return !held.includes(lock);
+    });
+    expect(port.role('chat-1').role).not.toBe('leader');
+  });
+
   /* Finding 12: the next grantee never finds the OPFS handle still open. */
   it('should release the lock only after the writer is relinquished', async () => {
     const project = uniqueProject();

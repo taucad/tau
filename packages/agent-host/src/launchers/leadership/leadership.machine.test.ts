@@ -351,7 +351,7 @@ describe('leadership (M2)', () => {
     expect(leader.of('relinquish')).toHaveLength(1);
     const [reread] = leader.take('readView');
     leader.actor.send({ type: 'viewRead', corr: reread!.corr, epoch: 3 });
-    expect(leader.take('claim')).toEqual([{ epoch: 3 }]);
+    expect(leader.take('claim')).toEqual([{ corr: reread!.corr, epoch: 3 }]);
     expect(leader.actor.getSnapshot().context.floor).toBe(3);
   });
   /* RH-A3 (RH-R12): a heard holder that falls silent is stolen from on the provider leg; its stale view is fenced. */
@@ -424,6 +424,73 @@ describe('leadership (M2)', () => {
     await leader.clock.advanceAsync(3500);
     expect(leader.take('requestLock')).toEqual([{ corr: expect.any(String) as unknown, mode: 'queued' }]);
   });
+
+  /* HA4 (H22, RC3, AR3-6): a claim refused after the grant leaves no writer. A closing incarnation's refusal is retried
+   * until the still-closing bound, then the lock goes; any other refusal lets it go at once. */
+  describe('a claim refused after the grant', () => {
+    /** Lead at epoch 2 and return the grant's correlation, with the effects cleared. */
+    const leading = (leader: ReturnType<typeof harness>): string => {
+      leader.actor.send({ type: 'reconcile', wait: false });
+      const [lock] = leader.take('requestLock');
+      leader.actor.send({ type: 'lockGranted', corr: lock!.corr });
+      leader.actor.send({ type: 'viewRead', corr: lock!.corr, epoch: 2 });
+      expect(leader.take('claim')).toEqual([{ corr: lock!.corr, epoch: 2 }]);
+      return lock!.corr;
+    };
+
+    it('should retry a WRITER_LOCKED claim until the bound, then release the lock', async () => {
+      const leader = harness({ claimRefusalRetry: 3000 });
+      const corr = leading(leader);
+      leader.actor.send({ type: 'quiescent', quiescent: false });
+      for (let retry = 0; retry < 2; retry += 1) {
+        leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+        // oxlint-disable-next-line no-await-in-loop -- each retry follows its pause.
+        await leader.clock.advanceAsync(1000);
+        expect(leader.take('claim')).toEqual([{ corr, epoch: 2 }]);
+        expect(leader.actor.getSnapshot().value).toBe('leading');
+      }
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+      await leader.clock.advanceAsync(1000);
+      expect(leader.of('relinquish')).toHaveLength(1);
+      expect(leader.of('releaseLock')).toEqual([{ corr }]);
+      expect(leader.of('broadcast').at(-1)).toEqual({ kind: 'hb', epoch: 2, body: { state: 'released' } });
+      expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
+    });
+
+    it('should keep the lock once a retry opens the writer', async () => {
+      const leader = harness({ claimRefusalRetry: 3000 });
+      const corr = leading(leader);
+      leader.actor.send({ type: 'quiescent', quiescent: false });
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+      await leader.clock.advanceAsync(1000);
+      expect(leader.take('claim')).toHaveLength(1);
+      leader.actor.send({ type: 'claimed', corr, epoch: 2 });
+      await leader.clock.advanceAsync(10_000);
+      expect(leader.of('claim')).toEqual([]);
+      expect(leader.of('releaseLock')).toEqual([]);
+      expect(leader.actor.getSnapshot().value).toBe('leading');
+    });
+
+    it('should release the lock at once on any other refusal', () => {
+      const leader = harness();
+      const corr = leading(leader);
+      leader.actor.send({ type: 'quiescent', quiescent: false });
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'LOG_POISONED' });
+      expect(leader.of('relinquish')).toHaveLength(1);
+      expect(leader.of('releaseLock')).toEqual([{ corr }]);
+      expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
+    });
+
+    it("should drop a refusal from an earlier term's claim", async () => {
+      const leader = harness({ claimRefusalRetry: 3000 });
+      const corr = leading(leader);
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 1, code: 'LOG_POISONED' });
+      leader.actor.send({ type: 'claimRefused', corr: 'lock:other', epoch: 2, code: 'LOG_POISONED' });
+      await leader.clock.advanceAsync(10_000);
+      expect(leader.of('releaseLock')).toEqual([]);
+      expect(leader.actor.getSnapshot().value).toBe('leading');
+    });
+  });
 });
 
 /* W6.r1 findings 1, 2 and 11 (probes P1, P1b, P3). */
@@ -465,7 +532,7 @@ describe('leadership under the page lifecycle', () => {
     expect(reread).toEqual({ corr });
     leader.actor.send({ type: 'viewRead', corr, epoch: 3 });
     expect(leader.actor.getSnapshot().value).toBe('leading');
-    expect(leader.take('claim')).toEqual([{ epoch: 3 }]);
+    expect(leader.take('claim')).toEqual([{ corr, epoch: 3 }]);
   });
 
   /* Finding 1: claiming is bounded, so a reread that never answers cannot wedge the writes waiting on it. */
@@ -680,6 +747,9 @@ describe('leadership transition labels', () => {
           'Retry',
           'SelfLead',
           'TimeOut',
+          'RefuseClaim',
+          'OpenClaim',
+          'ReleaseRefused',
         ],
         /* Faults and the platform (crash, freeze, the lock manager's queue), M1's appends (`Start`, `End`, `Abandon`,
          * `Process`), and steps M2 takes inside one labelled transition: `ReadStart` is the `readView` effect of

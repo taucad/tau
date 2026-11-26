@@ -3,15 +3,17 @@
  * chat by reading the log and appending; a writer whose view predates that claim is fenced.
  */
 
-import { spawnSync } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
+import type { LeadershipHost } from '#launchers/chat-store.js';
+import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import { followChat } from '#log/follow-chat.js';
 import type { AgentLogEvent } from '#log/event-types.js';
@@ -131,5 +133,95 @@ describe('Node leadership', () => {
       } as AgentLogEvent),
     ).rejects.toMatchObject({ code: 'LOG_FENCED' });
     expect(await readFile(logPath, 'utf8')).toBe(before);
+  });
+});
+
+/* HA4 (RC3): a reconciliation's claim is retried while a closing incarnation refuses it, never fired and forgotten. */
+describe('Node leadership reconciliation', () => {
+  /** A host whose claims answer `codes` in turn, then open. */
+  const hostAnswering = (codes: ReadonlyArray<string | undefined>) => {
+    const answers = [...codes];
+    const claim = vi.fn(async () => answers.shift());
+    const host = { claim, writing: () => false } as unknown as LeadershipHost;
+    return { host, claim };
+  };
+  const delays = { claimRetry: 5, claimRefusalRetry: 1000 };
+  const pause = async (milliseconds: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+
+  it('should claim again while the claim is refused WRITER_LOCKED, until it opens', async () => {
+    const { host, claim } = hostAnswering(['WRITER_LOCKED', 'WRITER_LOCKED', undefined]);
+    const port = createNodeLeadership(host, delays);
+    port.reconcile('chat-1', { wait: true });
+    await vi.waitFor(() => {
+      expect(claim).toHaveBeenCalledTimes(3);
+    });
+    await port.close();
+    expect(claim).toHaveBeenCalledTimes(3);
+  });
+
+  it('should stop claiming at the still-closing bound', async () => {
+    const claim = vi.fn(async () => 'WRITER_LOCKED');
+    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, {
+      claimRetry: 5,
+      claimRefusalRetry: 30,
+    });
+    port.reconcile('chat-1', { wait: true });
+    await vi.waitFor(() => {
+      expect(claim.mock.calls.length).toBeGreaterThan(1);
+    });
+    await pause(80);
+    const calls = claim.mock.calls.length;
+    await pause(40);
+    expect(claim.mock.calls.length).toBe(calls);
+    await port.close();
+  });
+
+  it('should not retry any other refusal', async () => {
+    const { host, claim } = hostAnswering(['LOG_POISONED', undefined]);
+    const port = createNodeLeadership(host, delays);
+    port.reconcile('chat-1', { wait: true });
+    await port.close();
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+
+  it('should run one reconciliation per chat at a time, and wait for it on close', async () => {
+    let open: (code: string | undefined) => void = () => undefined;
+    const claim = vi.fn(
+      async () =>
+        new Promise<string | undefined>((resolve) => {
+          open = resolve;
+        }),
+    );
+    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, delays);
+    port.reconcile('chat-1', { wait: true });
+    port.reconcile('chat-1', { wait: true });
+    expect(claim).toHaveBeenCalledTimes(1);
+    const closing = port.close();
+    expect(await Promise.race([closing.then(() => 'closed'), pause(20).then(() => 'waiting')])).toBe('waiting');
+    open(undefined);
+    await closing;
+  });
+
+  /* H32: a second process on the project, refused by the live writer that drives the run, reports no takeover. */
+  it("should not report a takeover of a run another process's live writer holds", async () => {
+    const { root, logPath } = await seedRunningChat('chat-held');
+    const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    try {
+      /* The marker names the log by its real path, as the writer that holds it records it. */
+      await writeFile(`${logPath}.lock`, `${String(holder.pid)}\n${await realpath(logPath)}\n`, 'utf8');
+      const launcher = launch(root);
+      const answer = await launcher.execute({
+        type: 'attach',
+        commandId: 'attach-1',
+        payload: { chatId: 'chat-held' },
+      });
+      expect(answer).toMatchObject({ status: 'applied', details: { takeover: false } });
+      expect(await readFile(logPath, 'utf8')).not.toContain('"state":"failed"');
+    } finally {
+      holder.kill();
+    }
   });
 });

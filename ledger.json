@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T12:18:27.654Z",
+  "updatedAt": "2026-11-26T12:51:06.046Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2835,62 +2835,75 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45821539303,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2815",
+      "sha": "3cd7b3696de2e937cf67305f9026e125d553b352",
+      "at": "2026-11-26T12:50:51Z",
+      "conclusion": "cancelled",
+      "artifacts": 31,
+      "counted": 27818,
+      "replayed": 2337,
+      "rejected": 0
     }
   ],
   "tasks": {
     "agent-host-ui:test": {
-      "executions": 17,
-      "tests": 516,
+      "executions": 18,
+      "tests": 549,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "targets": {
+        "test linux-x64": 4
+      }
+    },
+    "agent-host:test": {
+      "executions": 15,
+      "tests": 31083,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "targets": {
+        "test linux-x64": 6
+      }
+    },
+    "agent-host:test:e2e": {
+      "executions": 15,
+      "tests": 465,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "targets": {
+        "test:e2e linux-x64 browser=chromium": 6
+      }
+    },
+    "agent-observability:test": {
+      "executions": 9,
+      "tests": 1876,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-25T06:23:35Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
         "test linux-x64": 3
       }
     },
-    "agent-host:test": {
-      "executions": 14,
-      "tests": 28968,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
-      "targets": {
-        "test linux-x64": 5
-      }
-    },
-    "agent-host:test:e2e": {
-      "executions": 14,
-      "tests": 434,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
-      "targets": {
-        "test:e2e linux-x64 browser=chromium": 5
-      }
-    },
-    "agent-observability:test": {
-      "executions": 8,
-      "tests": 1669,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
-      "targets": {
-        "test linux-x64": 2
-      }
-    },
     "agent-observability:test:e2e": {
-      "executions": 14,
-      "tests": 1511,
+      "executions": 15,
+      "tests": 1620,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e linux-x64 browser=chromium": 5
+        "test:e2e linux-x64 browser=chromium": 6
       }
     },
     "agent-plugin:test": {
@@ -2910,25 +2923,25 @@
       "lastSeen": "2026-11-26T01:34:30Z"
     },
     "agent-tools:test": {
-      "executions": 12,
-      "tests": 7398,
+      "executions": 13,
+      "tests": 8017,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "api-agent-observability:test": {
-      "executions": 28,
-      "tests": 3937,
+      "executions": 30,
+      "tests": 4218,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-auth:test": {
@@ -2943,36 +2956,36 @@
       }
     },
     "api-billing:test": {
-      "executions": 28,
-      "tests": 6451,
+      "executions": 30,
+      "tests": 6911,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-chat:test": {
-      "executions": 30,
-      "tests": 2081,
+      "executions": 32,
+      "tests": 2220,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-contracts:test": {
-      "executions": 16,
-      "tests": 32,
+      "executions": 17,
+      "tests": 34,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 4
+        "test linux-x64": 5
       }
     },
     "api-core:test": {
@@ -2998,25 +3011,25 @@
       }
     },
     "api-e2e:test:git": {
-      "executions": 23,
-      "tests": 552,
+      "executions": 24,
+      "tests": 576,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:git linux-x64": 4
+        "test:git linux-x64": 5
       }
     },
     "api-e2e:test:server-modes": {
-      "executions": 25,
-      "tests": 50,
+      "executions": 26,
+      "tests": 52,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:server-modes linux-x64": 5
+        "test:server-modes linux-x64": 6
       }
     },
     "api-email:test": {
@@ -3031,36 +3044,36 @@
       }
     },
     "api-extractor:test": {
-      "executions": 14,
-      "tests": 5852,
+      "executions": 15,
+      "tests": 6270,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "api-git-core:test": {
-      "executions": 28,
-      "tests": 6860,
+      "executions": 30,
+      "tests": 7350,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-git-mirror:test": {
-      "executions": 28,
-      "tests": 2688,
+      "executions": 30,
+      "tests": 2880,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-hosts:test": {
@@ -3086,25 +3099,25 @@
       }
     },
     "api-llm-gateway:test": {
-      "executions": 28,
-      "tests": 4931,
+      "executions": 30,
+      "tests": 5291,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-object-storage:test": {
-      "executions": 28,
-      "tests": 1806,
+      "executions": 30,
+      "tests": 1935,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-observability:test": {
@@ -3119,14 +3132,14 @@
       }
     },
     "api-projects:test": {
-      "executions": 28,
-      "tests": 4550,
+      "executions": 30,
+      "tests": 4875,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api-redis:test": {
@@ -3152,25 +3165,25 @@
       }
     },
     "api:test": {
-      "executions": 30,
-      "tests": 18598,
+      "executions": 32,
+      "tests": 19839,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 10
       }
     },
     "api:test:models": {
-      "executions": 24,
-      "tests": 120,
+      "executions": 25,
+      "tests": 125,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:models linux-x64": 5
+        "test:models linux-x64": 6
       }
     },
     "apps-runtime-e2e:vitest": {
@@ -3209,14 +3222,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "billing-e2e:test": {
-      "executions": 35,
-      "tests": 1785,
+      "executions": 36,
+      "tests": 1836,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 6
+        "test linux-x64": 7
       }
     },
     "billing-ui:test": {
@@ -3247,15 +3260,15 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "build123d:test": {
-      "executions": 46,
-      "tests": 4370,
+      "executions": 49,
+      "tests": 4655,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 6,
-        "test linux-arm64": 3
+        "test linux-x64": 8,
+        "test linux-arm64": 4
       }
     },
     "build123d:test:native-darwin": {
@@ -3310,25 +3323,25 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "chat-surfaces:test": {
-      "executions": 24,
-      "tests": 1512,
+      "executions": 25,
+      "tests": 1575,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 4
+        "test linux-x64": 5
       }
     },
     "chat-ui:test": {
-      "executions": 22,
-      "tests": 16611,
+      "executions": 23,
+      "tests": 17373,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 4
+        "test linux-x64": 5
       }
     },
     "chat:test": {
@@ -3340,36 +3353,36 @@
       "lastSeen": "2026-11-26T00:04:59Z"
     },
     "cli-e2e:test:native-darwin": {
-      "executions": 20,
-      "tests": 200,
+      "executions": 21,
+      "tests": 210,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:native-darwin darwin-arm64": 3
+        "test:native-darwin darwin-arm64": 4
       }
     },
     "cli-e2e:test:scenarios": {
-      "executions": 45,
-      "tests": 1922,
+      "executions": 47,
+      "tests": 2009,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:scenarios linux-x64": 9
+        "test:scenarios linux-x64": 11
       }
     },
     "cli:test": {
-      "executions": 15,
-      "tests": 6780,
+      "executions": 16,
+      "tests": 7232,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 4
+        "test linux-x64": 5
       }
     },
     "consent:test": {
@@ -3400,14 +3413,14 @@
       }
     },
     "desktop-services-host:test": {
-      "executions": 13,
-      "tests": 2990,
+      "executions": 14,
+      "tests": 3220,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "desktop-services-host:test:terminal-conformance": {
@@ -3419,14 +3432,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "desktop-terminal:test": {
-      "executions": 9,
-      "tests": 360,
+      "executions": 10,
+      "tests": 400,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "desktop-terminal:test:terminal-conformance": {
@@ -3438,14 +3451,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "desktop:test": {
-      "executions": 18,
-      "tests": 20061,
+      "executions": 19,
+      "tests": 21181,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "docs:test": {
@@ -3465,14 +3478,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "editor-ui:test": {
-      "executions": 18,
-      "tests": 12806,
+      "executions": 19,
+      "tests": 13529,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "esbuild:test": {
@@ -3500,14 +3513,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "files-ui:test": {
-      "executions": 17,
-      "tests": 6676,
+      "executions": 18,
+      "tests": 7071,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "files:test": {
@@ -3591,25 +3604,25 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "host:test": {
-      "executions": 13,
-      "tests": 17893,
+      "executions": 14,
+      "tests": 19282,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "host:test:shell-conformance": {
-      "executions": 6,
-      "tests": 18,
+      "executions": 7,
+      "tests": 21,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:12:26Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:shell-conformance darwin-arm64": 1
+        "test:shell-conformance darwin-arm64": 2
       }
     },
     "host:test:shell-qualification": {
@@ -3688,12 +3701,15 @@
       }
     },
     "lsp:verify-browser": {
-      "executions": 18,
-      "tests": 18,
+      "executions": 19,
+      "tests": 19,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T01:34:30Z"
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "targets": {
+        "verify-browser linux-x64 browser=chromium": 1
+      }
     },
     "manifold:test": {
       "executions": 7,
@@ -3851,14 +3867,14 @@
       "lastSeen": "2026-11-25T23:44:04Z"
     },
     "project-library:test": {
-      "executions": 25,
-      "tests": 5208,
+      "executions": 26,
+      "tests": 5418,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "project-workspace:test": {
@@ -3929,14 +3945,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "revisions-ui:test": {
-      "executions": 18,
-      "tests": 1980,
+      "executions": 19,
+      "tests": 2090,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "revisions:test": {
@@ -4004,25 +4020,25 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "scripts:test": {
-      "executions": 56,
-      "tests": 70214,
+      "executions": 57,
+      "tests": 71630,
       "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 10
+        "test linux-x64": 11
       }
     },
     "scripts:test:e2e": {
-      "executions": 55,
-      "tests": 3190,
+      "executions": 56,
+      "tests": 3248,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e linux-x64": 10
+        "test:e2e linux-x64": 11
       }
     },
     "settings-ui:test": {
@@ -4045,36 +4061,36 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "shell-service:test": {
-      "executions": 9,
-      "tests": 1395,
+      "executions": 10,
+      "tests": 1550,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "shell-service:test:shell-conformance": {
-      "executions": 3,
-      "tests": 21,
+      "executions": 4,
+      "tests": 28,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:12:26Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:shell-conformance darwin-arm64": 1
+        "test:shell-conformance darwin-arm64": 2
       }
     },
     "skills:test": {
-      "executions": 12,
-      "tests": 144,
+      "executions": 13,
+      "tests": 156,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 2
+        "test linux-x64": 3
       }
     },
     "slicer:test": {
@@ -4110,14 +4126,14 @@
       "lastSeen": "2026-11-25T23:44:04Z"
     },
     "tau-examples:test": {
-      "executions": 25,
-      "tests": 2500,
+      "executions": 26,
+      "tests": 2600,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 5
+        "test linux-x64": 6
       }
     },
     "taucad-ui:test": {
@@ -4175,71 +4191,71 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 3,
-      "tests": 297,
+      "executions": 4,
+      "tests": 396,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 3
+        "test linux-x64": 4
       }
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 41,
-      "tests": 615,
+      "executions": 42,
+      "tests": 630,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:adaptive linux-x64 browser=chromium": 6
+        "test:e2e:adaptive linux-x64 browser=chromium": 7
       }
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 46,
-      "tests": 141,
+      "executions": 48,
+      "tests": 148,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:daemon-host linux-x64 browser=chromium": 6,
-        "test:e2e:daemon-host linux-x64": 3
+        "test:e2e:daemon-host linux-x64 browser=chromium": 7,
+        "test:e2e:daemon-host linux-x64": 4
       }
     },
     "ui-e2e:test:e2e:deploy-skew": {
-      "executions": 3,
-      "tests": 105,
-      "failures": 0,
+      "executions": 4,
+      "tests": 140,
+      "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:deploy-skew linux-x64": 3
+        "test:e2e:deploy-skew linux-x64": 4
       }
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 42,
-      "tests": 420,
+      "executions": 43,
+      "tests": 430,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:development linux-x64 browser=chromium": 6
+        "test:e2e:development linux-x64 browser=chromium": 7
       }
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 49,
-      "tests": 2071,
+      "executions": 51,
+      "tests": 2145,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:filesystem-scenarios linux-x64 browser=chromium": 7,
-        "test:e2e:filesystem-scenarios linux-x64": 3
+        "test:e2e:filesystem-scenarios linux-x64 browser=chromium": 8,
+        "test:e2e:filesystem-scenarios linux-x64": 4
       }
     },
     "ui-e2e:test:e2e:journey-chat-1": {
@@ -4343,14 +4359,14 @@
       }
     },
     "ui-e2e:test:e2e:journey-project-4": {
-      "executions": 6,
-      "tests": 138,
+      "executions": 7,
+      "tests": 161,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:journey-project-4 linux-x64 browser=chromium": 5
+        "test:e2e:journey-project-4 linux-x64 browser=chromium": 6
       }
     },
     "ui-e2e:test:e2e:journey-shell-1": {
@@ -4365,26 +4381,26 @@
       }
     },
     "ui-e2e:test:e2e:journey-shell-2": {
-      "executions": 6,
-      "tests": 198,
+      "executions": 7,
+      "tests": 231,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:journey-shell-2 linux-x64 browser=chromium": 5
+        "test:e2e:journey-shell-2 linux-x64 browser=chromium": 6
       }
     },
     "ui-e2e:test:e2e:journey-viewer-1": {
-      "executions": 10,
-      "tests": 80,
+      "executions": 12,
+      "tests": 96,
       "failures": 3,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:journey-viewer-1 linux-x64 browser=chromium": 4,
-        "test:e2e:journey-viewer-1 linux-x64 project=webkit-smoke browser=webkit": 4
+        "test:e2e:journey-viewer-1 linux-x64 browser=chromium": 5,
+        "test:e2e:journey-viewer-1 linux-x64 project=webkit-smoke browser=webkit": 5
       }
     },
     "ui-e2e:test:e2e:journey-viewer-2": {
@@ -4434,39 +4450,39 @@
       }
     },
     "ui-e2e:test:e2e:journey-viewer-6": {
-      "executions": 21,
-      "tests": 105,
+      "executions": 24,
+      "tests": 120,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T10:48:06Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:journey-viewer-6 linux-x64 browser=chromium": 7,
-        "test:e2e:journey-viewer-6 linux-x64 browser=firefox": 7,
-        "test:e2e:journey-viewer-6 linux-x64 project=webkit-smoke browser=webkit": 7
+        "test:e2e:journey-viewer-6 linux-x64 browser=chromium": 8,
+        "test:e2e:journey-viewer-6 linux-x64 browser=firefox": 8,
+        "test:e2e:journey-viewer-6 linux-x64 project=webkit-smoke browser=webkit": 8
       }
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 95,
-      "tests": 95,
+      "executions": 97,
+      "tests": 97,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:non-isolated linux-x64 browser=chromium": 8,
-        "test:e2e:non-isolated linux-x64 browser=firefox": 8
+        "test:e2e:non-isolated linux-x64 browser=chromium": 9,
+        "test:e2e:non-isolated linux-x64 browser=firefox": 9
       }
     },
     "ui-e2e:test:e2e:service-worker": {
-      "executions": 3,
-      "tests": 24,
+      "executions": 4,
+      "tests": 32,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:service-worker linux-x64": 3
+        "test:e2e:service-worker linux-x64": 4
       }
     },
     "ui-kit:test": {
@@ -4478,53 +4494,53 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "ui:test": {
-      "executions": 211,
-      "tests": 422480,
+      "executions": 217,
+      "tests": 434697,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:shard-6 linux-x64": 6,
-        "test:shard-2 linux-x64": 6,
-        "test:shard-4 linux-x64": 6,
-        "test:shard-3 linux-x64": 6,
-        "test:shard-1 linux-x64": 6,
-        "test:shard-5 linux-x64": 6
+        "test:shard-6 linux-x64": 7,
+        "test:shard-2 linux-x64": 7,
+        "test:shard-4 linux-x64": 7,
+        "test:shard-3 linux-x64": 7,
+        "test:shard-1 linux-x64": 7,
+        "test:shard-5 linux-x64": 7
       }
     },
     "ui:test:e2e:agent-host": {
-      "executions": 5,
-      "tests": 365,
+      "executions": 6,
+      "tests": 438,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:agent-host linux-x64 browser=chromium": 4
+        "test:e2e:agent-host linux-x64 browser=chromium": 5
       }
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 80,
-      "tests": 4880,
+      "executions": 82,
+      "tests": 5002,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:attachment-image-engines linux-x64 browser=webkit": 5,
-        "test:e2e:attachment-image-engines linux-x64 browser=firefox": 5
+        "test:e2e:attachment-image-engines linux-x64 browser=webkit": 6,
+        "test:e2e:attachment-image-engines linux-x64 browser=firefox": 6
       }
     },
     "ui:test:e2e:chat-message-queue": {
-      "executions": 5,
-      "tests": 210,
+      "executions": 6,
+      "tests": 252,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:chat-message-queue linux-x64 browser=chromium": 4
+        "test:e2e:chat-message-queue linux-x64 browser=chromium": 5
       }
     },
     "ui:test:e2e:chat-print": {
@@ -4539,25 +4555,25 @@
       }
     },
     "ui:test:e2e:chat-viewer": {
-      "executions": 7,
-      "tests": 98,
+      "executions": 8,
+      "tests": 112,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:chat-viewer linux-x64 browser=chromium": 6
+        "test:e2e:chat-viewer linux-x64 browser=chromium": 7
       }
     },
     "ui:test:e2e:editor-layout": {
-      "executions": 5,
-      "tests": 50,
+      "executions": 6,
+      "tests": 60,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test:e2e:editor-layout linux-x64 browser=chromium": 4
+        "test:e2e:editor-layout linux-x64 browser=chromium": 5
       }
     },
     "ui:test:e2e:follow-latest-output": {
@@ -4605,14 +4621,14 @@
       }
     },
     "ui:verify-browser": {
-      "executions": 42,
-      "tests": 5544,
+      "executions": 43,
+      "tests": 5676,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "verify-browser linux-x64 browser=chromium": 5
+        "verify-browser linux-x64 browser=chromium": 6
       }
     },
     "units:test": {
@@ -4656,14 +4672,14 @@
       "lastSeen": "2026-11-25T23:44:04Z"
     },
     "warehouse:test": {
-      "executions": 16,
-      "tests": 160,
+      "executions": 17,
+      "tests": 170,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T11:31:44Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "targets": {
-        "test linux-x64": 4
+        "test linux-x64": 5
       }
     },
     "workbench-panes:test": {
@@ -4735,18 +4751,18 @@
       "targetKey": "test",
       "file": "src/node/node-event-log.test.ts",
       "firstSeen": "2026-11-26T00:03:34Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
-      "lastFailure": "2026-11-26T12:12:53Z",
-      "executions": 8,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "lastFailure": "2026-11-26T12:50:51Z",
+      "executions": 9,
       "failures": 0,
-      "retriedPasses": 8,
+      "retriedPasses": 9,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 8,
+          "executions": 9,
           "failures": 0,
-          "events": 8,
-          "lastSeen": "2026-11-26T12:12:53Z"
+          "events": 9,
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [
@@ -4842,18 +4858,30 @@
           "hash": "12358972276847812374",
           "execution": 8,
           "variantExecution": 8
+        },
+        {
+          "kind": "retry",
+          "at": "2026-11-26T12:50:51Z",
+          "run": 45821539303,
+          "attempt": 1,
+          "failedRun": 45821539303,
+          "failedAttempt": 1,
+          "variant": "linux-x64",
+          "hash": "6446849029652431488",
+          "execution": 9,
+          "variantExecution": 9
         }
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 4159847530469981392",
         "linux-x64 11159794027113051888",
         "linux-x64 1169150324946858255",
         "linux-x64 189443942027267895",
         "linux-x64 12633312805041957905",
         "linux-x64 15048038209100070742",
         "linux-x64 8917207837379440144",
-        "linux-x64 12358972276847812374"
+        "linux-x64 12358972276847812374",
+        "linux-x64 6446849029652431488"
       ],
       "failureShas": [],
       "aliases": [],
@@ -4864,18 +4892,18 @@
       "targetKey": "test:git",
       "file": "src/git/tau-publish.spec.ts",
       "firstSeen": "2026-11-25T23:08:01Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-25T23:08:01Z",
-      "executions": 12,
+      "executions": 13,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 11,
+      "passStreak": 12,
       "variants": {
         "linux-x64": {
-          "executions": 12,
+          "executions": 13,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T12:12:53Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [],
@@ -4894,14 +4922,14 @@
         }
       ],
       "passHashes": [
-        "linux-x64 6015829995736719400",
         "linux-x64 8197288630490388258",
         "linux-x64 7580127558961345284",
         "linux-x64 7045137563171653377",
         "linux-x64 11631708320021556834",
         "linux-x64 17452796299990156034",
         "linux-x64 11817485527791330946",
-        "linux-x64 2614259252480476739"
+        "linux-x64 2614259252480476739",
+        "linux-x64 13418047268147551051"
       ],
       "failureShas": [
         "ad6a2532d452cea0cafe2e483aa7b341f6f5c576"
@@ -4914,18 +4942,18 @@
       "targetKey": "test:native-darwin",
       "file": "src/commands/serve.integration.test.ts",
       "firstSeen": "2026-11-25T18:53:36Z",
-      "lastSeen": "2026-11-26T12:12:53Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-25T18:53:36Z",
-      "executions": 16,
+      "executions": 17,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 15,
+      "passStreak": 16,
       "variants": {
         "darwin-arm64": {
-          "executions": 16,
+          "executions": 17,
           "failures": 1,
           "events": 1,
-          "lastSeen": "2026-11-26T12:12:53Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [
@@ -4944,14 +4972,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "darwin-arm64 17808899096224026714",
         "darwin-arm64 10312329206876967428",
         "darwin-arm64 651533725843188908",
         "darwin-arm64 7994899028625664028",
         "darwin-arm64 16835444267053632207",
         "darwin-arm64 17975044482673126398",
         "darwin-arm64 12593401858336416838",
-        "darwin-arm64 5183611664429079195"
+        "darwin-arm64 5183611664429079195",
+        "darwin-arm64 10875950855189668310"
       ],
       "failureShas": [
         "2d3d44bb0966bbbd1ecddf20c9e65a58a12c165d"
@@ -4964,18 +4992,18 @@
       "targetKey": "test",
       "file": "src/flake-regression-workflow.test.ts",
       "firstSeen": "2026-11-25T23:53:17Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-26T08:08:04Z",
-      "executions": 16,
+      "executions": 17,
       "failures": 5,
       "retriedPasses": 0,
-      "passStreak": 11,
+      "passStreak": 12,
       "variants": {
         "linux-x64": {
-          "executions": 16,
+          "executions": 17,
           "failures": 5,
           "events": 0,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [],
@@ -5018,14 +5046,14 @@
         }
       ],
       "passHashes": [
-        "linux-x64 4899924496611083272",
         "linux-x64 9364032458433310141",
         "linux-x64 11415401966611494998",
         "linux-x64 10133653682602789202",
         "linux-x64 12101964547112891704",
         "linux-x64 12562215471088107831",
         "linux-x64 5291780984611605258",
-        "linux-x64 2866868724118993755"
+        "linux-x64 2866868724118993755",
+        "linux-x64 6896986540438824889"
       ],
       "failureShas": [
         "fed01aadc523f2b1064a8638e1ed6403623eee65",
@@ -5091,18 +5119,18 @@
       "targetKey": "test",
       "file": "app/routes/w.$workspace.$project/chat-workbench-dockview.test.tsx",
       "firstSeen": "2026-11-26T00:03:34Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "lastFailure": "2026-11-26T12:16:18Z",
-      "executions": 14,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "lastFailure": "2026-11-26T12:50:51Z",
+      "executions": 15,
       "failures": 0,
-      "retriedPasses": 14,
+      "retriedPasses": 15,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 14,
+          "executions": 15,
           "failures": 0,
-          "events": 14,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "events": 15,
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [
@@ -5265,18 +5293,30 @@
           "hash": "1633997883643787625",
           "execution": 14,
           "variantExecution": 14
+        },
+        {
+          "kind": "retry",
+          "at": "2026-11-26T12:50:51Z",
+          "run": 45821539303,
+          "attempt": 1,
+          "failedRun": 45821539303,
+          "failedAttempt": 1,
+          "variant": "linux-x64",
+          "hash": "18383947477706541872",
+          "execution": 15,
+          "variantExecution": 15
         }
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 17637425183069844302",
         "linux-x64 13359938394282639289",
         "linux-x64 17560955442406574032",
         "linux-x64 2349196112922222451",
         "linux-x64 13291465109322510362",
         "linux-x64 18271422841595941918",
         "linux-x64 17250204578490133798",
-        "linux-x64 1633997883643787625"
+        "linux-x64 1633997883643787625",
+        "linux-x64 18383947477706541872"
       ],
       "failureShas": [],
       "aliases": [],
@@ -5433,31 +5473,31 @@
       "targetKey": "test:e2e:daemon-host",
       "file": "src/daemon-agent-host.spec.ts",
       "firstSeen": "2026-11-25T23:43:08Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-25T23:43:08Z",
-      "executions": 17,
+      "executions": 18,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 16,
+      "passStreak": 17,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 17,
+          "executions": 18,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 10247394194800471484",
         "linux-x64 browser=chromium 8715523570468878035",
         "linux-x64 browser=chromium 12652083520072634329",
         "linux-x64 browser=chromium 2780599045607342533",
         "linux-x64 browser=chromium 4427649796624651850",
         "linux-x64 browser=chromium 801713620447045529",
         "linux-x64 browser=chromium 1438021943983639105",
-        "linux-x64 browser=chromium 2962931341690215850"
+        "linux-x64 browser=chromium 2962931341690215850",
+        "linux-x64 browser=chromium 12346442184165736826"
       ],
       "failureShas": [
         "9cbd73c836f0bf6a394e6526ff1220a80bc8569a"
@@ -5675,27 +5715,27 @@
     },
     "ui-e2e › src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB": {
       "project": "ui-e2e",
-      "targetKey": "test:e2e:journey-viewer-4",
+      "targetKey": "test:e2e:non-isolated",
       "file": "src/picovoxel-multi.spec.ts",
       "firstSeen": "2026-11-25T13:44:58Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-26T00:15:59Z",
-      "executions": 136,
+      "executions": 139,
       "failures": 0,
       "retriedPasses": 3,
-      "passStreak": 64,
+      "passStreak": 67,
       "variants": {
         "linux-x64 browser=firefox": {
-          "executions": 47,
+          "executions": 48,
           "failures": 0,
           "events": 3,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         },
         "linux-x64 browser=chromium": {
-          "executions": 83,
+          "executions": 85,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         },
         "linux-x64 project=webkit-smoke browser=webkit": {
           "executions": 6,
@@ -5744,18 +5784,61 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 15816695326264080016",
-        "linux-x64 browser=chromium 16356691254697753968",
-        "linux-x64 browser=chromium 4404747846737466599",
         "linux-x64 browser=firefox 4404747846737466599",
         "linux-x64 browser=chromium 7955733001244569027",
         "linux-x64 browser=firefox 8189409414713799871",
         "linux-x64 project=webkit-smoke browser=webkit 8189409414713799871",
-        "linux-x64 browser=chromium 8189409414713799871"
+        "linux-x64 browser=chromium 8189409414713799871",
+        "linux-x64 browser=chromium 139810097466577001",
+        "linux-x64 browser=chromium 1199372711601791278",
+        "linux-x64 browser=firefox 1199372711601791278"
       ],
       "failureShas": [],
       "aliases": [],
       "lastOutcome": "passed"
+    },
+    "ui-e2e › src/stale-deploy-recovery.test.ts > a code load that fails once on the build the server still runs (FP9, FP10) > should keep the chat panel usable when its decorative spinner fails to load once": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:deploy-skew",
+      "file": "src/stale-deploy-recovery.test.ts",
+      "firstSeen": "2026-11-26T12:50:51Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "lastFailure": "2026-11-26T12:50:51Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T12:50:51Z",
+          "stableBefore": 3
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
+          "hash": "17097901051802203750",
+          "variant": "linux-x64",
+          "sha": "3cd7b3696de2e937cf67305f9026e125d553b352",
+          "lineage": "pr-2815",
+          "base": "c20324d1d487e7989bdd61ac73c3203879ef0221",
+          "execution": 1,
+          "variantExecution": 1,
+          "error": "AssertionError: expected 1 to be +0 // Object.is equality"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "3cd7b3696de2e937cf67305f9026e125d553b352"
+      ],
+      "aliases": [],
+      "lastOutcome": "failed"
     },
     "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should keep serving a saved view and never show an uncached one as zero usage": {
       "project": "ui-e2e",
@@ -5975,18 +6058,18 @@
       "targetKey": "test:e2e:journey-viewer-1",
       "file": "src/viewer-camera-persistence.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
+      "lastSeen": "2026-11-26T12:50:51Z",
       "lastFailure": "2026-11-26T11:31:44Z",
-      "executions": 5,
+      "executions": 6,
       "failures": 3,
       "retriedPasses": 0,
-      "passStreak": 2,
+      "passStreak": 3,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 5,
+          "executions": 6,
           "failures": 3,
           "events": 0,
-          "lastSeen": "2026-11-26T12:16:18Z"
+          "lastSeen": "2026-11-26T12:50:51Z"
         }
       },
       "events": [],
@@ -6034,7 +6117,8 @@
       ],
       "passHashes": [
         "linux-x64 browser=chromium 3209801044628595090",
-        "linux-x64 browser=chromium 13579647132421417192"
+        "linux-x64 browser=chromium 13579647132421417192",
+        "linux-x64 browser=chromium 11881150721799720293"
       ],
       "failureShas": [
         "15d25560401faab42c0dcfd0abdac7ecc299042e",
@@ -6958,9 +7042,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-project-4",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "runs": 6,
-      "streak": 6,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "runs": 7,
+      "streak": 7,
       "streakRetried": 0,
       "history": [
         {
@@ -7012,6 +7096,15 @@
           "run": 45814974055,
           "attempt": 1,
           "at": "2026-11-26T12:16:18Z",
+          "passed": true,
+          "tests": 23,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
           "passed": true,
           "tests": 23,
           "retried": 0,
@@ -7086,9 +7179,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-shell-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "runs": 6,
-      "streak": 6,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "runs": 7,
+      "streak": 7,
       "streakRetried": 0,
       "history": [
         {
@@ -7144,6 +7237,15 @@
           "tests": 33,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
+          "passed": true,
+          "tests": 33,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -7151,9 +7253,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "runs": 5,
-      "streak": 2,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "runs": 6,
+      "streak": 3,
       "streakRetried": 0,
       "history": [
         {
@@ -7202,6 +7304,15 @@
           "run": 45814974055,
           "attempt": 1,
           "at": "2026-11-26T12:16:18Z",
+          "passed": true,
+          "tests": 16,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
           "passed": true,
           "tests": 16,
           "retried": 0,
@@ -7448,9 +7559,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-6",
       "firstSeen": "2026-11-26T10:48:06Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "runs": 7,
-      "streak": 7,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "runs": 8,
+      "streak": 8,
       "streakRetried": 0,
       "history": [
         {
@@ -7515,6 +7626,15 @@
           "tests": 15,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
+          "passed": true,
+          "tests": 15,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -7522,9 +7642,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:service-worker",
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T12:16:18Z",
-      "runs": 3,
-      "streak": 3,
+      "lastSeen": "2026-11-26T12:50:51Z",
+      "runs": 4,
+      "streak": 4,
       "streakRetried": 0,
       "history": [
         {
@@ -7549,6 +7669,15 @@
           "run": 45814974055,
           "attempt": 1,
           "at": "2026-11-26T12:16:18Z",
+          "passed": true,
+          "tests": 8,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 45821539303,
+          "attempt": 1,
+          "at": "2026-11-26T12:50:51Z",
           "passed": true,
           "tests": 8,
           "retried": 0,

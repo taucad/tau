@@ -39,6 +39,7 @@ export type ProjectLibraryFileManager = Readonly<{
     | 'permanentlyDeleteProjectDirectory'
     | 'verifyProjectRoute'
     | 'verifyAbsent'
+    | 'probeProjectDirectories'
   >;
   recordFiles: Pick<RootedContentClient, 'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'unlink' | 'rmdir'>;
   workspace: Readonly<{ syncProjectRoots: () => Promise<void> }>;
@@ -86,7 +87,11 @@ export type ProjectLibraryRootFacade = ProjectLibraryFileManager &
   Readonly<{
     client: Pick<
       FileSystemClient,
-      'listProjectManifests' | 'verifyProjectRoute' | 'verifyAbsent' | 'adoptProjectDirectory'
+      | 'listProjectManifests'
+      | 'verifyProjectRoute'
+      | 'verifyAbsent'
+      | 'probeProjectDirectories'
+      | 'adoptProjectDirectory'
     >;
     scopedStorage: ScopedStorageClient;
     readDuplicateProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;

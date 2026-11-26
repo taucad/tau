@@ -213,9 +213,16 @@ export type WorkspaceJournal = Readonly<{
 /** What the workspace commands read from the library that builds them. @public */
 export type WorkspaceCommandsHost = Readonly<{
   workspaceConnection: Actor<typeof workspaceConnectionMachine>;
-  /** The root file facade, once there is one; the commands resync its project roots and read a picked folder. */
+  /**
+   * The root file facade, once there is one; the commands resync its project roots, read a picked folder and probe a
+   * chosen directory.
+   */
   facade: () => Promise<
-    Pick<ProjectLibraryFileManager, 'workspace'> & Readonly<{ scopedStorage: ScopedStorageClient }>
+    Pick<ProjectLibraryFileManager, 'workspace'> &
+      Readonly<{
+        scopedStorage: ScopedStorageClient;
+        client: Pick<ProjectLibraryFileManager['client'], 'probeProjectDirectories'>;
+      }>
   >;
   /** The object-store worker, ready; the commands only read its pending-operation journal. */
   readiedWorker: () => Promise<WorkspaceJournal>;
@@ -371,21 +378,21 @@ export class WorkspaceCommands {
    */
   public readonly chooseProjectDirectory = async (locator: ProjectLocator, projectId: string): Promise<void> => {
     await this.#host.whenDiscoveryReady();
-    // Re-verify on a fresh scan: the folder may have changed since the card
-    // rendered. Only the route binding moves; no project file is written (R7).
-    const discovery = await this.#host.discover();
-    const chosen = discovery.entries.find(
-      (entry) =>
-        (entry.status === 'duplicate-id' || entry.status === 'valid') &&
-        entry.projectId === projectId &&
-        entry.locator.storageRootKey === locator.storageRootKey &&
-        entry.locator.relativeDirectory === locator.relativeDirectory,
+    // The folder may have changed since the card rendered: it is read now, under the project's locks, and only a
+    // folder that holds the id is bound (fast-path FW3, a probe of the chosen directory and no scan). Only the route
+    // binding moves; no project file is written (R7).
+    const fileManager = await this.#host.facade();
+    const { locations } = await fileManager.client.probeProjectDirectories({ projectId, locators: [locator] });
+    const chosen = locations.find(
+      (location) =>
+        location.status === 'held' &&
+        location.locator.storageRootKey === locator.storageRootKey &&
+        location.locator.relativeDirectory === locator.relativeDirectory,
     );
     if (!chosen) {
       throw new Error('This folder no longer holds that project.');
     }
     await setProjectFileSystemConfig(routeConfigFor(projectId, chosen.locator));
-    const fileManager = await this.#host.facade();
     await fileManager.workspace.syncProjectRoots();
     this.#host.invalidateListing();
     this.#host.invalidateProject(projectId);

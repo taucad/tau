@@ -18,6 +18,8 @@ import type {
   WatchEvent,
   WatchRequest,
   ProjectAbsence,
+  ProjectDirectoryProbe,
+  ProjectDirectoryProbeRequest,
 } from '@taucad/filesystem';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { rootedPathOf } from '@taucad/fs-client/rooted-content-client';
@@ -252,6 +254,63 @@ const verifyAbsentFromDiscovery = async (projectId: string): Promise<ProjectAbse
   return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
 };
 const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(verifyAbsentFromDiscovery);
+/* The authority's probe (fast-path FW3): this suite's disk is what its discovery double lists, read now. */
+const probeFromDiscovery = async (request: ProjectDirectoryProbeRequest): Promise<ProjectDirectoryProbe> => {
+  const listed = await mockListProjectManifests.getMockImplementation()?.();
+  const entries = listed?.entries ?? [];
+  const keyOf = (locator: Readonly<{ storageRootKey: string; relativeDirectory: string }>): string =>
+    `${locator.storageRootKey}\0${locator.relativeDirectory}`;
+  const held = new Set(
+    entries.flatMap((entry) =>
+      'projectId' in entry && entry.projectId === request.projectId ? [keyOf(entry.locator)] : [],
+    ),
+  );
+  const seen = new Set(request.except === undefined ? [] : [keyOf(request.except)]);
+  const nominated = [
+    ...(request.locators ?? []),
+    ...(request.known === true
+      ? entries.flatMap((entry) =>
+          'projectId' in entry && entry.projectId === request.projectId ? [entry.locator] : [],
+        )
+      : []),
+  ].filter((locator) => {
+    const fresh = !seen.has(keyOf(locator));
+    seen.add(keyOf(locator));
+    return fresh;
+  });
+  const names =
+    request.root === undefined
+      ? undefined
+      : entries
+          .filter((entry) => entry.locator.storageRootKey === request.root)
+          .map((entry) => entry.locator.relativeDirectory);
+  return {
+    locations:
+      request.projectId === undefined
+        ? []
+        : nominated.map((locator) => ({ locator, status: held.has(keyOf(locator)) ? 'held' : 'vacant' }) as const),
+    ...(names === undefined ? {} : { names }),
+  };
+};
+const mockProbeProjectDirectories = vi.fn(probeFromDiscovery);
+/*
+ * The authority answers what remains of the id under the removal's lock (fast-path FW3): with no answer of a row's own,
+ * this suite's disk is what its discovery double lists once the delete has run, the deleted directory left out.
+ */
+const deleteAsTheAuthority: FileManagerProxy['permanentlyDeleteProjectDirectory'] = async (input) => {
+  const result = await mockPermanentlyDeleteProjectDirectory(input);
+  if ((result.status !== 'deleted' && result.status !== 'absent') || 'remaining' in result) {
+    return result;
+  }
+  const absence = await verifyAbsentFromDiscovery(input.projectId);
+  const remaining =
+    absence.status === 'present'
+      ? absence.locators.filter(
+          (locator) => locator.backend !== input.scope.backend || locator.relativeDirectory !== input.providerBasePath,
+        )
+      : [];
+  return remaining.length > 0 ? { ...result, remaining } : { ...result, remaining: [], absence: 'absent' };
+};
 const mockFileManager = {
   workerChangeChannel: mockWorkerChangeChannel,
   watchRecordFile: mockWatchRecordFile,
@@ -271,8 +330,9 @@ const mockFileManager = {
     listProjectManifests: mockListProjectManifests,
     verifyProjectRoute: mockVerifyProjectRoute,
     verifyAbsent: mockVerifyAbsent,
+    probeProjectDirectories: mockProbeProjectDirectories,
     adoptProjectDirectory: mockAdoptProjectDirectory,
-    permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
+    permanentlyDeleteProjectDirectory: deleteAsTheAuthority,
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
   },
   workspace: { syncProjectRoots: mockSyncProjectRoots },
@@ -3565,7 +3625,9 @@ describe('useProjectManager.createProject', () => {
     });
 
     expect(created?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
-    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    /* The bootstrap pass and the held pre-commit pass; allocation lists the root's names afresh (fast-path FW3). */
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+    expect(mockProbeProjectDirectories.mock.calls.some(([request]) => request.root !== undefined)).toBe(true);
     const published = queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects;
     expect(published).toHaveLength(1);
     expect(published?.[0]?.projectId).toBe(created?.id);
@@ -4619,11 +4681,13 @@ describe('useProjectManager.createProject', () => {
     await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
 
     expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, pendingPermanentDelete.storage);
-    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith({
-      projectId: fakeProject.id,
-      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
-      scope: { backend: 'opfs' },
-    });
+    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: fakeProject.id,
+        providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+        scope: { backend: 'opfs' },
+      }),
+    );
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith(fakeProject.id, undefined);
     expect(phaseOrder).toEqual(['resources-cleanup', 'disclosure-cleanup', 'locator-cleanup', 'roots', 'complete']);
   });
@@ -4712,11 +4776,13 @@ describe('useProjectManager.createProject', () => {
     await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
 
     expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, movedStorage);
-    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith({
-      projectId: fakeProject.id,
-      providerBasePath: movedLocator.relativeDirectory,
-      scope: { backend: 'opfs' },
-    });
+    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: fakeProject.id,
+        providerBasePath: movedLocator.relativeDirectory,
+        scope: { backend: 'opfs' },
+      }),
+    );
   });
 
   it('refuses permanent-delete admission while discovery is incomplete', async () => {
@@ -4803,11 +4869,13 @@ describe('useProjectManager.createProject', () => {
 
       // Not trashed: the project outlives the delete, so the journal row says so.
       expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, duplicateStorage, { copy: true });
-      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith({
-        projectId: fakeProject.id,
-        providerBasePath: 'duplicate',
-        scope: { backend: 'opfs' },
-      });
+      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          projectId: fakeProject.id,
+          providerBasePath: 'duplicate',
+          scope: { backend: 'opfs' },
+        }),
+      );
       expectSharedStateKept();
       // The route still binds the copy that remains.
       expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -4818,11 +4886,13 @@ describe('useProjectManager.createProject', () => {
 
       await act(async () => result.current.permanentlyDeleteProject(fakeProject.id, fakeLocator));
 
-      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith({
-        projectId: fakeProject.id,
-        providerBasePath: fakeLocator.relativeDirectory,
-        scope: { backend: 'opfs' },
-      });
+      expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          projectId: fakeProject.id,
+          providerBasePath: fakeLocator.relativeDirectory,
+          scope: { backend: 'opfs' },
+        }),
+      );
       expectSharedStateKept();
       expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
         projectId: fakeProject.id,
@@ -4879,7 +4949,9 @@ describe('useProjectManager.createProject', () => {
       expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
     });
 
-    it('refuses a copy while another root is not observed', async () => {
+    /* Fast-path FW3, step 3: only the deleted copy's own root must be observable once another copy is proven; with no
+     * copy proven, a root that is away may hold one, and the delete is refused as before. */
+    it('deletes a proven copy while an unrelated root is not observed', async () => {
       const { result } = await renderTwoCopies(copyPending(duplicateStorage));
       mockListProjectManifests.mockResolvedValue({
         ...twoCopies,
@@ -4890,6 +4962,26 @@ describe('useProjectManager.createProject', () => {
       } as ProjectDiscoveryResult);
       /* The precheck reads the current pass (FW1): the pass that saw the root go is the one it reads. */
       await act(async () => result.current.getProjectListing());
+
+      await act(async () => result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator));
+
+      expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, duplicateStorage, { copy: true });
+    });
+
+    it('refuses a copy no probe proves while another root is not observed', async () => {
+      const { result } = await renderTwoCopies(copyPending(duplicateStorage));
+      mockListProjectManifests.mockResolvedValue({
+        ...twoCopies,
+        roots: [
+          ...twoCopies.roots,
+          { status: 'inaccessible', root: { backend: 'webaccess', workspaceId: 'wsp_gone' }, reason: 'revoked' },
+        ],
+      } as ProjectDiscoveryResult);
+      await act(async () => result.current.getProjectListing());
+      /* The index still lists the bound copy; the disk no longer holds it. */
+      mockProbeProjectDirectories.mockResolvedValueOnce({
+        locations: [{ locator: fakeLocator, status: 'vacant' }],
+      });
 
       await expect(result.current.permanentlyDeleteProject(fakeProject.id, duplicateLocator)).rejects.toThrow(
         'Project storage is not completely observable',
@@ -4922,7 +5014,8 @@ describe('useProjectManager.createProject', () => {
           },
         ],
       });
-    mockPermanentlyDeleteProjectDirectory.mockResolvedValueOnce({ status: 'absent' });
+    /* The authority found the directory gone and read the id at another location under the same lock (FW3). */
+    mockPermanentlyDeleteProjectDirectory.mockResolvedValueOnce({ status: 'absent', remaining: [movedLocator] });
     mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 

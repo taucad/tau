@@ -12,7 +12,7 @@ import { createElement } from 'react';
 import type { ReactNode } from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { focusManager, QueryClient, QueryObserver } from '@tanstack/react-query';
 import { projectToManifest } from '@taucad/types';
@@ -84,8 +84,11 @@ vi.mock('@taucad/files-ui/constants/browser.constants', async (importOriginal) =
 }));
 
 type UnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
-/** The unit rows the filesystem cost test measures: a full read, a warm pass, a directory re-read, a sweep, a verification. */
-const unitRows = ['scan', 'warmPass', 'directoryRead', 'sweep', 'verification'] as const;
+/**
+ * The unit rows the filesystem cost test measures: a full read, a warm pass, a directory re-read, a sweep, a
+ * verification, a probe of one location and one root listing (FW3).
+ */
+const unitRows = ['scan', 'warmPass', 'directoryRead', 'sweep', 'verification', 'probe', 'listing'] as const;
 type Ceiling = Readonly<Record<(typeof unitRows)[number], UnitCost>> &
   Readonly<{ mutations: Readonly<Record<string, Readonly<Budget>>> }>;
 
@@ -98,6 +101,10 @@ type Budget = {
   /** Identity sweeps: `verifyAbsent` proving from storage whether any directory carries an id. */
   sweeps: number;
   verifications: number;
+  /** Known locations read under their locks (FW3): the library's probes and those of the authority's delete. */
+  probes: number;
+  /** Fresh listings of a root's child names (FW3). */
+  listings: number;
   /** `tau.json` reads through the record client, outside a scan or a verification. */
   recordReads: number;
   discoveryReads: number;
@@ -148,6 +155,8 @@ type Harness = Readonly<{
   library: ProjectLibrary<ProjectManagerWorker>;
   queryClient: QueryClient;
   manager: () => ProjectManagerContextType;
+  /** Stop this library, as a reload of its tab does: what it was doing never settles. */
+  stop: () => void;
 }>;
 
 const stops: Array<() => void> = [];
@@ -178,8 +187,7 @@ const settle = async (harness: Pick<Harness, 'library' | 'queryClient'>): Promis
 };
 
 /** A started library over a fresh profile, with the listing query mounted and its first listing published. */
-const startLibrary = async (): Promise<Harness> => {
-  const profile = createLibraryProfile();
+const startLibrary = async (profile: LibraryProfile = createLibraryProfile()): Promise<Harness> => {
   current.profile = profile;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   /* Mounted as `QueryClientProvider` mounts it, so a regained focus reaches the listing query. */
@@ -207,14 +215,20 @@ const startLibrary = async (): Promise<Harness> => {
         children,
       ),
   });
-  stops.push(() => {
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
     unmount();
     unsubscribe();
     library.stop();
     queryClient.unmount();
     queryClient.clear();
-  });
-  const harness = { profile, library, queryClient, manager: () => result.current };
+  };
+  stops.push(stop);
+  const harness = { profile, library, queryClient, manager: () => result.current, stop };
   await settle(harness);
   expect(queryClient.getQueryData(['projects'])).toBeDefined();
   return harness;
@@ -260,12 +274,16 @@ const budgetOf = ({
   directoryReads,
   sweeps,
   verifications,
+  probes,
+  listings,
   recordReads,
 }: Readonly<{
   scans: number;
   directoryReads: number;
   sweeps: number;
   verifications: number;
+  probes: number;
+  listings: number;
   recordReads: number;
 }>): Budget => {
   const units = [
@@ -273,12 +291,16 @@ const budgetOf = ({
     [directoryReads, ceiling.directoryRead],
     [sweeps, ceiling.sweep],
     [verifications, ceiling.verification],
+    [probes, ceiling.probe],
+    [listings, ceiling.listing],
   ] as const;
   return {
     scans,
     directoryReads,
     sweeps,
     verifications,
+    probes,
+    listings,
     recordReads,
     discoveryReads: units.reduce((sum, [count, unit]) => sum + count * (unit.fileReads + unit.listings), 0),
     browserCalls: units.reduce((sum, [count, unit]) => sum + count * unit.browserCalls, 0),
@@ -320,6 +342,8 @@ describe('discovery budget per library mutation', () => {
       'directoryReads',
       'sweeps',
       'verifications',
+      'probes',
+      'listings',
       'recordReads',
       'discoveryReads',
       'browserCalls',
@@ -424,7 +448,7 @@ describe('a copy delete proves the other copy from disk', () => {
     expect(begin.mock.calls.map((call) => call[2])).toEqual([{ copy: true }]);
   });
 
-  /* Review B1: a copy no route binds is proven from storage, never from the index, which may still list a gone copy. */
+  /* Review B1, FW3: a copy no route binds is proven by a probe of it, never by the index, which may still list a gone copy. */
   it('should ask for the Trash when the index lists an unbound copy that is gone from disk', async () => {
     const harness = await startLibrary();
     const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
@@ -440,7 +464,7 @@ describe('a copy delete proves the other copy from disk', () => {
     });
 
     expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
-    expect(harness.profile.counts()).toMatchObject({ scans: 0, sweeps: 1 });
+    expect(harness.profile.counts()).toMatchObject({ scans: 0, sweeps: 0, probes: 1 });
   });
 
   it('should journal a copy delete whose other copy vanished without copy, so the Trash check applies', async () => {
@@ -461,16 +485,16 @@ describe('a copy delete proves the other copy from disk', () => {
     });
 
     expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
-    expect(harness.profile.counts()).toMatchObject({ scans: 0, verifications: 1 });
+    expect(harness.profile.counts()).toMatchObject({ scans: 0, verifications: 0, probes: 1 });
   });
 
-  it('should not count a verification of the target as proof when the route moves onto it mid-precheck', async () => {
+  it('should not count a read of the target as proof when the route moves onto it mid-precheck', async () => {
     const harness = await startLibrary();
     const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
     /* The pass still lists the Home copy; the disk no longer holds it, so the target is the last copy. */
     harness.profile.removeDirectory('home', 'home-000');
-    /* After the precheck read the route (it bound the Home copy) and before the verification reads, "Use this folder"
-     * rebinds the route onto the very copy being deleted, as `chooseProjectDirectory` would with no mutation gate. */
+    /* After the precheck read the route (it bound the Home copy) and before the probe reads, "Use this folder" rebinds
+     * the route onto the very copy being deleted, as `chooseProjectDirectory` would with no mutation gate. */
     harness.profile.onVerification((projectId) => {
       if (projectId === homeId(0)) {
         harness.profile.routes.set(projectId, {
@@ -493,5 +517,234 @@ describe('a copy delete proves the other copy from disk', () => {
     });
 
     expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
+  });
+
+  /* FW3, copy proof held through the journal: the proof the journal waived the Trash on is taken again by the
+   * authority under the project's lock with the removal. Another tab deleting the other copy after this tab's probe
+   * and before its removal (here, as the journal row is written) leaves this copy where it is. */
+  it('should leave the copy and keep the project state when the other copy goes between the journal and the removal', async () => {
+    const harness = await startLibrary();
+    const { worker } = harness.profile;
+    const projectId = homeId(0);
+    const journal = worker.beginPermanentDeleteProject.bind(worker);
+    vi.spyOn(worker, 'beginPermanentDeleteProject').mockImplementationOnce(async (...args) => {
+      const operationId = await journal(...args);
+      /* Another tab's delete of the Home copy, the last other copy, settles now. */
+      harness.profile.removeDirectory('home', 'home-000');
+      return operationId;
+    });
+    harness.profile.reset();
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(
+          projectId,
+          harness.profile.locatorOf('workspace', 'copy-000'),
+        ),
+      ).rejects.toMatchObject({ reason: 'identity-conflict' });
+      await settle(harness);
+    });
+
+    /* The folder copy is still on disk: nothing was removed, and the id's device state stayed. The failed row hides it
+     * until the person discards the row (DF11). */
+    await expect(harness.profile.rootFiles.get().client.verifyAbsent(projectId)).resolves.toEqual({
+      status: 'present',
+      locators: [harness.profile.locatorOf('workspace', 'copy-000')],
+    });
+    await expect(worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
+    const [row] = await worker.getPendingProjectOperations();
+    expect(row).toMatchObject({ kind: 'permanent-delete', projectId, copy: true });
+  });
+
+  it('should reclaim nothing when the authority cannot tell what remains, and keep the row for the folder', async () => {
+    const harness = await startLibrary();
+    const { worker } = harness.profile;
+    const projectId = homeId(0);
+    const { client } = harness.profile.rootFiles.get();
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockResolvedValueOnce({
+      status: 'deleted',
+      remaining: [],
+      absence: 'unknown',
+    });
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(
+          projectId,
+          harness.profile.locatorOf('workspace', 'copy-000'),
+        ),
+      ).rejects.toMatchObject({ reason: 'workspace-unavailable' });
+      await settle(harness);
+    });
+
+    await expect(worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
+    expect(harness.profile.routes.has(projectId)).toBe(true);
+  });
+});
+
+/*
+ * The blueprint's delay test (Performance targets, method 3), in the library: every discovery pass answers late, here
+ * not at all until released, and a copy delete still completes within 1 s, because nothing it waits for is a pass.
+ */
+describe('a copy delete while every discovery pass is held (FW3)', () => {
+  it('should complete within 1 s with no pass answering', async () => {
+    const harness = await startLibrary();
+    const { client } = harness.profile.rootFiles.get();
+    const release = Promise.withResolvers<void>();
+    const list = client.listProjectManifests.bind(client);
+    const held = vi.spyOn(client, 'listProjectManifests').mockImplementation(async () => {
+      await release.promise;
+      return list();
+    });
+    onTestFinished(() => {
+      release.resolve();
+    });
+    const projectId = homeId(0);
+
+    const started = performance.now();
+    await harness.library.commands.permanentlyDeleteProject(
+      projectId,
+      harness.profile.locatorOf('workspace', 'copy-000'),
+    );
+    const elapsed = performance.now() - started;
+
+    expect(elapsed).toBeLessThan(1000);
+    await expect(harness.profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    await expect(client.verifyAbsent(projectId)).resolves.toEqual({
+      status: 'present',
+      locators: [harness.profile.locatorOf('home', 'home-000')],
+    });
+    /* A pass was asked for, the one the settled row owes, and none answered while the delete ran. */
+    expect(held).toHaveBeenCalled();
+  });
+});
+
+/*
+ * S3 and S4 (fast-path FW3): a permanent delete whose tab reloads after each row of the blueprint's crash table. The
+ * first library stops where the row says, with its work never settling; a second library over the same disk, journal and
+ * stores replays what the journal holds. Nothing is lost that the person kept, the route never stays bound to a missing
+ * copy, and the journal ends empty. The interrupted removals inside the authority are replayed by the filesystem's own
+ * test of each state (`project-directories.targeted-verification.test.ts`).
+ */
+describe('a permanent delete across a reload after each row of the crash table (S3, S4)', () => {
+  const never = async (): Promise<never> =>
+    new Promise<never>(() => {
+      /* Never settles: the tab reloaded. */
+    });
+  type Row = Readonly<{
+    name: string;
+    /** The project and copy deleted; with no locator, the route's copy. */
+    projectId: string;
+    locator?: Readonly<{ root: 'home' | 'workspace'; relativeDirectory: string }>;
+    /** Stop the first library at this row; resolves once it is there. */
+    crashAt: (profile: LibraryProfile) => Promise<void>;
+    /** What the disk and the stores hold once the second library has replayed. */
+    expected: Readonly<{ carrying: readonly string[]; route: string | undefined; state: boolean }>;
+  }>;
+  const hangAfter = async <Arguments extends unknown[], Result>(
+    target: Record<string, unknown>,
+    method: string,
+    run: (original: (...arguments_: Arguments) => Promise<Result>, ...arguments_: Arguments) => Promise<Result>,
+  ): Promise<void> => {
+    const reached = Promise.withResolvers<void>();
+    const original = (target[method] as (...arguments_: Arguments) => Promise<Result>).bind(target);
+    vi.spyOn(target as Record<string, (...arguments_: Arguments) => Promise<Result>>, method).mockImplementationOnce(
+      async (...arguments_: Arguments) => {
+        await run(original, ...arguments_);
+        reached.resolve();
+        return never();
+      },
+    );
+    return reached.promise;
+  };
+  const clientOf = (profile: LibraryProfile): Record<string, unknown> =>
+    profile.rootFiles.get().client as unknown as Record<string, unknown>;
+  const rows: readonly Row[] = [
+    {
+      name: 'the probe, before the journal row',
+      projectId: homeId(0),
+      locator: { root: 'workspace', relativeDirectory: 'copy-000' },
+      crashAt: async (profile) =>
+        hangAfter(
+          profile.worker as unknown as Record<string, unknown>,
+          'beginPermanentDeleteProject',
+          async () => undefined,
+        ),
+      expected: { carrying: ['home-000', 'copy-000'], route: 'home-000', state: true },
+    },
+    {
+      name: 'the journal row',
+      projectId: homeId(0),
+      locator: { root: 'workspace', relativeDirectory: 'copy-000' },
+      crashAt: async (profile) =>
+        hangAfter(
+          profile.worker as unknown as Record<string, unknown>,
+          'beginPermanentDeleteProject',
+          async (journal, ...rest) => journal(...rest),
+        ),
+      expected: { carrying: ['home-000'], route: 'home-000', state: true },
+    },
+    {
+      name: 'the directory removed, before any settle write',
+      projectId: homeId(0),
+      locator: { root: 'workspace', relativeDirectory: 'copy-000' },
+      crashAt: async (profile) =>
+        hangAfter(clientOf(profile), 'permanentlyDeleteProjectDirectory', async (remove, ...rest) => remove(...rest)),
+      expected: { carrying: ['home-000'], route: 'home-000', state: true },
+    },
+    {
+      name: 'the route write, before the row completes',
+      /* The route binds the Home copy, which is the one deleted: the settle moves the route to the folder copy. */
+      projectId: homeId(1),
+      locator: { root: 'home', relativeDirectory: 'home-001' },
+      crashAt: async (profile) =>
+        hangAfter(
+          profile.worker as unknown as Record<string, unknown>,
+          'completePendingProjectOperation',
+          async () => undefined,
+        ),
+      expected: { carrying: ['copy-001'], route: 'copy-001', state: true },
+    },
+    {
+      name: "part of a sole copy's reclaim",
+      /* The trashed Home project: its only directory. */
+      projectId: homeId(3),
+      crashAt: async (profile) =>
+        hangAfter(
+          profile.worker as unknown as Record<string, unknown>,
+          'deleteProjectResources',
+          async (reclaim, ...rest) => reclaim(...rest),
+        ),
+      expected: { carrying: [], route: undefined, state: false },
+    },
+  ];
+
+  it.each(rows)('should recover a crash after $name', async ({ projectId, locator, crashAt, expected }) => {
+    const first = await startLibrary();
+    const { profile } = first;
+    const crashed = crashAt(profile);
+    void first.library.commands.permanentlyDeleteProject(
+      projectId,
+      locator === undefined ? undefined : profile.locatorOf(locator.root, locator.relativeDirectory),
+    );
+    await crashed;
+    first.stop();
+    vi.restoreAllMocks();
+
+    const second = await startLibrary(profile);
+    await act(async () => {
+      await settle(second);
+    });
+
+    await expect(profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    const absence = await profile.rootFiles.get().client.verifyAbsent(projectId);
+    expect(absence.status === 'present' ? absence.locators.map((found) => found.relativeDirectory) : []).toEqual(
+      expected.carrying,
+    );
+    /* S3: the route binds a copy that is there, or is gone with the project. */
+    expect(profile.routes.get(projectId)?.providerBasePath).toBe(expected.route);
+    await expect(profile.worker.getProjectLibraryState(projectId).then((state) => state !== undefined)).resolves.toBe(
+      expected.state,
+    );
   });
 });

@@ -55,6 +55,7 @@ import {
   rememberChatPlacement,
   resolveWorkspaceForWrite,
   routeBindsLocator,
+  routeLocatorOf,
   writeProjectLibraryFile,
 } from '#runtime/project-library-storage.js';
 import type { PersistentStorageRoot, ProjectOccurrence } from '#runtime/project-library-storage.js';
@@ -385,13 +386,6 @@ export const namingImageUrls = async (
 const selectProjectLive = (snapshot: ReturnType<ProjectLibrarySessions['getSnapshot']>, projectId: string): boolean =>
   snapshot.context.refs[projectId] !== undefined;
 
-/** Whether a route verification names the directory at `locator` as the one it read; one that names none does not. */
-const namesDirectory = (
-  verified: Readonly<{ storageRootKey?: string; providerBasePath?: string }>,
-  locator: ProjectLocator,
-): boolean =>
-  verified.storageRootKey === locator.storageRootKey && verified.providerBasePath === locator.relativeDirectory;
-
 /**
  * Where a new project is created: the explicit location, or the last
  * successful one, and the storage root it names. The workspace is resolved
@@ -542,6 +536,15 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       return current;
     }
     await this.#host.whenReplaysDrained();
+    /* The route's read failed. Its known locations are read under the project's locks (`locationsOf` and the route's
+     * directory, fast-path FW3): what they hold now is evidence for the index, so the pass below re-reads only them and
+     * rebinds the route to a copy that holds the id. */
+    const configured = await getProjectFileSystemConfig(projectId);
+    await fileManager.client.probeProjectDirectories({
+      projectId,
+      locators: configured === undefined || configured.backend === 'memory' ? [] : [routeLocatorOf(configured)],
+      known: true,
+    });
     await this.#host.discover();
     return read();
   };
@@ -938,18 +941,22 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   }
 
   /**
-   * Find the one directory a permanent delete removes, in a pass whose roots are all observed: the copy at `locator`,
-   * or with none the copy the route binds, or the only copy. The directory must still carry the project id; the
-   * authority checks that once more under the project and physical locks before it deletes. `survives` says another
-   * directory carries the id too.
+   * Find the one directory a permanent delete removes, and whether another copy proves that it need not be in the
+   * Trash (fast-path FW3, steps 2 and 3): target, probe, then a root-status check.
    *
-   * The target and the root statuses come from the current pass, with no scan (fast-path blueprint FW1). A stale pass
-   * can only make this stricter: `survives`, the one fact that loosens a delete (no Trash needed), is read from disk.
-   * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks,
-   * and counts only when the directory it read is that copy and not the target. When the pass shows another copy that
-   * no route binds, storage proves it: `verifyAbsent` reads every directory's identity under the project's lock, and
-   * only a `present` answer naming a directory other than the target counts. The pass is the discovery index, which
-   * may still list a copy that is gone, so it never proves one (fast-path FW2, index-contract review A1).
+   * - Target: the copy at `locator`, or with none the copy the route binds, or the only copy, from the current pass
+   *   (`discover` with `reuse`, no scan). The authority checks once more, under the project and physical locks, that it
+   *   still carries the id before it removes anything.
+   * - Probe: every other known location of the id, the pass's copies and the route's directory together with the
+   *   authority's own (`known`), each read now under the project's locks. `survives` is true only when one of them
+   *   holds the id. The pass is the discovery index, which nominates and never proves; `vacant` and `unknown` prove
+   *   nothing, and the delete stays a sole copy's, which asks for the Trash.
+   * - Root status: with no copy proven, a root the pass could not observe may hold one, so the delete is refused as
+   *   today. With a copy proven, an unrelated folder that is away is no reason to refuse.
+   *
+   * The proof is the authority's read now; the journal is written after it. The authority proves a surviving copy again
+   * under `project:<id>` before it removes the target and refuses when none holds the id (`copy-unproven`), so another
+   * tab's delete of that copy in between cannot leave the id with none (copy proof held through the journal).
    */
   async #discoverPermanentDeleteStorage(
     projectId: string,
@@ -962,39 +969,30 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const fileManager = await this.#host.facade();
     const pass = await this.#host.discover({ reuse: true });
     const target = this.#permanentDeleteTarget({ projectId, locator, configured }, pass);
-    const others = projectOccurrences(pass, projectId).filter((occurrence) => occurrence !== target);
-    if (others.length === 0) {
-      return { storage: locatorToPendingStorage(target.locator), survives: false };
+    const routed = configured === undefined || configured.backend === 'memory' ? undefined : routeLocatorOf(configured);
+    const { locations } = await fileManager.client.probeProjectDirectories({
+      projectId,
+      locators: [
+        ...projectOccurrences(pass, projectId).map((occurrence) => occurrence.locator),
+        ...(routed === undefined ? [] : [routed]),
+      ],
+      known: true,
+      except: { storageRootKey: target.locator.storageRootKey, relativeDirectory: target.locator.relativeDirectory },
+    });
+    const survives = locations.some(
+      ({ locator: other, status }) =>
+        status === 'held' &&
+        (other.storageRootKey !== target.locator.storageRootKey ||
+          other.relativeDirectory !== target.locator.relativeDirectory),
+    );
+    if (!survives && pass.roots.some((root) => root.status === 'inaccessible')) {
+      throw new Error(`Project storage is not completely observable: ${projectId}`);
     }
-    const routeCopy = others.find((occurrence) => routeBindsLocator(configured, occurrence.locator));
-    if (routeCopy !== undefined) {
-      /* The route binds another copy: proven by reading it now, or not at all. The verification reads whichever
-       * directory the route binds when it runs, and an ungated "Use this folder" may have moved the route since
-       * `configured` was read, even onto the target; so the proof counts only for the directory it names, and only
-       * when that is the copy chosen here and not the target. With no proof the delete stays a sole copy's, which
-       * only asks for the Trash. */
-      const verification = await fileManager.client.verifyProjectRoute({ projectId });
-      const proven =
-        verification.status === 'verified' &&
-        namesDirectory(verification, routeCopy.locator) &&
-        !namesDirectory(verification, target.locator);
-      return { storage: locatorToPendingStorage(target.locator), survives: proven };
-    }
-    /* Another copy that no route binds: one identity sweep proves it until the authority can probe (FW3). `unknown`
-     * and `absent` prove nothing, and the delete stays a sole copy's, which asks for the Trash. */
-    const absence = await fileManager.client.verifyAbsent(projectId);
-    const survives =
-      absence.status === 'present' &&
-      absence.locators.some(
-        (other) =>
-          other.storageRootKey !== target.locator.storageRootKey ||
-          other.relativeDirectory !== target.locator.relativeDirectory,
-      );
     return { storage: locatorToPendingStorage(target.locator), survives };
   }
 
   /**
-   * The occurrence a permanent delete targets in `discovery`, once every root is observed: the copy at `locator`, the
+   * The occurrence a permanent delete targets in `discovery`, once its root is observed: the copy at `locator`, the
    * copy the route binds, or the only copy.
    */
   #permanentDeleteTarget(
@@ -1013,7 +1011,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       locator?.storageRootKey ??
       (configured === undefined || configured.backend === 'memory' ? undefined : persistentStorageRootKey(configured));
     const targetRootStatus = discovery.roots.find((root) => persistentStorageRootKey(root.root) === targetRoot);
-    if (targetRootStatus?.status !== 'complete' || discovery.roots.some((root) => root.status === 'inaccessible')) {
+    if (targetRootStatus?.status !== 'complete') {
       throw new Error(`Project storage is not completely observable: ${projectId}`);
     }
     const occurrences = projectOccurrences(discovery, projectId);

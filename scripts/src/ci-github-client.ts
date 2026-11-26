@@ -39,8 +39,8 @@ export type Client = {
   readonly getText: (path: string, accept?: string) => Promise<string>;
   /** A binary body: an artifact's zip, which the API redirects to a signed URL. */
   readonly getBytes: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
-  /** A `POST`, `PATCH` or `PUT` with a JSON body; no retry, since a write may have landed before the error. */
-  readonly send: <T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown) => Promise<T>;
+  /** A `POST`, `PATCH`, `PUT` or `DELETE` with a JSON body; no retry, since a write may have landed before the error. */
+  readonly send: <T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body: unknown) => Promise<T>;
   /** Requests this run may still make. */
   readonly budget: () => number;
 };
@@ -109,7 +109,7 @@ export const client = (options: {
       const response = await request(path);
       return new Uint8Array(await response.arrayBuffer());
     },
-    async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
+    async send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body: unknown): Promise<T> {
       made += 1;
       const response = await fetch(`${api}${path}`, {
         method,
@@ -121,7 +121,8 @@ export const client = (options: {
         const detail = await response.text().catch(() => '');
         throw new GitHubError(`${method} ${path}`, response.status, detail.slice(0, 200));
       }
-      return (await response.json()) as T;
+      // A DELETE may answer 204 with no body.
+      return (response.status === 204 ? undefined : await response.json()) as T;
     },
   };
 };

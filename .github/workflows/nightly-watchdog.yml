@@ -2,7 +2,8 @@
 # scheduled run on `main` of every workflow with a `schedule` trigger (and any red one of the last 24 h behind it),
 # and when one was red, cancelled or did not run, send the operator one Grafana IRM alert (a normal phone push,
 # not a page). No GitHub issue is opened. New nightlies are watched without editing this file. It also alerts when a
-# `desktop-staging@*` candidate of the last 36 hours lacks a green "Shell gate" (WD-1a). The webhook lives on the
+# `desktop-staging@*` candidate of the last 36 hours lacks a green "Shell gate" (WD-1a), and for every flake
+# quarantine entry on `main` at or past its `expires` day (FQ-9: day 14, or 28 after the one renewal). The webhook lives on the
 # `main`-only `ci-alerts` environment (tau-cloud `stacks/repo/tau`, relayed from tau-observability);
 # without it the job reports and turns red instead. 18:30 UTC is after the last daily cron (15:41)
 # has had time to finish its macOS jobs, and is the operator's morning in New Zealand.

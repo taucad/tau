@@ -21,17 +21,24 @@
  * workflow it dispatches and fails on a red one, so its newest scheduled run being green and in the 36-hour window
  * means it ran and every dispatch it made is green.
  *
+ * It also pages for the flake quarantine (FQ-9 of the CI flake quarantine blueprint; testing policy § 16.3): every
+ * `quarantine.json` entry on `main` at or past its `expires` day (day 14, or 28 after the one operator renewal) is a
+ * problem row, every day until the flake ledger's removal lands and the test gates again.
+ *
  * Usage: node scripts/src/nightly-watchdog.ts [--summary <file>] [--test-alert]
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY (`owner/name`), CI_ALERT_WEBHOOK_URL (unset: report only and exit 1 on a
  * problem, so the run itself turns red), GITHUB_SERVER_URL, GITHUB_RUN_ID (for the alert's link).
  * Exit codes: 0 every scheduled workflow is healthy or the alert was delivered; 1 a problem with no delivered alert,
  * or a delivery failure; 2 usage.
  */
+import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { load } from 'js-yaml';
+
+import { parseQuarantine } from '@taucad/vitest-ci/quarantine';
 
 /** A workflow file with at least one cron schedule. */
 export type ScheduledWorkflow = {
@@ -138,6 +145,54 @@ export const judgeRuns = (workflow: ScheduledWorkflow, runs: readonly ScheduledR
     };
   }
   return newest;
+};
+
+/** A `quarantine.json` on `main`: its workspace-relative path and its text. */
+export type QuarantineFile = { readonly path: string; readonly text: string };
+
+/**
+ * One problem row per quarantine entry at or past its `expires` day (testing policy § 16.3): the operator is paged on
+ * day 14 (28 after a renewal), and every day after until the entry leaves `main`. An entry that is not an object with
+ * a `test` and an `expires` is `validate-quarantine`'s to report.
+ */
+export const judgeQuarantine = (
+  files: readonly QuarantineFile[],
+  today: string,
+  repository = 'taucad/tau',
+): Verdict[] =>
+  files.flatMap((file) =>
+    parseQuarantine(file.text).entries.flatMap((entry): Verdict[] => {
+      if (typeof entry !== 'object' || entry === null) {
+        return [];
+      }
+      const { test, expires, issue, renewal } = entry as Record<string, unknown>;
+      if (typeof test !== 'string' || typeof expires !== 'string' || expires > today) {
+        return [];
+      }
+      const owner = typeof issue === 'number' ? ` (owner issue #${issue})` : '';
+      return [
+        {
+          workflow: { file: file.path, name: 'Flake quarantine expiry', crons: [] },
+          state: 'failed',
+          detail:
+            `${test.replaceAll(/\s+/gu, ' ').slice(0, 200)}${owner} ${expires === today ? 'expires today' : `expired on ${expires}`}: ` +
+            `the flake ledger removes the entry and the test gates again${renewal === undefined ? '; the operator may renew it once, to 28 days' : ''}`,
+          ...(typeof issue === 'number' ? { url: `https://github.com/${repository}/issues/${issue}` } : {}),
+        },
+      ];
+    }),
+  );
+
+/** Every tracked `quarantine.json` under `root`. */
+export const readQuarantineFiles = async (root: string): Promise<QuarantineFile[]> => {
+  const paths = execFileSync('git', ['ls-files', '-z', '--', ':(glob)**/quarantine.json'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter((path) => path !== '')
+    .sort();
+  return Promise.all(paths.map(async (path) => ({ path, text: await readFile(resolve(root, path), 'utf8') })));
 };
 
 /** Grafana IRM formatted-webhook fields. */
@@ -348,6 +403,11 @@ const main = async (args: readonly string[]): Promise<number> => {
       ),
     )),
     ...(await candidateVerdicts(repository, token, now)),
+    ...judgeQuarantine(
+      await readQuarantineFiles(resolve(import.meta.dirname, '../..')),
+      now.toISOString().slice(0, 10),
+      repository,
+    ),
   ];
   const problems = verdicts.filter((verdict) => verdict.state === 'failed' || verdict.state === 'missing');
 

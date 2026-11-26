@@ -347,6 +347,8 @@ type ChatStore = {
   live: Set<string>;
   /** The live incarnation's outcome channel: a driver's rows advance its ledger (RA-R7). */
   deliver?: ((event: ChatRunOutcomeEvent) => void) | undefined;
+  /** The deliveries to M1 still waiting on a flush or on a delivery before them (WP-10 step B, {@link inOrder}). */
+  outbox?: Promise<void> | undefined;
   readers: Set<() => void>;
   /** The run kind whose runner may hold a session open for this chat (V2). */
   externalKind?: string | undefined;
@@ -894,12 +896,17 @@ const deferredDriver = (build: Promise<DriverHandle>, report: (report: DriverRep
 export const appendChatRows = async (
   input: Readonly<{
     chatId: string;
-    log: Pick<DurableEventLog, 'append' | 'appendMany'>;
+    log: Pick<DurableEventLog, 'append' | 'appendMany' | 'appendOrdered'>;
     ledger: ChatLedger;
     leaderEpoch: string;
     recordedAt: string;
     rows: readonly ChatRunRow[];
     onAppended?: (row: AgentLogEvent, ledger: ChatLedger) => void;
+    /**
+     * WP-10 step B: answer once the rows' order is fixed, before they are durable, where the log can (`appendOrdered`).
+     * The caller then acts on them only after `durable` (ChatRunSlot.tla `Put`, then `Synced`).
+     */
+    ordered?: boolean;
   }>,
 ): Promise<ChatLedger> => {
   const { chatId, log, leaderEpoch, recordedAt, rows } = input;
@@ -963,7 +970,7 @@ export const appendChatRows = async (
   /*
    * WP-10 step A: the batch is one write and one flush. A repeat settlement is skipped as the per-row loop skips it,
    * against the ledger with the batch's earlier rows folded in. Each landed row is folded and announced once the batch
-   * is durable, never before.
+   * is durable, or, `ordered`, once its order is fixed (step B).
    */
   let held = ledger;
   const kept = stamped.filter((row) => {
@@ -975,7 +982,10 @@ export const appendChatRows = async (
   });
   let batch: EventLogBatchOutcome;
   try {
-    batch = await log.appendMany(kept);
+    batch =
+      input.ordered === true && log.appendOrdered !== undefined
+        ? await log.appendOrdered(kept)
+        : await log.appendMany(kept);
   } catch (error) {
     throw failed(error, 'not-applied');
   }
@@ -1194,6 +1204,46 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /** Run `work` after everything already queued on the chat; a failure does not wedge the queue. */
+  /**
+   * WP-10 step B: M1 hears of a driver's rows only once they are durable, and of everything in the order it happened
+   * (ChatRunSlot.tla: `complete`, `acknowledge`, a steer's answer and `quiescent` each wait for `Synced`). A delivery
+   * waits for its rows' flush and for every delivery before it; with nothing waiting, it is made at once. A failed
+   * flush drops its delivery: the log is poisoned or fenced, the ledger is refolded on the next open, and the driver's
+   * next write or barrier fails its attempt.
+   *
+   * @param store - The chat.
+   * @param durable - The flush the delivery waits for, if any.
+   * @param send - The delivery.
+   */
+  const inOrder = (store: ChatStore, durable: Promise<void> | undefined, send: () => void): void => {
+    const prior = store.outbox;
+    if (prior === undefined && durable === undefined) {
+      send();
+      return;
+    }
+    const slot: { mine?: Promise<void> } = {};
+    // async-iife: bootstrap -- a delivery queues behind the ones before it; nothing awaits it.
+    slot.mine = (async () => {
+      try {
+        await prior;
+        if (durable !== undefined) {
+          try {
+            await durable;
+          } catch {
+            store.ledger = undefined;
+            return;
+          }
+        }
+        send();
+      } finally {
+        if (store.outbox === slot.mine) {
+          store.outbox = undefined;
+        }
+      }
+    })();
+    store.outbox = slot.mine;
+  };
+
   const serial = async <Result>(chatId: string, work: () => Promise<Result>): Promise<Result> => {
     const store = storeOf(chatId);
     const previous = store.chain;
@@ -1697,9 +1747,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (committed === undefined) {
           return;
         }
-        if (store.deliver === deliver) {
-          deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
-        }
+        inOrder(store, undefined, () => {
+          if (store.deliver === deliver) {
+            deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+          }
+        });
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
         if (!rechecked) {
           store.publishedAt = elapsed();
@@ -2331,11 +2383,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * go at their place in the batch ({@link carriedPlace}; round 21, T14), never between a call and its output nor before
    * the batch's own rewind.
    */
+  // eslint-disable-next-line max-params -- `ordered` is the one switch between a driver's write and the host's own.
   const write = async (
     chatId: string,
     incarnationTerm: string,
     rows: readonly ChatRunRow[],
-  ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
+    ordered = false,
+  ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[]; durable?: Promise<void> }>> => {
     const store = storeOf(chatId);
     const messageIds: string[] = [];
     const decided = termWriteOf(store.terms ?? {}, incarnationTerm, rows);
@@ -2371,6 +2425,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         leaderEpoch,
         recordedAt: new Date(stamped).toISOString(),
         rows: place === undefined ? own : [...own.slice(0, place), ...carried!.says, ...own.slice(place)],
+        ordered,
         onAppended: (row, ledger) => {
           store.ledger = ledger;
           /* The batch's first row commits what its write decided (rounds 19 and 20). */
@@ -2390,7 +2445,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         },
       });
       armHeartbeat(chatId);
-      return { ledger, messageIds };
+      /* Asked now, so it covers exactly the rows written so far. */
+      const durable = ordered ? log.durable?.() : undefined;
+      return { ledger, messageIds, ...(durable === undefined ? {} : { durable }) };
     } catch (error) {
       if (codedFailureDetail(error).code === 'LOG_FENCED') {
         // The log moved under this writer: the next incarnation rereads it (RA-A9).
@@ -2425,15 +2482,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           'Turn-change proof is written by the placement authority, not by an agent.',
         );
       }
+      /* WP-10 step B: the driver goes on once the rows' order is fixed; M1 hears of them once they are durable. */
       const committed = await serial(chatId, async () =>
         write(
           chatId,
           leaderEpoch,
           bodies.map((body) => ({ runId: key.runId, body })),
+          true,
         ),
       );
       /* The incarnation's own channel: it drops the outcome if the incarnation stopped meanwhile (RV4). */
-      deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+      inOrder(store, committed.durable, () => {
+        deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+      });
     };
 
   const closeExternalChat = async (chatId: string): Promise<void> => {
@@ -2866,9 +2927,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         ...request,
       };
     },
-    startDriver: ({ key, kind, mode, leaderEpoch, report, grant }) => {
+    startDriver: ({ key, kind, mode, leaderEpoch, report: reportNow, grant }) => {
       const { chatId, runId } = key;
       const store = storeOf(chatId);
+      /* A driver's report follows its rows to M1: never ahead of a delivery still waiting on a flush (WP-10 step B). */
+      const report: typeof reportNow = (event) => {
+        inOrder(store, undefined, () => {
+          reportNow(event);
+        });
+      };
       store.live.add(attemptKeyOf(key));
       const append = driverAppender({ chatId, key, leaderEpoch });
       const opening = logOf(chatId);
@@ -3007,6 +3074,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
               appendEvent: async (event) => append([event as LogRowBody]),
               appendEvents: async (events) => append(events as LogRowBody[]),
+              /* WP-10 step B: the driver's rows answer once ordered; its request, tools and outcome wait for this. */
+              ...(log.durable === undefined ? {} : { durable: async () => log.durable!() }),
               ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
               ...(selection === undefined ? {} : { selection }),
               clientContext,

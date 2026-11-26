@@ -419,6 +419,14 @@ const fencePurged = (binding: ChatStoreBinding): ChatStoreBinding => {
                 return log.appendMany!(events);
               },
             }),
+        ...(log.appendOrdered === undefined
+          ? {}
+          : {
+              appendOrdered: async (events: Parameters<NonNullable<typeof log.appendOrdered>>[0]) => {
+                await refuse(chatId);
+                return log.appendOrdered!(events);
+              },
+            }),
       };
     },
   };

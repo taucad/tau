@@ -72,7 +72,12 @@ import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { readChatPlacementsShared, writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import type { ComposerRecord, ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
-import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';
+import {
+  chatPlacementOf,
+  isDeviceRelativeHostId,
+  portableExecutionOf,
+  withChatPlacement,
+} from '@taucad/chat-ui/utils/chat-execution';
 import { createChatAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { attachmentReferencesOf } from '@taucad/chat-ui/utils/message-attachments';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -641,7 +646,7 @@ type InternalSession = ChatSession & {
   /** A fresh check found no local log bytes, whose empty host read otherwise parks. */
   seedLocalLogEmpty: boolean;
   /** A composer pick held while an own run is unsettled (HA-I7); the queue waits for it, not for the settlement. */
-  deferredPick?: true | undefined;
+  deferredPick?: symbol | undefined;
   seedLocalLogCheck: Promise<Uint8Array<ArrayBuffer>> | undefined;
   /** The retained session owns one lease on the shared local/foreign log observation. */
   observationRelease: (() => void) | undefined;
@@ -874,6 +879,9 @@ const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || 
 /** How long a lost or refused host read may last before HA0 reports what it leaves the person with. Milliseconds. */
 export const chatReadLossBoundMilliseconds = 10_000;
 
+/** The longest wait between HA-I5 in-page `attach` sends while a stale own run stays unsettled. Milliseconds. */
+const inPageAttachBackoffMilliseconds = 60_000;
+
 /** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
 const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
@@ -977,6 +985,11 @@ type ObservedChat = {
   /** Live (re)subscriptions on a local placement, and the one the settler last sent `attach` for (HA-I5). */
   subscriptions?: number;
   settledFor?: number;
+  /** The watch on the chat's own files that wakes the source when another tab or app writes them (HA-I1). */
+  ownWatch?: ObservationWatch;
+  /** HA-I5's in-page `attach` after a stale span: how many went unanswered, and when the next may go. */
+  inPageTries?: number;
+  inPageNextAt?: number;
 };
 
 /**
@@ -1368,8 +1381,7 @@ export class ChatSessionStore {
         return;
       }
       this.#stopObservedAttachment(chatId, observed);
-      observed.source?.stop();
-      observed.source = undefined;
+      this.#stopOwnSource(observed);
       this.#observed.delete(chatId);
       this.#stopRemoteObservationIfUnused(chatId);
       if (!this.#sessions.has(chatId)) {
@@ -3869,18 +3881,17 @@ export class ChatSessionStore {
   }
 
   /**
-   * Start reading the chat's own segment from the file (HA1, HA-I1), where this device holds the chat's files: the
-   * browser and desktop placements, and a `tau serve` placement whose log this device already holds rows of (one that
-   * shares the folder). A remote daemon, or a chat the file does not hold, keeps the host read (residual R1).
+   * Start reading the chat's own segment from the file (HA1, HA-I1), where this device holds the chat's files and the
+   * chat is placed here: the browser and desktop placements, and a device-relative `tau serve` (`origin`, `loopback:`)
+   * whose log this device already holds rows of, as one sharing the folder does. A paired computer, a remote daemon
+   * or an external agent keeps the host read whatever the folder holds (residual R1).
    *
    * @param chatId - The observed chat.
    * @param observed - Its observation.
-   * @returns Whether the chat is local: its own source then feeds the ledger.
+   * @returns Whether the chat is local: decided by the source's first pass, which must hold the file (`current`);
+   *   any other first verdict stops the source and keeps the host read, so a chat is never left with neither.
    */
   async #startOwnSource(chatId: string, observed: ObservedChat): Promise<boolean> {
-    /* The file holds the chat with its own log there (a browser, desktop or shared-folder `tau serve` writer), or with
-     * its record beside no log on a placement whose files are this device's. ponytail: a directory of foreign
-     * segments alone keeps the host read, which already shows it (HA0 row 18). */
     const directory = `/projects/${observed.projectId}/${chatRecordsPath(chatId)}`;
     const { client } = this.#deps;
     const held = async (path: string): Promise<boolean> => {
@@ -3890,25 +3901,34 @@ export class ChatSessionStore {
         return false;
       }
     };
-    if (!(await held(`${directory}/events.jsonl`))) {
-      if (!(await held(`${directory}/chat.json`))) {
-        return false;
-      }
-      let settings: Awaited<ReturnType<ChatSessionStore['getChatHostSettings']>>;
-      try {
-        settings = await this.getChatHostSettings(chatId);
-      } catch {
-        settings = undefined;
-      }
-      const host = settings?.activeExecution === undefined ? undefined : daemonPlacementOf(settings.activeExecution);
-      if (host !== undefined && host !== 'desktop') {
-        return false;
-      }
+    /* ponytail: a directory of foreign segments alone (no own log, no record) keeps the host read. The foreign scan
+     * already reads those segments with no host (HA-I1 holds for every turn they carry), so the own source would add
+     * only an empty own segment's authority, which no record vouches for there (HA0 row 18 is green on this path). */
+    const [ownLog, record] = await Promise.all([held(`${directory}/events.jsonl`), held(`${directory}/chat.json`)]);
+    if (!ownLog && !record) {
+      return false;
+    }
+    let settings: Awaited<ReturnType<ChatSessionStore['getChatHostSettings']>>;
+    try {
+      settings = await this.getChatHostSettings(chatId);
+    } catch {
+      settings = undefined;
+    }
+    const execution = settings?.activeExecution;
+    const host = execution === undefined ? undefined : daemonPlacementOf(execution);
+    const placedHere =
+      execution === undefined ||
+      (execution.kind === 'tau' &&
+        (host === undefined || host === 'desktop' || (ownLog && isDeviceRelativeHostId(host))));
+    if (!placedHere) {
+      return false;
     }
     const { createOwnSegmentSource } = await loadCode(async () => import('#services/chat-own-segment-source.js'));
     if (this.#observed.get(chatId) !== observed) {
       return false;
     }
+    const first = Promise.withResolvers<boolean>();
+    let decided = false;
     observed.source = createOwnSegmentSource({
       chatId,
       directory,
@@ -3920,6 +3940,22 @@ export class ChatSessionStore {
         },
       },
       onVerdict: (verdict) => {
+        if (!decided) {
+          decided = true;
+          const local = verdict === 'current' || verdict === 'deleted';
+          if (!local) {
+            this.#stopOwnSource(observed);
+          }
+          first.resolve(local);
+          if (!local) {
+            return;
+          }
+          /* Another tab or app writing the chat's own files (a shared folder's `tau serve`) wakes the source, as the
+           * host's watch of its log woke the host read. The foreign segments have their own watch. */
+          observed.ownWatch = this.#deps.watchRecordFile?.(directory, () => {
+            observed.source?.wake();
+          });
+        }
         this.#ownVerdict(chatId, observed, verdict);
       },
       onRewrite: () => {
@@ -3933,7 +3969,14 @@ export class ChatSessionStore {
         this.#attachInPage(chatId, observed);
       },
     });
-    return true;
+    return first.promise;
+  }
+
+  #stopOwnSource(observed: ObservedChat): void {
+    observed.source?.stop();
+    observed.source = undefined;
+    observed.ownWatch?.dispose();
+    observed.ownWatch = undefined;
   }
 
   /** What the own source's pass decided (HA-I3a): read authority, the deleted state, or nothing new. */
@@ -3941,9 +3984,17 @@ export class ChatSessionStore {
     if (this.#observed.get(chatId) !== observed) {
       return;
     }
-    observed.ownCurrent = verdict === 'current';
+    /* `unreadable` keeps the authority it had: a failed read is retried, and the file still holds the chat. */
+    if (verdict !== 'unreadable') {
+      const wasCurrent = observed.ownCurrent === true;
+      observed.ownCurrent = verdict === 'current';
+      if (wasCurrent && !observed.ownCurrent) {
+        /* A pick waiting on this source's run (HA-I7) waits no longer. */
+        this.#projectionTopics.get(chatId)?.emit();
+      }
+    }
     if (verdict === 'deleted') {
-      observed.source?.stop();
+      this.#stopOwnSource(observed);
       this.#invalidateDeletedProjection(chatId);
       return;
     }
@@ -3952,6 +4003,10 @@ export class ChatSessionStore {
       return;
     }
     this.#answeredLogReads.add(chatId);
+    if (!this.#ownRunUnsettled(chatId)) {
+      observed.inPageTries = undefined;
+      observed.inPageNextAt = undefined;
+    }
     observed.attachment?.send({ type: 'own-read' });
     this.#syncProjection(chatId, 'none');
     this.#unreadTopic.emit();
@@ -3960,10 +4015,18 @@ export class ChatSessionStore {
     this.#settle(chatId, observed);
   }
 
-  /** Whether the chat's own segment shows a run that has not settled (HA-I5, HA-I7). */
+  /**
+   * Whether the chat's own segment, read from the file, shows a run that has not settled (HA-I5, HA-I7). A chat this
+   * device does not read from the file (a remote host's) never does: its pick is not deferred on a host that may be gone.
+   */
   #ownRunUnsettled(chatId: string): boolean {
     const projection = this.#projectionContext(chatId);
-    return projection !== undefined && selectCaughtUp(projection) && retainsLiveRun(selectRunPhase(projection));
+    return (
+      this.#observed.get(chatId)?.ownCurrent === true &&
+      projection !== undefined &&
+      selectCaughtUp(projection) &&
+      retainsLiveRun(selectRunPhase(projection))
+    );
   }
 
   /** Resolve once the chat's own run has settled; reject when `signal` aborts (a newer pick). */
@@ -4018,12 +4081,24 @@ export class ChatSessionStore {
     }
   }
 
-  /** HA-I5's stale span completed: `attach` on this build's own host, whatever the record says; one at a time. */
+  /**
+   * HA-I5's stale span completed: `attach` on this build's own host, whatever the record says; one at a time. A span
+   * that stays complete re-sends on the source's 1 s poll, backing off 1 s doubling to 60 s while the run stays
+   * unsettled, until an own read shows it settled.
+   */
   #attachInPage(chatId: string, observed: ObservedChat): void {
     const connector = this.#projectHostConnectors.get(observed.projectId);
-    if (connector === undefined || this.#inPageAttaching.has(chatId)) {
+    const at = performance.now();
+    if (
+      connector === undefined ||
+      this.#inPageAttaching.has(chatId) ||
+      (observed.inPageNextAt !== undefined && at < observed.inPageNextAt)
+    ) {
       return;
     }
+    const tries = (observed.inPageTries ?? 0) + 1;
+    observed.inPageTries = tries;
+    observed.inPageNextAt = at + Math.min(1000 * 2 ** (tries - 1), inPageAttachBackoffMilliseconds);
     this.#inPageAttaching.add(chatId);
     /* ponytail: the route is a flag the connector's first, synchronous settings read sees; a connector port for the
      * in-page host replaces it if the connector grows one (HA2 owns host-connector.ts). */
@@ -5963,13 +6038,17 @@ export class ChatSessionStore {
                 await apply();
                 return;
               }
-              session.deferredPick = true;
+              /* This pick's own mark: a newer pick that aborts this one sets its own, which this one must not lift. */
+              const pick = Symbol('pick');
+              session.deferredPick = pick;
               try {
                 await this.#ownRunSettled(input.chatId, signal);
                 await apply();
               } finally {
-                session.deferredPick = undefined;
-                this.refreshMessageQueue(input.chatId);
+                if (session.deferredPick === pick) {
+                  session.deferredPick = undefined;
+                  this.refreshMessageQueue(input.chatId);
+                }
               }
             },
           }),

@@ -240,6 +240,39 @@ describe('own segment source: absence judged against the record (HA-I3a)', () =>
     chat.stop();
   });
 
+  it('should say missing once and stop the 1 Hz re-read until a wake finds rows again', async () => {
+    const disk = createDisk({ [record]: '{"id":"chat_own"}', [log]: line(admitted()) + line(completed()) });
+    const chat = follow(disk, clock);
+    await pass(clock);
+    disk.remove(log);
+    chat.wake();
+    await pass(clock);
+    await pass(clock, readRefusalMilliseconds);
+    expect(chat.verdicts.filter((verdict) => verdict === 'missing')).toHaveLength(1);
+    const reads = vi.spyOn(disk.client, 'readFile');
+    await pass(clock, 10 * unsettledReadPollMilliseconds);
+    expect(reads).not.toHaveBeenCalled();
+    expect(chat.verdicts.filter((verdict) => verdict === 'missing')).toHaveLength(1);
+
+    disk.write(log, line(admitted()) + line(completed()));
+    chat.wake();
+    await pass(clock);
+    expect(chat.verdicts.at(-1)).toBe('current');
+    chat.stop();
+  });
+
+  it('should read again on the poll when its first read fails, so a failed open never strands the chat', async () => {
+    const disk = createDisk({ [log]: line(admitted()) + line(completed()) });
+    disk.failing.add(log);
+    const chat = follow(disk, clock);
+    await pass(clock);
+    expect(chat.verdicts).toEqual(['unreadable']);
+    disk.failing.delete(log);
+    await pass(clock, unsettledReadPollMilliseconds);
+    expect(chat.verdicts.at(-1)).toBe('current');
+    chat.stop();
+  });
+
   it('should answer missing for held rows when record, own log and events/ are all not found', async () => {
     const disk = createDisk({ [log]: line(admitted()) + line(completed()) });
     const chat = follow(disk, clock);

@@ -1209,12 +1209,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         };
       });
       await vi.waitFor(() => {
-        /* A zero-byte own log is read from the file (HA1): the host carries only the live overlay, no read. */
-        if (localLogFile === 'zero-byte') {
-          expect(reloaded.getAttachmentStatus('chat_seed_waiting_ack')).toBe('attached');
-        } else {
-          expect(subscribe).toHaveBeenCalledOnce();
-        }
+        /* A zero-byte own log with no record is not a chat the file vouches for (HA-I3a): the host read stays. */
+        expect(subscribe).toHaveBeenCalledOnce();
       });
       expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual(['chat_seed_waiting_ack']);
       reloaded.startPendingSeed('chat_seed_waiting_ack');

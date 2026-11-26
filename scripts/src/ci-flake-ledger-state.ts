@@ -383,7 +383,7 @@ export type ReleaseTrack = {
   readonly path: string;
   /** The ledger identity: `<project> › <test>`. */
   readonly id: string;
-  /** The first run counted. */
+  /** When the ingestion first saw the entry on `main` (or, for a track it never opened, the first run counted): only runs created from then on count. */
   since: string;
   /** Gating executions counted. */
   executions: number;

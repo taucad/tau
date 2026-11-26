@@ -156,6 +156,31 @@ const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number)
 };
 
 /**
+ * Start the track of every entry on `main` that has none, from `now`: the ingestion that first sees an entry on `main`
+ * counts only runs created after it, so a backlog of runs from before the entry landed (or before a returned entry
+ * re-entered) never counts. Call it before counting runs; `retainQuarantineTracks` drops a track whose entry left.
+ */
+export const openQuarantineTracks = (state: LedgerState, tests: readonly QuarantinedTest[], now: string): string[] => {
+  state.quarantineTracks ??= {};
+  const opened: string[] = [];
+  for (const test of tests) {
+    if (state.quarantineTracks[test.key] === undefined) {
+      state.quarantineTracks[test.key] = {
+        path: test.path,
+        id: test.id,
+        since: now,
+        executions: 0,
+        failures: 0,
+        streak: 0,
+        streakRuns: [],
+      };
+      opened.push(test.key);
+    }
+  }
+  return opened;
+};
+
+/**
  * Count one run attempt's outcome rows into the quarantined tests' tracks (in place). Call it before `ingestRun`
  * records the attempt as ingested: like the ledger, it counts the rows this run executed at this attempt or an
  * earlier one not yet ingested, and leaves rows a cache replay restored alone. Rows of a non-gating shadow row (marked
@@ -202,7 +227,8 @@ export const countQuarantineRun = (
     seen.add(rowKey);
     for (const test of byId.get(row.id) ?? []) {
       // Only runs from the entry's day on: a backlog ingested after the entry landed holds runs from before it.
-      if (!covers(test, row) || run.created_at < `${test.entry.created}T00:00:00Z`) {
+      const since = state.quarantineTracks?.[test.key]?.since ?? `${test.entry.created}T00:00:00Z`;
+      if (!covers(test, row) || Date.parse(run.created_at) < Date.parse(since)) {
         continue;
       }
       const attempts = counts.get(test.key) ?? new Map<number, { passes: number; failures: number }>();
@@ -394,7 +420,11 @@ export const planRemovals = (input: RemovalInput): RemovalPlan => {
             ? 'a test it releases no longer meets the bar'
             : pending.kind === 'expiry' && mayRelease && tests.some((test) => test?.verdict.met)
               ? 'a test it expires now meets the release bar'
-              : undefined;
+              : pending.kind === 'release' &&
+                  !mayRelease &&
+                  tests.some((test) => test !== undefined && test.entry.expires <= input.today)
+                ? 'a release the partial count cannot confirm does not hold an entry past its expiry'
+                : undefined;
     if (reason !== undefined) {
       stale.push({ ...pending, reason });
       continue;

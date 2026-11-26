@@ -22,6 +22,7 @@ import type { LandedRemoval } from '#ci-flake-quarantine-release-cli.js';
 import {
   countQuarantineRun,
   isRecentRelease,
+  openQuarantineTracks,
   lastLanded,
   lastRemoval,
   linkedFix,
@@ -389,6 +390,32 @@ describe('the count in run order', () => {
     expect(reversed.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
   });
 
+  it('should count only runs created after the ingestion first saw the entry on main', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    // The entry was made on the 20th but reached main at 12:00 on the 21st.
+    openQuarantineTracks(state, tests, '2026-11-21T12:00:00Z');
+    // A backlog ingested afterwards: 10 runs from before the landing, 10 after.
+    history(state, tests, { count: 10, from: '2026-11-21T06:00:00Z' });
+    history(state, tests, { count: 10, from: '2026-11-21T13:00:00Z', firstRun: 2000 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ executions: 10, streak: 10 });
+  });
+
+  it('should start the count of a returned entry again when it reaches main once more', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    openQuarantineTracks(state, tests, '2026-11-20T12:00:00Z');
+    history(state, tests, { count: 50, from: '2026-11-20T13:00:00Z' });
+    // Released: the entry left main, and its track went with it.
+    retainQuarantineTracks(state, []);
+    // It returns as the same entry (same issue and `created`) and is seen on main again on the 25th.
+    openQuarantineTracks(state, tests, '2026-11-25T00:00:00Z');
+    history(state, tests, { count: 5, from: '2026-11-24T20:00:00Z', firstRun: 3000, everyHours: 1 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ since: '2026-11-25T00:00:00Z', streak: 1 });
+  });
+
   it('should give an entry that replaces another for the same test a track of its own', () => {
     const [first] = testsOf([entryOf()]);
     const [replacement] = testsOf([entryOf({ issue: 99, created: '2026-11-21', expires: '2026-12-05' })]);
@@ -507,6 +534,23 @@ describe('pending removals', () => {
     });
     expect(held.stale).toEqual([]);
     expect(held.held).toHaveLength(1);
+  });
+
+  it('should not let a pending release hold an expired entry on a partial count', () => {
+    const due = testsOf([entryOf()], '2026-12-04');
+    const plan = planRemovals({
+      tests: due,
+      tracks: {},
+      fixes: new Map(),
+      pending: [{ branch: 'flake-release/2026-12-02-abcd1234', kind: 'release', removed }],
+      today: '2026-12-04',
+      releases: false,
+    });
+
+    expect(plan.stale).toMatchObject([
+      { reason: 'a release the partial count cannot confirm does not hold an entry past its expiry' },
+    ]);
+    expect(plan.expiries).toHaveLength(1);
   });
 
   it('should list the entries a branch removes against the file it was built on', () => {
@@ -720,6 +764,16 @@ describe('the release job', () => {
                   merged_at: '2026-11-21T08:00:00Z',
                   updated_at: '2026-11-21T08:00:00Z',
                   head: { ref: 'flake-release/2026-11-20-merged00', sha: 'branch-sha' },
+                  base: { ref: 'main' },
+                },
+                // Merged into another branch: it removed nothing from main.
+                {
+                  number: 73,
+                  state: 'closed',
+                  merged_at: '2026-11-21T10:00:00Z',
+                  updated_at: '2026-11-21T10:00:00Z',
+                  head: { ref: 'flake-release/2026-11-20-elsewhere', sha: 'branch-sha' },
+                  base: { ref: 'claude/other' },
                 },
                 {
                   number: 72,

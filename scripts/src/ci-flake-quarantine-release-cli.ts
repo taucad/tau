@@ -145,6 +145,7 @@ export type LandedRemoval = {
 /** A closed pull request, as the list of closed pull requests gives it. */
 type ClosedPull = Pull & {
   readonly head?: { readonly ref?: string; readonly sha?: string };
+  readonly base?: { readonly ref?: string };
   // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
   readonly updated_at?: string;
 };
@@ -184,6 +185,7 @@ const maximumClosedPages = 10;
 export const readRemovalBranches = async (
   github: Client,
   since: string,
+  base = 'main',
 ): Promise<{ pending: PendingRemoval[]; landed: LandedRemoval[] }> => {
   const repo = `/repos/${github.repository}`;
   const owner = github.repository.split('/')[0] ?? '';
@@ -215,7 +217,14 @@ export const readRemovalBranches = async (
       const branch = pull.head?.ref ?? '';
       const kind = prefixes.find(([, prefix]) => branch.startsWith(prefix))?.[0];
       const sha = pull.head?.sha;
-      if (kind === undefined || sha === undefined || typeof pull.merged_at !== 'string' || pull.merged_at < since) {
+      // Only a merge into the base branch removed the entry from it.
+      if (
+        kind === undefined ||
+        sha === undefined ||
+        pull.base?.ref !== base ||
+        typeof pull.merged_at !== 'string' ||
+        pull.merged_at < since
+      ) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one commit per merged removal
@@ -845,7 +854,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   const tests = quarantinedTests(workspace, values.today);
   const { pending, landed } = offline
     ? { pending: [], landed: [] }
-    : await readRemovalBranches(github, `${addDays(values.today, -returnWindowDays)}T00:00:00Z`);
+    : await readRemovalBranches(github, `${addDays(values.today, -returnWindowDays)}T00:00:00Z`, values.base);
   const releases = values.releases === 'true';
   // An expiry-only run needs no fix: its lookups could only stop the expiries.
   const fixes = offline || !releases ? new Map<string, LinkedFix | undefined>() : await readFixes(github, tests, state);

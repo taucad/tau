@@ -54,7 +54,12 @@ import {
 import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 import { readWorkspace } from '#ci-flake-quarantine-entry-cli.js';
-import { countQuarantineRun, quarantinedTests, retainQuarantineTracks } from '#ci-flake-quarantine-release.js';
+import {
+  countQuarantineRun,
+  openQuarantineTracks,
+  quarantinedTests,
+  retainQuarantineTracks,
+} from '#ci-flake-quarantine-release.js';
 import { countShadowRun, readShadowRegistry, renderShadowMarkdown, retainShadowRows } from '#ci-shadow-rows.js';
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
@@ -267,6 +272,8 @@ const main = async (args: readonly string[]): Promise<number> => {
   const existing = await store.read();
   const state = existing ?? emptyState(now);
   const folded = applyAliases(state, aliases);
+  // An entry seen on `main` for the first time counts only runs created from now on.
+  const openedTracks = openQuarantineTracks(state, quarantined, now.toISOString());
   const listed = await runsToIngest(github, {
     workflow: values.workflow,
     branch: values.branch,
@@ -331,7 +338,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   pruneState(state, now);
   retainShadowRows(state, shadow.rows);
   const droppedTracks = retainQuarantineTracks(state, quarantined);
-  if (!existing || ingested.length > 0 || folded.length > 0 || droppedTracks.length > 0) {
+  if (!existing || ingested.length > 0 || folded.length > 0 || droppedTracks.length > 0 || openedTracks.length > 0) {
     state.updatedAt = now.toISOString();
     const message = [
       `chore(flake-ledger): Ingest ${ingested.length} CI runs`,

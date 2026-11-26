@@ -3,7 +3,7 @@ import type {} from '../../test/webgpu-profile.test-utils.js';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
@@ -41,6 +41,7 @@ export default defineConfig({
   },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     provide: { webGpuProfile, surfaceAa },
     include: [
       'src/graphics/three/shader-cache.browser.test.ts',

@@ -2,7 +2,7 @@
 import type {} from './src/cli-scenarios.test-utils.js';
 import { globSync } from 'node:fs';
 
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -91,5 +91,6 @@ export default defineConfig({
      */
     testTimeout: 60_000,
     reporters: testReporters('verbose'),
+    retry: testRetry(),
   },
 });

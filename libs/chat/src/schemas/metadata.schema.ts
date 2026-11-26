@@ -171,5 +171,6 @@ export const messageMetadataSchema = z.object({
    * build cannot read is dropped with the rest of the message kept, so a newer writer never costs an older reader the
    * message.
    */
+  // oxlint-disable-next-line promise/prefer-await-to-then, unicorn/prefer-top-level-await -- zod's `.catch` is a schema fallback, not a promise.
   annotations: messageAnnotationsSchema.optional().catch(undefined),
 });

@@ -38,7 +38,7 @@ export const hasAnnotations = (annotations: MessageAnnotations | undefined): ann
  * @returns The metadata, with `annotations` present exactly when the record says something.
  * @public
  */
-export function withAnnotations<Metadata extends object>(
+export function withAnnotations<Metadata extends Record<string, unknown>>(
   metadata: Metadata,
   annotations: MessageAnnotations | undefined,
 ): Metadata & { annotations?: MessageAnnotations } {

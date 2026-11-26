@@ -10,6 +10,7 @@ import {
   serializeMessageAnnotations,
   withAnnotations,
 } from '#annotations/index.js';
+import type { AnnotationMark } from '#annotations/annotations.schema.js';
 import type { AnnotatedImage, MessageAnnotations } from '#annotations/index.js';
 import { messageMetadataSchema } from '#schemas/metadata.schema.js';
 
@@ -96,8 +97,8 @@ describe('message annotations', () => {
         annotations({ comments: [{ ...comment, text: 'x'.repeat(annotationLimits.commentCharacters + 1) }] }),
       ),
     ).toBe('commentCharacters');
-    const stroke = {
-      kind: 'pen' as const,
+    const stroke: AnnotationMark = {
+      kind: 'pen',
       points: Array.from({ length: annotationLimits.penPoints }, (_, index): [number, number] => [index / 200, 0.5]),
     };
     expect(

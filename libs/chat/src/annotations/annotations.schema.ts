@@ -25,7 +25,8 @@ export const annotationLimits = {
   bytes: 64 * 1024,
 } as const;
 
-const finite = z.number().finite();
+/** Zod numbers are finite: `NaN` and the infinities are refused. */
+const finite = z.number();
 
 /** A point or direction in `tau:root` (Z up). Points are metres, as the viewer stores them. */
 const vec3Schema = z.tuple([finite, finite, finite]);

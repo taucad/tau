@@ -187,7 +187,7 @@ export function agentAnnotationsOf(
             viewOf: view.path,
             ...(view.kernelView === undefined ? {} : { kernelView: view.kernelView }),
             ...(view.instance === undefined ? {} : { instance: view.instance }),
-            ...(view.posed === true ? { posed: true as const } : {}),
+            ...(view.posed === true ? ({ posed: true } as const) : {}),
             look: direction(
               unit([
                 view.camera.position[0] - view.camera.target[0],
@@ -206,7 +206,7 @@ export function agentAnnotationsOf(
                   },
                 }),
           }),
-      ...(image.outdated === true ? { outdated: true as const } : {}),
+      ...(image.outdated === true ? ({ outdated: true } as const) : {}),
       ...(marks.length === 0 ? {} : { marks }),
     });
   }

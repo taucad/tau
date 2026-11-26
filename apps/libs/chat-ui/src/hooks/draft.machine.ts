@@ -191,7 +191,7 @@ export function buildDraftMessage(
     id: 'draft',
     role: 'user',
     /* A draft is not a message yet: the send stamps its time (`buildUserMessage`), so this stays pure (MC-R6). */
-    metadata: withAnnotations({ createdAt: 0, status: 'pending' as const }, annotations),
+    metadata: withAnnotations({ createdAt: 0, status: 'pending' } as const, annotations),
     parts,
   };
 }

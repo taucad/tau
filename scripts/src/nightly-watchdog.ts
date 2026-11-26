@@ -516,31 +516,33 @@ const recentScheduledRuns = async (
   return body.workflow_runs;
 };
 
-/** The most pages of ledger runs read for one day: a run per CI run, most of them skipped pull-request runs. */
-const maximumLedgerPages = 20;
-
 /** One page of a workflow's runs, as the Actions API lists it. */
 export type LedgerRunPage = { readonly total_count: number; readonly workflow_runs: readonly LedgerRun[] };
 
+/** The most results the runs API returns for one filtered listing. */
+const listingCap = 1000;
+
 /**
- * Every run a listing holds, page by page. A listing that ends before its `total_count` (the API returns at most
- * 1,000 results for a filtered query) or runs past {@link maximumLedgerPages} throws: a partial list could hide a red
- * run, so it fails closed.
+ * Every run a listing holds, page by page, counted against the `total_count` of its first page (a page past the end
+ * reports 0). A listing over the API's 1,000-result cap, or one whose pages end before that count, throws: a partial
+ * list could hide a red run, so it fails closed.
  */
 export const readAllRuns = async (getPage: (page: number) => Promise<LedgerRunPage>): Promise<LedgerRun[]> => {
-  const runs: LedgerRun[] = [];
-  for (let page = 1; page <= maximumLedgerPages; page += 1) {
+  const first = await getPage(1);
+  const total = first.total_count;
+  if (total > listingCap) {
+    throw new Error(`${total} ledger runs in a day, over the listing cap of ${listingCap}; not read in part`);
+  }
+  const runs: LedgerRun[] = [...first.workflow_runs];
+  for (let page = 2; runs.length < total; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
     const body = await getPage(page);
-    runs.push(...body.workflow_runs);
-    if (runs.length >= body.total_count) {
-      return runs;
-    }
     if (body.workflow_runs.length === 0) {
-      throw new Error(`the listing ended at ${runs.length} of ${body.total_count} runs; not read in part`);
+      throw new Error(`the listing ended at ${runs.length} of ${total} runs; not read in part`);
     }
+    runs.push(...body.workflow_runs);
   }
-  throw new Error(`more than ${maximumLedgerPages * 100} ledger runs in a day; not read in part`);
+  return runs;
 };
 
 /** The ledger job's completed runs of the last 24 hours, any event; the judge picks the red ones. */

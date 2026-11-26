@@ -365,10 +365,12 @@ describe('nightly watchdog', () => {
       });
       expect(await readAllRuns(async (number) => page(number === 1 ? 100 : 20, 120))).toHaveLength(120);
       expect(await readAllRuns(async () => page(0, 0))).toEqual([]);
-      // The API returns at most 1,000 results for a filtered listing: pages end before the count.
-      await expect(readAllRuns(async (number) => page(number <= 10 ? 100 : 0, 1500))).rejects.toThrow(
-        'the listing ended at 1000 of 1500 runs',
+      // A page past the end reports a total of 0: the first page's count still decides.
+      await expect(readAllRuns(async (number) => (number === 1 ? page(100, 150) : page(0, 0)))).rejects.toThrow(
+        'the listing ended at 100 of 150 runs',
       );
+      // The API returns at most 1,000 results for a filtered listing.
+      await expect(readAllRuns(async () => page(100, 1500))).rejects.toThrow('over the listing cap of 1000');
     });
   });
 

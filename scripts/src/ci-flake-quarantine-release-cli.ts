@@ -578,7 +578,8 @@ const settleExpiry = async (
   context: {
     readonly release: LandedRemoval;
     readonly identityOf: (path: string, test: string) => string | undefined;
-    readonly onMain: ReadonlySet<number>;
+    /** Entries on `main` as `<issue> <return key>`: a variant still quarantined is not this expiry's. */
+    readonly onMain: ReadonlySet<string>;
   },
 ): Promise<string[]> => {
   const repo = `/repos/${github.repository}`;
@@ -592,7 +593,9 @@ const settleExpiry = async (
       id === undefined ||
       typeof created !== 'string' ||
       typeof expires !== 'string' ||
-      context.onMain.has(issue)
+      context.onMain.has(
+        `${issue} ${returnKey(identityHashOf(id), typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined)}`,
+      )
     ) {
       continue;
     }
@@ -650,6 +653,10 @@ export const closeReleased = async (
   },
 ): Promise<string[]> => {
   const repo = `/repos/${github.repository}`;
+  // An entry on `main` is one variant of a test: another variant sharing its owner issue may have been released.
+  const onMainEntries = new Set(
+    context.tests.map((test) => `${test.entry.issue} ${returnKey(identityHashOf(test.id), test.entry.variant)}`),
+  );
   const onMain = new Set(context.tests.map((test) => test.entry.issue));
   const outcome: string[] = [];
   const handled = new Set<number>();
@@ -661,25 +668,19 @@ export const closeReleased = async (
     const released = release.mergedAt.slice(0, 10);
     if (release.kind === 'expiry') {
       // oxlint-disable-next-line no-await-in-loop -- one merged expiry at a time
-      outcome.push(...(await settleExpiry(github, { release, identityOf: context.identityOf, onMain })));
+      outcome.push(...(await settleExpiry(github, { release, identityOf: context.identityOf, onMain: onMainEntries })));
       continue;
     }
     for (const { path, entry } of release.removed) {
       const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
       const { issue, test, created, expires, renewal, variant } = fields;
       const id = typeof test === 'string' ? context.identityOf(path, test) : undefined;
-      if (
-        typeof issue !== 'number' ||
-        id === undefined ||
-        typeof created !== 'string' ||
-        typeof expires !== 'string' ||
-        onMain.has(issue)
-      ) {
+      if (typeof issue !== 'number' || id === undefined || typeof created !== 'string' || typeof expires !== 'string') {
         continue;
       }
       const entryVariant = typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined;
       const key = returnKey(identityHashOf(id), entryVariant);
-      if (settled.has(`${issue} ${key}`)) {
+      if (settled.has(`${issue} ${key}`) || onMainEntries.has(`${issue} ${key}`)) {
         continue;
       }
       settled.add(`${issue} ${key}`);
@@ -689,12 +690,19 @@ export const closeReleased = async (
         github.get<LabelledIssue>(`${repo}/issues/${issue}`),
         automationComments(github, issue),
       ]);
-      const noted = markersIn(comments).some(
-        (marker) =>
-          marker.kind === 'released' &&
-          marker.record.branch === release.branch &&
-          returnKey(marker.record.identity, marker.record.variant) === key,
+      const notedAt = comments.findIndex((body) =>
+        markersIn([body]).some(
+          (marker) =>
+            marker.kind === 'released' &&
+            marker.record.branch === release.branch &&
+            returnKey(marker.record.identity, marker.record.variant) === key,
+        ),
       );
+      const noted = notedAt !== -1;
+      // A return of any variant after this release was recorded reopened the issue for the operator: leave it open.
+      const returnedSince = noted && comments.slice(notedAt + 1).some((body) => body.includes('<!-- flake-returned:'));
+      // Another variant of the test is still quarantined under this issue: record this release, keep the issue open.
+      const shared = onMain.has(issue);
       const labels = labelNames(current.labels);
       const done =
         noted && current.state === 'closed' && labels.includes(releasedLabel) && !labels.includes(releasingLabel);
@@ -702,7 +710,7 @@ export const closeReleased = async (
       const returned = comments.some((body) =>
         body.includes(returnMarker({ identity: identityHashOf(id), released, variant: entryVariant })),
       );
-      if (done || returned) {
+      if (done || returned || returnedSince || (noted && shared)) {
         continue;
       }
       if (!noted) {
@@ -727,6 +735,11 @@ export const closeReleased = async (
       if (!labels.includes(releasedLabel)) {
         // oxlint-disable-next-line no-await-in-loop -- one issue at a time
         await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [releasedLabel] });
+      }
+      if (shared) {
+        // `flake:released` lets the 30-day return find this record; the issue stays with the variant on main.
+        outcome.push(`Recorded the release of one variant on #${issue}; another is still quarantined under it.`);
+        continue;
       }
       if (labels.includes(releasingLabel)) {
         // oxlint-disable-next-line no-await-in-loop -- one issue at a time

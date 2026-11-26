@@ -131,45 +131,17 @@ const covers = (test: QuarantinedTest, row: OutcomeRow): boolean =>
 const passesOf = (runs: ReadonlyArray<{ readonly passes: number }>): number =>
   runs.reduce((sum, run) => sum + run.passes, 0);
 
-/**
- * Count one run attempt into a track, in run order whatever order the runs are ingested in: a run that completes late
- * takes its place by when it was created. A failure ends the count there, so passes of runs created before it no
- * longer count, and a late pass from before the newest failure never joins the count after it. Runs past the newest
- * {@link maximumStreakRuns} fold into `trimmed`, one bucket per run creation instant, which keeps their passes and when.
- */
 /** Run order: by creation time, then run, then attempt (the attempts of one run share its creation time). */
 const runOrder = (
   a: { readonly at: string; readonly run: number; readonly attempt: number },
   b: { readonly at: string; readonly run: number; readonly attempt: number },
 ): number => a.at.localeCompare(b.at) || a.run - b.run || a.attempt - b.attempt;
 
-type TrimmedBucket = { readonly passes: number; readonly from: string; readonly to: string };
-
-/** The most trimmed buckets kept: older ones drop off, which only shortens the span the count is known to cover. */
-const maximumTrimmed = 2400;
-
 /**
- * Fold a run's passes into the bucket of the instant its run was created (its attempts, and runs created at the same
- * instant, share one), keeping the buckets in order.
+ * Count one run attempt into a track, in run order whatever order the runs are ingested in: a run that completes late
+ * takes its place by when it was created, then by run and attempt. A failure ends the count there, so the passes before
+ * it in run order no longer count, and a late pass from before the newest failure never joins the count after it.
  */
-const foldTrimmed = (buckets: readonly TrimmedBucket[], run: StreakRun): TrimmedBucket[] => {
-  const index = buckets.findIndex((bucket) => bucket.from === run.at);
-  if (index === -1) {
-    return [...buckets, { passes: run.passes, from: run.at, to: run.at }]
-      .sort((a, b) => a.from.localeCompare(b.from))
-      .slice(-maximumTrimmed);
-  }
-  return buckets.map((bucket, at) =>
-    at === index
-      ? {
-          passes: bucket.passes + run.passes,
-          from: run.at < bucket.from ? run.at : bucket.from,
-          to: run.at > bucket.to ? run.at : bucket.to,
-        }
-      : bucket,
-  );
-};
-
 const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number): void => {
   if (failures > 0) {
     track.failures += failures;
@@ -177,26 +149,10 @@ const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number)
       track.lastFailure = { run: attempt.run, attempt: attempt.attempt, at: attempt.at };
     }
     track.streakRuns = track.streakRuns.filter((run) => runOrder(run, attempt) > 0);
-    // A bucket of a run created after the failure keeps its passes; one created at the same instant is dropped, since
-    // whether it ran after the failure is unknown.
-    const kept = (track.trimmed ?? []).filter((bucket) => bucket.from > attempt.at);
-    track.trimmed = kept.length > 0 ? kept : undefined;
   } else if (track.lastFailure === undefined || runOrder(attempt, track.lastFailure) > 0) {
-    const newestTrimmed = track.trimmed?.at(-1)?.to;
-    if (newestTrimmed !== undefined && attempt.at < newestTrimmed) {
-      track.trimmed = foldTrimmed(track.trimmed ?? [], attempt);
-    } else {
-      track.streakRuns = [...track.streakRuns, attempt].sort(runOrder);
-    }
-    while (track.streakRuns.length > maximumStreakRuns) {
-      const [oldest] = track.streakRuns;
-      track.streakRuns = track.streakRuns.slice(1);
-      if (oldest) {
-        track.trimmed = foldTrimmed(track.trimmed ?? [], oldest);
-      }
-    }
+    track.streakRuns = [...track.streakRuns, attempt].sort(runOrder).slice(-maximumStreakRuns);
   }
-  track.streak = passesOf(track.trimmed ?? []) + passesOf(track.streakRuns);
+  track.streak = passesOf(track.streakRuns);
 };
 
 /**
@@ -325,9 +281,7 @@ const spanDays = (from: string | undefined, to: string | undefined): number =>
 /** Whether a track meets the release bar, with the linked fix when there is one. */
 export const releaseVerdict = (track: ReleaseTrack | undefined, fix?: LinkedFix): ReleaseVerdict => {
   const runs = track?.streakRuns ?? [];
-  const trimmed = track?.trimmed ?? [];
-  const last = runs.at(-1)?.at ?? trimmed.at(-1)?.to;
-  const allDays = spanDays(trimmed[0]?.from ?? runs[0]?.at, last);
+  const allDays = spanDays(runs[0]?.at, runs.at(-1)?.at);
   const withoutFix: ReleaseVerdict = {
     met: (track?.streak ?? 0) >= releaseBar.withoutFix && allDays >= releaseBar.minimumDays,
     kind: 'no-fix',
@@ -341,10 +295,8 @@ export const releaseVerdict = (track: ReleaseTrack | undefined, fix?: LinkedFix)
   // Strictly after the merge: a run created at the same instant may not have tested the fix.
   const merged = Date.parse(fix.mergedAt);
   const after = runs.filter((run) => Date.parse(run.at) > merged);
-  // A trimmed hour counts only when it began after the merge: the one the merge fell in is not known to follow it.
-  const trimmedAfter = trimmed.filter((bucket) => Date.parse(bucket.from) > merged);
-  const passes = passesOf(after) + passesOf(trimmedAfter);
-  const days = spanDays(trimmedAfter[0]?.from ?? after[0]?.at, after.at(-1)?.at ?? trimmedAfter.at(-1)?.to);
+  const passes = passesOf(after);
+  const days = spanDays(after[0]?.at, after.at(-1)?.at);
   return {
     met: passes >= releaseBar.withFix && days >= releaseBar.minimumDays,
     kind: 'fix',

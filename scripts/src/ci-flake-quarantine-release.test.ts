@@ -315,19 +315,29 @@ describe('the count in run order', () => {
     expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ streak: 6, failures: 1 });
   });
 
-  it('should keep where a long count started when its oldest runs are trimmed', () => {
+  it('should keep a long count whole, in run order, from where it started', () => {
     const tests = testsOf([entryOf()]);
     const state = emptyState(new Date('2026-11-20T00:00:00Z'));
     history(state, tests, { count: 1, from: '2026-11-21T01:00:00Z' });
     history(state, tests, { count: 300, from: '2026-11-23T02:00:00Z', everyHours: 0.01, firstRun: 2000 });
 
     const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
-    expect(track).toMatchObject({ streak: 301, trimmed: [{ passes: 1, from: '2026-11-21T01:00:00.000Z' }] });
-    expect(track?.streakRuns).toHaveLength(300);
+    expect(track?.streak).toBe(301);
+    expect(track?.streakRuns[0]).toMatchObject({ at: '2026-11-21T01:00:00.000Z' });
     expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix', passes: 301 });
   });
 
-  it('should keep the trimmed passes after a late failure among them, the same hour included', () => {
+  it('should keep a pass created at the same instant as a late failure but after it in run order', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    const at = '2026-11-21T01:00:00Z';
+    countQuarantineRun(state, { run: runOf(1001, at), rows: [rowOf(1001)], tests });
+    countQuarantineRun(state, { run: runOf(1000, at), rows: [rowOf(1000, { state: 'failed' })], tests });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']?.streak).toBe(1);
+  });
+
+  it('should keep every pass after a late failure in an old part of a long count', () => {
     const tests = testsOf([entryOf()]);
     const state = emptyState(new Date('2026-11-20T00:00:00Z'));
     // 100 passes on November 21 (one an hour from 00:00, then every few minutes), then 300 on November 24.
@@ -342,7 +352,7 @@ describe('the count in run order', () => {
     });
 
     const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
-    // Every pass after 10:30 survives (47 of them, from 10:36 on), the ones in the same hour included.
+    // Every pass after 10:30 survives (47 of them, from 10:36 on), however old.
     expect(track?.streak).toBe(347);
     expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix' });
   });
@@ -965,6 +975,60 @@ describe('the release job', () => {
     expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true })).toBe(true);
     expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true, unnoted: ['failed'] })).toBe(false);
     expect(mayResumeAutoMerge({ ...ready, kind: 'expiry', releases: true, problems: ['invalid'] })).toBe(false);
+  });
+
+  it('should record a released variant while another stays quarantined under the issue, and keep a return open', async () => {
+    const id = `host › ${testName}`;
+    const firefox = { browser: 'firefox' };
+    const webkit = { browser: 'webkit' };
+    const branch = 'flake-release/2026-11-26-bbbb';
+    const webkitRecord = {
+      identity: identityHashOf(id),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch,
+      released: '2026-11-26',
+      variant: webkit,
+    };
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // #33: WebKit's release was recorded and closed the issue; Firefox then returned and reopened it.
+      '/issues/33/comments': [
+        { body: removalMarker('released', webkitRecord), user: { type: 'Bot' } },
+        {
+          body: `${returnMarker({ identity: identityHashOf(id), released: '2026-11-22', variant: firefox })}\nReturned.`,
+          user: { type: 'Bot' },
+        },
+      ],
+    });
+    const landed: LandedRemoval[] = [
+      // #32: Firefox released while WebKit is still on main.
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 32, variant: firefox }) }],
+      },
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [{ path, entry: entryOf({ issue: 33, variant: webkit }) }],
+      },
+    ];
+
+    const outcome = await closeReleased(github, {
+      tests: testsOf([entryOf({ issue: 32, variant: webkit })]),
+      landed,
+      identityOf: (_file, test) => `host › ${test}`,
+    });
+
+    const note = requests.find((request) => request.method === 'POST' && request.path.endsWith('/issues/32/comments'))
+      ?.body as { body: string };
+    expect(lastLanded([note.body])).toMatchObject({ variant: firefox, released: '2026-11-26' });
+    expect(requests.some((request) => request.method === 'PATCH')).toBe(false);
+    expect(outcome).toEqual(['Recorded the release of one variant on #32; another is still quarantined under it.']);
   });
 
   it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {

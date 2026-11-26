@@ -362,8 +362,11 @@ export type IngestedRun = {
   readonly rejected: number;
 };
 
-/** Run records kept per quarantine track: the count's newest runs, enough to recount the bar after a fix by hand. */
-export const maximumStreakRuns = 300;
+/**
+ * Run records kept per quarantine track: more than an entry's 28 days of runs at the measured rate (about 41 a day), so
+ * the whole count stays in run order. A count longer than this keeps its newest runs, which only shortens its span.
+ */
+export const maximumStreakRuns = 2400;
 
 /** One run attempt of a track's count: its passing executions. */
 export type StreakRun = {
@@ -386,15 +389,10 @@ export type ReleaseTrack = {
   executions: number;
   /** Executions that failed, or passed only on the recorded retry. */
   failures: number;
-  /** Consecutive passing executions, up to the newest: the count against the bar without a fix (`trimmed` included). */
+  /** Consecutive passing executions, up to the newest: the count against the bar without a fix. */
   streak: number;
   /** The runs of the current count, oldest first, the newest {@link maximumStreakRuns}. */
   streakRuns: StreakRun[];
-  /**
-   * The passes of the count's runs older than the newest {@link maximumStreakRuns}, one bucket per instant their runs
-   * were created, oldest first: a late failure among them drops only the buckets at or before it.
-   */
-  trimmed?: Array<{ readonly passes: number; readonly from: string; readonly to: string }> | undefined;
   /** The newest run with a failure. */
   lastFailure?: { readonly run: number; readonly attempt: number; readonly at: string } | undefined;
 };

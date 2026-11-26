@@ -74,7 +74,8 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore, presentMessages } = await import('#services/chat-session-store.js');
+const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages } =
+  await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
@@ -5287,6 +5288,8 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    /* HA-I4: `CHAT_RUN_LIVE` is a `wait` code, so the command stays queued to be sent again by its id; it never
+     * fails, and the gate holds it while the other run is live. */
     it('should never cancel an unrelated live run when retrying a prepared command', async () => {
       const chatId = 'queue_refused';
       const projectId = 'queue_refused_project';
@@ -5304,12 +5307,16 @@ describe('ChatSessionStore', () => {
         publishLogRows(store, chatId, []);
         await store.requestTurn(chatId, queuedGesture('wait'));
         await vi.waitFor(() => {
-          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+          expect(hostCommand).toHaveBeenCalledTimes(1);
         });
         publishLogRows(store, chatId, runningRows('other'));
-        store.retryMessageQueue(chatId);
-        await settle();
+        /* Past the first re-send's 250 ms backoff: the other run's gate still holds it. */
+        await new Promise((resolve) => {
+          setTimeout(resolve, 600);
+        });
         expect(hostCommand).toHaveBeenCalledTimes(1);
+        expect(hostCommand.mock.calls.every(([command]) => command.type === 'start')).toBe(true);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
         expect(session.messageQueueRef.getSnapshot().context.items[0]?.command?.commandId).toBe('req_wait');
       } finally {
         unadmit();
@@ -5684,8 +5691,10 @@ describe('ChatSessionStore', () => {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('waits'));
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+            expect(hostCommand).toHaveBeenCalled();
           });
+          /* HA-I4: the code's line waits for its bound (outboxWaitLineMilliseconds); the send is queued meanwhile. */
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
           /* Not failed: the send is in the thread, the chat reads as on its way, and nothing offers Try again. */
           expect(store.departingSendOf(chatId)).toBe('waits');
           expect(store.getChatStatus(chatId)).toBe('submitted');
@@ -5715,6 +5724,72 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      it("should show a waiting send's line only once it has waited its bound (HA-I4)", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_wait_line';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('line'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          /* Re-sent by its key meanwhile, never failed. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+
+          expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA-I4: an answer lost past the command's bound (U21) is a `wait`, not a failure: the command is sent again by
+       * its key, and the host's answer ends it. */
+      it('should keep a send whose answer was lost and send it again by its key until the host answers', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        let reachable = false;
+        hostCommand.mockImplementation(async (command) => {
+          if (!reachable) {
+            throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+          }
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('lost'));
+          /* Past the send's own 30 s bound: the answer is lost, and the outbox keeps the command. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['lost']);
+
+          reachable = true;
+          await vi.advanceTimersByTimeAsync(31_000);
+
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should take a send that waits for its host back to the composer on Stop, with no cancel sent', async () => {
         const chatId = 'departing_host_wait_stopped';
         const projectId = 'departing_project';
@@ -5724,8 +5799,9 @@ describe('ChatSessionStore', () => {
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('stopped'));
+          /* Sent again by its key: the send waits for its host between re-sends. */
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toBeDefined();
+            expect(hostCommand).toHaveBeenCalledTimes(2);
           });
           expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
 

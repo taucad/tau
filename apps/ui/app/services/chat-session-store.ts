@@ -42,7 +42,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
-import { ownerWaitOf, sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { CommandRefusal } from '#chat-clients/_internal/host-command.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
@@ -89,6 +89,7 @@ import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildEditedUserMessage, composeDraftText } from '#utils/chat.utils.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
+import type { HostAttachmentStatus } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
@@ -127,7 +128,8 @@ import type {
 } from '#machines/chat-projection.logic.js';
 import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { AgentLiveEvent, RowKey } from '@taucad/agent-host';
-import type { HostCommand } from '@taucad/agent-host/wire';
+import { refusalOf } from '@taucad/agent-host/wire';
+import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import type { OwnSegmentSource, OwnSegmentVerdict } from '#services/chat-own-segment-source.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import {
@@ -479,6 +481,42 @@ const takeBackRetryDelay = 250;
 const hostWaitFirstDelay = 250;
 const hostWaitLongestDelay = 30_000;
 
+/**
+ * HA-I8: how long a transient cause must hold before the chat says "Reconnecting…" (Rule 17). A debounce on the cause
+ * facts, never a silence detector. Milliseconds.
+ */
+export const reconnectingCueMilliseconds = 2000;
+
+/**
+ * HA-I4: how long a queued command may wait on a `wait` code before that code's line shows; it stays queued after.
+ * ponytail: one value, as the still-closing bound that `WRITER_LOCKED` waits on (`closingWait`) is ten seconds too.
+ * Milliseconds.
+ */
+export const outboxWaitLineMilliseconds = 10_000;
+
+/**
+ * HA-I4: the queued command's outcome by the retry class of the code it met. Any host answer ends a command, except a
+ * `wait` code's, which keeps it queued to be sent again by its id. A connection that failed past the command's bound
+ * lost the answer: that is `wait` too, and the log's `applied[commandId]` resolves it on the next pass.
+ *
+ * @param commandId - The command.
+ * @param outcome - Its answer, or what its send threw.
+ * @returns The refusal to wait on, or `undefined` when the outcome ends the command (a throw that is not a wait
+ *   rethrows at the caller).
+ */
+const outboxWaitOf = (
+  commandId: string,
+  outcome: CommandAnswer | { readonly thrown: unknown },
+): CommandRefusal | undefined => {
+  if (!('thrown' in outcome)) {
+    return outcome.status === 'refused' && refusalOf(outcome.code).retry === 'wait' ? outcome : undefined;
+  }
+  const code = getErrno(outcome.thrown);
+  return code !== undefined && refusalOf(code).retry === 'wait'
+    ? { commandId, generation: 0, status: 'refused', effect: 'unknown', code, message: String(outcome.thrown) }
+    : undefined;
+};
+
 /** Approximate retained representation weight, bounded at retirement rather than during streaming. */
 const projectionWeight = (projection: ChatProjection): number => {
   const pending: unknown[] = [projection];
@@ -801,9 +839,12 @@ type HostWait = Readonly<{
   attempt: number;
   /** The backoff ran out, so the outbox may send it again. */
   due: boolean;
-  /** What the chat says while the send waits. */
+  /** What the chat says while the send waits, once it has waited {@link outboxWaitLineMilliseconds} (HA-I4). */
   sentence: string;
+  lineShown: boolean;
   timer: ReturnType<typeof setTimeout>;
+  /** Shows the line at the bound; kept across this command's re-sends. */
+  line: ReturnType<typeof setTimeout>;
 }>;
 
 /** What a send that waits for its host reads as: queued, with why and when it goes (PERF-5). */
@@ -949,8 +990,19 @@ type ObservedChat = {
   attachment?: Actor<typeof hostAttachment>;
   /** Placement of that live connection, not the chat's desired execution. */
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+  /**
+   * The host read's verified state, for a placement whose files this device does not hold (residual R1; HA3 rewrites
+   * it). A local placement has none (HA2): its read is the own source's ({@link ObservedChat.ownCurrent}), and its
+   * host carries only the live overlay ({@link ObservedChat.subscribed}).
+   */
   status: 'unknown' | 'attached' | 'lost' | 'refused';
+  /** D17's backoff before the host read is attached again: the remote branch only (HA2 deleted the local one). */
   retry?: ReturnType<typeof setTimeout>;
+  /** A local placement's live overlay is subscribed; otherwise it is waiting, and the next own read starts it. */
+  subscribed?: boolean;
+  /** HA-I8's cause facts have held since this timer started; at {@link reconnectingCueMilliseconds} the cue shows. */
+  cueTimer?: ReturnType<typeof setTimeout>;
+  cue?: boolean;
   /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
   lossReport?: ReturnType<typeof setTimeout>;
   attempts: number;
@@ -965,6 +1017,8 @@ type ObservedChat = {
   source?: OwnSegmentSource;
   /** The source's last pass held the file: read authority that no host loss takes away (HA-I2). */
   ownCurrent?: boolean;
+  /** The projection's reset that pass published into: a later reset is read again before it counts as read. */
+  ownResetVersion?: number;
   /** Live (re)subscriptions on a local placement, and the one the settler last sent `attach` for (HA-I5). */
   subscriptions?: number;
   settledFor?: number;
@@ -994,8 +1048,19 @@ export type ProjectClosePlan = Readonly<{
   >;
 }>;
 
+/**
+ * How a connect routes: by the chat's stored records (HA-I7), or to this build's own host (`inPage`, HA-I5's stale-run
+ * `attach`).
+ *
+ * @public
+ */
+export type HostRoute = Readonly<{ inPage?: true }>;
+
 type ProjectHostConnector = Readonly<{
-  connect: (chatId: string) => Promise<
+  connect: (
+    chatId: string,
+    route?: HostRoute,
+  ) => Promise<
     Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'> & {
       placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
     }
@@ -1119,13 +1184,12 @@ export class ChatSessionStore {
     { projectId: string; actor: Actor<typeof chatProjectionLogic>; weight: number }
   >();
   readonly #deletedProjections = new WeakSet<Actor<typeof chatProjectionLogic>>();
-  /** A read answer, not the projection's initially empty cursor, proves this chat's log was checked. */
-  readonly #answeredLogReads = new Set<string>();
   /**
-   * Chats whose next connect routes to this build's own host, whatever the record says (HA-I5's stale-run `attach`).
-   * Read synchronously by {@link ChatSessionStore.getChatHostSettings}, which the connector calls first.
+   * A remote placement's host read answer, not the projection's initially empty cursor, proves this chat's log was
+   * checked. A local placement's proof is its own source's file read ({@link ChatSessionStore.#logRead}).
    */
-  readonly #inPageRoute = new Set<string>();
+  readonly #answeredLogReads = new Set<string>();
+  /** Chats whose HA-I5 stale-run `attach` to this build's own host is in flight: one at a time. */
   readonly #inPageAttaching = new Set<string>();
   /** Chats this tab created empty and has not acquired yet: their transcript is settled `empty` at once (I21). */
   readonly #createdEmpty = new Set<string>();
@@ -1359,6 +1423,7 @@ export class ChatSessionStore {
       this.#stopObservedAttachment(chatId, observed);
       this.#stopOwnSource(observed);
       this.#observed.delete(chatId);
+      clearTimeout(observed.cueTimer);
       this.#stopRemoteObservationIfUnused(chatId);
       if (!this.#sessions.has(chatId)) {
         this.#historicalUsage.delete(chatId);
@@ -1470,9 +1535,10 @@ export class ChatSessionStore {
    */
   public async getChatHostSettings(
     chatId: string,
+    route?: HostRoute,
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel' | 'kernelPreference'> | undefined> {
-    /* Read before any wait: the connector calls this first, synchronously within the settler's connect (HA-I5). */
-    const inPage = this.#inPageRoute.has(chatId);
+    /* HA-I5's stale-run `attach` goes to this build's own host, whatever the records say. */
+    const inPage = route?.inPage === true;
     const session = this.#sessions.get(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
@@ -1954,7 +2020,8 @@ export class ChatSessionStore {
     ) {
       this.#answeredLogReads.add(chatId);
       const observed = this.#observed.get(chatId);
-      if (observed !== undefined) {
+      /* A local placement keeps no attachment state (HA2): its read is the own source's. */
+      if (observed !== undefined && observed.ownStart === undefined) {
         observed.status = 'attached';
       }
     } else if (answer.status === 'refused') {
@@ -1969,11 +2036,12 @@ export class ChatSessionStore {
         session.seedLocalLogCheck = undefined;
       }
       const observed = this.#observed.get(chatId);
-      if (observed !== undefined) {
+      if (observed !== undefined && observed.ownStart === undefined) {
         observed.status = answer.reason === 'unreadable' ? 'refused' : 'lost';
       }
-      if (answer.reason === 'unreadable' && session !== undefined) {
-        // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
+      if (answer.reason === 'unreadable' && session !== undefined && observed?.ownStart === undefined) {
+        // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it. A local
+        // placement has no such latch (HA2): its own source reads the file again on the next wake.
         this.#latchUnreadTranscript(session);
         this.#releaseRefusedRun(session);
       }
@@ -1993,20 +2061,32 @@ export class ChatSessionStore {
     this.#projectionOf(chatId).send({ type: 'live', event });
   }
 
-  /** The current read-only host attachment's verified state, never a run lifecycle. @public */
+  /**
+   * Whether this page has read the chat's log, never a run lifecycle. A local placement keeps no attachment state
+   * (HA2): it reads `attached` once its own source read the file (HA-I1), and `unknown` before; only a remote
+   * placement's host read is ever `lost` or `refused`. ponytail: kept for its readers outside the store, which ask only
+   * whether the log was read; it goes with them.
+   *
+   * @public
+   */
   public getAttachmentStatus(chatId: string): ObservedChat['status'] {
-    return this.#observed.get(chatId)?.status ?? 'unknown';
+    const observed = this.#observed.get(chatId);
+    if (observed?.ownStart !== undefined) {
+      return this.#logRead(chatId) ? 'attached' : 'unknown';
+    }
+    return observed?.status ?? 'unknown';
   }
 
   /**
-   * The host whose log this chat is attached to now: where its runs ran and its refusals came from, whatever the
-   * composer is set to since. `undefined` while unattached or attached to this page's own host.
+   * The host this chat's connection reaches: where its runs ran and its refusals came from, whatever the composer is
+   * set to since, as the stored records route it (HA-I7). `undefined` before a connection, while a remote read is not
+   * attached, or on this page's own host. ponytail: approvals and cancels route through the connector by those records,
+   * not by this; it stays for its reader outside the store.
    *
    * @public
    */
   public getAttachedHostId(chatId: string): TauAgentHostId | undefined {
-    const observed = this.#observed.get(chatId);
-    return observed?.status === 'attached' ? observed.placement?.hostId : undefined;
+    return this.#connectedPlacement(chatId)?.hostId;
   }
 
   /** Exact usage can be read only after both the host log and foreign segments reached this projection. */
@@ -2014,7 +2094,7 @@ export class ChatSessionStore {
     const projection = this.#projectionContext(chatId);
     return (
       this.#observed.get(chatId)?.projectId === projectId &&
-      this.#answeredLogReads.has(chatId) &&
+      this.#logRead(chatId) &&
       this.#remoteReadCompletedVersions.get(chatId) === this.#remoteReadVersions.get(chatId) &&
       projection !== undefined &&
       selectCaughtUp(projection)
@@ -2194,7 +2274,7 @@ export class ChatSessionStore {
       return;
     }
     const observed = this.#observed.get(chatId);
-    if (observed?.status === 'lost' && observed.hostLoadFailure !== undefined) {
+    if (observed?.hostLoadFailure !== undefined) {
       /* The read this seed waits for met an agent host this page can never load, before this session could say so. */
       void this.#showHostLoadFailure(session, observed.hostLoadFailure);
       return;
@@ -2224,7 +2304,7 @@ export class ChatSessionStore {
     if (chatTurnAdmit(chatId) === undefined || this.#projectHostConnectors.get(session.projectId) === undefined) {
       return;
     }
-    if (!this.#answeredLogReads.has(chatId) && !session.seedLocalLogEmpty) {
+    if (!this.#logRead(chatId) && !session.seedLocalLogEmpty) {
       const attachment = this.#observed.get(chatId)?.attachment;
       if (attachment !== undefined && session.seedLocalLogCheck === undefined) {
         const path = `/projects/${session.projectId}/${chatRecordsPath(chatId)}/events.jsonl`;
@@ -2369,7 +2449,8 @@ export class ChatSessionStore {
    * @public
    */
   public hostWaitOf(chatId: string): string | undefined {
-    return this.#sessions.get(chatId)?.hostWait?.sentence;
+    const wait = this.#sessions.get(chatId)?.hostWait;
+    return wait?.lineShown === true ? wait.sentence : undefined;
   }
 
   /**
@@ -2448,6 +2529,18 @@ export class ChatSessionStore {
   public getChatStatus(chatId: string): ChatStatus {
     const session = this.#sessions.get(chatId);
     return selectVisibleChatStatus(this.#projectionContext(chatId), session !== undefined && this.#awaitsRun(session));
+  }
+
+  /**
+   * Whether the chat says "Reconnecting…" (HA-I8, Rule 17): a transient cause has held for
+   * {@link reconnectingCueMilliseconds}. Never in a `paused` phase, and never for an idle chat or a healthy run.
+   *
+   * @param chatId - The chat.
+   * @returns Whether the cue shows.
+   * @public
+   */
+  public isReconnecting(chatId: string): boolean {
+    return this.#observed.get(chatId)?.cue === true;
   }
 
   /** A user Stop is awaiting its host-confirmed terminal row. @public */
@@ -2773,9 +2866,7 @@ export class ChatSessionStore {
         this.#loadOutbox(session, record, false);
         return this.#holdQueue(session, record.items, 'log-not-caught-up');
       }
-      const observation = this.#observed.get(session.chatId);
-      const placement = observation?.status === 'attached' ? observation.placement : undefined;
-      const observedPlacement = connectionPlacement(placement);
+      const observedPlacement = connectionPlacement(this.#connectedPlacement(session.chatId));
       for (const entry of record.items) {
         if (entry.command !== undefined && projection.ledger.applied[entry.command.commandId] !== undefined) {
           // oxlint-disable-next-line no-await-in-loop -- each acknowledgement reads the preceding durable queue state.
@@ -2832,21 +2923,25 @@ export class ChatSessionStore {
             if (code !== undefined && peerLossCodes.has(code)) {
               unknownEffect({ reason: 'peer-lost', code });
             }
-            throw error;
+            const lost = outboxWaitOf(commandId, { thrown: error });
+            if (lost === undefined) {
+              throw error;
+            }
+            answer = lost;
           }
-          const wait = ownerWaitOf(answer);
+          if (answer.status === 'refused' && answer.effect === 'unknown') {
+            /* U8: the bounded re-send ran out with the effect still unknown. */
+            unknownEffect({ reason: 'unknown-effect', code: answer.code });
+          }
+          /* HA-I4: a `wait` keeps the item to send again by its id; its effect, if unknown, is the log's to resolve. */
+          const wait = outboxWaitOf(commandId, answer);
           if (wait !== undefined) {
-            /* A wait-class refusal holds the item for its host; its effect is not unknown. */
             this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
             return this.#holdQueue(session, record.items, 'host-wait');
           }
-          if (answer.effect === 'unknown') {
-            /* U8: the bounded re-send ran out with the effect still unknown. */
-            unknownEffect({ reason: 'unknown-effect', code: answer.code });
-          } else if (answer.status !== 'refused' && answer.effect !== 'durable') {
-            /* U20: applied, but not as a durable row. */
-            unknownEffect({ reason: 'not-durable', code: answer.status });
-          }
+          /* `never`, `resume` and `reauth` end the item with the code's card. ponytail: an applied answer that applied
+           * nothing still keeps the item, as MessageQueue's `Acknowledge` requires durable acceptance; HA4 ends it with
+           * the queue store and the `QueuePlacement` target. */
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
           }
@@ -2968,10 +3063,7 @@ export class ChatSessionStore {
     const known = projection !== undefined && projection.fault === undefined && selectCaughtUp(projection);
     const caught = known ? projection : undefined;
     const run = caught === undefined ? undefined : selectCurrentRun(caught);
-    const observation = this.#observed.get(session.chatId);
-    const observedPlacement = connectionPlacement(
-      observation?.status === 'attached' ? observation.placement : undefined,
-    );
+    const observedPlacement = connectionPlacement(this.#connectedPlacement(session.chatId));
     return selectOutboxGate({
       items: record.items,
       caughtUp: caught !== undefined,
@@ -3016,14 +3108,27 @@ export class ChatSessionStore {
     { queueId, command, refusal }: Readonly<{ queueId: string; command: QueuedStartCommand; refusal: CommandRefusal }>,
   ): void {
     const previous = session.hostWait;
-    const attempt = previous?.commandId === command.commandId ? previous.attempt + 1 : 0;
+    const same = previous?.commandId === command.commandId ? previous : undefined;
+    const attempt = same === undefined ? 0 : same.attempt + 1;
     clearTimeout(previous?.timer);
+    if (same === undefined) {
+      clearTimeout(previous?.line);
+    }
     const timer = setTimeout(
       () => {
         this.#hostWaitRanOut(session, timer);
       },
       Math.min(hostWaitFirstDelay * 2 ** attempt, hostWaitLongestDelay),
     );
+    const line =
+      same?.line ??
+      setTimeout(() => {
+        const current = session.hostWait;
+        if (this.#sessions.get(session.chatId) === session && current?.line === line) {
+          session.hostWait = { ...current, lineShown: true };
+          this.#chatTopics.get(session.chatId)?.emit();
+        }
+      }, outboxWaitLineMilliseconds);
     session.hostWait = {
       queueId,
       commandId: command.commandId,
@@ -3031,8 +3136,11 @@ export class ChatSessionStore {
       attempt,
       due: false,
       sentence: hostWaitSentence(refusal),
+      lineShown: same?.lineShown ?? false,
       timer,
+      line,
     };
+    this.#refreshReconnecting(session.chatId);
     if (previous?.commandId !== command.commandId || previous.sentence !== session.hostWait.sentence) {
       logFacts('info', '[ChatSessionStore] send waits for its host', {
         chatId: session.chatId,
@@ -3070,7 +3178,9 @@ export class ChatSessionStore {
       return;
     }
     clearTimeout(wait.timer);
+    clearTimeout(wait.line);
     session.hostWait = undefined;
+    this.#refreshReconnecting(session.chatId);
     this.#refreshStatus(session);
     this.#chatTopics.get(session.chatId)?.emit();
   }
@@ -3271,7 +3381,7 @@ export class ChatSessionStore {
       session === undefined ||
       session.transcriptSettled ||
       this.#displayedTranscript(session).length > 0 ||
-      !this.#answeredLogReads.has(chatId) ||
+      !this.#logRead(chatId) ||
       this.#foreignScanState(chatId) !== 'failed'
     ) {
       return;
@@ -3853,6 +3963,10 @@ export class ChatSessionStore {
         observed.ownHeldUnsettled = undefined;
         /* A pick waiting on the run this start held unsettled (HA-I7) waits no longer. */
         this.#projectionTopics.get(chatId)?.emit();
+        /* Not local: an overlay lost while this start decided is the host read again, with its retry (remote). */
+        queueMicrotask(() => {
+          this.#resumeOverlay(chatId, observed);
+        });
       }
       return false;
     };
@@ -3919,6 +4033,9 @@ export class ChatSessionStore {
           }
           first.resolve(local);
           if (!local) {
+            queueMicrotask(() => {
+              this.#resumeOverlay(chatId, observed);
+            });
             return;
           }
           this.#watchOwnFiles(chatId, observed);
@@ -4005,16 +4122,36 @@ export class ChatSessionStore {
     if (verdict !== 'current') {
       return;
     }
-    this.#answeredLogReads.add(chatId);
+    observed.ownResetVersion = this.#projectionContext(chatId)?.resetVersion;
     if (observed.ownWatch === undefined && performance.now() - (observed.ownWatchAt ?? -Infinity) >= 1000) {
       this.#watchOwnFiles(chatId, observed);
     }
     observed.attachment?.send({ type: 'own-read' });
+    this.#resumeOverlay(chatId, observed);
+    this.#refreshReconnecting(chatId);
     this.#syncProjection(chatId, 'none');
     this.#unreadTopic.emit();
     this.#latchIfForeignScanLost(chatId);
     this.startPendingSeed(chatId);
     this.#settle(chatId, observed);
+  }
+
+  /**
+   * Whether this page read the chat's own log: from the file on a local placement (HA-I1), as of the projection's
+   * current reset (a reset the store sends waits for the source's next pass), else a host answer.
+   */
+  #logRead(chatId: string): boolean {
+    const observed = this.#observed.get(chatId);
+    return (
+      (observed?.ownCurrent === true && observed.ownResetVersion === this.#projectionContext(chatId)?.resetVersion) ||
+      this.#answeredLogReads.has(chatId)
+    );
+  }
+
+  /** The placement the chat's connection reached: a local placement's is kept across an overlay loss (HA-I2). */
+  #connectedPlacement(chatId: string): ObservedChat['placement'] {
+    const observed = this.#observed.get(chatId);
+    return observed?.ownStart !== undefined || observed?.status === 'attached' ? observed.placement : undefined;
   }
 
   /**
@@ -4092,20 +4229,9 @@ export class ChatSessionStore {
       return;
     }
     this.#inPageAttaching.add(chatId);
-    /* ponytail: the route is a flag the connector's first, synchronous settings read sees; a connector port for the
-     * in-page host replaces it if the connector grows one (HA2 owns host-connector.ts). */
-    // oxlint-disable-next-line promise-function-async -- the route flag must clear before the connect's first await.
-    const connect = (): ReturnType<ProjectHostConnector['connect']> => {
-      this.#inPageRoute.add(chatId);
-      try {
-        return connector.connect(chatId);
-      } finally {
-        this.#inPageRoute.delete(chatId);
-      }
-    };
     const attach = async (): Promise<void> => {
       try {
-        await this.#sendAttach(chatId, connect);
+        await this.#sendAttach(chatId, async () => connector.connect(chatId, { inPage: true }));
       } finally {
         this.#inPageAttaching.delete(chatId);
       }
@@ -4133,9 +4259,8 @@ export class ChatSessionStore {
   #stopObservedAttachment(chatId: string, observed: ObservedChat): void {
     clearTimeout(observed.lossReport);
     observed.lossReport = undefined;
-    if (observed.ownCurrent !== true) {
-      this.#answeredLogReads.delete(chatId);
-    }
+    this.#answeredLogReads.delete(chatId);
+    observed.subscribed = false;
     const session = this.#sessions.get(chatId);
     if (session !== undefined) {
       session.seedLocalLogEmpty = false;
@@ -4149,6 +4274,7 @@ export class ChatSessionStore {
     observed.attachment = undefined;
     observed.placement = undefined;
     observed.status = 'unknown';
+    this.#refreshReconnecting(chatId);
   }
 
   /**
@@ -4243,6 +4369,96 @@ export class ChatSessionStore {
     session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
   }
 
+  /**
+   * A local placement's live overlay met `event` (HA2). Reading never needed it (HA-I2), so the chat's read keeps its
+   * authority and no attachment state is kept: a loss leaves the overlay waiting, and the chat's next own read starts
+   * it again ({@link ChatSessionStore.#resumeOverlay}), with no timer of its own (D17's local branch is gone).
+   */
+  #overlayStatus(
+    chatId: string,
+    { observed, attachment }: Readonly<{ observed: ObservedChat; attachment: Actor<typeof hostAttachment> }>,
+    event: HostAttachmentStatus,
+  ): void {
+    if (event.type === 'attachment.attached') {
+      observed.hostLoadFailure = undefined;
+      return;
+    }
+    observed.subscribed = false;
+    if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
+      /* FP10: this page cannot load the host's code; the overlay is not started again for the page's life. */
+      observed.hostLoadFailure = event.error;
+      const session = this.#sessions.get(chatId);
+      if (session !== undefined) {
+        void this.#showHostLoadFailure(session, event.error);
+      }
+    }
+    queueMicrotask(() => {
+      if (observed.attachment === attachment) {
+        attachment.stop();
+        observed.attachment = undefined;
+      }
+    });
+    this.#refreshReconnecting(chatId);
+  }
+
+  /** Start a waiting live overlay again: the publisher of its wait is the own read (HA-I9), not a timer. */
+  #resumeOverlay(chatId: string, observed: ObservedChat): void {
+    if (
+      this.#observed.get(chatId) === observed &&
+      observed.attachment === undefined &&
+      observed.retry === undefined &&
+      observed.hostLoadFailure === undefined
+    ) {
+      this.#startObservedAttachment(chatId, observed);
+    }
+  }
+
+  /**
+   * HA-I8's cause facts: the outbox head re-sends after a lost answer or a `wait` code, or a local chat's live overlay
+   * is waiting while its own run is unsettled and not paused. Never in a `paused` phase (an approval or a question).
+   */
+  #reconnectingCause(chatId: string, observed: ObservedChat): boolean {
+    const projection = this.#projectionContext(chatId);
+    const phase = projection !== undefined && selectCaughtUp(projection) ? selectRunPhase(projection) : undefined;
+    if (phase === 'paused') {
+      return false;
+    }
+    if (this.#sessions.get(chatId)?.hostWait !== undefined) {
+      return true;
+    }
+    return observed.ownCurrent === true && observed.subscribed !== true && phase !== undefined && opensRun(phase);
+  }
+
+  /** Follow the cause facts: the cue shows once they have held for {@link reconnectingCueMilliseconds}. */
+  #refreshReconnecting(chatId: string): void {
+    const observed = this.#observed.get(chatId);
+    if (observed === undefined) {
+      return;
+    }
+    const announce = (cue: boolean): void => {
+      if ((observed.cue === true) !== cue) {
+        observed.cue = cue;
+        this.#projectionTopics.get(chatId)?.emit();
+        this.#chatTopics.get(chatId)?.emit();
+      }
+    };
+    if (!this.#reconnectingCause(chatId, observed)) {
+      clearTimeout(observed.cueTimer);
+      observed.cueTimer = undefined;
+      announce(false);
+      return;
+    }
+    if (observed.cue === true || observed.cueTimer !== undefined) {
+      return;
+    }
+    observed.cueTimer = setTimeout(() => {
+      observed.cueTimer = undefined;
+      if (this.#observed.get(chatId) === observed && this.#reconnectingCause(chatId, observed)) {
+        announce(true);
+      }
+    }, reconnectingCueMilliseconds); // Bound: reconnectingCueMilliseconds.
+  }
+
   #startObservedAttachment(chatId: string, observed: ObservedChat): void {
     const connector = this.#projectHostConnectors.get(observed.projectId);
     if (connector === undefined) {
@@ -4254,6 +4470,8 @@ export class ChatSessionStore {
         local: async () => observed.local ?? false,
         onSubscribed: () => {
           observed.subscriptions = (observed.subscriptions ?? 0) + 1;
+          observed.subscribed = true;
+          this.#refreshReconnecting(chatId);
           this.#settle(chatId, observed);
         },
         onLive: () => {
@@ -4284,13 +4502,18 @@ export class ChatSessionStore {
             clearTimeout(observed.retry);
             observed.retry = undefined;
           }
+          /* An own source running or deciding: the chat is (or may be) local, so this is the live overlay alone. */
+          if (observed.ownStart !== undefined) {
+            this.#overlayStatus(chatId, { observed, attachment }, event);
+            return;
+          }
           observed.status =
             event.type === 'attachment.attached'
               ? 'attached'
               : event.type === 'attachment.refused'
                 ? 'refused'
                 : 'lost';
-          if (event.type !== 'attachment.attached' && observed.ownCurrent !== true) {
+          if (event.type !== 'attachment.attached') {
             this.#answeredLogReads.delete(chatId);
           }
           this.#projectionTopics.get(chatId)?.emit();
@@ -4843,29 +5066,44 @@ export class ChatSessionStore {
         abort.signal.throwIfAborted();
       }
       let acceptingPlacement: string | undefined;
-      const answer = await this.#sendHostCommand(
-        async () => {
-          const client =
-            request.queueId === undefined
-              ? await connector.connect(session.chatId)
-              : await this.#connectQueuedCommand(session, connector, {
-                  queueId: request.queueId,
-                  signal: abort.signal,
-                });
-          acceptingPlacement = connectionPlacement(client.placement);
-          return client;
-        },
-        command,
-        { signal: abort.signal },
-      );
+      let answer: CommandAnswer;
+      try {
+        answer = await this.#sendHostCommand(
+          async () => {
+            const client =
+              request.queueId === undefined
+                ? await connector.connect(session.chatId)
+                : await this.#connectQueuedCommand(session, connector, {
+                    queueId: request.queueId,
+                    signal: abort.signal,
+                  });
+            acceptingPlacement = connectionPlacement(client.placement);
+            return client;
+          },
+          command,
+          { signal: abort.signal },
+        );
+      } catch (error) {
+        /* A queued Start whose answer was lost past its bound waits as a `wait` code does (HA-I4). */
+        const lost =
+          request.queueId !== undefined && command.type === 'start'
+            ? outboxWaitOf(command.commandId, { thrown: error })
+            : undefined;
+        if (lost === undefined) {
+          throw error;
+        }
+        answer = lost;
+      }
       if (session.commandAbort !== abort || abort.signal.aborted) {
         return;
       }
       session.commandInFlight = false;
       this.#refreshStatus(session);
-      const wait = ownerWaitOf(answer);
-      if (request.queueId !== undefined && command.type === 'start' && wait !== undefined) {
-        /* Its command stays in the outbox, which sends it again by its key: the chat holds the turn meanwhile. */
+      /* HA-I4: a queued Start's command stays in the outbox on a `wait`, which sends it again by its key: the chat
+       * holds the turn meanwhile. */
+      const wait =
+        request.queueId !== undefined && command.type === 'start' ? outboxWaitOf(command.commandId, answer) : undefined;
+      if (wait !== undefined && request.queueId !== undefined && command.type === 'start') {
         this.#holdForHost(session, { queueId: request.queueId, command, refusal: wait });
         return;
       }
@@ -5041,6 +5279,7 @@ export class ChatSessionStore {
       presented = key;
       presentedAttempt = run === undefined ? presentedAttempt : { runId: run.runId, attempt: run.attempt };
       this.#syncProjection(chatId, reopened ? 'reopened' : moved ? 'moved' : 'none');
+      this.#refreshReconnecting(chatId);
       this.#projectionTopics.get(chatId)?.emit();
     };
     projection.subscribe(({ context }) => {
@@ -5334,7 +5573,7 @@ export class ChatSessionStore {
     if (actor !== undefined && this.#deletedProjections.has(actor)) {
       return false;
     }
-    if (this.#answeredLogReads.has(chatId)) {
+    if (this.#logRead(chatId)) {
       return true;
     }
     const views = projection.remote?.views;
@@ -5396,7 +5635,7 @@ export class ChatSessionStore {
    */
   #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
     // Trays are remembered only from the whole chat: other devices' history read, and this device's log answered.
-    if (this.#foreignScanState(session.chatId) !== 'read' || !this.#answeredLogReads.has(session.chatId)) {
+    if (this.#foreignScanState(session.chatId) !== 'read' || !this.#logRead(session.chatId)) {
       if (messages.length === 0) {
         this.#latchUnreadTranscript(session);
       } else {
@@ -5889,6 +6128,7 @@ export class ChatSessionStore {
                 this.#projectionOf(input.chatId).send({ type: 'reset' });
                 if (observed !== undefined) {
                   this.#startObservedAttachment(input.chatId, observed);
+                  observed.source?.wake();
                 }
                 /* Keep the exact intent until Start is durably accepted. A
                  * reload between this load and host acknowledgement must
@@ -6208,6 +6448,7 @@ export class ChatSessionStore {
         recordLoadedSubscription.unsubscribe();
         session.commandAbort?.abort();
         clearTimeout(session.hostWait?.timer);
+        clearTimeout(session.hostWait?.line);
         clearTimeout(session.announceTimer);
         session.announceTimer = undefined;
         lifecycleSubscription?.unsubscribe();

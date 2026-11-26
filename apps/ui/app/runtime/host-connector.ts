@@ -9,8 +9,11 @@
  *
  * - it is published while the file manager has a worker and is `ready`, withdrawn when either stops holding, and
  *   published again when the worker changes (the effect's `client` and `viewsReady` dependencies);
- * - each chat's placement on this device (its stored execution, else the default) decides which owner log it reads;
- *   connecting never issues Start or acquires an SDK session;
+ * - each chat's placement on this device (its stored execution, else the default) decides which host a connect
+ *   reaches: the host that takes its commands and `attach` and streams its live overlay. A chat whose files this
+ *   device holds is read from the file, not through here (HA-I1); only a remote placement's read still is. A
+ *   connect routed `inPage` reaches this build's own host whatever the records say (HA-I5). Connecting never issues
+ *   Start or acquires an SDK session;
  * - the filesystem bridge, the revision session port and the compute store port are read from the file-manager
  *   actor when a chat attaches (row S2);
  * - the default execution, model resolution, the default kernel, the testing cookie and compute reuse are read from
@@ -45,7 +48,7 @@ import {
   readBrowserRunStoppability,
   retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
-import type { ChatSessionStore } from '#services/chat-session-store.js';
+import type { ChatSessionStore, HostRoute } from '#services/chat-session-store.js';
 import { resolveCatalogModel } from '#hooks/use-models.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ProjectChoices } from '#runtime/choices.js';
@@ -115,8 +118,8 @@ export const hostConnectorCallback =
 
     const publish = (): (() => void) => {
       let connectorActive = true;
-      const connect = async (chatId: string) => {
-        const stored = await chatSessions.getChatHostSettings(chatId);
+      const connect = async (chatId: string, route?: HostRoute) => {
+        const stored = await chatSessions.getChatHostSettings(chatId, route);
         const choices = ports.choices();
         const execution = stored?.activeExecution ?? choices.defaultExecution;
         const daemonHostId = daemonPlacementOf(execution);

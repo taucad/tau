@@ -930,6 +930,22 @@
       "owner": "host attachment reliability HA1"
     },
     {
+      "id": "HA2-RECONNECTING-CUE",
+      "bound": "The chat says Reconnecting only once an HA-I8 cause fact has held for reconnectingCueMilliseconds (2 s): a local chat's live overlay waiting while its own run is unsettled and not paused, or the outbox head re-sending after a lost answer or a wait code; never in a paused phase. A debounce on cause facts, not a silence detector",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "observed.cueTimer = setTimeout",
+      "class": "Presentation",
+      "owner": "host attachment reliability HA2"
+    },
+    {
+      "id": "HA2-OUTBOX-WAIT-LINE",
+      "bound": "A queued command refused with a wait code, or whose answer was lost past its 30 s bound, stays queued and is sent again by its id; its code's line shows only once it has waited outboxWaitLineMilliseconds (10 s, equal to the still-closing bound WRITER_LOCKED waits on); the item stays queued after (HA-I4)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "session.hostWait = { ...current, lineShown: true }",
+      "class": "Presentation",
+      "owner": "host attachment reliability HA2"
+    },
+    {
       "id": "HA0-READ-LOSS",
       "bound": "Report-only: a lost or refused chat read (not a leadership handoff) that lasts 10 s (chatReadLossBoundMilliseconds) reports chat.read.cold-hidden and run.unsettled.own; an attach clears it",
       "site": "apps/ui/app/services/chat-session-store.ts",

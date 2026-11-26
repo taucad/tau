@@ -3,7 +3,8 @@
  * HA0 regression harness (Brain research/host-attachment-reliability-blueprint.md, "Regression harness (HA0)"). Each
  * row is one numbered harness row, written against T4, where this device's own `events.jsonl` reaches the transcript
  * only through a live host's read answers. A row was kept only while it was red on T4; HA1 (own segment from the file,
- * HA-I1, and the `attach` settler, HA-I5) turned rows 1, 2 and 8a green. Rows green on T4, and rows this tier cannot
+ * HA-I1, and the `attach` settler, HA-I5) turned rows 1, 2 and 8a green; HA2 (no attachment state on a local
+ * placement) adds rows 3, 4 and 16 and the successors of what it deleted. Rows green on T4, and rows this tier cannot
  * build, are inventoried in Brain `artifacts/host-attachment-reliability/ha0-results.md`.
  */
 import { readFileSync } from 'node:fs';
@@ -15,7 +16,13 @@ import { chatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js'
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { ChatSessionStore, chatReadLossBoundMilliseconds } from '#services/chat-session-store.js';
+import {
+  ChatSessionStore,
+  chatReadLossBoundMilliseconds,
+  reconnectingCueMilliseconds,
+} from '#services/chat-session-store.js';
+import { selectCaughtUp } from '#machines/chat-projection.logic.js';
+import type { SourceLiveEvent } from '@taucad/agent-host';
 import { chatReadReporter } from '#lib/chat-read-reporting.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
@@ -235,6 +242,236 @@ describe('host attachment regression harness (HA0 rows, green since HA1)', () =>
 });
 
 // ===========================================================================
+// HA2: no attachment state on a local placement
+// ===========================================================================
+
+/** A host that connects and streams live deltas the test pushes, and whose live subscription the test can end. */
+const overlayHost = (hostId?: 'desktop') => {
+  let listener: ((chatId: string, event: SourceLiveEvent) => void) | undefined;
+  let ended: ((error?: unknown) => void) | undefined;
+  const connect = vi.fn(
+    async () =>
+      ({
+        hostCommand: vi.fn(async (command: HostCommand) => ({
+          status: 'applied',
+          effect: 'durable',
+          commandId: command.commandId,
+          cursor: 0,
+        })),
+        catchUp: writerOwnedCatchUp,
+        read: vi.fn(),
+        subscribe: vi.fn(() => vi.fn()),
+        subscribeLive: (
+          _chatId: string,
+          next: (chatId: string, event: SourceLiveEvent) => void,
+          onEnded?: (error?: unknown) => void,
+        ) => {
+          listener = next;
+          ended = onEnded;
+          return vi.fn();
+        },
+        close: vi.fn(async () => undefined),
+        placement: { hostId },
+      }) as unknown as AgentHostClient,
+  );
+  return {
+    connect,
+    push: (event: SourceLiveEvent) => listener?.(chatId, event),
+    end: (error: unknown) => ended?.(error),
+  };
+};
+
+const delta = (text: string, sourceGeneration: string): SourceLiveEvent => ({
+  type: 'text-delta',
+  chatId,
+  runId: 'run_1',
+  messageId: 'assistant_1',
+  contentIndex: 0,
+  delta: text,
+  sourceGeneration,
+});
+
+/** An own log whose run stopped on an approval: paused, still unsettled. */
+const pausedLog = `${unsettledLog}${JSON.stringify(lifecycleRow(2, 'paused'))}\n`;
+
+describe('host attachment regression harness (HA2 rows)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /* Row 3 (U7): a writer reopen mints a new generation. On T4 the read went `lost` and every command gate closed until
+   * a re-read; a local placement's read is the file's, so a new writer is only the overlay's next deltas. */
+  it('row 3: keeps the chat read and caught up across a writer reopen', async () => {
+    const host = overlayHost('desktop');
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
+    const seen: Array<readonly [string, boolean, string | undefined]> = [];
+    const unsubscribe = chat.store.subscribeProjection(chatId, () => {
+      const projection = chat.store.getProjection(chatId);
+      seen.push([
+        chat.store.getAttachmentStatus(chatId),
+        projection !== undefined && selectCaughtUp(projection),
+        chat.store.getAttachedHostId(chatId),
+      ]);
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachedHostId(chatId)).toBe('desktop');
+      }, coldBound);
+      seen.length = 0;
+      host.push(delta('before ', 'writer-a'));
+      host.push(delta('after', 'writer-b'));
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain('after');
+      }, coldBound);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((entry) => entry[0] === 'attached' && entry[1] && entry[2] === 'desktop')).toBe(true);
+    } finally {
+      unsubscribe();
+      chat.close();
+    }
+  });
+
+  /* Row 4 (U4, U5): leadership taken mid-read. A local chat reads no host, so a fenced host neither hides it cold nor
+   * freezes it warm, and the chat's read keeps its authority. */
+  it('row 4: shows the chat cold and keeps it warm while leadership is taken', async () => {
+    const host = overlayHost();
+    const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain(recordedText);
+        expect(host.connect).toHaveBeenCalled();
+      }, coldBound);
+      host.end(Object.assign(new Error('Leadership moved.'), { code: 'LEADERSHIP_LOST' }));
+      await Promise.resolve();
+      expect(chat.text()).toContain(recordedText);
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* Row 16 (AR3-4, AR4-7): "Reconnecting…" only on a transient cause fact, never on a healthy run or an idle chat. */
+  it('row 16: says nothing on a 30 s tool call, an approval wait or an idle chat whose overlay is down', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const cases = [
+      { log: unsettledLog, connect: overlayHost().connect, wait: 30_000 }, // A live run quiet for 30 s
+      { log: pausedLog, connect: deadHost('PEER_GONE'), wait: 5000 }, // An approval wait, overlay down
+      { log: recordedTurn, connect: deadHost('PEER_GONE'), wait: 5000 }, // An idle chat, overlay down
+    ];
+    for (const { log, connect, wait } of cases) {
+      const chat = open(createStore(createDisk({ [ownLog]: log })), connect);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each case runs alone on the shared fake clock.
+        await vi.waitFor(() => {
+          expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+        }, coldBound);
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await vi.advanceTimersByTimeAsync(wait);
+        expect(chat.store.isReconnecting(chatId)).toBe(false);
+      } finally {
+        chat.close();
+      }
+    }
+  });
+
+  it('should say "Reconnecting…" once a live run\'s overlay has waited its debounce, and not before', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), deadHost('PEER_GONE'));
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      expect(chat.store.isReconnecting(chatId)).toBe(false);
+      await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+      expect(chat.store.isReconnecting(chatId)).toBe(true);
+    } finally {
+      chat.close();
+    }
+  });
+});
+
+/* Successors (testing §14): each behaviour HA2 deleted state for now comes from the own source. */
+describe('HA2 successors: a local placement keeps no attachment state', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /* Replaces "should leave the live connection lost": the status of a local chat is its file read, not its host's. */
+  it.each(['PEER_GONE', 'WORKER_LOAD_FAILED'] as const)(
+    'should read a local chat as read from its own file while its host fails %s',
+    async (code) => {
+      const connect = vi.fn(deadHost(code));
+      const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
+      try {
+        await vi.waitFor(() => {
+          expect(chat.text()).toContain(recordedText);
+          expect(connect).toHaveBeenCalled();
+        }, coldBound);
+        await Promise.resolve();
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+        expect(chat.store.historicalUsageReady(chatId, projectId)).toBe(true);
+      } finally {
+        chat.close();
+      }
+    },
+  );
+
+  /* D17's local branch is deleted: a lost overlay is started again by the next own read, not by a backoff timer. */
+  it('should not dial a lost overlay again on a timer while nothing wakes the own source', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const connect = vi.fn(deadHost('PEER_GONE'));
+    const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain(recordedText);
+        expect(connect).toHaveBeenCalled();
+      }, coldBound);
+      /* Past D17's whole backoff (250 ms doubling to 30 s): nothing dials the overlay again on its own. */
+      await vi.advanceTimersByTimeAsync(1000);
+      const dialed = connect.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(connect).toHaveBeenCalledTimes(dialed);
+    } finally {
+      chat.close();
+    }
+  });
+
+  it('should start a lost overlay again on the own reads of an unsettled run', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const connect = vi.fn(deadHost('PEER_GONE'));
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), connect);
+    try {
+      await vi.waitFor(() => {
+        expect(connect).toHaveBeenCalled();
+      }, coldBound);
+      const before = connect.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(connect.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* `getAttachedHostId` no longer reads the attachment state: a local chat's connected placement outlives an overlay
+   * loss, so approvals and the sign-in card keep the run's host (U7). */
+  it('should keep the connected placement of a local chat across an overlay loss', async () => {
+    const host = overlayHost('desktop');
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachedHostId(chatId)).toBe('desktop');
+      }, coldBound);
+      host.end(Object.assign(new Error('gone'), { code: 'PEER_GONE' }));
+      await Promise.resolve();
+      expect(chat.store.getAttachedHostId(chatId)).toBe('desktop');
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+    } finally {
+      chat.close();
+    }
+  });
+});
+
+// ===========================================================================
 // Stand-in controls (green): each red row fails for its documented reason
 // ===========================================================================
 
@@ -262,22 +499,6 @@ describe('host attachment harness stand-ins (HA0 controls)', () => {
       chat.close();
     }
   });
-
-  it.each(['PEER_GONE', 'WORKER_LOAD_FAILED'] as const)(
-    'should leave the live connection lost when the host fails %s',
-    async (code) => {
-      const connect = vi.fn(deadHost(code));
-      const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
-      try {
-        await vi.waitFor(() => {
-          expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
-        }, coldBound);
-        expect(connect).toHaveBeenCalled();
-      } finally {
-        chat.close();
-      }
-    },
-  );
 
   it('should connect a silent host whose read never answers, and send no command for a settled log', async () => {
     const commands: HostCommand[] = [];

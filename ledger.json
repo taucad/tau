@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T17:26:08.326Z",
+  "updatedAt": "2026-11-26T17:46:57.354Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -3043,6 +3043,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45869643807,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2895",
+      "sha": "f25c2181ec0f9b4f272404f52411b9b01b4128bc",
+      "at": "2026-11-26T17:46:41Z",
+      "conclusion": "success",
+      "artifacts": 2,
+      "counted": 1568,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -4251,25 +4264,25 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "scripts:test": {
-      "executions": 64,
-      "tests": 81957,
+      "executions": 65,
+      "tests": 83467,
       "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T17:20:35Z",
+      "lastSeen": "2026-11-26T17:46:41Z",
       "targets": {
-        "test linux-x64": 18
+        "test linux-x64": 19
       }
     },
     "scripts:test:e2e": {
-      "executions": 64,
-      "tests": 3712,
+      "executions": 65,
+      "tests": 3770,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T17:20:35Z",
+      "lastSeen": "2026-11-26T17:46:41Z",
       "targets": {
-        "test:e2e linux-x64": 19
+        "test:e2e linux-x64": 20
       }
     },
     "settings-ui:test": {
@@ -5240,18 +5253,18 @@
       "targetKey": "test",
       "file": "src/flake-regression-workflow.test.ts",
       "firstSeen": "2026-11-25T23:53:17Z",
-      "lastSeen": "2026-11-26T17:20:35Z",
+      "lastSeen": "2026-11-26T17:46:41Z",
       "lastFailure": "2026-11-26T08:08:04Z",
-      "executions": 24,
+      "executions": 25,
       "failures": 5,
       "retriedPasses": 0,
-      "passStreak": 19,
+      "passStreak": 20,
       "variants": {
         "linux-x64": {
-          "executions": 24,
+          "executions": 25,
           "failures": 5,
           "events": 0,
-          "lastSeen": "2026-11-26T17:20:35Z"
+          "lastSeen": "2026-11-26T17:46:41Z"
         }
       },
       "events": [],
@@ -5294,14 +5307,14 @@
         }
       ],
       "passHashes": [
-        "linux-x64 6896986540438824889",
         "linux-x64 4891831726146866318",
         "linux-x64 16141597063466251183",
         "linux-x64 14590996704141811867",
         "linux-x64 7146397122647584479",
         "linux-x64 10176100964357223800",
         "linux-x64 15072891939242050523",
-        "linux-x64 9367349692940658126"
+        "linux-x64 9367349692940658126",
+        "linux-x64 13898811610929686028"
       ],
       "failureShas": [
         "fed01aadc523f2b1064a8638e1ed6403623eee65",

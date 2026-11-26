@@ -8,7 +8,12 @@ import type {
   PaymentCheckoutExpiryEvidence,
   RequestRejectedEvidence,
 } from '#schema/billing-payment.types.js';
-import type { SupplierValuation, JointInputMaximum, PersistedInputCountEvidence } from '#schema/billing.types.js';
+import type {
+  SupplierValuation,
+  JointInputMaximum,
+  PersistedInputCountEvidence,
+  InputPrefix,
+} from '#schema/billing.types.js';
 import { sql, desc } from 'drizzle-orm';
 import type { AnyPgColumn, PgTableExtraConfigValue } from 'drizzle-orm/pg-core';
 import {
@@ -494,6 +499,9 @@ export const creditOperation = billing.table(
       supplierValuation?: SupplierValuation;
       jointInputMaximum?: JointInputMaximum;
       inputCount?: PersistedInputCountEvidence;
+      inputPrefix?: InputPrefix;
+      /** What the hold's input maximum was taken from. Never part of the price. */
+      holdBasis?: 'prefix' | 'bytes' | 'context' | 'count';
     }>(),
     sku: text('sku').notNull(),
     pinnedTariff: jsonb('pinned_tariff')

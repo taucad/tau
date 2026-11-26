@@ -141,45 +141,41 @@ export const writeDraftHint = (
   }
 };
 
-/** The typing pause before a scheduled draft hint is written: the draft machine's own `saveDebounce`. */
-export const draftHintWriteDelay = 200;
-
 let pendingWrite: (() => void) | undefined;
-let pendingTimer: ReturnType<typeof setTimeout> | undefined;
-let isPageHideListening = false;
+let isListening = false;
 
 /**
- * Write any scheduled draft hint now: the page is hiding, or its composer is leaving.
+ * Write any held draft hint now: the page is hiding, or its composer is leaving.
  */
 export const flushDraftHint = (): void => {
-  if (pendingTimer !== undefined) {
-    clearTimeout(pendingTimer);
-    pendingTimer = undefined;
-  }
   const write = pendingWrite;
   pendingWrite = undefined;
   write?.();
 };
 
+const flushWhenHidden = (): void => {
+  if (globalThis.document.visibilityState === 'hidden') {
+    flushDraftHint();
+  }
+};
+
 /**
- * {@link writeDraftHint} after a typing pause of {@link draftHintWriteDelay}. The write reads, parses and rewrites the
- * whole record synchronously, so a keystroke only replaces the pending draft; the last one lands once typing pauses,
- * or on `pagehide`, or when {@link flushDraftHint} is called.
+ * Hold a draft for {@link writeDraftHint} until the page hides (`visibilitychange` to hidden, or `pagehide`) or
+ * {@link flushDraftHint} is called as the composer leaves. The write reads, parses and rewrites the whole record
+ * synchronously, and the hint is only read when a document loads, so a keystroke only replaces the held draft and the
+ * last one lands before any load could read it. No timer runs while typing.
  *
  * @param scope - Home, or a project by its URL key.
  * @param draft - The draft's text, and for a project the chat it belongs to.
  */
-export const scheduleDraftHint = (scope: DraftHintScope, draft: Readonly<{ text: string; chatId?: string }>): void => {
+export const holdDraftHint = (scope: DraftHintScope, draft: Readonly<{ text: string; chatId?: string }>): void => {
   pendingWrite = () => {
     writeDraftHint(scope, draft);
   };
-  if (pendingTimer !== undefined) {
-    clearTimeout(pendingTimer);
-  }
-  pendingTimer = setTimeout(flushDraftHint, draftHintWriteDelay);
-  if (!isPageHideListening && typeof globalThis.addEventListener === 'function') {
-    isPageHideListening = true;
+  if (!isListening && typeof globalThis.addEventListener === 'function') {
+    isListening = true;
     globalThis.addEventListener('pagehide', flushDraftHint);
+    globalThis.document.addEventListener('visibilitychange', flushWhenHidden);
   }
 };
 

@@ -12,7 +12,7 @@ import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
-import { draftHintScopeOf, flushDraftHint, scheduleDraftHint } from '#lib/frame-hint-draft.js';
+import { draftHintScopeOf, flushDraftHint, holdDraftHint } from '#lib/frame-hint-draft.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -288,7 +288,7 @@ export const ChatTextarea = memo(function ({
     }
     const scope = draftHintScopeOf(globalThis.location.pathname, isProjectComposer);
     if (scope !== undefined) {
-      scheduleDraftHint(scope, {
+      holdDraftHint(scope, {
         text: logic.inputText,
         ...(scope.kind === 'project' && draftHintChatId !== undefined ? { chatId: draftHintChatId } : {}),
       });

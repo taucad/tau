@@ -272,6 +272,8 @@
 \* Chat performance WP-04 review (2026-11-26): the composer's draft hint is held and written when the page hides instead of
 \* written per keystroke (`chat-textarea.tsx`), and `useDraftSelector` selects inside the draft actor's subscription
 \* (`use-chat.tsx`). Neither touches the outbox, a send or a turn request. No action or verdict changes.
+\* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
+\* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

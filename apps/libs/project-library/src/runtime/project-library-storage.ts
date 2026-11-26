@@ -722,6 +722,53 @@ export const scanDiscovery = async (
   return { result: { ...discovered, entries }, configs, quarantinedLocators };
 };
 
+/** How long an orphan nominee's undecided proof stands while the listing does not change: the audit's interval. */
+const absenceProofLifetimeMilliseconds = 10 * 60_000;
+
+/** What a listing says about its roots and directories, to tell whether anything a proof read may have changed. */
+const listingFingerprint = (listing: ProjectDiscoveryResult): string =>
+  JSON.stringify([
+    listing.roots.map((root) => [persistentStorageRootKey(root.root), root.status]),
+    listing.entries.map((entry) => [
+      entry.locator.storageRootKey,
+      entry.locator.relativeDirectory,
+      entry.status,
+      'projectId' in entry ? entry.projectId : '',
+    ]),
+  ]);
+
+/**
+ * The orphan sweep's proofs, remembered (review M4). An `absent` answer is acted on and never kept. A nominee storage
+ * answered `unknown` or `present` for is not swept again until the listing changes, which is what evidence on a root
+ * does, or the audit's interval passes: an unavailable root or a copy the index has not listed yet would otherwise
+ * cost an identity sweep on every pass.
+ *
+ * @param verifyAbsent - The authority's proof.
+ * @param now - The clock.
+ * @returns The remembering proof `planDiscovery` takes.
+ * @public
+ */
+export const rememberedAbsenceProofs = (
+  verifyAbsent: (projectId: string) => Promise<ProjectAbsence>,
+  now: () => number = Date.now,
+): ((projectId: string, listing: ProjectDiscoveryResult) => Promise<ProjectAbsence>) => {
+  const proofs = new Map<string, Readonly<{ proof: ProjectAbsence; fingerprint: string; at: number }>>();
+  return async (projectId, listing) => {
+    const fingerprint = listingFingerprint(listing);
+    const known = proofs.get(projectId);
+    if (known?.fingerprint === fingerprint && now() - known.at < absenceProofLifetimeMilliseconds) {
+      return known.proof;
+    }
+    const proof = await verifyAbsent(projectId);
+    if (proof.status === 'absent') {
+      proofs.delete(projectId);
+    } else {
+      proofs.set(projectId, { proof, fingerprint, at: now() });
+    }
+    return proof;
+  };
+};
+
 /**
  * Decide a scan's writes: the route configs to write for the directories found, with a project whose route is bound
  * to an incomplete root marked `route-blocked`, and the orphans to delete, once the worker that deletes them is ready.
@@ -729,7 +776,7 @@ export const scanDiscovery = async (
 export const planDiscovery = async (
   scan: DiscoveryScan,
   readiedWorker: () => Promise<unknown>,
-  verifyAbsent: (projectId: string) => Promise<ProjectAbsence>,
+  proveAbsent: (projectId: string, listing: ProjectDiscoveryResult) => Promise<ProjectAbsence>,
 ): Promise<DiscoveryPlan> => {
   const configs = new Map(scan.configs);
   const { quarantinedLocators } = scan;
@@ -825,8 +872,21 @@ export const planDiscovery = async (
   /* The pass only nominates (FW2, A1): an orphan's state is dropped only once storage proves no directory carries its
    * id. A copy the index has not heard of keeps its state and is listed by the pass that evidence owes; a root that is
    * not available, or a read that failed, waits. */
-  const proofs = await Promise.all(nominated.map(async (config) => verifyAbsent(config.projectId)));
-  const orphans = nominated.filter((_, index) => proofs[index]?.status === 'absent');
+  /* One identity sweep at a time: each reads every root (review M4). A sweep that fails is uncertainty, which waits, and
+   * never fails the pass. */
+  const orphans: ProjectFileSystemConfig[] = [];
+  for (const config of nominated) {
+    let proof: ProjectAbsence;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Sweeps run one after another.
+      proof = await proveAbsent(config.projectId, result);
+    } catch (error) {
+      proof = { status: 'unknown', reason: error instanceof Error ? error.message : String(error) };
+    }
+    if (proof.status === 'absent') {
+      orphans.push(config);
+    }
+  }
   // The worker deletes an orphan's chats, editor layout and library rows, so the prune waits for it, as today; the
   // machine checks the epoch after this read, so a pass whose epoch moved meanwhile prunes nothing (I7).
   await readiedWorker();

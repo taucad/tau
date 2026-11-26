@@ -197,6 +197,10 @@
 \* passes adopt's remembered id to the authority, which decides under `project:<id>`, and asks `verifyAbsent` before
 \* the orphaned-route release; `remainingCopiesAfterDelete` proves the route's copy by the directory it names or asks
 \* `verifyAbsent`. That is `AbsenceProof = "storage"`; no action or correspondence changes.
+\* FW2 review (2026-11-26): the permanent-delete precheck proves a copy no route binds with `verifyAbsent` (a `present`
+\* answer naming another directory) instead of a pass, which reads the index (B1); `project-library.ts` remembers an
+\* orphan nominee's undecided proof until the listing changes (M4). Both read storage, `AbsenceProof = "storage"`; the
+\* precheck runs before `MutationJournaled`. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

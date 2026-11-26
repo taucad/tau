@@ -244,13 +244,14 @@ const mockVerifyProjectRoute = vi.fn<(input: { projectId: string }) => Promise<P
  * double lists, read without consuming a queued result or counting a call. A row that tests the proof itself sets
  * its own answer.
  */
-const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(async (projectId) => {
+const verifyAbsentFromDiscovery = async (projectId: string): Promise<ProjectAbsence> => {
   const listed = await mockListProjectManifests.getMockImplementation()?.();
   const locators = (listed?.entries ?? []).flatMap((entry) =>
     'projectId' in entry && entry.projectId === projectId ? [entry.locator] : [],
   );
   return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
-});
+};
+const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(verifyAbsentFromDiscovery);
 const mockFileManager = {
   workerChangeChannel: mockWorkerChangeChannel,
   watchRecordFile: mockWatchRecordFile,
@@ -1927,6 +1928,72 @@ describe('useProjectManager.createProject', () => {
     await result.current.getProjectListing();
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+  });
+
+  /* Review M4: the orphan sweep's proof is storage's; a proof that fails waits, and never fails the pass. */
+  describe('the orphan sweep asks storage for every nominee', () => {
+    const orphanConfig = (projectId: string): ProjectFileSystemConfig => ({
+      projectId,
+      backend: 'opfs',
+      providerBasePath: `gone-${projectId}`,
+    });
+    const emptyDiscovery: ProjectDiscoveryResult = {
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [],
+    };
+    afterEach(() => {
+      mockVerifyAbsent.mockImplementation(verifyAbsentFromDiscovery);
+    });
+
+    it('should keep a nominee whose proof rejected and still publish the listing', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([orphanConfig(fakeProject.id)]);
+      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+      mockVerifyAbsent.mockRejectedValueOnce(new Error('The worker went away.'));
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.getProjectListing()).resolves.toBeDefined();
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+      expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+    });
+
+    it('should sweep nominees one at a time', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+        orphanConfig(fakeProject.id),
+        orphanConfig(unrelatedProject.id),
+      ]);
+      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+      let inFlight = 0;
+      let mostInFlight = 0;
+      mockVerifyAbsent.mockImplementation(async () => {
+        inFlight += 1;
+        mostInFlight = Math.max(mostInFlight, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1);
+        });
+        inFlight -= 1;
+        return { status: 'absent' };
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.getProjectListing();
+
+      expect(mockVerifyAbsent).toHaveBeenCalledTimes(2);
+      expect(mostInFlight).toBe(1);
+    });
+
+    it('should not sweep again a nominee storage could not decide while the listing is unchanged', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([orphanConfig(fakeProject.id)]);
+      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+      mockVerifyAbsent.mockResolvedValue({ status: 'unknown', reason: 'root notFound' });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.getProjectListing();
+      await result.current.getProjectListing();
+
+      expect(mockListProjectManifests.mock.calls.length).toBeGreaterThan(1);
+      expect(mockVerifyAbsent).toHaveBeenCalledOnce();
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+    });
   });
 
   it('deletes a config with no discovered directory under a complete root', async () => {

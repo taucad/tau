@@ -150,6 +150,33 @@ describe('durable chat message queue', () => {
     const reopenedReceipt = await f.open().read();
     expect(reopenedReceipt.afterPlacement).toBe(saved4.afterPlacement);
   });
+  /* HA-I4 (HA4): applied with nothing to do ends the item, once, by its key, with no receipt for the next item. */
+  it('should end an item applied with nothing to do without a receipt, and only by its own key', async () => {
+    const f = fixture();
+    const q = f.open();
+    const one = item('one');
+    const command = {
+      type: 'start',
+      commandId: one.requestId,
+      payload: {
+        chatId: 'chat',
+        runId: one.requestId,
+        trigger: 'submit',
+        message: { id: one.id, role: 'user', content: 'one' },
+      },
+    } as const;
+    await q.enqueue({ ...one, command });
+    await q.enqueue(item('two'));
+    const kept = await q.end('one', 'wrong-key');
+    expect(kept.items.map((entry) => entry.id)).toEqual(['one', 'two']);
+    const ended = await q.end('one', one.requestId);
+    expect(ended.items.map((entry) => entry.id)).toEqual(['two']);
+    expect(ended.afterRunId).toBeUndefined();
+    expect(ended.afterPlacement).toBeUndefined();
+    expect(await q.end('one', one.requestId)).toEqual(ended);
+    const reopened = await f.open().read();
+    expect(reopened.items.map((entry) => entry.id)).toEqual(['two']);
+  });
   it('should make duplicate enqueue idempotent and preserve attachments in the saved message', async () => {
     const f = fixture();
     const q = f.open();

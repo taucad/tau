@@ -23,13 +23,56 @@ export type HostAttachmentStatus = Readonly<{
   type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
   reason?: string;
   error?: unknown;
+  /** The loss is residual R6: the computer was revoked or its grant refused, so only pairing it again helps. */
+  residual?: 'R6';
 }>;
+
+/** How one remote connection closed: a WebSocket close code and reason, or a channel's `CloseInfo`. */
+export type RemoteCloseInfo = Readonly<{ code: number | string; reason?: string }>;
+
+/**
+ * D17 (HA3): a remote read that is lost is dialled again after 250 ms, doubling to 30 s, with no give-up; a wake
+ * (`online`, `visibilitychange` to visible, `pageshow`) retries at once. A read that attaches starts the curve over.
+ *
+ * @public
+ */
+export const remoteReadRetryMilliseconds = { first: 250, longest: 30_000 } as const;
+
+/** The API's 1008 refusals of a route's grant (`hosts.service.ts`); its other 1008, the peerless reap, is transient. */
+const grantRefusalReasons: ReadonlySet<string> = new Set([
+  'session unavailable',
+  'route already consumed',
+  'host grant unavailable',
+  'host grant route mismatch',
+]);
+
+/**
+ * Residual R6's close codes (AR3-8): 4003 is the device's revocation, and a 1008 is a grant refusal only by its reason.
+ * The peerless reap (`1008 route peer did not connect`) and every other close stay transient. A host route is never
+ * closed 4401.
+ *
+ * @param info - How the remote connection closed.
+ * @returns The bounded cause when the close is R6's, else `undefined`.
+ * @public
+ */
+export const remoteCloseRefusal = (info: RemoteCloseInfo): 'revoked' | 'grant-refused' | undefined => {
+  if (info.code === 4003) {
+    return 'revoked';
+  }
+  return info.code === 1008 && info.reason !== undefined && grantRefusalReasons.has(info.reason)
+    ? 'grant-refused'
+    : undefined;
+};
 
 /** A read-only connection into one chat's projection. @public */
 export type HostAttachmentInput = Readonly<{
   chatId: string;
   connect: () => Promise<
-    Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'close'> & Partial<Pick<AgentHostClient, 'subscribeLive'>>
+    Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'close'> &
+      Partial<Pick<AgentHostClient, 'subscribeLive'>> & {
+        /** Every close of the connection underneath, with its code (R6 is told from it). Returns an unsubscribe. */
+        onClose?: (handler: (info: RemoteCloseInfo) => void) => () => void;
+      }
   >;
   projection: Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
@@ -76,6 +119,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let observedSource = input.projection.getSnapshot().context.ledger.position.sourceGeneration;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeLive: (() => void) | undefined;
+  let offClose: (() => void) | undefined;
   let client: Awaited<ReturnType<HostAttachmentInput['connect']>> | undefined;
   const clearLive = (): void => {
     const runId = input.projection.getSnapshot().context.live?.runId;
@@ -93,10 +137,22 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     const { sourceGeneration: _sourceGeneration, ...modelEvent } = event;
     input.projection.send({ type: 'live', event: modelEvent });
   };
+  /* The remote read loop (HA3, D17): a lost remote read is read again on the backoff or a wake, never given up. */
+  let remote = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryRedial = false;
+  let retries = 0;
+  let scheduleRetry = (_again: boolean): void => undefined;
   const report = (event: HostAttachmentStatus): void => {
-    if (!closed) {
-      sendBack(event);
-      input.onStatus?.(event);
+    if (closed) {
+      return;
+    }
+    sendBack(event);
+    input.onStatus?.(event);
+    if (event.type === 'attachment.attached') {
+      retries = 0;
+    } else if (remote && event.type === 'attachment.lost') {
+      scheduleRetry(event.reason !== 'owner-fenced');
     }
   };
 
@@ -240,13 +296,22 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     }
   };
 
+  let connections = 0;
   const connectLive = async (): Promise<void> => {
+    const connection = ++connections;
     try {
-      client = await input.connect();
-      if (closed) {
-        await client.close();
+      const connected = await input.connect();
+      if (closed || connection !== connections) {
+        await connected.close();
         return;
       }
+      client = connected;
+      offClose = client.onClose?.((info) => {
+        const refusal = remoteCloseRefusal(info);
+        if (refusal !== undefined && !local && connection === connections) {
+          report({ type: 'attachment.lost', reason: refusal, residual: 'R6' });
+        }
+      });
       unsubscribeLive = client.subscribeLive?.(
         input.chatId,
         (_chatId, event) => {
@@ -291,7 +356,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           pending.events.push(event);
         },
         (error) => {
-          if (!closed && !terminalRefusal) {
+          if (!closed && !terminalRefusal && connection === connections) {
             pending = undefined;
             liveUnavailable = true;
             clearLive();
@@ -301,7 +366,9 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       );
       liveConnected = true;
     } catch (error) {
-      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error), error });
+      if (connection === connections) {
+        report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error), error });
+      }
     }
   };
 
@@ -527,11 +594,69 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       }
     }
   };
+  /** Retire this connection's reader, live overlay and client, then dial again from the folded position. */
+  const redial = async (): Promise<void> => {
+    readerVersion += 1;
+    unsubscribe?.();
+    unsubscribe = undefined;
+    unsubscribeLive?.();
+    unsubscribeLive = undefined;
+    offClose?.();
+    offClose = undefined;
+    const retired = client;
+    client = undefined;
+    if (retired !== undefined) {
+      void retired.close();
+    }
+    pending = undefined;
+    liveUnavailable = false;
+    readerFenced = false;
+    clearLive();
+    await connectLive();
+    await beginRead();
+  };
+  const retryNow = (): void => {
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+    const again = retryRedial || liveUnavailable || client === undefined;
+    retryRedial = false;
+    if (!isClosed() && !terminalRefusal) {
+      void (again ? redial() : beginRead());
+    }
+  };
+  /* One retry pending at a time; a fenced reader alone reads again, any other loss dials a new connection. */
+  scheduleRetry = (again: boolean): void => {
+    retryRedial ||= again;
+    if (retryTimer !== undefined || isClosed() || terminalRefusal) {
+      return;
+    }
+    const retryDelayMilliseconds = Math.min(
+      remoteReadRetryMilliseconds.first * 2 ** retries,
+      remoteReadRetryMilliseconds.longest,
+    );
+    retries += 1;
+    retryTimer = setTimeout(retryNow, retryDelayMilliseconds); // Bound: remoteReadRetryMilliseconds.
+  };
+  const onWake = (event: Event): void => {
+    if (retryTimer !== undefined && (event.type !== 'visibilitychange' || document.visibilityState === 'visible')) {
+      retryNow();
+    }
+  };
+  /* `visibilitychange` fires on the document; `pageshow` and `online` on the window. Absent outside a page. */
+  const wakes: ReadonlyArray<readonly [EventTarget | undefined, string]> = [
+    [
+      typeof document !== 'undefined' && typeof document.addEventListener === 'function' ? document : undefined,
+      'visibilitychange',
+    ],
+    [typeof globalThis.addEventListener === 'function' ? globalThis : undefined, 'pageshow'],
+    [typeof globalThis.addEventListener === 'function' ? globalThis : undefined, 'online'],
+  ];
+  for (const [target, type] of wakes) {
+    target?.addEventListener(type, onWake);
+  }
   receive((event) => {
     if (event.type === 'own-read' && local && !closed) {
       releaseHeld();
-    } else if (event.type === 'retry-read' && readerFenced && !closed && !liveUnavailable) {
-      void beginRead();
     }
   });
   const begin = async (): Promise<void> => {
@@ -550,6 +675,12 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       return;
     }
     if (!local) {
+      remote = true;
+      if (client === undefined) {
+        /* The connect failed before the read was known to be remote: its loss is retried now that it is. */
+        scheduleRetry(true);
+        return;
+      }
       await beginRead();
     } else if (liveConnected) {
       attached = true;
@@ -560,6 +691,11 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   void begin();
   return () => {
     closed = true;
+    clearTimeout(retryTimer);
+    for (const [target, type] of wakes) {
+      target?.removeEventListener(type, onWake);
+    }
+    offClose?.();
     capture.abort();
     pending = undefined;
     held.clear();

@@ -83,15 +83,20 @@ vi.mock('@taucad/files-ui/constants/browser.constants', async (importOriginal) =
   directoryPicker: () => ({ available: true, backend: 'webaccess', pick: async () => undefined }),
 }));
 
-type Ceiling = Readonly<{
-  scan: Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
-  verification: Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
-  mutations: Readonly<Record<string, Readonly<Budget>>>;
-}>;
+type UnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
+/** The unit rows the filesystem cost test measures: a full read, a warm pass, a directory re-read, a sweep, a verification. */
+const unitRows = ['scan', 'warmPass', 'directoryRead', 'sweep', 'verification'] as const;
+type Ceiling = Readonly<Record<(typeof unitRows)[number], UnitCost>> &
+  Readonly<{ mutations: Readonly<Record<string, Readonly<Budget>>> }>;
 
 /** What one mutation cost. */
 type Budget = {
+  /** Full discovery reads of every directory (FW2: only the first pass after a reload or a reset). */
   scans: number;
+  /** Directories a warm pass re-read because evidence marked them. */
+  directoryReads: number;
+  /** Identity sweeps: `verifyAbsent` proving from storage whether any directory carries an id. */
+  sweeps: number;
   verifications: number;
   /** `tau.json` reads through the record client, outside a scan or a verification. */
   recordReads: number;
@@ -252,31 +257,46 @@ const mutations: Readonly<Record<string, (harness: Harness) => Promise<unknown>>
  */
 const budgetOf = ({
   scans,
+  directoryReads,
+  sweeps,
   verifications,
   recordReads,
-}: Readonly<{ scans: number; verifications: number; recordReads: number }>): Budget => ({
-  scans,
-  verifications,
-  recordReads,
-  discoveryReads:
-    scans * (ceiling.scan.fileReads + ceiling.scan.listings) +
-    verifications * (ceiling.verification.fileReads + ceiling.verification.listings),
-  browserCalls: scans * ceiling.scan.browserCalls + verifications * ceiling.verification.browserCalls,
-});
+}: Readonly<{
+  scans: number;
+  directoryReads: number;
+  sweeps: number;
+  verifications: number;
+  recordReads: number;
+}>): Budget => {
+  const units = [
+    [scans, ceiling.scan],
+    [directoryReads, ceiling.directoryRead],
+    [sweeps, ceiling.sweep],
+    [verifications, ceiling.verification],
+  ] as const;
+  return {
+    scans,
+    directoryReads,
+    sweeps,
+    verifications,
+    recordReads,
+    discoveryReads: units.reduce((sum, [count, unit]) => sum + count * (unit.fileReads + unit.listings), 0),
+    browserCalls: units.reduce((sum, [count, unit]) => sum + count * unit.browserCalls, 0),
+  };
+};
 
 describe('discovery budget per library mutation', () => {
-  it('should charge a scan and a verification at the unit costs the filesystem measures', () => {
+  it('should charge every unit at the cost the filesystem measures', () => {
     const unitCost = JSON.parse(
       readFileSync(
         path.join(import.meta.dirname, '../../../../packages/filesystem/src/testing/discovery-unit-cost.json'),
         'utf8',
       ),
-    ) as Readonly<{ scan: unknown; verification: unknown }>;
+    ) as Readonly<Record<(typeof unitRows)[number], unknown>>;
 
-    expect({ scan: ceiling.scan, verification: ceiling.verification }).toEqual({
-      scan: unitCost.scan,
-      verification: unitCost.verification,
-    });
+    expect(Object.fromEntries(unitRows.map((row) => [row, ceiling[row]]))).toEqual(
+      Object.fromEntries(unitRows.map((row) => [row, unitCost[row]])),
+    );
   });
 
   it('should hold one budget row for every mutation it runs, and no other', () => {
@@ -295,7 +315,15 @@ describe('discovery budget per library mutation', () => {
     const measured = budgetOf(harness.profile.counts());
     const committed = ceiling.mutations[name];
     const report = `${name} measured ${JSON.stringify(measured)}; ceiling ${JSON.stringify(committed)}`;
-    for (const key of ['scans', 'verifications', 'recordReads', 'discoveryReads', 'browserCalls'] as const) {
+    for (const key of [
+      'scans',
+      'directoryReads',
+      'sweeps',
+      'verifications',
+      'recordReads',
+      'discoveryReads',
+      'browserCalls',
+    ] as const) {
       expect(measured[key], `${report}: ${key} rose above its ceiling`).toBeLessThanOrEqual(committed?.[key] ?? 0);
       expect(measured[key], `${report}: ${key} fell below its ceiling; lower the ceiling to match`).toBe(
         committed?.[key],

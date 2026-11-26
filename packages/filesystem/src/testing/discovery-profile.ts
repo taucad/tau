@@ -22,6 +22,7 @@ import type { ProjectRootConfig, ProjectRootConfiguration } from '#mount-table.j
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { ProjectDirectoryIndex } from '#project-directory-index.js';
 import { workerTimingCounters, workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
@@ -71,6 +72,10 @@ export type DiscoveryCost = Readonly<{
 /** The fixture, built. @public */
 export type DiscoveryProfile = Readonly<{
   service: WorkspaceFileService;
+  /** The authority's discovery index (FW2), so a test can make it cold and measure a full read. */
+  index: ProjectDirectoryIndex;
+  /** Write one file into a root's handle tree behind the authority's back, as another program would. */
+  writeBehind: (root: 'home' | 'workspace', path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>;
   shape: DiscoveryProfileShape;
   /** Run `operation` and report what it cost, counted from a clean window. */
   measure: <Result>(operation: () => Promise<Result>) => Promise<Readonly<{ result: Result; cost: DiscoveryCost }>>;
@@ -181,11 +186,13 @@ export async function createDiscoveryProfile(
   const rootProvider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: rootStorageRootKey });
   const mountTable = new MountTable();
   mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory', storageRootKey: rootStorageRootKey });
+  const index = new ProjectDirectoryIndex();
   const service = new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),
     eventBus: new ChangeEventBus(),
     mountTable,
+    discoveryIndex: index,
   });
   const workspaceScope = {
     backend: 'webaccess',
@@ -255,6 +262,8 @@ export async function createDiscoveryProfile(
 
   return {
     service,
+    index,
+    writeBehind: async (root, path, bytes) => writeInto(root === 'home' ? home.root : workspace.root, path, bytes),
     shape,
     measure,
     dispose: () => {

@@ -47,7 +47,11 @@ const mount = (allowed: boolean | undefined): ((next: boolean | undefined) => vo
   };
   const Host = (): React.JSX.Element => {
     const current = useSyncExternalStore(subscribe, () => value);
-    return <PostHogAnalyticsProvider isActive options={options} isReplayEnabled isReplayContentAllowed={current} />;
+    return (
+      <PostHogAnalyticsProvider isActive options={options} isReplayEnabled isReplayContentAllowed={current}>
+        {null}
+      </PostHogAnalyticsProvider>
+    );
   };
   const router = createMemoryRouter([{ path: '*', element: <Host /> }], {
     initialEntries: ['/projects'],

@@ -87,6 +87,7 @@ vi.mock('#routes/w.$workspace.$project/chat-sign-in-return.js', () => ({ ChatSig
 vi.mock('#chat-clients/chat-turn-host.js', () => ({
   ChatTurnHost: () => <div data-testid='chat-turn-host' />,
 }));
+vi.mock('#chat-clients/_internal/external-agent-prewarm.js', () => ({ ExternalAgentPrewarm: () => null }));
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider: ({ children, chatId }: { readonly children: React.ReactNode; readonly chatId: string }) => (

@@ -2584,6 +2584,45 @@ describe('restoring a session a cold start lost', () => {
     expect(usageOf(chat.eventsOf('run-2')).at(-1)).toMatchObject({ input: 1200, output: 300, totalTokens: 1500 });
   }, 30_000);
 
+  it('prompts a turn on the session a prewarm opened, whether it lands while the prewarm opens or after (WP-18)', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-prewarm-'));
+    roots.push(workspaceRoot);
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [fakeAgent],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    const early = durableChat('chat-prewarm-early');
+    await port.prewarm?.({
+      agentId: 'codex',
+      agent: { kind: 'acp', id: 'codex' },
+      chatId: 'chat-prewarm-early',
+      history: [],
+    });
+    /* The turn lands before the prewarm's `session/new` answers: it is held, then prompted on that session. */
+    await port.run(early.turn('run-early', 'noask'));
+    expect(sent(frames, 'initialize')).toBe(1);
+    expect(sent(frames, 'session/new')).toBe(1);
+    expect(sent(frames, 'session/prompt')).toBe(1);
+
+    const late = durableChat('chat-prewarm-late');
+    await port.prewarm?.({
+      agentId: 'codex',
+      agent: { kind: 'acp', id: 'codex' },
+      chatId: 'chat-prewarm-late',
+      history: [],
+    });
+    await until(async () => sent(frames, 'session/new') === 2, 'the prewarmed session to open');
+    await port.run(late.turn('run-late', 'noask'));
+    expect(sent(frames, 'initialize')).toBe(2);
+    expect(sent(frames, 'session/new')).toBe(2);
+    expect(sent(frames, 'session/prompt')).toBe(2);
+    expect(typeof late.markers.at(-1)?.['acpSessionId']).toBe('string');
+    await port.closeChat?.('chat-prewarm-early');
+    await port.closeChat?.('chat-prewarm-late');
+  }, 30_000);
+
   it('falls back to session/load, and appends nothing it replays', async () => {
     const adapter = await withoutCapabilities({ resume: true });
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-load-'));

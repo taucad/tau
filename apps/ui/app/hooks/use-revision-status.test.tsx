@@ -56,6 +56,7 @@ const revisionChannel = (
   async *liveEvents() {
     yield* [];
   },
+  prewarm: async () => undefined,
   onClose: () => () => undefined,
   ...fields,
 });

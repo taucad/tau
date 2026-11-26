@@ -18,7 +18,7 @@ import type {
   AcpVendorAnswer,
   AcpVendorRequest,
 } from '#acp/acp-session.machine.js';
-import type { AcpAcquire, AcpSlot } from '#acp/acp-sessions.machine.js';
+import type { AcpAcquire, AcpPrewarm, AcpSlot } from '#acp/acp-sessions.machine.js';
 import type { AcpAgentFacts, AcpLimitReset, AcpSessionPresentation, AcpSessionFailure } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { GrokNotification } from '#acp/grok-notifications.js';
@@ -173,6 +173,8 @@ export const reportSchemas = {
 /** Events `acpSessions` takes (MC-R30). */
 export const parentEventSchemas = {
   acquire: z.object({ acquire: json<AcpAcquire>() }),
+  /* WP-18: open a key's session ahead of its first turn. */
+  prewarm: z.object({ prewarm: json<AcpPrewarm>() }),
   cancel: z.object({ requestId: z.string() }),
   closeChat: z.object({ requestId: z.string(), chatId: z.string() }),
   /* Internal (MC-R15): the delayed raise `idle:<key>`. */

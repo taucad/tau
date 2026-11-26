@@ -45,6 +45,19 @@ export type CommentPinScreen = Readonly<{
 }>;
 
 /**
+ * The scene's surface, for a host that drags a pin's head: what lies under a point of the page, and the ghost pin that
+ * shows where a drop would put it. Points are client pixels.
+ *
+ * @public
+ */
+export type CommentPinSurface = Readonly<{
+  /** The surface under a point, or `undefined` over nothing or while the model's pick tree is still building. */
+  pick: (at: Readonly<{ x: number; y: number }>) => CommentSurfacePick | undefined;
+  /** Shows the ghost pin at a point, or hides it with `undefined`. */
+  hover: (at: Readonly<{ x: number; y: number }> | undefined) => void;
+}>;
+
+/**
  * The pin heads a host draws as DOM over the viewer. The scene moves each registered element when the camera or the
  * pin moves, without a React render.
  *
@@ -55,12 +68,20 @@ export type CommentPinHeads = Readonly<{
   register: (id: string, element: HTMLElement | undefined) => void;
   /** Called by the scene. */
   place: (id: string, screen: CommentPinScreen) => void;
+  /** Stops the scene moving a head the host is dragging, or lets it again with `undefined`. */
+  hold: (id: string | undefined) => void;
+  /** The scene's surface while it is mounted; the scene sets it. */
+  surface: { current: CommentPinSurface | undefined };
 }>;
 
 const createCommentPinHeads = (): CommentPinHeads => {
   const elements = new Map<string, HTMLElement>();
   const screens = new Map<string, CommentPinScreen>();
+  let held: string | undefined;
   const apply = (id: string): void => {
+    if (id === held) {
+      return;
+    }
     const element = elements.get(id);
     const screen = screens.get(id);
     if (!element || !screen) {
@@ -83,6 +104,14 @@ const createCommentPinHeads = (): CommentPinHeads => {
       screens.set(id, screen);
       apply(id);
     },
+    hold(id) {
+      const released = held;
+      held = id;
+      if (released !== undefined && released !== id) {
+        apply(released);
+      }
+    },
+    surface: { current: undefined },
   };
 };
 

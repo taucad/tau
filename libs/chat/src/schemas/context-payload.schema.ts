@@ -32,9 +32,9 @@ export const skillMetadataSchema = z.object({
 });
 
 /**
- * Context payload assembled client-side from ZenFS and attached to message metadata.
- * Carries skills catalog and memory (AGENTS.md) content so the API can inject them
- * into the system prompt without RPC round-trips.
+ * Context payload assembled client-side from the project filesystem and attached to message metadata.
+ * Carries the skills catalog and the project's root `AGENTS.md` (as `memory`, keyed by its path) so the
+ * agent host can place them in the turn context without RPC round-trips.
  * @public
  */
 /**

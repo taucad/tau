@@ -83,7 +83,7 @@ describe('skillMetadataSchema', () => {
 
 describe('contextPayloadSchema', () => {
   it('should accept valid context payload with skills and memory', () => {
-    const agentsKey = '.tau/AGENTS.md';
+    const agentsKey = 'AGENTS.md';
     const result = contextPayloadSchema.safeParse({
       skills: [
         { name: 'skill-a', description: 'First skill', path: '.agents/skills/skill-a' },
@@ -108,7 +108,7 @@ describe('contextPayloadSchema', () => {
   });
 
   it('should accept payload with only memory', () => {
-    const agentsKey = '.tau/AGENTS.md';
+    const agentsKey = 'AGENTS.md';
     const result = contextPayloadSchema.safeParse({
       memory: { [agentsKey]: 'Memory content' },
     });
@@ -145,13 +145,13 @@ describe('contextPayloadSchema', () => {
 describe('CH-10 payload caps', () => {
   it('rejects a memory entry beyond the byte ceiling', () => {
     const oversized = 'x'.repeat(contextMemoryMaxBytes + 512);
-    const result = contextPayloadSchema.safeParse({ memory: { '.tau/AGENTS.md': oversized } });
+    const result = contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': oversized } });
     expect(result.success).toBe(false);
   });
 
   it('accepts a memory entry at the truncated size including the notice', () => {
     const truncated = 'x'.repeat(contextMemoryMaxBytes) + '\n[AGENTS.md truncated]';
-    const result = contextPayloadSchema.safeParse({ memory: { '.tau/AGENTS.md': truncated } });
+    const result = contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': truncated } });
     expect(result.success).toBe(true);
   });
 

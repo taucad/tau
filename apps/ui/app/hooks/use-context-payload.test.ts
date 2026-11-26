@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import type { FileEntry } from '@taucad/types';
+import type { WatchEvent } from '@taucad/filesystem';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
@@ -24,6 +25,8 @@ const mockTreeService = {
 /** A ready recursive watch that never changes: each hook mount reads the catalog afresh. */
 let catalogClosed = Promise.withResolvers<void>();
 const contentObservations = new Map<string, ObservationService<FileContentResult>>();
+/** The handler each watched path was registered with, so a test can report a change to it. */
+const watchHandlers = new Map<string, (event: WatchEvent) => void>();
 const mockContentService = {
   observeContent: (path: string) => {
     let service = contentObservations.get(path);
@@ -43,11 +46,22 @@ const mockContentService = {
     }
     return service;
   },
-  watchReady: () => ({
-    ready: Promise.resolve(),
-    closed: catalogClosed.promise,
-    dispose: () => undefined,
-  }),
+  watchReady: (request: { paths: readonly string[] }, handler: (event: WatchEvent) => void) => {
+    for (const path of request.paths) {
+      watchHandlers.set(path, handler);
+    }
+    return {
+      ready: Promise.resolve(),
+      closed: catalogClosed.promise,
+      dispose() {
+        for (const path of request.paths) {
+          if (watchHandlers.get(path) === handler) {
+            watchHandlers.delete(path);
+          }
+        }
+      },
+    };
+  },
 };
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -95,6 +109,7 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 describe('useContextPayload', () => {
   beforeEach(() => {
     contentObservations.clear();
+    watchHandlers.clear();
     resetContextPayloadPublication();
     vi.clearAllMocks();
     catalogClosed = Promise.withResolvers<void>();
@@ -188,9 +203,9 @@ describe('useContextPayload', () => {
 
   it('should read AGENTS.md content into memory payload', async () => {
     const agentsContent = '# AGENTS\n\nPrefer early returns.';
-    mockGetEntry.mockResolvedValue(makeFileEntry('.tau/AGENTS.md'));
+    mockGetEntry.mockResolvedValue(makeFileEntry('AGENTS.md'));
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '.tau/AGENTS.md') {
+      if (path === 'AGENTS.md') {
         return encoder.encode(agentsContent);
       }
       throw new Error('not found');
@@ -202,8 +217,72 @@ describe('useContextPayload', () => {
       expect(result.current?.memory).toBeDefined();
     });
 
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture path key
-    expect(result.current!.memory).toEqual({ '.tau/AGENTS.md': agentsContent });
+    expect(result.current!.memory).toEqual({ 'AGENTS.md': agentsContent });
+  });
+
+  /* Rulings U2 and U5: the root file is the only instruction file; nothing reads the retired `.tau` path. */
+  it('should carry no memory for a project whose only instruction file is the retired .tau/AGENTS.md', async () => {
+    mockGetEntry.mockImplementation(async (path: string) =>
+      path === '.tau/AGENTS.md' ? makeFileEntry('.tau/AGENTS.md') : undefined,
+    );
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path === '.tau/AGENTS.md') {
+        return encoder.encode('Legacy memory');
+      }
+      throw new Error('not found');
+    });
+
+    const { result } = renderHook(() => useContextPayload());
+
+    await waitFor(() => {
+      expect(result.current?.skills?.length).toBeGreaterThan(0);
+    });
+    expect(result.current!.memory).toBeUndefined();
+    expect(mockGetEntry).not.toHaveBeenCalledWith('.tau/AGENTS.md');
+    expect(mockReadFile).not.toHaveBeenCalledWith('.tau/AGENTS.md');
+  });
+
+  it('should carry the file as it now reads after AGENTS.md changes, and nothing once it is gone', async () => {
+    let content: string | undefined;
+    mockGetEntry.mockImplementation(async (path: string) =>
+      path === 'AGENTS.md' && content !== undefined ? makeFileEntry('AGENTS.md') : undefined,
+    );
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path === 'AGENTS.md' && content !== undefined) {
+        return encoder.encode(content);
+      }
+      throw new Error('not found');
+    });
+
+    const { result } = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(result.current?.skills?.length).toBeGreaterThan(0);
+    });
+    expect(result.current!.memory).toBeUndefined();
+
+    content = 'Dimensions in millimetres.';
+    act(() => {
+      watchHandlers.get('AGENTS.md')?.({ type: 'change', path: 'AGENTS.md' });
+    });
+    await waitFor(() => {
+      expect(result.current?.memory).toEqual({ 'AGENTS.md': 'Dimensions in millimetres.' });
+    });
+
+    content = 'Dimensions in millimetres.\nHex nuts are M8.';
+    act(() => {
+      watchHandlers.get('AGENTS.md')?.({ type: 'change', path: 'AGENTS.md' });
+    });
+    await waitFor(() => {
+      expect(result.current?.memory).toEqual({ 'AGENTS.md': 'Dimensions in millimetres.\nHex nuts are M8.' });
+    });
+
+    content = undefined;
+    act(() => {
+      watchHandlers.get('AGENTS.md')?.({ type: 'delete', path: 'AGENTS.md' });
+    });
+    await waitFor(() => {
+      expect(result.current?.memory).toBeUndefined();
+    });
   });
 
   it('should handle empty .agents/skills/ directory while retaining system skills', async () => {
@@ -254,12 +333,12 @@ describe('useContextPayload', () => {
 
   it('should return both skills and memory when both present', async () => {
     mockListDirectory.mockResolvedValue([skillDirectoryRow('my-skill')]);
-    mockGetEntry.mockResolvedValue(makeFileEntry('.tau/AGENTS.md'));
+    mockGetEntry.mockResolvedValue(makeFileEntry('AGENTS.md'));
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes('SKILL.md')) {
         return makeSkillMd('my-skill', 'A skill');
       }
-      if (path === '.tau/AGENTS.md') {
+      if (path === 'AGENTS.md') {
         return encoder.encode('Memory content');
       }
       throw new Error('not found');
@@ -278,7 +357,7 @@ describe('useContextPayload', () => {
     });
 
     expect(result.current!.skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'my-skill' })]));
-    expect(result.current!.memory!['.tau/AGENTS.md']).toBe('Memory content');
+    expect(result.current!.memory!['AGENTS.md']).toBe('Memory content');
   });
 
   it('should handle readFile errors gracefully for individual skills', async () => {
@@ -361,6 +440,7 @@ describe('useContextPayload', () => {
 describe('awaitContextPayload', () => {
   beforeEach(() => {
     contentObservations.clear();
+    watchHandlers.clear();
     resetContextPayloadPublication();
     vi.clearAllMocks();
     catalogClosed = Promise.withResolvers<void>();

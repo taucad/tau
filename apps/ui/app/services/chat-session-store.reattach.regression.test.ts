@@ -249,6 +249,7 @@ describe('host attachment regression harness (HA0 rows, green since HA1)', () =>
 const overlayHost = (hostId?: 'desktop') => {
   let listener: ((chatId: string, event: SourceLiveEvent) => void) | undefined;
   let ended: ((error?: unknown) => void) | undefined;
+  const release = vi.fn();
   const connect = vi.fn(
     async () =>
       ({
@@ -268,7 +269,7 @@ const overlayHost = (hostId?: 'desktop') => {
         ) => {
           listener = next;
           ended = onEnded;
-          return vi.fn();
+          return release;
         },
         close: vi.fn(async () => undefined),
         placement: { hostId },
@@ -278,6 +279,10 @@ const overlayHost = (hostId?: 'desktop') => {
     connect,
     push: (event: SourceLiveEvent) => listener?.(chatId, event),
     end: (error: unknown) => ended?.(error),
+    /** Whether the overlay's live subscription is in place, so `end` reaches it. */
+    subscribed: () => ended !== undefined,
+    /** Whether the store let the overlay's live subscription go. */
+    released: () => release.mock.calls.length > 0,
   };
 };
 
@@ -383,21 +388,35 @@ describe('host attachment regression harness (HA2 rows)', () => {
       throw Object.assign(new Error(`Host unavailable (${code})`), { code });
     });
     connect.mockImplementationOnce(host.connect);
-    return { connect, lose: () => host.end(Object.assign(new Error('lost'), { code })) };
+    return {
+      connect,
+      subscribed: host.subscribed,
+      released: host.released,
+      lose: () => host.end(Object.assign(new Error('lost'), { code })),
+    };
   };
 
-  it('row 16: says nothing over a coded terminal cause on a subscribed overlay', async () => {
+  /* A coded terminal cause (a `never` code; the agent host's code not loading, R9's `hostLoadFailure`) has its own
+   * residual: no cue. A transient one in the same steps does show it, so the loss is proven to land. */
+  it.each([
+    ['WIRE_VERSION_UNSUPPORTED', false],
+    ['WORKER_LOAD_FAILED', false],
+    ['PEER_GONE', true],
+  ] as const)('row 16: a subscribed overlay lost with %s shows the cue: %s', async (code, cue) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const host = lostAfterSubscribing('WIRE_VERSION_UNSUPPORTED');
+    const host = lostAfterSubscribing(code);
     const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
     try {
       await vi.waitFor(() => {
-        expect(host.connect).toHaveBeenCalled();
+        expect(host.subscribed()).toBe(true);
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
       }, coldBound);
-      await Promise.resolve();
+      expect(host.released()).toBe(false);
       host.lose();
       await vi.advanceTimersByTimeAsync(5000);
-      expect(chat.store.isReconnecting(chatId)).toBe(false);
+      /* The loss landed: the store let the overlay go. */
+      expect(host.released()).toBe(true);
+      expect(chat.store.isReconnecting(chatId)).toBe(cue);
     } finally {
       chat.close();
     }
@@ -409,10 +428,9 @@ describe('host attachment regression harness (HA2 rows)', () => {
     const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
     try {
       await vi.waitFor(() => {
-        expect(host.connect).toHaveBeenCalled();
+        expect(host.subscribed()).toBe(true);
         expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
       }, coldBound);
-      await Promise.resolve();
       host.lose();
       expect(chat.store.isReconnecting(chatId)).toBe(false);
       await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
@@ -487,6 +505,41 @@ describe('HA2 successors: a local placement keeps no attachment state', () => {
       const settled = connect.mock.calls.length;
       await vi.advanceTimersByTimeAsync(20_000);
       expect(connect.mock.calls.length - settled).toBeLessThanOrEqual(1);
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* A host that subscribes and drops at once never holds overlayHeldMilliseconds, so it still backs off. */
+  it('should back off a host whose overlay subscribes and drops at once', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const connect = vi.fn(
+      async () =>
+        ({
+          hostCommand: vi.fn(
+            async () =>
+              new Promise<never>(() => {
+                /* The settler's `attach` is never answered. */
+              }),
+          ),
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn(),
+          subscribe: vi.fn(() => vi.fn()),
+          subscribeLive: (_chatId: string, _next: unknown, onEnded?: (error?: unknown) => void) => {
+            queueMicrotask(() => onEnded?.(Object.assign(new Error('dropped'), { code: 'PEER_GONE' })));
+            return vi.fn();
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), connect);
+    try {
+      await vi.waitFor(() => {
+        expect(connect).toHaveBeenCalled();
+      }, coldBound);
+      await vi.advanceTimersByTimeAsync(60_000);
+      /* The settler's `attach` also dials; the overlay alone backs off to a handful, not sixty. */
+      expect(connect.mock.calls.length).toBeLessThanOrEqual(16);
     } finally {
       chat.close();
     }

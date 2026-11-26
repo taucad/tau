@@ -5910,6 +5910,39 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      /* HA5 table: a transport wait code has no line of its own; "Reconnecting…" says it while the send re-sends. */
+      it('should say "Reconnecting…", and show no line, over a send refused with a transport wait code', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_cue_transport';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'PEER_GONE',
+          message: 'The host went away.',
+        }));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('transport'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+          expect(store.isReconnecting(chatId)).toBe(true);
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(store.isReconnecting(chatId)).toBe(true);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should say "Reconnecting…" over a send whose answer was lost, never over a coded wait or a pause', async () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         const lost = await open('departing_cue_lost', 'departing_project');

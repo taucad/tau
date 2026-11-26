@@ -489,6 +489,13 @@ const hostWaitLongestDelay = 30_000;
 export const reconnectingCueMilliseconds = 2000;
 
 /**
+ * A local chat's lost live overlay is dialled again on an own read no sooner than this after its loss, doubling per
+ * loss to {@link overlayRedialLongestMilliseconds}; a subscription resets it. Milliseconds.
+ */
+export const overlayRedialFirstMilliseconds = 250;
+export const overlayRedialLongestMilliseconds = 30_000;
+
+/**
  * HA-I4: how long a queued command may wait on a `wait` code before that code's line shows; it stays queued after.
  * ponytail: one value, as the still-closing bound that `WRITER_LOCKED` waits on (`closingWait`) is ten seconds too.
  * Milliseconds.
@@ -843,6 +850,8 @@ type HostWait = Readonly<{
   /** What the chat says while the send waits, once it has waited {@link outboxWaitLineMilliseconds} (HA-I4). */
   sentence: string;
   lineShown: boolean;
+  /** The answer was lost (its effect unknown), not a coded wait: only this re-send is a "Reconnecting…" cause. */
+  lost: boolean;
   timer: ReturnType<typeof setTimeout>;
   /** Shows the line at the bound; kept across this command's re-sends. */
   line: ReturnType<typeof setTimeout>;
@@ -1014,8 +1023,16 @@ type ObservedChat = {
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   /** D17's backoff before the host read is attached again: the remote branch only (HA2 deleted the local one). */
   retry?: ReturnType<typeof setTimeout>;
-  /** A local placement's live overlay is subscribed; otherwise it is waiting, and the next own read starts it. */
+  /**
+   * A local placement's live overlay is subscribed (`true`), or was and is now waiting (`false`); `undefined` before
+   * its first subscription. The next own read past {@link ObservedChat.overlayRedialAt} starts a waiting one again.
+   */
   subscribed?: boolean;
+  /** Losses of the overlay since it last subscribed, and the monotonic time before which it is not dialled again. */
+  overlayLosses?: number;
+  overlayRedialAt?: number;
+  /** The overlay's last loss was a coded terminal cause, not a transient one: no "Reconnecting…" over it (HA-I8). */
+  overlayTerminal?: boolean;
   /** HA-I8's cause facts have held since this timer started; at {@link reconnectingCueMilliseconds} the cue shows. */
   cueTimer?: ReturnType<typeof setTimeout>;
   cue?: boolean;
@@ -1033,7 +1050,10 @@ type ObservedChat = {
   source?: OwnSegmentSource;
   /** The source's last pass held the file: read authority that no host loss takes away (HA-I2). */
   ownCurrent?: boolean;
-  /** The projection's reset that pass published into: a later reset is read again before it counts as read. */
+  /**
+   * The projection's reset the own source last published into as `current`: the chat counts as read while the
+   * projection keeps that reset. A transient `missing` or `not-a-chat` keeps it; only `deleted` or a stop clears it.
+   */
   ownResetVersion?: number;
   /** Live (re)subscriptions on a local placement, and the one the settler last sent `attach` for (HA-I5). */
   subscriptions?: number;
@@ -3051,6 +3071,8 @@ export class ChatSessionStore {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
           }
           if (answer.effect !== 'durable') {
+            /* U20: applied, but not as a durable row. */
+            unknownEffect({ reason: 'not-durable', code: answer.status });
             throw new Error('Message saved. The host has not confirmed durable acceptance.');
           }
         } catch (error) {
@@ -3253,6 +3275,7 @@ export class ChatSessionStore {
       due: false,
       sentence: hostWaitSentence(refusal),
       lineShown: same?.lineShown ?? false,
+      lost: refusal.effect === 'unknown',
       timer,
       line,
     };
@@ -4101,9 +4124,7 @@ export class ChatSessionStore {
         /* A pick waiting on the run this start held unsettled (HA-I7) waits no longer. */
         this.#projectionTopics.get(chatId)?.emit();
         /* Not local: an overlay lost while this start decided is the host read again, with its retry (remote). */
-        queueMicrotask(() => {
-          this.#resumeOverlay(chatId, observed);
-        });
+        this.#overlayIsRemote(chatId, observed);
       }
       return false;
     };
@@ -4170,9 +4191,7 @@ export class ChatSessionStore {
           }
           first.resolve(local);
           if (!local) {
-            queueMicrotask(() => {
-              this.#resumeOverlay(chatId, observed);
-            });
+            this.#overlayIsRemote(chatId, observed);
             return;
           }
           this.#watchOwnFiles(chatId, observed);
@@ -4228,6 +4247,7 @@ export class ChatSessionStore {
 
   #stopOwnSource(observed: ObservedChat): void {
     observed.ownStart = undefined;
+    observed.ownResetVersion = undefined;
     observed.ownDecide?.(false);
     observed.ownDecide = undefined;
     observed.source?.stop();
@@ -4246,11 +4266,13 @@ export class ChatSessionStore {
       const wasCurrent = observed.ownCurrent === true;
       observed.ownCurrent = verdict === 'current';
       if (wasCurrent && !observed.ownCurrent) {
-        /* A pick waiting on this source's run (HA-I7) waits no longer. */
+        /* A pick waiting on this source's run (HA-I7) waits no longer, nor does the cue on its overlay. */
         this.#projectionTopics.get(chatId)?.emit();
+        this.#refreshReconnecting(chatId);
       }
     }
     if (verdict === 'deleted') {
+      observed.ownResetVersion = undefined;
       this.#stopOwnSource(observed);
       this.#invalidateDeletedProjection(chatId);
       return;
@@ -4278,9 +4300,14 @@ export class ChatSessionStore {
    * current reset (a reset the store sends waits for the source's next pass), else a host answer.
    */
   #logRead(chatId: string): boolean {
+    const actor = this.#projections.get(chatId);
+    if (actor === undefined || this.#deletedProjections.has(actor)) {
+      return false;
+    }
     const observed = this.#observed.get(chatId);
     return (
-      (observed?.ownCurrent === true && observed.ownResetVersion === this.#projectionContext(chatId)?.resetVersion) ||
+      (observed?.ownResetVersion !== undefined &&
+        observed.ownResetVersion === this.#projectionContext(chatId)?.resetVersion) ||
       this.#answeredLogReads.has(chatId)
     );
   }
@@ -4397,7 +4424,9 @@ export class ChatSessionStore {
     clearTimeout(observed.lossReport);
     observed.lossReport = undefined;
     this.#answeredLogReads.delete(chatId);
-    observed.subscribed = false;
+    if (observed.subscribed === true) {
+      observed.subscribed = false;
+    }
     const session = this.#sessions.get(chatId);
     if (session !== undefined) {
       session.seedLocalLogEmpty = false;
@@ -4523,7 +4552,17 @@ export class ChatSessionStore {
       observed.hostLoadFailure = undefined;
       return;
     }
-    observed.subscribed = false;
+    if (observed.subscribed === true) {
+      observed.subscribed = false;
+    }
+    /* Transient: an uncoded end, or a `wait`-class code; a thrown cause without one (a non-durable root, no config)
+     * or a `never` code is terminal and has its own residual. */
+    const code = getErrno(event.error);
+    observed.overlayTerminal = code === undefined ? event.error !== undefined : refusalOf(code).retry !== 'wait';
+    const losses = observed.overlayLosses ?? 0;
+    observed.overlayLosses = losses + 1;
+    observed.overlayRedialAt =
+      performance.now() + Math.min(overlayRedialFirstMilliseconds * 2 ** losses, overlayRedialLongestMilliseconds);
     if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
       /* FP10: this page cannot load the host's code; the overlay is not started again for the page's life. */
       observed.hostLoadFailure = event.error;
@@ -4541,21 +4580,37 @@ export class ChatSessionStore {
     this.#refreshReconnecting(chatId);
   }
 
-  /** Start a waiting live overlay again: the publisher of its wait is the own read (HA-I9), not a timer. */
+  /**
+   * Start a waiting live overlay again: the publisher of its wait is the own read (HA-I9), paced by the overlay's
+   * redial backoff (250 ms doubling to 30 s per loss, reset by a subscription), so a host that keeps failing is not
+   * dialled on every read.
+   */
   #resumeOverlay(chatId: string, observed: ObservedChat): void {
     if (
       this.#observed.get(chatId) === observed &&
       observed.attachment === undefined &&
       observed.retry === undefined &&
-      observed.hostLoadFailure === undefined
+      observed.hostLoadFailure === undefined &&
+      performance.now() >= (observed.overlayRedialAt ?? -Infinity)
     ) {
       this.#startObservedAttachment(chatId, observed);
     }
   }
 
+  /** The chat is not local after all: its overlay is the remote host read, whose retry is D17's, not this backoff. */
+  #overlayIsRemote(chatId: string, observed: ObservedChat): void {
+    observed.overlayLosses = undefined;
+    observed.overlayRedialAt = undefined;
+    observed.overlayTerminal = undefined;
+    queueMicrotask(() => {
+      this.#resumeOverlay(chatId, observed);
+    });
+  }
+
   /**
-   * HA-I8's cause facts: the outbox head re-sends after a lost answer or a `wait` code, or a local chat's live overlay
-   * is waiting while its own run is unsettled and not paused. Never in a `paused` phase (an approval or a question).
+   * HA-I8's cause facts: the outbox head re-sends after a lost answer (a coded wait has its own line), or a local
+   * chat's live overlay that was subscribed waits again for a transient cause while its own run is unsettled. Never in
+   * a `paused` phase (an approval or a question), on a cold open's first connect, or over a coded terminal cause.
    */
   #reconnectingCause(chatId: string, observed: ObservedChat): boolean {
     const projection = this.#projectionContext(chatId);
@@ -4563,10 +4618,17 @@ export class ChatSessionStore {
     if (phase === 'paused') {
       return false;
     }
-    if (this.#sessions.get(chatId)?.hostWait !== undefined) {
+    if (this.#sessions.get(chatId)?.hostWait?.lost === true) {
       return true;
     }
-    return observed.ownCurrent === true && observed.subscribed !== true && phase !== undefined && opensRun(phase);
+    return (
+      observed.ownCurrent === true &&
+      observed.subscribed === false &&
+      observed.overlayTerminal !== true &&
+      observed.hostLoadFailure === undefined &&
+      phase !== undefined &&
+      opensRun(phase)
+    );
   }
 
   /** Follow the cause facts: the cue shows once they have held for {@link reconnectingCueMilliseconds}. */
@@ -4616,6 +4678,9 @@ export class ChatSessionStore {
         onSubscribed: () => {
           observed.subscriptions = (observed.subscriptions ?? 0) + 1;
           observed.subscribed = true;
+          observed.overlayLosses = undefined;
+          observed.overlayRedialAt = undefined;
+          observed.overlayTerminal = undefined;
           this.#refreshReconnecting(chatId);
           this.#settle(chatId, observed);
         },
@@ -4625,7 +4690,11 @@ export class ChatSessionStore {
         connect: async () => {
           try {
             const client = await connector.connect(chatId);
-            if (observed.attachment === attachment) {
+            if (observed.attachment === attachment && observed.placement?.hostId !== client.placement?.hostId) {
+              observed.placement = client.placement;
+              /* `getAttachedHostId` readers follow the projection topic. */
+              this.#projectionTopics.get(chatId)?.emit();
+            } else if (observed.attachment === attachment) {
               observed.placement = client.placement;
               observed.client = client;
             }
@@ -6632,6 +6701,8 @@ export class ChatSessionStore {
         session.commandAbort?.abort();
         clearTimeout(session.hostWait?.timer);
         clearTimeout(session.hostWait?.line);
+        session.hostWait = undefined;
+        this.#refreshReconnecting(session.chatId);
         clearTimeout(session.announceTimer);
         session.announceTimer = undefined;
         lifecycleSubscription?.unsubscribe();

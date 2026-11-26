@@ -74,7 +74,7 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages } =
+const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages, reconnectingCueMilliseconds } =
   await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
@@ -5385,7 +5385,9 @@ describe('ChatSessionStore', () => {
           expect(hostCommand).toHaveBeenCalledTimes(1);
         });
         publishLogRows(store, chatId, runningRows('other'));
-        /* Past the first re-send's 250 ms backoff: the other run's gate still holds it. */
+        /* A retry, and the first re-send's 250 ms backoff: the other run's gate still holds it. */
+        store.retryMessageQueue(chatId);
+        await settle();
         await new Promise((resolve) => {
           setTimeout(resolve, 600);
         });
@@ -5862,6 +5864,87 @@ describe('ChatSessionStore', () => {
           unadmit();
           unpublish();
           store.release(chatId);
+        }
+      });
+
+      /* The host applied the first send, but its answer was lost: the log's `applied[commandId]` ends the item on the
+       * next pass, with no second send and so no second run. */
+      it('should end a send the host applied but whose answer was lost, without sending it again', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_applied_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(store, chatId, settled);
+          await store.requestTurn(chatId, queuedGesture('applied'));
+          await vi.advanceTimersByTimeAsync(31_000);
+          const sent = hostCommand.mock.calls[0]![0];
+          expect(sent.type).toBe('start');
+          const runId = sent.type === 'start' ? sent.payload.runId : '';
+          publishLogRows(store, chatId, [
+            ...settled,
+            logRow(3, { runId, type: 'run.lifecycle', state: 'admitted', attempt: 1, commandId: sent.commandId }),
+          ]);
+          store.refreshMessageQueue(chatId);
+          /* A re-send already out runs to its bound; the next pass reads `applied` and ends the item. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          const calls = hostCommand.mock.calls.length;
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(hostCommand).toHaveBeenCalledTimes(calls);
+          /* One command id throughout: no second run was ever asked for. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId))).toEqual(
+            new Set([sent.commandId]),
+          );
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should say "Reconnecting…" over a send whose answer was lost, never over a coded wait or a pause', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const lost = await open('departing_cue_lost', 'departing_project');
+        const coded = await open('departing_cue_coded', 'departing_project');
+        lost.hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        coded.hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmitLost = queueAdmission('departing_cue_lost');
+        const unadmitCoded = queueAdmission('departing_cue_coded');
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(lost.store, 'departing_cue_lost', settled);
+          publishLogRows(coded.store, 'departing_cue_coded', settled);
+          await lost.store.requestTurn('departing_cue_lost', queuedGesture('cue_lost'));
+          await coded.store.requestTurn('departing_cue_coded', queuedGesture('cue_coded'));
+          await vi.advanceTimersByTimeAsync(31_000 + reconnectingCueMilliseconds);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(true);
+          expect(coded.store.isReconnecting('departing_cue_coded')).toBe(false);
+          /* A run that pauses on an approval meanwhile: no cue in a `paused` phase. */
+          publishLogRows(lost.store, 'departing_cue_lost', [
+            ...settled,
+            ...runningRows('paused_run').map((row, index) => ({ ...row, sequence: 3 + index })),
+            lifecycleRow(5, 'paused', 'paused_run'),
+          ]);
+          await vi.advanceTimersByTimeAsync(100);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(false);
+        } finally {
+          vi.useRealTimers();
+          unadmitLost();
+          unadmitCoded();
+          lost.unpublish();
+          coded.unpublish();
+          lost.store.release('departing_cue_lost');
+          coded.store.release('departing_cue_coded');
         }
       });
 

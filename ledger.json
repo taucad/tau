@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T08:53:04.837Z",
+  "updatedAt": "2026-11-26T09:18:55.809Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2562,6 +2562,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45788527602,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2873",
+      "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+      "at": "2026-11-26T09:18:47Z",
+      "conclusion": "cancelled",
+      "artifacts": 24,
+      "counted": 1780,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3574,20 +3587,20 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "scripts:test": {
-      "executions": 44,
-      "tests": 53347,
+      "executions": 45,
+      "tests": 54681,
       "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "scripts:test:e2e": {
-      "executions": 43,
-      "tests": 2494,
+      "executions": 44,
+      "tests": 2552,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "settings-ui:test": {
       "executions": 13,
@@ -3718,44 +3731,180 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 34,
-      "tests": 510,
+      "executions": 35,
+      "tests": 525,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 36,
-      "tests": 108,
+      "executions": 37,
+      "tests": 111,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 35,
-      "tests": 350,
+      "executions": 36,
+      "tests": 360,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 38,
-      "tests": 1634,
+      "executions": 39,
+      "tests": 1677,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-chat-1": {
+      "executions": 1,
+      "tests": 17,
+      "failures": 1,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-chat-2": {
+      "executions": 2,
+      "tests": 17,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-chat-3": {
+      "executions": 1,
+      "tests": 4,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-mobile-1": {
+      "executions": 1,
+      "tests": 10,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-mobile-2": {
+      "executions": 1,
+      "tests": 21,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-mobile-3": {
+      "executions": 1,
+      "tests": 23,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-project-1": {
+      "executions": 1,
+      "tests": 14,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-project-2": {
+      "executions": 1,
+      "tests": 10,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-project-3": {
+      "executions": 1,
+      "tests": 20,
+      "failures": 1,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-project-4": {
+      "executions": 1,
+      "tests": 23,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-shell-1": {
+      "executions": 1,
+      "tests": 36,
+      "failures": 3,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-shell-2": {
+      "executions": 1,
+      "tests": 33,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-viewer-1": {
+      "executions": 2,
+      "tests": 16,
+      "failures": 1,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-viewer-2": {
+      "executions": 1,
+      "tests": 20,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-viewer-3": {
+      "executions": 1,
+      "tests": 25,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-viewer-4": {
+      "executions": 3,
+      "tests": 11,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
+    },
+    "ui-e2e:test:e2e:journey-viewer-5": {
+      "executions": 1,
+      "tests": 15,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 77,
-      "tests": 77,
+      "executions": 79,
+      "tests": 79,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T08:47:22Z"
+      "lastSeen": "2026-11-26T09:18:47Z"
     },
     "ui-kit:test": {
       "executions": 5,
@@ -4390,39 +4539,119 @@
       "failureShas": [],
       "aliases": []
     },
+    "ui-e2e › src/chat-compaction.spec.ts > compacts a turn in flight, is summarized over the same gateway, and finishes the turn": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-chat-1",
+      "file": "src/chat-compaction.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "8024086427026069487",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "AssertionError: expected false to be true // Object.is equality"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
+      ],
+      "aliases": []
+    },
     "ui-e2e › src/daemon-agent-host.spec.ts > daemon agent host (AV-4, rung 1) > places a Tau turn on the daemon that served the page, and survives losing its client": {
       "project": "ui-e2e",
       "targetKey": "test:e2e:daemon-host",
       "file": "src/daemon-agent-host.spec.ts",
       "firstSeen": "2026-11-25T23:43:08Z",
-      "lastSeen": "2026-11-26T08:47:22Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
       "lastFailure": "2026-11-25T23:43:08Z",
-      "executions": 10,
+      "executions": 11,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 9,
+      "passStreak": 10,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 10,
+          "executions": 11,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T08:47:22Z"
+          "lastSeen": "2026-11-26T09:18:47Z"
         }
       },
       "events": [],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 17649050601073645889",
         "linux-x64 browser=chromium 10881211277628266117",
         "linux-x64 browser=chromium 4445956923309065831",
         "linux-x64 browser=chromium 1685531630929905050",
         "linux-x64 browser=chromium 14573179447472520329",
         "linux-x64 browser=chromium 12968336610270914657",
         "linux-x64 browser=chromium 17233094877810673995",
-        "linux-x64 browser=chromium 10247394194800471484"
+        "linux-x64 browser=chromium 10247394194800471484",
+        "linux-x64 browser=chromium 8715523570468878035"
       ],
       "failureShas": [
         "9cbd73c836f0bf6a394e6526ff1220a80bc8569a"
+      ],
+      "aliases": []
+    },
+    "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-project-3",
+      "file": "src/home-storage.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "4094269348271139127",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "TimeoutError: locator.click: Timeout 10000ms exceeded."
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
       ],
       "aliases": []
     },
@@ -4431,24 +4660,30 @@
       "targetKey": "test:e2e:non-isolated",
       "file": "src/picovoxel-multi.spec.ts",
       "firstSeen": "2026-11-25T13:44:58Z",
-      "lastSeen": "2026-11-26T08:47:22Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
       "lastFailure": "2026-11-26T00:15:59Z",
-      "executions": 93,
+      "executions": 99,
       "failures": 0,
       "retriedPasses": 3,
-      "passStreak": 21,
+      "passStreak": 27,
       "variants": {
         "linux-x64 browser=firefox": {
-          "executions": 32,
+          "executions": 34,
           "failures": 0,
           "events": 3,
-          "lastSeen": "2026-11-26T08:47:22Z"
+          "lastSeen": "2026-11-26T09:18:47Z"
         },
         "linux-x64 browser=chromium": {
-          "executions": 61,
+          "executions": 64,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-26T08:47:22Z"
+          "lastSeen": "2026-11-26T09:18:47Z"
+        },
+        "linux-x64 project=webkit-smoke browser=webkit": {
+          "executions": 1,
+          "failures": 0,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
         }
       },
       "events": [
@@ -4491,14 +4726,214 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 1895319927607975270",
-        "linux-x64 browser=firefox 1895319927607975270",
-        "linux-x64 browser=chromium 8946016316278174689",
-        "linux-x64 browser=chromium 10072159458598272846",
-        "linux-x64 browser=firefox 10072159458598272846",
-        "linux-x64 browser=chromium 402500162684593649",
         "linux-x64 browser=chromium 1829134430822088616",
-        "linux-x64 browser=firefox 1829134430822088616"
+        "linux-x64 browser=firefox 1829134430822088616",
+        "linux-x64 browser=chromium 12555124645867693805",
+        "linux-x64 browser=firefox 1303253146556611118",
+        "linux-x64 project=webkit-smoke browser=webkit 1303253146556611118",
+        "linux-x64 browser=chromium 1303253146556611118",
+        "linux-x64 browser=chromium 18101981497212084724",
+        "linux-x64 browser=firefox 18101981497212084724"
+      ],
+      "failureShas": [],
+      "aliases": []
+    },
+    "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should keep serving a saved view and never show an uncached one as zero usage": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-shell-1",
+      "file": "src/usage-offline.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "1826205882636053045",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
+      ],
+      "aliases": []
+    },
+    "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should leave no saved usage behind after a sign-out": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-shell-1",
+      "file": "src/usage-offline.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "1826205882636053045",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "AssertionError: expected 'No saved usage for this viewRetry' to be 'Sign in to see your Tau usage.' // Object.is equality"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
+      ],
+      "aliases": []
+    },
+    "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should render the saved snapshot with its server instant when a cold page cannot reach the API": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-shell-1",
+      "file": "src/usage-offline.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "1826205882636053045",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
+      ],
+      "aliases": []
+    },
+    "ui-e2e › src/viewer-camera-persistence.spec.ts > Viewer camera persistence > keeps the second orbit drag pose with a 400 ms gap requested between the drags": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-viewer-1",
+      "file": "src/viewer-camera-persistence.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "hash": "14405101707678610707",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "15d25560401faab42c0dcfd0abdac7ecc299042e",
+          "lineage": "pr-2873",
+          "base": "99e681f7fa89ef48278002b3c116604e2b98d0df",
+          "execution": 1,
+          "error": "AssertionError: one pair should land in the snap window, or this row proves nothing: [{\"requestedGapMilliseconds\":400,\"timeline\":{\"firstDragMilliseconds\":4308,\"secondDragMilliseconds\":4742,\"gapMilliseconds\":971,\"longestPauseMilliseconds\":355}},{\"requestedGapMilliseconds\":0,\"timeline\":{\"firstDragMil…"
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "15d25560401faab42c0dcfd0abdac7ecc299042e"
+      ],
+      "aliases": []
+    },
+    "ui-e2e › src/workbench-records.spec.ts > drops unshipped Jobs and Browser panes from an adopted layout record": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-project-3",
+      "file": "src/workbench-records.spec.ts",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "lastFailure": "2026-11-26T09:18:47Z",
+      "executions": 1,
+      "failures": 0,
+      "retriedPasses": 1,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 0,
+          "events": 1,
+          "lastSeen": "2026-11-26T09:18:47Z"
+        }
+      },
+      "events": [
+        {
+          "kind": "retry",
+          "at": "2026-11-26T09:18:47Z",
+          "run": 45788527602,
+          "attempt": 1,
+          "failedRun": 45788527602,
+          "failedAttempt": 1,
+          "variant": "linux-x64 browser=chromium",
+          "hash": "4094269348271139127",
+          "execution": 1,
+          "error": "Error: page.evaluate: NotFoundError: A requested file or directory could not be found at the time an operation was processed."
+        }
+      ],
+      "openFailures": [],
+      "passHashes": [
+        "linux-x64 browser=chromium 4094269348271139127"
       ],
       "failureShas": [],
       "aliases": []
@@ -4541,6 +4976,404 @@
       ],
       "failureShas": [],
       "aliases": []
+    }
+  },
+  "shadowRows": {
+    "ui-e2e:test:e2e:journey-chat-1": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-chat-1",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 0,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": false,
+          "tests": 17,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/chat-compaction.spec.ts > compacts a turn in flight, is summarized over the same gateway, and finishes the turn"
+          ]
+        }
+      ],
+      "lastFailure": {
+        "run": 45788527602,
+        "attempt": 1,
+        "at": "2026-11-26T09:18:47Z",
+        "passed": false,
+        "tests": 17,
+        "retried": 0,
+        "failed": [
+          "ui-e2e › src/chat-compaction.spec.ts > compacts a turn in flight, is summarized over the same gateway, and finishes the turn"
+        ]
+      }
+    },
+    "ui-e2e:test:e2e:journey-chat-2": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-chat-2",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 17,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-chat-3": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-chat-3",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 4,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-mobile-1": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-mobile-1",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 10,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-mobile-2": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-mobile-2",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 21,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-mobile-3": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-mobile-3",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 23,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-project-1": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-project-1",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 14,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-project-2": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-project-2",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 10,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-project-3": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-project-3",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 0,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": false,
+          "tests": 20,
+          "retried": 1,
+          "failed": [
+            "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine"
+          ]
+        }
+      ],
+      "lastFailure": {
+        "run": 45788527602,
+        "attempt": 1,
+        "at": "2026-11-26T09:18:47Z",
+        "passed": false,
+        "tests": 20,
+        "retried": 1,
+        "failed": [
+          "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine"
+        ]
+      }
+    },
+    "ui-e2e:test:e2e:journey-project-4": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-project-4",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 23,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-shell-1": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-shell-1",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 0,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": false,
+          "tests": 36,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should keep serving a saved view and never show an uncached one as zero usage",
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should leave no saved usage behind after a sign-out",
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should render the saved snapshot with its server instant when a cold page cannot reach the API"
+          ]
+        }
+      ],
+      "lastFailure": {
+        "run": 45788527602,
+        "attempt": 1,
+        "at": "2026-11-26T09:18:47Z",
+        "passed": false,
+        "tests": 36,
+        "retried": 0,
+        "failed": [
+          "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should keep serving a saved view and never show an uncached one as zero usage",
+          "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should leave no saved usage behind after a sign-out",
+          "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should render the saved snapshot with its server instant when a cold page cannot reach the API"
+        ]
+      }
+    },
+    "ui-e2e:test:e2e:journey-shell-2": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-shell-2",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 33,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-viewer-1": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-viewer-1",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 0,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": false,
+          "tests": 16,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/viewer-camera-persistence.spec.ts > Viewer camera persistence > keeps the second orbit drag pose with a 400 ms gap requested between the drags"
+          ]
+        }
+      ],
+      "lastFailure": {
+        "run": 45788527602,
+        "attempt": 1,
+        "at": "2026-11-26T09:18:47Z",
+        "passed": false,
+        "tests": 16,
+        "retried": 0,
+        "failed": [
+          "ui-e2e › src/viewer-camera-persistence.spec.ts > Viewer camera persistence > keeps the second orbit drag pose with a 400 ms gap requested between the drags"
+        ]
+      }
+    },
+    "ui-e2e:test:e2e:journey-viewer-2": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-viewer-2",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 20,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-viewer-3": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-viewer-3",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 25,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-viewer-4": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-viewer-4",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 11,
+          "retried": 0,
+          "failed": []
+        }
+      ]
+    },
+    "ui-e2e:test:e2e:journey-viewer-5": {
+      "project": "ui-e2e",
+      "target": "test:e2e:journey-viewer-5",
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T09:18:47Z",
+      "runs": 1,
+      "streak": 1,
+      "streakRetried": 0,
+      "history": [
+        {
+          "run": 45788527602,
+          "attempt": 1,
+          "at": "2026-11-26T09:18:47Z",
+          "passed": true,
+          "tests": 15,
+          "retried": 0,
+          "failed": []
+        }
+      ]
     }
   }
 }

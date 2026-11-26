@@ -1038,7 +1038,7 @@ type ObservedChat = {
    */
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   /**
-   * The remote read's last loss was residual R6 (a revoked computer or a refused grant), until a read attaches again.
+   * The remote read's last loss was residual R6 (a revoked or no longer paired computer), until a read attaches again.
    * The attachment keeps retrying it (D17 lives there since HA3); this is only what the chat can say.
    */
   residual?: 'R6';
@@ -2159,7 +2159,7 @@ export class ChatSessionStore {
   }
 
   /**
-   * Residual R6 on a remote placement: its computer was revoked (4003) or its route's grant refused (1008 by reason),
+   * Residual R6 on a remote placement: its computer was revoked (4003) or is no longer paired (`HOST_NOT_PAIRED`),
    * so only pairing it again lets the chat go on. Held from that loss until a read attaches; the read keeps retrying.
    *
    * @public

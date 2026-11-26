@@ -186,7 +186,9 @@ const coldBound = { timeout: 2000 };
 // Rows red on T4
 // ===========================================================================
 
-describe('host attachment regression harness (HA0, red on T4)', () => {
+/* No retry: Vitest retries an `it.fails` body that failed, as expected, before inverting it, so a retry would record
+ * every red row as a flake. */
+describe('host attachment regression harness (HA0, red on T4)', { retry: 0 }, () => {
   /* Row 1 (U2), unit tier: the worker died mid-run and the page reloaded. The turn is on this device's disk, yet T4
    * shows it only once a host answers a read. HA1 (HA-I1) reads the own segment from the file. */
   // Expected-failure: @rifont until 2026-12-15
@@ -321,7 +323,7 @@ describe('host attachment reporting (HA0)', () => {
       silentHost(() => undefined),
     );
     try {
-      chat.store.receiveHostReadAnswer(chatId, { status: 'refused', chatId, reason: 'cursor-ahead' });
+      chat.store.receiveHostReadAnswer(chatId, { status: 'refused', reason: 'cursor-ahead' });
 
       expect(report.mock.calls.filter(([code]) => code === 'own.rewrite')).toEqual([
         ['own.rewrite', expect.objectContaining({ chatId, tags: { reason: 'cursor-ahead' } })],

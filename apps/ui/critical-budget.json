@@ -11,7 +11,7 @@
   "variants": {
     "adaptive": {
       "project": {
-        "brotliBytes": 1991000,
+        "brotliBytes": 1993000,
         "requests": 311,
         "largestChunkBrotliBytes": 167234,
         "knownHeavy": {}

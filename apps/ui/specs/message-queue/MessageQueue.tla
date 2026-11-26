@@ -315,6 +315,8 @@
 \* HA1 review round 3 (2026-11-27): an applied pick decides again whether the chat is read from the file before its
 \* observer restarts, so a chat moved to a paired computer reads that host, and the own watch follows new
 \* dependencies. No action or verdict changes.
+\* HA1 review round 4 (2026-11-27): overlapping picks start one own source, the newest; while it decides, a chat whose
+\* own run was unsettled keeps deferring picks; an older start stands down. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

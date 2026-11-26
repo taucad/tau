@@ -23,10 +23,31 @@ import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { runHeartbeatMilliseconds } from '@taucad/agent-host';
 import { ChatSessionStore, selectChatTranscript } from '#services/chat-session-store.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
+import type * as OwnSegmentSourceModule from '#services/chat-own-segment-source.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
+
+/* Counts the own sources running: each the store creates and has not stopped. */
+const runningSources = vi.hoisted(() => new Set<unknown>());
+vi.mock('#services/chat-own-segment-source.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof OwnSegmentSourceModule>();
+  return {
+    ...actual,
+    createOwnSegmentSource: (input: Parameters<typeof actual.createOwnSegmentSource>[0]) => {
+      const source = actual.createOwnSegmentSource(input);
+      runningSources.add(source);
+      return {
+        wake: source.wake,
+        stop: () => {
+          runningSources.delete(source);
+          source.stop();
+        },
+      };
+    },
+  };
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -372,6 +393,47 @@ describe('the own source decides locality and follows the file (HA-I1)', () => {
     }
   });
 
+  /* Review round 4, finding 1: two quick picks restart the source twice over; exactly one survives. */
+  it('should run exactly one own source after two quick picks restart it', async () => {
+    const disk = createDisk({ [recordPath]: '{"id":"chat_own"}', [ownLog]: settledLog });
+    const { store, deps } = createStore(disk);
+    const chat = open(store, deadHost);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain('Gear made.');
+        expect(chat.session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      }, bound);
+      await settle();
+      expect(runningSources.size).toBe(1);
+      /* Each restart's placement read waits, so the two starts overlap. */
+      const gate = Promise.withResolvers<undefined>();
+      const stored = record();
+      deps.getChat.mockImplementation(async () => {
+        await gate.promise;
+        return stored;
+      });
+      chat.session.persistenceActorRef.send({
+        type: 'setActiveExecution',
+        execution: { kind: 'tau', model: 'model-a', hostId: 'loopback:a' },
+      });
+      await settle();
+      chat.session.persistenceActorRef.send({
+        type: 'setActiveExecution',
+        execution: { kind: 'tau', model: 'model-b', hostId: 'loopback:b' },
+      });
+      await settle();
+      gate.resolve(undefined);
+      await vi.waitFor(() => {
+        expect(runningSources.size).toBe(1);
+      }, bound);
+      await settle(300);
+      expect(runningSources.size).toBe(1);
+    } finally {
+      chat.close();
+    }
+    expect(runningSources.size).toBe(0);
+  });
+
   /* Review round 3, finding 3: the own watch follows a new capability incarnation, and one that closes is replaced. */
   it('should register the own watch again on new dependencies and after it closes', async () => {
     const disk = createDisk({ [recordPath]: '{"id":"chat_own"}', [ownLog]: settledLog });
@@ -396,8 +458,10 @@ describe('the own source decides locality and follows the file (HA-I1)', () => {
       }, bound);
       expect(own()[0]?.dispose).toHaveBeenCalled();
 
-      /* A watch that stayed open a while and then closed is registered again at once. */
+      /* A watch that stayed open a while and then closed is registered again at once, not by the source's next
+       * current read: that read fails here, so only the immediate re-register can bring the third watch. */
       await settle(1100);
+      disk.failing.add(ownLog);
       own()[1]?.close();
       await vi.waitFor(() => {
         expect(own()).toHaveLength(3);

@@ -1809,19 +1809,27 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
       .set({ purchasedAtoms: 1_000_000_000n })
       .where(eq(creditAccount.id, busy.accountId));
     const uncountedOwner = createOwner(url);
-    for (let index = 0; index < 64; index++) {
-      // The caller leaves once admitted, so the hold stays open for the recovery sweep.
-      const leaving = new AbortController();
-      await invoke({
-        owner: uncountedOwner,
-        authUserId: busy.authUserId,
-        attemptKey: `busy-${index}-${randomUUID()}`,
-        signal: leaving.signal,
-        onAdmitted: () => {
-          leaving.abort();
-        },
-      });
-    }
+    /* Every slot is held by a step the supplier has not answered yet. A caller that leaves after admission no longer
+       keeps its hold (the atomic admit ends it at zero), so the slots are filled with steps in flight instead. */
+    generationDelay = 60_000;
+    const inFlightFrom = generations;
+    const inFlight = Array.from({ length: 64 }, async (_, index) => {
+      try {
+        await invoke({
+          owner: uncountedOwner,
+          authUserId: busy.authUserId,
+          attemptKey: `busy-${index}-${randomUUID()}`,
+        });
+      } catch {
+        // Closing the supplier's connections at the end cuts these steps; only their holds matter here.
+      }
+    });
+    await vi.waitFor(
+      () => {
+        expect(generations - inFlightFrom).toBe(64);
+      },
+      { timeout: 20_000, interval: 25 },
+    );
     await expect(invoke({ owner, authUserId: busy.authUserId, attemptKey: randomUUID() })).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof LlmGatewayError &&
@@ -1829,6 +1837,9 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
         (error.getResponse() as { error?: { type?: string } }).error?.type === 'FUNDED_OPERATION_LIMIT',
     );
     expect(counts).toBe(beforePaused);
+    generationDelay = 0;
+    server.closeAllConnections();
+    await Promise.all(inFlight);
   } finally {
     for (const timer of timers) {
       clearTimeout(timer);

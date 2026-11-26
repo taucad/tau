@@ -299,12 +299,14 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
   const { chats, isLoading: isChatsLoading } = useChatRecords(projectId);
   const { applyGeneratedChatName, updateChatName } = useChats(projectId, { enabled: false });
   const firstMessage = useChatSelector((state) => state.messages[0]);
+  const isAwaitingFirstStep = useChatSelector((state) => state.status === 'submitted');
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const isGeneratingName = useActiveChatNaming({
     activeChat,
     firstMessage,
     isProjectLoading,
     isChatsLoading,
+    isAwaitingFirstStep,
     applyGeneratedChatName,
   });
   const [isRenaming, setIsRenaming] = useState(false);

@@ -58,13 +58,20 @@ const {
   mockWorkspaceCreated,
 } = vi.hoisted(() => ({
   mockAssertWorkspaceMutationAllowed: vi.fn(),
-  /* The root file manager, as far as the folder rows read it: started, with Home's root status published, and not in
-   * `error`. One snapshot object, as an actor returns until it changes, so a selector over it settles. */
+  /* The root file manager, as far as the folder rows read it: started, with Home's root status and the connected
+   * folder's published, not in `error` and not in safe mode. One snapshot object, as an actor returns until it changes,
+   * so a selector over it settles. */
   mockFileManagerRef: {
     snapshot: {
       status: 'active',
       matches: () => false,
-      context: { rootStatuses: [{ storageRootKey: 'opfs:origin', backend: 'opfs', state: 'available' }] },
+      context: {
+        rootStatuses: [
+          { storageRootKey: 'opfs:origin', backend: 'opfs', state: 'available' },
+          { storageRootKey: 'webaccess:wsp_connected', backend: 'webaccess', state: 'available' },
+        ],
+        safeMode: false,
+      },
     },
     getSnapshot() {
       return this.snapshot;

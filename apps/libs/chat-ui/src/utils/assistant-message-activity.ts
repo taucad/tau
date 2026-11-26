@@ -355,8 +355,19 @@ const familyState = (parts: readonly MyMessagePart[]): { state: ActivityState; s
 
 const lowerInitial = (value: string): string => `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
 
-/** Describe every live family represented by an adjacent tool group. */
-export const describeActivity = (parts: readonly MyMessagePart[]): string => {
+/**
+ * Describe every live family represented by an adjacent tool group, in the order each first ran.
+ *
+ * @param parts - The group's tool parts.
+ * @param options - `failuresFirst` leads with the families where something did not go through; `omitShortfall` leaves
+ *   out each family's "(1 of 3 failed)" count, for a line that states the tally on its own; `settled` reads a call the
+ *   turn ended without settling (a steered segment's) as done, never as still running or awaiting approval.
+ * @returns The summary, such as "Read files, ran commands (1 of 3 failed)".
+ */
+export const describeActivity = (
+  parts: readonly MyMessagePart[],
+  options: { readonly failuresFirst?: boolean; readonly omitShortfall?: boolean; readonly settled?: boolean } = {},
+): string => {
   const orderedFamilies: ActivityFamily[] = [];
   const byFamily = new Map<ActivityFamily, MyMessagePart[]>();
   for (const part of parts) {
@@ -368,10 +379,24 @@ export const describeActivity = (parts: readonly MyMessagePart[]): string => {
     byFamily.get(family)!.push(part);
   }
 
-  return orderedFamilies
+  const fellShort = (family: ActivityFamily): boolean => {
+    const { state, suffix } = familyState(byFamily.get(family)!);
+    return state === 'error' || state === 'denied' || suffix !== '';
+  };
+  const families = options.failuresFirst
+    ? [
+        ...orderedFamilies.filter((family) => fellShort(family)),
+        ...orderedFamilies.filter((family) => !fellShort(family)),
+      ]
+    : orderedFamilies;
+  return families
     .map((family, index) => {
       const familyParts = byFamily.get(family)!;
-      const { state, suffix } = familyState(familyParts);
+      const { state: outcome, suffix: shortfall } = familyState(familyParts);
+      const state = options.settled && (outcome === 'active' || outcome === 'approval') ? 'completed' : outcome;
+      /* With the tally stated apart, a family that partly failed reads as the work it did; one that only failed still
+       * says so ("model rendering failed"). */
+      const suffix = options.omitShortfall ? '' : shortfall;
       const phrase =
         family === 'other'
           ? `${displayTitle(familyParts.at(-1)!, state === 'active')}${
@@ -472,6 +497,78 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
     activityGroups.set(first, groups);
   }
   return groups;
+};
+
+/** An older turn's groups, split into the working narrative its fold holds and what stays in view. */
+export type WorkingNarrative = {
+  /** Commentary and activity before the last tool call, in order: what the fold holds. */
+  readonly narrative: readonly ActivityGroup[];
+  /** Decisions and deliverables that came before any of the work, kept in view above the fold line. */
+  readonly leading: readonly ActivityGroup[];
+  /** The other decisions and deliverables from that stretch, kept in view below the fold line in their own order. */
+  readonly kept: readonly ActivityGroup[];
+  /** The turn's answer: everything after the last tool call, or its last text when a tool call came after it. */
+  readonly answer: readonly ActivityGroup[];
+  /** The fold line's detail, naming every tool family the narrative ran, failures first. */
+  readonly summary: string;
+  /** What did not go through, tallied across the narrative ("2 failed, 1 denied"); empty when everything did. */
+  readonly shortfall: string;
+};
+
+/**
+ * Split a finished turn's groups at its answer: what came before is its working narrative.
+ *
+ * The answer is everything after the last tool call. A turn that ends on a tool call (ticking off its task list, or
+ * stopped mid-call) after some work answered in its last text, so that text is the answer and the tool calls after it
+ * fold with the rest; a turn whose only text opened it folds whole. Commentary and activity fold; a decision, a deliverable or an attachment never does, so those stay in view,
+ * ahead of the fold line when they came before any of the work.
+ * Whether a one-line narrative is worth folding is the caller's call: it is when the fold line adds the time worked.
+ *
+ * @param groups - The turn's groups, from {@link groupAssistantParts}.
+ * @returns The split, or `undefined` when no tool call comes before the answer.
+ */
+export const splitWorkingNarrative = (groups: readonly ActivityGroup[]): WorkingNarrative | undefined => {
+  const isText = (group: ActivityGroup): boolean => group.kind === 'singleton' && group.part.type === 'text';
+  const isWork = (group: ActivityGroup): boolean => group.kind === 'aggregated' || isText(group);
+  const isTool = (group: ActivityGroup): boolean => group.kind === 'aggregated' && group.category === 'research';
+  const afterTools = groups.findLastIndex((group) => isTool(group)) + 1;
+  const lastText = groups.findLastIndex((group) => isText(group));
+  /* Last words count as the answer only once some work came before them; an opening line is commentary. */
+  const answersBetween = lastText < afterTools && lastText > groups.findIndex((group) => isTool(group));
+  const inAnswer = (group: ActivityGroup, index: number): boolean =>
+    answersBetween ? index === lastText || (index > lastText && !isWork(group)) : index >= afterTools;
+  const narrative: ActivityGroup[] = [];
+  const leading: ActivityGroup[] = [];
+  const kept: ActivityGroup[] = [];
+  const answer: ActivityGroup[] = [];
+  for (const [index, group] of groups.entries()) {
+    if (inAnswer(group, index)) {
+      answer.push(group);
+    } else if (isWork(group)) {
+      narrative.push(group);
+    } else {
+      (narrative.length === 0 ? leading : kept).push(group);
+    }
+  }
+  const toolParts = narrative.flatMap((group) =>
+    group.kind === 'aggregated' ? group.parts.filter((part) => cachedCategory(part) === 'research') : [],
+  );
+  if (toolParts.length === 0) {
+    return undefined;
+  }
+  const states = toolParts.map((part) => partState(part));
+  const count = (state: ActivityState, label: string): string[] => {
+    const total = states.filter((each) => each === state).length;
+    return total === 0 ? [] : [`${String(total)} ${label}`];
+  };
+  return {
+    narrative,
+    leading,
+    kept,
+    answer,
+    summary: describeActivity(toolParts, { failuresFirst: true, omitShortfall: true, settled: true }),
+    shortfall: [...count('error', 'failed'), ...count('denied', 'denied')].join(', '),
+  };
 };
 
 const partCategories = new WeakMap<MyMessagePart, ActivityCategory>();

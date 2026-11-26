@@ -1,6 +1,5 @@
 // @vitest-environment node
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+import { describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -45,12 +44,6 @@ const createStore = (
   });
   return store;
 };
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 describe('ChatSessionStore live delivery through the displayed fold (T3)', () => {
   it.each(['running', 'paused'] as const)(
@@ -412,6 +405,45 @@ describe('ChatSessionStore live delivery through the displayed fold (T3)', () =>
     expect(listener.mock.calls.length).toBeLessThanOrEqual(2);
     expect(visible(store.get('chat')!.messages).at(-1)).toEqual({ id: 'run_1', text: 'x'.repeat(20) });
     unsubscribe();
+    store.release('chat');
+  });
+
+  it('should hold the throttled transcript for a reader the projection topic wakes per live event (D-UI-10)', async () => {
+    const store = createStore();
+    store.acquire('chat', 'project');
+    await vi.waitFor(() => {
+      expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    publishLogRows(store, 'chat', [
+      lifecycleRow(0, 'admitted'),
+      lifecycleRow(1, 'running'),
+      logRow(2, { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Go.' } }),
+    ]);
+    const text = { chatId: 'chat', runId: 'run_1', messageId: 'step-1', contentIndex: 0 } as const;
+    store.receiveHostLiveEvent('chat', { type: 'text-start', ...text });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    /* A `useChatSelector` reader: subscribed to both topics, reading the transcript whenever either wakes it. */
+    const seen = new Set<unknown>();
+    const read = (): void => {
+      seen.add(store.get('chat')!.messages);
+    };
+    read();
+    seen.clear();
+    const unsubscribeChat = store.subscribeChat('chat', read);
+    const unsubscribeProjection = store.subscribeProjection('chat', read);
+    for (let index = 0; index < 20; index++) {
+      store.receiveHostLiveEvent('chat', { type: 'text-delta', ...text, delta: 'x', offset: index });
+    }
+    expect(seen.size).toBeLessThanOrEqual(1);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 120);
+    });
+    expect(seen.size).toBeLessThanOrEqual(2);
+    expect(visible(store.get('chat')!.messages).at(-1)).toEqual({ id: 'run_1', text: 'x'.repeat(20) });
+    unsubscribeChat();
+    unsubscribeProjection();
     store.release('chat');
   });
 

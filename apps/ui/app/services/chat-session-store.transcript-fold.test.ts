@@ -5,13 +5,11 @@
  * transcript is a synchronous fold of the projection, so a committed result shows without waiting for a later step.
  */
 
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentLiveEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSession } from '#services/chat-session-store.js';
-import * as Projection from '#machines/chat-projection.logic.js';
 import { mock } from 'vitest-mock-extended';
 import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import {
@@ -28,10 +26,6 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
-
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -130,6 +124,11 @@ const openReader = async (): Promise<Reader> => {
       await settle();
       record();
     }
+    /* The transcript a reader sees moves at most every 50 ms (D-UI-10): let the trailing announcement land. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 60);
+    });
+    record();
   };
   return {
     store,
@@ -616,7 +615,10 @@ describe('displayed transcript replay cases (T2)', () => {
       publishLogPage(reader.store, chatId, runD.slice(4), { cursor: 4, endCursor: runD.length });
       await settle();
 
-      expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      /* The reread's end shows with the next transcript announcement (D-UI-10). */
+      await vi.waitFor(() => {
+        expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      });
       expectNoRegression([...reader.seen, reader.session.messages]);
     } finally {
       reader.dispose();
@@ -760,9 +762,7 @@ describe('displayed transcript replay cases (T2)', () => {
     }
   });
 
-  it('should show the transcript when the SDK cannot reconstruct the run', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.spyOn(Projection, 'materializeTranscript').mockRejectedValue(new Error('No tool invocation found'));
+  it('should show the transcript with no SDK reader on its path (T4)', async () => {
     const reader = await openReader();
     try {
       await reader.run(rowsOf([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], runD));

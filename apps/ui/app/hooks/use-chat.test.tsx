@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-/* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -40,120 +38,12 @@ vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) =>
   };
 });
 
-// ---------------------------------------------------------------------------
-// Hoisted test harness
-//
-// A minimal SDK Chat stand-in lets the provider tests read status, messages,
-// and selection without invoking a real host transport. Host commands and
-// projection-driven transcript behavior are covered by their owning suites.
-// ---------------------------------------------------------------------------
-
-type FakeChat = {
-  id: string;
-  messages: MyUIMessage[];
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
-  error: Error | undefined;
-  sendMessage: ReturnType<typeof vi.fn>;
-  regenerate: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  // Private in AI SDK source; chat-session-store uses a typed shim. Exposed
-  // as a public spy here so we can assert continuation flows.
-  makeRequest: ReturnType<typeof vi.fn>;
-  resumeStream: ReturnType<typeof vi.fn>;
-  emitMessages: () => void;
-  emitStatus: () => void;
-  onFinish: (event: { messages: MyUIMessage[]; isAbort: boolean; isError: boolean; isDisconnect: boolean }) => void;
-  onError: (error: Error) => void;
-};
-
 const harness = vi.hoisted(() => ({
-  created: [] as FakeChat[],
   patchChat: vi.fn(),
   touchChatRecency: vi.fn(),
   getChat: vi.fn(),
   consumeChatStartupRequest: vi.fn(),
   commitCancelledDraftRestore: vi.fn(),
-}));
-
-function getFake(chatId: string): FakeChat {
-  const fake = harness.created.find((chat) => chat.id === chatId);
-  if (!fake) {
-    throw new Error(`No fake Chat created for ${chatId}`);
-  }
-  return fake;
-}
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id: string;
-    public status: 'submitted' | 'streaming' | 'ready' | 'error' = 'ready';
-    public error: Error | undefined = undefined;
-    public messages: MyUIMessage[];
-    public sendMessage = vi.fn().mockResolvedValue(undefined);
-    public regenerate = vi.fn().mockResolvedValue(undefined);
-    public stop = vi.fn().mockResolvedValue(undefined);
-    public makeRequest = vi.fn().mockResolvedValue(undefined);
-    public resumeStream = vi.fn().mockResolvedValue(undefined);
-    readonly #messagesListeners = new Set<() => void>();
-    readonly #statusListeners = new Set<() => void>();
-    readonly #errorListeners = new Set<() => void>();
-
-    constructor(init: {
-      id: string;
-      messages?: MyUIMessage[];
-      onFinish?: (event: {
-        messages: MyUIMessage[];
-        isAbort: boolean;
-        isError: boolean;
-        isDisconnect: boolean;
-      }) => void;
-      onError?: (error: Error) => void;
-    }) {
-      this.id = init.id;
-      this.messages = init.messages ?? [];
-      const fake: FakeChat = Object.assign(this, {
-        // oxlint-disable-next-line no-empty-function -- default no-op until store wires its callback
-        onFinish: init.onFinish ?? (() => {}),
-        // oxlint-disable-next-line no-empty-function -- default no-op until store wires its callback
-        onError: init.onError ?? (() => {}),
-      });
-      harness.created.push(fake);
-    }
-
-    public '~registerMessagesCallback' = (onChange: () => void): (() => void) => {
-      this.#messagesListeners.add(onChange);
-      return () => {
-        this.#messagesListeners.delete(onChange);
-      };
-    };
-
-    public '~registerStatusCallback' = (onChange: () => void): (() => void) => {
-      this.#statusListeners.add(onChange);
-      return () => {
-        this.#statusListeners.delete(onChange);
-      };
-    };
-
-    public '~registerErrorCallback' = (onChange: () => void): (() => void) => {
-      this.#errorListeners.add(onChange);
-      return () => {
-        this.#errorListeners.delete(onChange);
-      };
-    };
-
-    public emitMessages = (): void => {
-      for (const listener of this.#messagesListeners) {
-        listener();
-      }
-    };
-
-    public emitStatus = (): void => {
-      for (const listener of this.#statusListeners) {
-        listener();
-      }
-    };
-  },
 }));
 
 vi.mock('ai', async (importOriginal) => ({
@@ -402,15 +292,8 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
 /** Torn down in `afterEach` so one test's project session never binds the next one's chat. */
 let stopTurnOwner: (() => void) | undefined;
 
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   beforeEach(() => {
-    harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
@@ -448,7 +331,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     });
     const user = makeUserMessage('msg_user_activity', 'activity');
     const assistant = makeAssistantMessage('msg_assistant_activity', 'answer');
-    getFake(defaultTestChatId).messages = [user, assistant];
     expect(assistant.id).toBeDefined();
     act(() => {
       stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId);
@@ -489,7 +371,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       expect(refuse).toHaveBeenCalledOnce();
     });
 
-    expect(getFake(defaultTestChatId).sendMessage).not.toHaveBeenCalled();
     expect(harness.touchChatRecency).not.toHaveBeenCalled();
   });
 });
@@ -505,7 +386,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
 describe('hooks resolution rules', () => {
   beforeEach(() => {
-    harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
@@ -665,7 +545,7 @@ describe('hooks resolution rules', () => {
       { wrapper: createWrapper('chat_middle_replace') },
     );
     await waitFor(() => {
-      expect(getFake('chat_middle_replace')).toBeDefined();
+      expect(result.current.store.get('chat_middle_replace')).toBeDefined();
     });
     const assistant = (text: string) => ({ id: 'step-1', role: 'assistant', content: [{ type: 'text', text }] });
     act(() => {
@@ -692,8 +572,11 @@ describe('hooks resolution rules', () => {
         8,
       );
     });
+    /* The replacement shows with the next transcript announcement (D-UI-10). */
+    await waitFor(() => {
+      expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
+    });
     expect(result.current.order).toEqual(['first', 'run_1', 'last', 'run_2']);
-    expect(result.current.messagesById.get('run_1')?.parts.at(-1)).toMatchObject({ text: 'new' });
   });
 
   // =========================================================================

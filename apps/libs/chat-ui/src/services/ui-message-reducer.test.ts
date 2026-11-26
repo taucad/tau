@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { UIMessageChunk } from 'ai';
+import { readUIMessageStream } from 'ai';
+import type { UIMessage, UIMessageChunk } from 'ai';
 import { reduceChunks } from '#services/ui-message-reducer.js';
 
 const deepFreeze = <Value>(value: Value): Value => {
@@ -75,6 +76,34 @@ describe('reduceChunks', () => {
       input: { targetFile: 'main.ts' },
       rawInput: '{"targetFile":"main.ts"}',
     });
+  });
+
+  it("should merge a run's end time as the SDK does, a later null taking it back", async () => {
+    const chunks: UIMessageChunk[] = [
+      { type: 'start', messageId: 'm1', messageMetadata: { createdAt: 1000 } },
+      { type: 'start-step' },
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'Working' },
+      { type: 'message-metadata', messageMetadata: { endedAt: 39_000 } },
+      { type: 'abort' },
+      { type: 'message-metadata', messageMetadata: { endedAt: null } },
+    ];
+    let sdk: UIMessage | undefined;
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    for await (const message of readUIMessageStream({ stream })) {
+      sdk = message;
+    }
+
+    expect(reduceChunks(chunks.slice(0, 5)).message?.metadata).toEqual({ createdAt: 1000, endedAt: 39_000 });
+    expect(reduceChunks(chunks).message?.metadata).toEqual({ createdAt: 1000, endedAt: null });
+    expect(reduceChunks(chunks).message?.metadata).toEqual(sdk?.metadata);
   });
 
   it('should return the same reduction for no chunks and the same message when only unfitting chunks follow', () => {

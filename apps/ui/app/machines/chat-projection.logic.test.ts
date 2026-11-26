@@ -16,18 +16,18 @@ import {
 } from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { createUIMessageStream, readUIMessageStream } from 'ai';
-import type { UIMessage, UIMessageChunk } from 'ai';
+import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
+import type { UIMessageChunk } from 'ai';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
+import type { MyUIMessage } from '@taucad/chat';
 import { projectAgentHostEvent, runFailureText } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   chatProjectionLogic,
   chunksOf,
   digestLogSegments,
   initialChatProjection,
-  materializeTranscript,
   reduceChatProjection,
   selectAttentionRow,
   selectCaughtUp,
@@ -39,6 +39,7 @@ import {
   selectRunFailure,
   selectPosition,
   selectRunPhase,
+  selectTranscript,
   selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
@@ -58,7 +59,10 @@ const logs = [
 ] as const;
 
 const terminalChunk = new Set(['finish', 'error', 'abort']);
+/** What a reopen keeps: everything but the terminal marker. */
 const durable = (chunks: ReadonlyArray<{ type: string }>) => chunks.filter((chunk) => !terminalChunk.has(chunk.type));
+/** What a reopen appends: the end time taken back, since chunks only append. */
+const reopenedEnd = { type: 'message-metadata', messageMetadata: { endedAt: null } };
 
 const readLog = (name: string): AgentLogEvent[] =>
   readFileSync(
@@ -196,12 +200,13 @@ describe('chatProjectionLogic (PV-S7)', () => {
         admission: { kind: 'external', turnId: user.id, message: user },
       },
     ];
-    expect(await materializeTranscript(project(rows, 1), 'run_1')).toEqual([
+    expect(selectTranscript(project(rows, 1))).toEqual([
       expect.objectContaining({
         id: user.id,
         role: 'user',
         parts: [{ type: 'text', text: user.content }],
       }),
+      expect.objectContaining({ id: 'run_1', role: 'assistant', parts: [] }),
     ]);
   });
 
@@ -255,7 +260,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ];
     await Promise.all(
       Array.from({ length: rows.length }, async (_unused, index) => {
-        const result = await materializeTranscript(project(rows, index + 1));
+        const result = selectTranscript(project(rows, index + 1));
         expect(result.map((message) => message.id)).toEqual([
           'original-user',
           'run_1',
@@ -316,7 +321,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ];
     await Promise.all(
       Array.from({ length: rewindRows.length }, async (_unused, index) => {
-        const result = await materializeTranscript(project(rewindRows, index + 1));
+        const result = selectTranscript(project(rewindRows, index + 1));
         expect(result.map((message) => message.id)).toEqual(['original-user', 'run_1', 'steer:command-1', 'run_2']);
         expect(
           result.map((message) =>
@@ -337,14 +342,14 @@ describe('chatProjectionLogic (PV-S7)', () => {
       admission: { kind: 'tau', trigger: 'submit', turnId: message.id, message },
     };
     const pending = project([admitted], 1);
-    const pendingMessages = await materializeTranscript(pending);
+    const pendingMessages = selectTranscript(pending);
     expect(pendingMessages.filter((entry) => entry.role === 'user').map((entry) => entry.id)).toEqual([message.id]);
 
     const appended = project(
       [admitted, logRow(1, { type: 'message.appended', message: { ...message, content: 'Make a cylinder' } })],
       1,
     );
-    const appendedMessages = await materializeTranscript(appended);
+    const appendedMessages = selectTranscript(appended);
     expect(appendedMessages.filter((entry) => entry.role === 'user')).toEqual([
       expect.objectContaining({ id: message.id, parts: [{ type: 'text', text: 'Make a cylinder' }] }),
     ]);
@@ -361,7 +366,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       ],
       1,
     );
-    const committedMessages = await materializeTranscript(committed);
+    const committedMessages = selectTranscript(committed);
     expect(committedMessages.filter((entry) => entry.role === 'user')).toEqual([
       expect.objectContaining({ id: message.id, parts: [{ type: 'text', text: 'Make a sphere' }] }),
     ]);
@@ -480,14 +485,11 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(JSON.parse(JSON.stringify(state.views))).toEqual(state.views);
   });
 
-  it('materializes the live transcript from the same terminal log', async () => {
+  it('folds the live transcript from the same terminal log', () => {
     const rows = readLog('recorded/in-project-ping-pong-turn');
     const projected = project(rows, 7);
-    expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(project(rows, 1)));
-    expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(projected));
-    const watched = projected.ledger.currentRunId!;
-    const withoutWatchedRun = await materializeTranscript(projected, watched);
-    expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
+    expect(selectTranscript(projected)).toEqual(selectTranscript(project(rows, 1)));
+    expect(selectTranscript(projected)).toEqual(selectTranscript(projected));
   });
 
   /*
@@ -546,9 +548,9 @@ describe('chatProjectionLogic (PV-S7)', () => {
 
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
     expect(second.remote?.digest).toBe(digestLogSegments(after));
-    expect(await materializeTranscript(completed)).toEqual([
-      ...(await materializeTranscript(project(remote, 1))),
-      ...(await materializeTranscript(project(own, 1))),
+    expect(selectTranscript(completed)).toEqual([
+      ...selectTranscript(project(remote, 1)),
+      ...selectTranscript(project(own, 1)),
     ]);
     expect(reduceChatProjection(second, { type: 'remote', at: 0, segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
@@ -746,8 +748,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const first = reduceChatProjection(initialChatProjection, { type: 'remote', at: 0, segments: before }).state;
     const second = reduceChatProjection(first, { type: 'remote', at: 0, segments: after }).state;
     expect(second.remote?.views).not.toEqual(first.remote?.views);
-    expect(await materializeTranscript(second)).not.toEqual(await materializeTranscript(first));
-    expect(JSON.stringify(await materializeTranscript(second))).toContain('40mm');
+    expect(selectTranscript(second)).not.toEqual(selectTranscript(first));
+    expect(JSON.stringify(selectTranscript(second))).toContain('40mm');
   });
 
   it('never revisits a row it already folded: O(1) work per row (L3 D19)', () => {
@@ -823,14 +825,18 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(chunksOf(failed.chunks).at(-1)?.type).toBe('error');
 
     const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
-    expect(chunksOf(reopened.chunks)).toEqual([...durable(chunksOf(failed.chunks)), { type: 'start-step' }]);
+    expect(chunksOf(reopened.chunks)).toEqual([
+      ...durable(chunksOf(failed.chunks)),
+      reopenedEnd,
+      { type: 'start-step' },
+    ]);
     const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
     const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
     expect(chunksOf(continued.chunks).slice(0, chunksOf(paused.chunks).length)).toEqual(chunksOf(paused.chunks));
 
     const completed = project(rows.slice(0, rows.findIndex((row) => row.type === 'turn.finalized') + 1), 1);
     expect(chunksOf(completed.views[runId]?.chunks).some((chunk) => chunk.type === 'error')).toBe(false);
-    const messages = await materializeTranscript(completed);
+    const messages = selectTranscript(completed);
     expect(messages.some((message) => message.role === 'assistant')).toBe(true);
   });
 
@@ -850,7 +856,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       durable(chunksOf(before.chunks)),
     );
 
-    const transcript = await materializeTranscript(project(rows, 7));
+    const transcript = selectTranscript(project(rows, 7));
     const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
     expect(users).toEqual(['msg_1JskO6ClYBK41k3UxSBc9', 'msg_qhR4h2Hntr2ECEKBa5LFy']);
     expect(transcript.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
@@ -871,7 +877,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
         );
       }
     }
-    const transcript = await materializeTranscript(project(rows, 3));
+    const transcript = selectTranscript(project(rows, 3));
     const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
     expect(new Set(users).size).toBe(users.length);
   });
@@ -908,7 +914,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ];
     const projection = project(rows, 2);
     expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1', 'r3']);
-    const transcript = await materializeTranscript(projection);
+    const transcript = selectTranscript(projection);
     expect(transcript.filter((message) => message.role === 'user')).toHaveLength(2);
   });
 
@@ -1022,7 +1028,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       }),
       logRow(9, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     const reply = transcript.find((message) => message.role === 'assistant');
     expect(reply?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['corrected first']);
   });
@@ -1047,7 +1053,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       }),
       logRow(6, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     const reply = transcript.find((message) => message.role === 'assistant');
     expect(reply?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['retained']);
   });
@@ -1082,7 +1088,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       logRow(3, { type: 'message.appended', message: assistant(before) }),
       logRow(4, { type: 'message.envelope-replaced', messageId: 'a1', replacement: assistant(after) }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     const reply = transcript.find((message) => message.role === 'assistant');
     expect(
       reply?.parts
@@ -1106,7 +1112,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
         replacement: assistant('a1', 'Corrected answer'),
       }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     expect(
       transcript.map((message) =>
         message.parts
@@ -1130,7 +1136,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       lifecycleRow(7, 'admitted', 'run_2'),
       logRow(8, { runId: 'run_2', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     expect(
       transcript
         .filter((message) => message.role === 'assistant')
@@ -1156,7 +1162,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       lifecycleRow(6, 'admitted', 'run_2'),
       logRow(7, { runId: 'run_2', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['summary'] }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     expect(
       transcript.flatMap((message) => message.parts.filter((part) => part.type === 'text').map((part) => part.text)),
     ).toEqual(['Original prompt', 'Visible original answer']);
@@ -1199,7 +1205,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
         replacement: assistant('hello'),
       }),
     ];
-    const transcript = await materializeTranscript(project(rows, 1));
+    const transcript = selectTranscript(project(rows, 1));
     const message = transcript.find((entry) => entry.role === 'assistant');
     expect(message?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['hello']);
   });
@@ -1339,7 +1345,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
   });
 });
 
-it('should reject malformed SDK reconstruction instead of accepting its partial prefix', async () => {
+/* D1 (T1, T4): where the SDK reader rejected the whole transcript, the fold skips the chunk that does not fit. */
+it('should skip an output with no call and keep the run around it', () => {
   const projection = project(
     [
       lifecycleRow(0, 'admitted'),
@@ -1362,7 +1369,12 @@ it('should reject malformed SDK reconstruction instead of accepting its partial 
     ],
     1,
   );
-  await expect(materializeTranscript(projection)).rejects.toThrow('No tool invocation found');
+  expect(selectTranscript(projection)).toEqual([
+    expect.objectContaining({
+      id: 'run_1',
+      parts: [expect.objectContaining({ type: 'text', text: 'Before malformed tool' }), { type: 'step-start' }],
+    }),
+  ]);
 });
 
 it('should retain failed-run history and finalize its interrupted tool tail', async () => {
@@ -1383,7 +1395,7 @@ it('should retain failed-run history and finalize its interrupted tool tail', as
     ],
     1,
   );
-  const messages = await materializeTranscript(projection);
+  const messages = selectTranscript(projection);
   expect(messages).toHaveLength(1);
   expect(messages[0]?.parts).toContainEqual(
     expect.objectContaining({
@@ -1600,7 +1612,7 @@ describe('compact captured projection parity', () => {
           fixture.verify(compact);
         }
         if ('expectedTranscript' in fixture && fixture.expectedTranscript !== undefined) {
-          for (const messages of await Promise.all([materializeTranscript(raw), materializeTranscript(compact)])) {
+          for (const messages of await Promise.all([selectTranscript(raw), selectTranscript(compact)])) {
             expect.soft(messages.map((message) => message.id)).toEqual(fixture.expectedTranscript.ids);
             expect
               .soft(
@@ -1618,7 +1630,7 @@ describe('compact captured projection parity', () => {
         expect(compact.openTools).toEqual(raw.openTools);
         expect(compact.failure).toEqual(raw.failure);
         expect(compact.attentionRow).toEqual(raw.attentionRow);
-        expect(await materializeTranscript(compact)).toEqual(await materializeTranscript(raw));
+        expect(selectTranscript(compact)).toEqual(selectTranscript(raw));
       } finally {
         actor.stop();
         await launcher.close();
@@ -2020,38 +2032,7 @@ it('should isolate tool input and output blocks from previously published snapsh
   expect(late.live?.blocks[key]).toBe(settled.live?.blocks[key]);
 });
 
-describe('completed long-run public SDK reconstruction controls', () => {
-  const callbackMessage = async (chunks: readonly UIMessageChunk[]): Promise<UIMessage | undefined> => {
-    let message: UIMessage | undefined;
-    const stream = createUIMessageStream({
-      generateId: () => 'diagnostic-fallback',
-      execute({ writer }) {
-        for (const chunk of chunks) {
-          writer.write(chunk);
-        }
-      },
-      onError(error) {
-        throw error;
-      },
-      onFinish({ responseMessage }) {
-        message = structuredClone(responseMessage);
-      },
-    });
-    const reader = stream.getReader();
-    try {
-      for (;;) {
-        // oxlint-disable-next-line no-await-in-loop -- Drain the public processor through its final callback.
-        const { done } = await reader.read();
-        if (done) {
-          break;
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    return message;
-  };
-
+describe('completed long-run transcript fold controls', () => {
   it.each([
     { rounds: 64, outputBytes: 256, dynamic: false },
     { rounds: 64, outputBytes: 256, dynamic: true },
@@ -2123,13 +2104,8 @@ describe('completed long-run public SDK reconstruction controls', () => {
       const before = JSON.stringify(chunks);
       const clones = vi.spyOn(globalThis, 'structuredClone');
       try {
-        const existing = await materializeTranscript(projection);
-        const ordinaryClones = clones.mock.calls.length;
-        clones.mockClear();
-        const message = await callbackMessage(chunks);
-        expect(clones).toHaveBeenCalledOnce();
-        expect(ordinaryClones).toBe(1);
-        expect(message).toEqual(existing[0]);
+        const existing = selectTranscript(projection);
+        const message = existing[0];
         expect(message).toMatchObject({ id: 'run_1', role: 'assistant', metadata: { status: 'success' } });
         expect(message?.parts).toHaveLength(rounds * (dynamic ? 3 : 4) + 1);
         expect(message?.parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual(
@@ -2149,64 +2125,14 @@ describe('completed long-run public SDK reconstruction controls', () => {
           })),
         );
         expect(JSON.stringify(chunks)).toBe(before);
-        const output = chunks.find((chunk) => chunk.type === 'tool-output-available');
-        if (output?.type !== 'tool-output-available') {
-          throw new Error('Expected projected tool output');
-        }
-        if (typeof output.output !== 'object' || output.output === null || !('value' in output.output)) {
-          throw new Error('Expected nested output object');
-        }
-        output.output.value = 'changed after reconstruction';
-        expect(JSON.stringify(message)).not.toContain('changed after reconstruction');
-        expect(JSON.stringify(existing)).not.toContain('changed after reconstruction');
-        const sourceSnapshot = JSON.stringify(chunks);
-        const replyTool = message?.parts.find((part) => part.type === (dynamic ? 'dynamic-tool' : 'tool-read_file'));
-        if (
-          !replyTool ||
-          !('output' in replyTool) ||
-          typeof replyTool.output !== 'object' ||
-          replyTool.output === null ||
-          !('value' in replyTool.output)
-        ) {
-          throw new Error('Expected independent returned tool output');
-        }
-        replyTool.output.value = 'returned snapshot mutation';
-        expect(JSON.stringify(chunks)).toBe(sourceSnapshot);
+        /* The fold reads the projection's immutable chunks without cloning them (T4): no SDK snapshot copy. */
+        expect(clones).not.toHaveBeenCalled();
+        expect(selectTranscript(projection, existing)[0]).toBe(message);
       } finally {
         clones.mockRestore();
       }
     },
   );
-
-  it.each(['trailing step', 'metadata-free finish'] as const)('retains the reader distinction for %s', async (tail) => {
-    const chunks: UIMessageChunk[] = [
-      { type: 'start', messageId: 'run_1' },
-      { type: 'text-start', id: 'text' },
-      { type: 'text-delta', id: 'text', delta: 'answer' },
-      { type: 'text-end', id: 'text' },
-      { type: 'finish', messageMetadata: { status: 'success' } },
-      { type: 'start-step' },
-      ...(tail === 'metadata-free finish' ? [{ type: 'finish' } as const] : []),
-    ];
-    let ordinary: UIMessage | undefined;
-    const stream = new ReadableStream<UIMessageChunk>({
-      start(controller) {
-        for (const chunk of chunks) {
-          controller.enqueue(chunk);
-        }
-        controller.close();
-      },
-    });
-    for await (const message of readUIMessageStream({ stream, terminateOnError: true })) {
-      ordinary = message;
-    }
-    const final = await callbackMessage(chunks);
-    expect(ordinary?.parts).toEqual([{ type: 'text', text: 'answer', state: 'done', providerMetadata: undefined }]);
-    expect(final?.parts).toEqual([
-      { type: 'text', text: 'answer', state: 'done', providerMetadata: undefined },
-      { type: 'step-start' },
-    ]);
-  });
 
   it.each(['no start', 'missing start ID', 'trailing step', 'metadata-free finish'] as const)(
     'should preserve actual materializer reader semantics for %s',
@@ -2230,14 +2156,14 @@ describe('completed long-run public SDK reconstruction controls', () => {
         ...initialChatProjection,
         views: { [runId]: { admittedAt: '2026-10-01T00:00:00.000Z', terminal: 'completed', chunks } },
       };
-      const messages = await materializeTranscript(projection);
+      const messages = selectTranscript(projection);
       expect(messages).toHaveLength(1);
       expect(messages[0]?.id).toBe(shape === 'no start' || shape === 'missing start ID' ? '' : 'run_1');
       expect(messages[0]?.parts).toEqual([
         { type: 'text', text: 'answer', state: 'done', providerMetadata: undefined },
       ]);
       expect(chunks).toEqual(before);
-      expect(await materializeTranscript(projection)).toEqual(messages);
+      expect(selectTranscript(projection)).toEqual(messages);
     },
   );
 
@@ -2259,7 +2185,7 @@ describe('completed long-run public SDK reconstruction controls', () => {
         ...(terminal === undefined ? [] : [lifecycleRow(2, terminal)]),
       ];
       const projection = project(rows, 1);
-      const messages = await materializeTranscript(projection);
+      const messages = selectTranscript(projection);
       expect(messages).toHaveLength(1);
       expect(messages[0]?.parts).toContainEqual(
         expect.objectContaining({
@@ -2269,20 +2195,10 @@ describe('completed long-run public SDK reconstruction controls', () => {
           state: terminal === undefined ? 'input-available' : 'output-error',
         }),
       );
-      const again = await materializeTranscript(projection);
+      const again = selectTranscript(projection);
       expect(again[0]).toBe(messages[0]);
     },
   );
-
-  it('rejects malformed projected-style deltas before returning a partial final state', async () => {
-    await expect(
-      callbackMessage([
-        { type: 'start', messageId: 'run_1' },
-        { type: 'text-delta', id: 'missing', delta: 'invalid' },
-        { type: 'finish', messageMetadata: { status: 'success' } },
-      ]),
-    ).rejects.toThrow();
-  });
 });
 
 describe('late tool input envelope corrections', () => {
@@ -2371,7 +2287,7 @@ describe('late tool input envelope corrections', () => {
         }),
       );
       const state = project(rows, single ? 1 : rows.length);
-      const messages = await materializeTranscript(state);
+      const messages = selectTranscript(state);
       const parts = messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
       expect(parts).toHaveLength(1);
       expect(parts[0]).toMatchObject({
@@ -2418,7 +2334,7 @@ describe('late tool input envelope corrections', () => {
             rows.length + 1,
           ),
         }).state;
-        const continuedMessages = await materializeTranscript(continued);
+        const continuedMessages = selectTranscript(continued);
         const continuedParts = continuedMessages
           .flatMap((message) => message.parts)
           .filter((part) => part.type === 'dynamic-tool');
@@ -2426,7 +2342,7 @@ describe('late tool input envelope corrections', () => {
       }
       // Serialization is the projection persistence boundary, not merely a deep copy.
       const serialized = JSON.stringify(state);
-      expect(await materializeTranscript(JSON.parse(serialized) as ChatProjection)).toEqual(messages);
+      expect(selectTranscript(JSON.parse(serialized) as ChatProjection)).toEqual(messages);
     },
   );
 });
@@ -2485,7 +2401,7 @@ it('isolates late corrected tool metadata by call and run', async () => {
     }),
   );
   const state = project(rows, 1);
-  const messages = await materializeTranscript(state);
+  const messages = selectTranscript(state);
   expect(messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool')).toMatchObject([
     { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'Corrected' } } },
     { state: 'output-available', output: 'done', toolMetadata: { tau: { title: 'run_1-call_2' } } },
@@ -2577,25 +2493,8 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
     type: 'live',
     event: { chatId: 'chat_1', runId: 'run_1', messageId: 'step-2', contentIndex: 0, ...event },
   });
-  const present = async (state: ChatProjection) => {
-    const chunks = chunksOf(state.live?.chunks ?? state.views['run_1']?.chunks);
-    const stream = new ReadableStream<UIMessageChunk>({
-      start(controller) {
-        for (const chunk of chunks) {
-          controller.enqueue(chunk);
-        }
-        controller.close();
-      },
-    });
-    let message: UIMessage | undefined;
-    for await (const next of readUIMessageStream({
-      stream,
-      terminateOnError: true,
-    })) {
-      message = next;
-    }
-    return message;
-  };
+  const present = (state: ChatProjection) =>
+    reduceChunks(chunksOf(state.live?.chunks ?? state.views['run_1']?.chunks)).message;
 
   const thinkThroughResults = () => {
     let state = project(stepRows, stepRows.length);
@@ -2612,8 +2511,8 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
     return state;
   };
 
-  it('should conclude every tool call and keep streaming the open reasoning block', async () => {
-    const message = await present(thinkThroughResults());
+  it('should conclude every tool call and keep streaming the open reasoning block', () => {
+    const message = present(thinkThroughResults());
 
     expect(message?.parts.filter((part) => part.type === 'tool-read_file')).toMatchObject(
       calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
@@ -2624,7 +2523,7 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
     });
   });
 
-  it('should end the reasoning block when the step closes and keep its concluded tools', async () => {
+  it('should end the reasoning block when the step closes and keep its concluded tools', () => {
     let state = thinkThroughResults();
     const text = 'Reading. skill read. main read. config read. ';
     state = reduceChatProjection(state, thinking({ type: 'thinking-end', content: text })).state;
@@ -2644,11 +2543,129 @@ describe('durable tool results read after the next step went live (LiveOverlay.t
       answer: batch(closing, at, at + 1),
     }).state;
 
-    const message = await present(state);
+    const message = present(state);
 
     expect(message?.parts.filter((part) => part.type === 'tool-read_file')).toMatchObject(
       calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
     );
     expect(message?.parts.filter((part) => part.type === 'reasoning')).toMatchObject([{ text, state: 'done' }]);
+  });
+});
+
+describe('the time an answer worked', () => {
+  const at = (row: Readonly<Record<string, unknown>>, recordedAt: string) => ({ ...row, recordedAt });
+  const assistantTimes = (messages: readonly MyUIMessage[]) =>
+    messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => [message.id, message.metadata?.createdAt, message.metadata?.endedAt]);
+  /** The times the displayed transcript shows. */
+  const shownTimes = (projection: ChatProjection) => assistantTimes(selectTranscript(projection));
+
+  it('should end each recorded answer at its run settling row, wall clock from its admission', () => {
+    const hexnutProjection = project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7);
+    const hexnut = selectTranscript(hexnutProjection);
+    expect(
+      hexnut
+        .filter((message) => message.role === 'assistant')
+        .map((message) => message.metadata!.endedAt! - message.metadata!.createdAt!),
+    ).toEqual([38_768, 7532, 27_790, 4225]);
+
+    // Stopped for an approval at 04:58:49, failed by a later host at 05:07:09: wall clock counts the wait.
+    const kineticProjection = project(readLog('recorded/kinetic-regenerate-resume'), 7);
+    const kinetic = selectTranscript(kineticProjection);
+    const [, last] = kinetic.filter((message) => message.role === 'assistant');
+    expect(last?.metadata?.endedAt).toBe(Date.parse('2026-10-04T05:07:09.700Z'));
+    expect(last!.metadata!.endedAt! - last!.metadata!.createdAt!).toBe(832_628);
+  });
+
+  it('should take the end away when a stopped run resumes, and state the later end once it settles again', () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(2, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Working' } }),
+        '2026-09-28T00:00:10.000Z',
+      ),
+      at(lifecycleRow(3, 'cancelled'), '2026-09-28T00:00:39.000Z'),
+      at(lifecycleRow(4, 'running'), '2026-09-28T00:13:00.000Z'),
+      at(lifecycleRow(5, 'completed'), '2026-09-28T00:14:06.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(shownTimes(project(rows.slice(0, 4), 1))).toEqual([['run_1', start, start + 39_000]]);
+    expect(shownTimes(project(rows.slice(0, 5), 1))).toEqual([['run_1', start, null]]);
+    expect(shownTimes(project(rows, 1))).toEqual([['run_1', start, start + 846_000]]);
+  });
+
+  it('should take the end back in the live watch too when a stopped run resumes', () => {
+    const rows = [
+      at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+    ];
+    const watched = reduceChatProjection(project(rows, 2), {
+      type: 'live',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'live-text',
+        contentIndex: 0,
+        delta: 'Working',
+        offset: 0,
+      },
+    }).state;
+    /** The end a replay of the watch's chunks leaves on the message: metadata merges last write wins. */
+    const replayedEnd = (state: ChatProjection): unknown =>
+      chunksOf(state.live?.chunks)
+        .flatMap((chunk) =>
+          chunk.type === 'message-metadata' && typeof chunk.messageMetadata === 'object' && chunk.messageMetadata
+            ? [chunk.messageMetadata as Readonly<Record<string, unknown>>]
+            : [],
+        )
+        .findLast((metadata) => 'endedAt' in metadata)?.['endedAt'];
+    const stopped = reduceChatProjection(watched, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(2, 'cancelled'), '2026-09-28T00:00:39.000Z')], 2, 3),
+    }).state;
+    expect(replayedEnd(stopped)).toBe(Date.parse('2026-09-28T00:00:39.000Z'));
+
+    const resumed = reduceChatProjection(stopped, {
+      type: 'batch',
+      answer: batch([at(lifecycleRow(3, 'running'), '2026-09-28T00:13:00.000Z')], 3, 4),
+    }).state;
+    expect(replayedEnd(resumed)).toBeNull();
+    // Chunks only append, so a watch's delivered offset stays valid.
+    expect(resumed.live!.chunks.length).toBeGreaterThan(stopped.live!.chunks.length);
+  });
+
+  it('should end a steered answer at the steering input and start the next one there', () => {
+    const user = { id: 'user-1', role: 'user', content: 'Build it' } as const;
+    const rows = [
+      at(
+        { ...lifecycleRow(0, 'admitted'), admission: { kind: 'tau', turnId: user.id, message: user } },
+        '2026-09-28T00:00:00.000Z',
+      ),
+      at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
+      at(logRow(2, { type: 'message.appended', message: user }), '2026-09-28T00:00:00.000Z'),
+      at(
+        logRow(3, { type: 'message.appended', message: { id: 'a-1', role: 'assistant', content: 'Before' } }),
+        '2026-09-28T00:00:05.000Z',
+      ),
+      at(
+        logRow(4, { type: 'message.appended', message: { id: 'steer:c-1', role: 'user', content: 'Steer' } }),
+        '2026-09-28T00:00:20.000Z',
+      ),
+      at(
+        logRow(5, { type: 'message.appended', message: { id: 'a-2', role: 'assistant', content: 'After' } }),
+        '2026-09-28T00:00:25.000Z',
+      ),
+      at(lifecycleRow(6, 'completed'), '2026-09-28T00:01:00.000Z'),
+    ];
+    const start = Date.parse('2026-09-28T00:00:00.000Z');
+
+    expect(shownTimes(project(rows, 2))).toEqual([
+      ['run_1', start, start + 20_000],
+      ['run_1:steer:c-1', start + 20_000, start + 60_000],
+    ]);
   });
 });

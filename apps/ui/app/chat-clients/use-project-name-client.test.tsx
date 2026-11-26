@@ -78,6 +78,29 @@ describe('useProjectNameClient', () => {
     expect(parsed.id).toMatch(/^chat_/);
   });
 
+  it('should cancel the request on the wire when the caller aborts its signal', async () => {
+    fetchMock.mockImplementation(
+      async (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted', { cause: init.signal?.reason }));
+          });
+        }),
+    );
+    const controller = new AbortController();
+    const { result } = renderHook(() => useProjectNameClient());
+
+    const generated = result.current.generate({ projectId: 'proj_test', text: 'Hi', signal: controller.signal });
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    controller.abort(new Error('superseded'));
+
+    await expect(generated).rejects.toThrow('aborted');
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.signal?.aborted).toBe(true);
+  });
+
   it('should resolve with the accumulated text from text-delta chunks in order', async () => {
     mountStreamingResponse([
       { type: 'start' },

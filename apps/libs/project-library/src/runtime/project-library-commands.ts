@@ -60,6 +60,7 @@ import {
 import type { PersistentStorageRoot } from '#runtime/project-library-storage.js';
 import type {
   InitialEditorState,
+  ProjectLibraryFileManager,
   ProjectLibraryRootFacade,
   ProjectLibraryWorker,
 } from '#types/project-library-io.types.js';
@@ -144,8 +145,8 @@ type CreateProjectFromKernel = CreateProjectChatOptions & {
    * and evaluates becomes main.
    */
   kernel: KernelProvider | 'auto';
-  /** Override default project name */
-  projectName?: string;
+  /** Override default project name; a promise is awaited only where the name is needed, so the create overlaps it. */
+  projectName?: string | Promise<string>;
 };
 
 /**
@@ -349,6 +350,32 @@ export type ProjectCommandsHost<
 const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSource?: string } => {
   const source = options.initialMessage?.attachmentSource;
   return source === undefined ? {} : { attachmentSource: source };
+};
+
+/**
+ * The image attachments of a prompt as the `data:` URLs the project-name profile takes (D14). The Home composer asks
+ * the same way before submit (C1), so a name it holds was made from the same input.
+ *
+ * @param recordFiles - The record client the composer's attachments are stored under.
+ * @param message - The prompt's attachments and the composer directory holding them.
+ * @returns One URL per readable image, in order.
+ *
+ * @public
+ */
+export const namingImageUrls = async (
+  recordFiles: ProjectLibraryFileManager['recordFiles'],
+  message: Readonly<Pick<NonNullable<CreateProjectChatOptions['initialMessage']>, 'attachments' | 'attachmentSource'>>,
+): Promise<string[]> => {
+  const source = composerAttachmentsOf(recordFiles, message.attachmentSource);
+  const urls = await Promise.all(
+    (message.attachments ?? [])
+      .filter((attachment) => attachmentKind(attachment.mediaType) === 'image')
+      .map(async (attachment) => {
+        const bytes = await source.read(attachment);
+        return bytes && `data:${attachment.mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+      }),
+  );
+  return urls.filter((url) => url !== undefined);
 };
 
 /** Whether the registry holds a live session for the project. */
@@ -892,24 +919,6 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   }
 
   /**
-   * Images for the naming profile, which needs bytes over HTTP. Documents are
-   * not sent to it (blueprint §Legacy arms).
-   */
-  async #namingImageUrls(message: NonNullable<CreateProjectChatOptions['initialMessage']>): Promise<string[]> {
-    const fileManager = await this.#host.facade();
-    const source = composerAttachmentsOf(fileManager.recordFiles, message.attachmentSource);
-    const urls = await Promise.all(
-      (message.attachments ?? [])
-        .filter((attachment) => attachmentKind(attachment.mediaType) === 'image')
-        .map(async (attachment) => {
-          const bytes = await source.read(attachment);
-          return bytes && `data:${attachment.mediaType};base64,${uint8ArrayToBase64(bytes)}`;
-        }),
-    );
-    return urls.filter((url) => url !== undefined);
-  }
-
-  /**
    * Find the one directory a permanent delete removes, in a pass whose roots are all observed: the copy at `locator`,
    * or with none the copy the route binds, or the only copy. The directory must still carry the project id; the
    * authority checks that once more under the project and physical locks before it deletes. `survives` says another
@@ -980,11 +989,46 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     await fileManager.workspace.syncProjectRoots();
   }
 
-  /** The manifest, files and kernel a create starts from: a kernel template, or the caller's own data. */
-  async #projectSource(
+  /**
+   * The name a kernel create takes: the caller's, or one generated from the initial message. Started before the
+   * create's other awaits and awaited only where the name is needed (C1), so the request overlaps them. Never rejects.
+   */
+  async #projectName(
     options: CreateProjectOptions,
     projectId: string,
     naming: ProjectNaming | undefined,
+  ): Promise<string> {
+    /* A create from data keeps its own manifest, and so its own name. */
+    if (!('kernel' in options)) {
+      return options.project.name;
+    }
+    const { projectName, initialMessage } = options;
+    if (projectName) {
+      return projectName;
+    }
+    if (!initialMessage || naming === undefined) {
+      return defaultProjectName;
+    }
+    try {
+      const fileManager = await this.#host.facade();
+      const generated = await naming.generate({
+        projectId,
+        text: initialMessage.content,
+        imageUrls: await namingImageUrls(fileManager.recordFiles, initialMessage),
+      });
+      /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
+      return projectNameFromReply(generated) || defaultProjectName;
+    } catch {
+      /* Naming is a courtesy from the API, not a prerequisite: with the API unreachable (a daemon-served page, desktop
+       * offline) the project is still created, under the same default an empty suggestion gets. */
+      return defaultProjectName;
+    }
+  }
+
+  /** The manifest, files and kernel a create starts from: a kernel template, or the caller's own data. */
+  async #projectSource(
+    options: CreateProjectOptions,
+    projectName: Promise<string>,
   ): Promise<
     Readonly<{
       projectData: Omit<ProjectManifest, '$schema'>;
@@ -992,56 +1036,27 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       kernel: KernelProvider | undefined;
     }>
   > {
-    // Determine project data and files based on pattern
-    let projectData: Omit<ProjectManifest, '$schema'>;
-    let files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
-    let kernel: KernelProvider | undefined;
-
-    if ('kernel' in options) {
-      // CreateProjectFromKernel: Generate from kernel template
-      const { projectName: requestedProjectName } = options;
-      let projectName = requestedProjectName;
-      if (!projectName && options.initialMessage) {
-        const generated =
-          naming === undefined
-            ? ''
-            : await naming
-                .generate({
-                  projectId,
-                  text: options.initialMessage.content,
-                  imageUrls: await this.#namingImageUrls(options.initialMessage),
-                })
-                /* Naming is a courtesy from the API, not a prerequisite: with the
-                 * API unreachable (a daemon-served page, desktop offline) the
-                 * project is still created, under the same default an empty
-                 * suggestion gets. */
-                .catch((): string => '');
-        /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
-        projectName = projectNameFromReply(generated) || defaultProjectName;
-      }
-      const { projectTemplates: templates } = this.#host.services;
-      if (options.kernel === 'auto') {
-        projectData = templates.createEntrylessProject(projectName ?? defaultProjectName);
-        files = {};
-      } else {
-        kernel = options.kernel;
-        const { mainFile: mainFileName, emptyCode, ecosystem } = templates.getKernelOption(options.kernel);
-        const result = templates.createInitialProject({
-          projectName: projectName ?? defaultProjectName,
-          mainFileName,
-          emptyCodeContent: encodeTextFile(emptyCode),
-          ecosystem,
-          dependencies: await templates.getKernelDependencies(options.kernel),
-          template: await templates.getKernelProjectTemplate(options.kernel),
-        });
-        projectData = result.projectData;
-        files = result.files;
-      }
-    } else {
+    if (!('kernel' in options)) {
       // CreateProjectFromData: Use provided project data and files
-      projectData = options.project;
-      files = options.files;
+      return { projectData: options.project, files: options.files, kernel: undefined };
     }
+    const { projectTemplates: templates } = this.#host.services;
+    if (options.kernel === 'auto') {
+      return { projectData: templates.createEntrylessProject(await projectName), files: {}, kernel: undefined };
+    }
+    const { kernel } = options;
+    const { mainFile: mainFileName, emptyCode, ecosystem } = templates.getKernelOption(kernel);
+    /* The template reads run while the name is still being generated. */
+    const dependencies = await templates.getKernelDependencies(kernel);
+    const template = await templates.getKernelProjectTemplate(kernel);
+    const { projectData, files } = templates.createInitialProject({
+      projectName: await projectName,
+      mainFileName,
+      emptyCodeContent: encodeTextFile(emptyCode),
+      ecosystem,
+      dependencies,
+      template,
+    });
     return { projectData, files, kernel };
   }
 
@@ -1060,13 +1075,16 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (options.id !== undefined && (await getProjectFileSystemConfig(options.id)) !== undefined) {
       throw new Error('This project is already on this device.');
     }
+    const projectId = options.id ?? generatePrefixedId(idPrefix.project);
+    /* C1: the name request starts first and is awaited only where the name is needed, so it overlaps the worker's
+       readiness, the storage resolution and the template reads. */
+    const projectName = this.#projectName(options, projectId, naming);
+
     const worker = await this.#host.readiedWorker();
 
     const { location, storageRoot, workspaceSlug } = await resolveCreationStorage(options.location);
 
-    const projectId = options.id ?? generatePrefixedId(idPrefix.project);
-
-    const source = await this.#projectSource(options, projectId, naming);
+    const source = await this.#projectSource(options, projectName);
     const { projectData, kernel } = source;
     let { files } = source;
 

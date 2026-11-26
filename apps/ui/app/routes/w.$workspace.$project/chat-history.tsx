@@ -72,6 +72,7 @@ const TurnGroup = memo(function ({
         <ChatMessage
           key={id}
           messageId={id}
+          isPastTurn={!isLast}
           // The request's revision summary is a card attached under the user
           // message, so appending assistant messages never moves it.
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}

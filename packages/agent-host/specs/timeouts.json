@@ -873,14 +873,6 @@
       "owner": "use_skill startup latency T2"
     },
     {
-      "id": "D17b",
-      "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
-      "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "const presentationRetry = setTimeout",
-      "class": "Backoff",
-      "owner": "W9"
-    },
-    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

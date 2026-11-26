@@ -31,7 +31,7 @@ export class NameGeneratorRequestError extends Error {
 type NameProfile = 'project_name' | 'commit_name';
 
 type GenerateName = (prompt: string, projectId: string) => Promise<string>;
-type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string) => Promise<string>;
+type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * Public surface of the simple-text name clients (project + commit). These
@@ -88,7 +88,7 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
  */
 export const useNameGeneratorPartsClient = (profile: NameProfile): NameGeneratorPartsClient => {
   const generateFromParts = useCallback<GenerateNameFromParts>(
-    async (parts, projectId) => {
+    async (parts, projectId, signal) => {
       // Mounting the project manager does not need a naming transport.
       const sdk = await loadCode(async () => import('ai'));
       const chatId = generatePrefixedId(idPrefix.chat);
@@ -117,7 +117,8 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
             idempotencyKey: generatePrefixedId(idPrefix.request),
           },
         },
-        abortSignal: AbortSignal.timeout(10_000),
+        /* A caller's signal cancels the request on the wire (a superseded name ahead, C1); the bound stays 10 s. */
+        abortSignal: AbortSignal.any([AbortSignal.timeout(10_000), ...(signal === undefined ? [] : [signal])]),
       });
 
       let assembled: MyUIMessage | undefined;

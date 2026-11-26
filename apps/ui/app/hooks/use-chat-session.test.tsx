@@ -1,95 +1,18 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-/* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { StrictMode, Suspense, useEffect, useState } from 'react';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
-// ---------------------------------------------------------------------------
-// Hoisted test harness — reuses the AI SDK Chat mock from
-// chat-session-store.test.ts so tests can drive snapshot callbacks.
-// ---------------------------------------------------------------------------
-
-type FakeChatInstance = {
-  id: string;
-  messages: unknown[];
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
-  error: Error | undefined;
-  emitMessagesChange: () => void;
-  emitStatusChange: () => void;
-  emitErrorChange: () => void;
-};
-
 const harness = vi.hoisted(() => ({
-  created: [] as FakeChatInstance[],
   projectManager: {
     getChat: vi.fn().mockResolvedValue(undefined),
     patchChat: vi.fn().mockResolvedValue(undefined),
     touchChatRecency: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id: string;
-    public messages: unknown[] = [];
-    public status: 'submitted' | 'streaming' | 'ready' | 'error' = 'ready';
-    public error: Error | undefined = undefined;
-    public sendMessage = vi.fn().mockResolvedValue(undefined);
-    public regenerate = vi.fn().mockResolvedValue(undefined);
-    public stop = vi.fn().mockResolvedValue(undefined);
-    readonly #messagesListeners = new Set<() => void>();
-    readonly #statusListeners = new Set<() => void>();
-    readonly #errorListeners = new Set<() => void>();
-
-    constructor(init: { id: string }) {
-      this.id = init.id;
-      const fake: FakeChatInstance = Object.assign(this, {
-        emitMessagesChange: () => {
-          for (const l of this.#messagesListeners) {
-            l();
-          }
-        },
-        emitStatusChange: () => {
-          for (const l of this.#statusListeners) {
-            l();
-          }
-        },
-        emitErrorChange: () => {
-          for (const l of this.#errorListeners) {
-            l();
-          }
-        },
-      });
-      harness.created.push(fake);
-    }
-
-    public '~registerMessagesCallback' = (onChange: () => void): (() => void) => {
-      this.#messagesListeners.add(onChange);
-      return () => {
-        this.#messagesListeners.delete(onChange);
-      };
-    };
-
-    public '~registerStatusCallback' = (onChange: () => void): (() => void) => {
-      this.#statusListeners.add(onChange);
-      return () => {
-        this.#statusListeners.delete(onChange);
-      };
-    };
-
-    public '~registerErrorCallback' = (onChange: () => void): (() => void) => {
-      this.#errorListeners.add(onChange);
-      return () => {
-        this.#errorListeners.delete(onChange);
-      };
-    };
   },
 }));
 
@@ -120,7 +43,7 @@ const { useChatSessionStore } = await import('#hooks/chat-session-store-provider
 const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
   await import('#hooks/chat-session-store.fixture.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
-const { publishLogRows, runningRows } = await import('#machines/chat-projection.fixture.js');
+const { lifecycleRow, logRow, publishLogRows, runningRows } = await import('#machines/chat-projection.fixture.js');
 
 function createWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
@@ -128,15 +51,8 @@ function createWrapper() {
   };
 }
 
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 describe('useChatSession', () => {
   beforeEach(() => {
-    harness.created = [];
     harness.projectManager.getChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.patchChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.touchChatRecency.mockReset().mockResolvedValue(undefined);
@@ -249,7 +165,6 @@ describe('useChatSession', () => {
   it('returns the session record', () => {
     const { result } = renderHook(() => useChatSession('chat_a', 'proj_a'), { wrapper: createWrapper() });
     expect(result.current?.chatId).toBe('chat_a');
-    expect(result.current?.chat).toBeDefined();
     expect(result.current?.persistenceActorRef).toBeDefined();
     expect(result.current?.draftActorRef).toBeDefined();
   });
@@ -355,39 +270,39 @@ describe('useChatSession', () => {
 });
 
 describe('useChatSessionSnapshot', () => {
-  beforeEach(() => {
-    harness.created = [];
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('re-renders when the underlying chat messages change', () => {
+  it('re-renders when the chat transcript changes', () => {
     let renderCount = 0;
+    const captured: { store?: ChatSessionStore; session?: unknown } = {};
     const { result } = renderHook(
       () => {
         renderCount += 1;
-        useChatSession('chat_a', 'proj_a');
-        return useChatSessionSnapshot('chat_a', (session) => session?.chat.messages);
+        captured.session = useChatSession('chat_a', 'proj_a');
+        captured.store = useChatSessionStore();
+        return useChatSessionSnapshot('chat_a', (session) => session?.messages);
       },
       { wrapper: createWrapper() },
     );
 
     const initialRenders = renderCount;
+    const initialSession = captured.session;
     expect(result.current).toEqual([]);
-    expect(harness.created).toHaveLength(1);
-    const fake = harness.created[0]!;
 
     act(() => {
-      fake.messages = [{ id: 'msg_1', role: 'user', parts: [] }];
-      fake.emitMessagesChange();
+      publishLogRows(captured.store!, 'chat_a', [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, { type: 'message.appended', message: { id: 'msg_1', role: 'user', content: 'Hello' } }),
+        lifecycleRow(2, 'completed'),
+      ]);
     });
 
     expect(renderCount).toBeGreaterThan(initialRenders);
-    expect(result.current).toEqual([{ id: 'msg_1', role: 'user', parts: [] }]);
-    // The Chat instance was not recreated.
-    expect(harness.created).toHaveLength(1);
+    expect(result.current?.map((message) => message.id)).toContain('msg_1');
+    // The session was not recreated.
+    expect(captured.session).toBe(initialSession);
   });
 
   it('should re-render when the chat status moves with its run phase', () => {
@@ -417,12 +332,14 @@ describe('useChatSessionSnapshot', () => {
     function ProbeA() {
       renderCountA += 1;
       useChatSession('chat_a', 'proj_a');
-      useChatSessionSnapshot('chat_a', (session) => session?.chat.status);
+      useChatSessionSnapshot('chat_a', (session) => session?.messages);
       return null;
     }
 
+    const captured: { store?: ChatSessionStore } = {};
     function ProbeB() {
       useChatSession('chat_b', 'proj_a');
+      captured.store = useChatSessionStore();
       return null;
     }
 
@@ -434,9 +351,12 @@ describe('useChatSessionSnapshot', () => {
     );
 
     const initial = renderCountA;
-    const fakeB = harness.created.find((c) => c.id === 'chat_b')!;
     act(() => {
-      fakeB.emitMessagesChange();
+      publishLogRows(captured.store!, 'chat_b', [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, { type: 'message.appended', message: { id: 'msg_b', role: 'user', content: 'Hello' } }),
+        lifecycleRow(2, 'completed'),
+      ]);
     });
     expect(renderCountA).toBe(initial);
   });

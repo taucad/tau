@@ -169,7 +169,7 @@ export class ChatService {
         }
         return result.response;
       },
-    }).responses('openai-gpt-5.6-luna');
+    }).responses('openai-gpt-6-luna');
     try {
       const streamed = streamText({
         model,

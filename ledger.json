@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T22:28:58.108Z",
+  "updatedAt": "2026-11-26T22:29:46.363Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -3524,6 +3524,19 @@
       "counted": 18030,
       "replayed": 9417,
       "rejected": 0
+    },
+    {
+      "run": 45904533826,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2907",
+      "sha": "18005afa7e93d982304d8bdc7ca1c113de6878a6",
+      "at": "2026-11-26T22:29:06Z",
+      "conclusion": "cancelled",
+      "artifacts": 2,
+      "counted": 99,
+      "replayed": 1752,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -5084,14 +5097,14 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 32,
-      "tests": 3168,
+      "executions": 33,
+      "tests": 3267,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T22:28:24Z",
+      "lastSeen": "2026-11-26T22:29:06Z",
       "targets": {
-        "test linux-x64": 32
+        "test linux-x64": 33
       }
     },
     "ui-e2e:test:e2e:adaptive": {

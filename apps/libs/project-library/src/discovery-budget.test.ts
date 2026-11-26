@@ -26,6 +26,7 @@ import {
 } from '#runtime/project-library.fixture.js';
 import type { LibraryProfile, LibraryProfileRoute } from '#runtime/project-library.fixture.js';
 import type { ProjectManagerWorker, ProjectLibraryRootFacade } from '#types/project-library-io.types.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 import { ProjectManagerProvider } from '#hooks/project-manager-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectManagerContextType } from '#hooks/use-project-manager.js';
@@ -307,5 +308,143 @@ describe('discovery budget per library mutation', () => {
     expect(profile.shape).toEqual({ home: 84, workspace: 302, duplicates: 3 });
     expect(libraryProfileWorkspaceId(0)).toMatch(/^proj_[\dA-Za-z]{21}$/u);
     expect(libraryProfileFolderId).toBe('wsp_libraryprofile0000000');
+  });
+});
+
+/* Fast-path blueprint FW1: what removing the scans nothing needs must keep. */
+describe('mutations that change no disk fact', () => {
+  it('should move no epoch for a chat recency touch, and list the project at its new activity', async () => {
+    const harness = await startLibrary();
+    const { epoch } = harness.library.discovery.getSnapshot().context;
+    const touchedAt = 1_800_000_000_000;
+
+    await act(async () => {
+      await harness.library.touchChatRecency(chatId, touchedAt);
+      await settle(harness);
+    });
+
+    expect(harness.library.discovery.getSnapshot().context.epoch).toBe(epoch);
+    const listing = harness.queryClient.getQueryData<ProjectListing>(['projects']);
+    expect(listing?.projects.find((project) => project.projectId === homeId(13))?.library.lastActivityAt).toBe(
+      touchedAt,
+    );
+  });
+
+  it('should list a trashed project as trashed with no scan', async () => {
+    const harness = await startLibrary();
+    harness.profile.reset();
+
+    await act(async () => {
+      await harness.library.commands.trashProject(homeId(12));
+      await settle(harness);
+    });
+
+    const listing = harness.queryClient.getQueryData<ProjectListing>(['projects']);
+    expect(listing?.projects.find((project) => project.projectId === homeId(12))?.library.deletedAt).toBeDefined();
+    expect(harness.profile.counts().scans).toBe(0);
+  });
+});
+
+describe('listing rows refreshed with no scan', () => {
+  it('should keep the newer listing when an earlier refresh of the same pass finishes last', async () => {
+    const harness = await startLibrary();
+    const projectId = homeId(12);
+    const { worker } = harness.profile;
+    await worker.trashProject(projectId);
+    /* The first refresh reads the rows while the project is in the Trash, and its read answers only once released. */
+    const released = Promise.withResolvers<void>();
+    const readStates = worker.getProjectLibraryStates.bind(worker);
+    vi.spyOn(worker, 'getProjectLibraryStates').mockImplementationOnce(async (projectIds) => {
+      const states = await readStates(projectIds);
+      await released.promise;
+      return states;
+    });
+    const earlier = harness.library.refreshListingRows();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    /* Restore, and a second refresh of the same pass reads and publishes the restored row first. */
+    await worker.restoreProject(projectId);
+    await harness.library.refreshListingRows();
+    const deletedAtOf = (): number | undefined =>
+      harness.queryClient
+        .getQueryData<ProjectListing>(['projects'])
+        ?.projects.find((project) => project.projectId === projectId)?.library.deletedAt;
+    expect(deletedAtOf()).toBeUndefined();
+
+    released.resolve();
+    await earlier;
+
+    expect(deletedAtOf()).toBeUndefined();
+  });
+});
+
+describe('a copy delete proves the other copy from disk', () => {
+  it('should journal a copy delete with copy once it has read the route copy', async () => {
+    const harness = await startLibrary();
+    const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
+
+    await act(async () => {
+      await harness.library.commands.permanentlyDeleteProject(
+        homeId(0),
+        harness.profile.locatorOf('workspace', 'copy-000'),
+      );
+      await settle(harness);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([{ copy: true }]);
+  });
+
+  it('should journal a copy delete whose other copy vanished without copy, so the Trash check applies', async () => {
+    const harness = await startLibrary();
+    const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
+    /* The pass still lists the route's copy; the disk no longer holds it. */
+    harness.profile.removeDirectory('home', 'home-000');
+    harness.profile.reset();
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(
+          homeId(0),
+          harness.profile.locatorOf('workspace', 'copy-000'),
+        ),
+      ).rejects.toThrow('Permanent delete is available only for trashed projects');
+      await settle(harness);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
+    expect(harness.profile.counts()).toMatchObject({ scans: 0, verifications: 1 });
+  });
+
+  it('should not count a verification of the target as proof when the route moves onto it mid-precheck', async () => {
+    const harness = await startLibrary();
+    const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
+    /* The pass still lists the Home copy; the disk no longer holds it, so the target is the last copy. */
+    harness.profile.removeDirectory('home', 'home-000');
+    /* After the precheck read the route (it bound the Home copy) and before the verification reads, "Use this folder"
+     * rebinds the route onto the very copy being deleted, as `chooseProjectDirectory` would with no mutation gate. */
+    harness.profile.onVerification((projectId) => {
+      if (projectId === homeId(0)) {
+        harness.profile.routes.set(projectId, {
+          projectId,
+          backend: 'webaccess',
+          workspaceId: libraryProfileFolderId,
+          providerBasePath: 'copy-000',
+        });
+      }
+    });
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(
+          homeId(0),
+          harness.profile.locatorOf('workspace', 'copy-000'),
+        ),
+      ).rejects.toThrow('Permanent delete is available only for trashed projects');
+      await settle(harness);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
   });
 });

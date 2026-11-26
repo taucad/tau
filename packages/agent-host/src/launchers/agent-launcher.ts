@@ -38,6 +38,8 @@ import { catchUpRequestSchema } from '#wire/frames.schema.js';
 import type { CatchUpFrame, CatchUpInput, ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import { chatStoreBinding, requireChatPathSegment } from '#launchers/chat-store.js';
+import { createLiveConflater } from '#launchers/live-conflater.js';
+import type { LiveConflater } from '#launchers/live-conflater.js';
 import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
 import type { ReplayView } from '#launchers/replay-view.js';
 import type { ChatStore, ChatWriterOpen, LeadershipPort } from '#launchers/chat-store.js';
@@ -157,8 +159,9 @@ export type AgentLauncher = {
 };
 
 /**
- * Events a subscriber may leave unread before it is dropped (RH-A24). A subscriber this far behind has stopped
- * reading; it re-reads from its cursor, which is what the durable log is for.
+ * Unmergeable events a subscriber may leave unread before it is dropped (RH-A24). Deltas of one block merge (WP-08),
+ * so only boundaries count. A subscriber this far behind has stopped reading; it re-reads from its cursor, which is
+ * what the durable log is for.
  */
 const fanOutQueueLimit = 1024;
 
@@ -187,37 +190,39 @@ export const iterateStream = async function* <Chunk>(stream: ReadableStream<Chun
   }
 };
 
-/** A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). */
-const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: string) => () => void) => {
-  const controllers = new Map<
+/**
+ * A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). Each
+ * subscriber has its own conflation buffer (WP-08): a delta is merged into the one before it while that subscriber's
+ * window is open or it has not read its last event, so a slow reader costs merged text, not queued events.
+ */
+const createFanOut = <Event extends { readonly chatId: string; readonly type: string }>(
+  own: (chatId: string) => () => void,
+  now?: () => number,
+) => {
+  const subscribers = new Map<
     ReadableStreamDefaultController<Event>,
-    { chatId: string; close: (reason?: Error) => void }
+    { chatId: string; conflater: LiveConflater<Event>; close: (reason?: Error) => void }
   >();
   let closed = false;
   const drop = (controller: ReadableStreamDefaultController<Event>, reason?: Error): void => {
-    controllers.get(controller)?.close(reason);
+    subscribers.get(controller)?.close(reason);
   };
   return {
     publish: (event: Event): void => {
-      for (const [controller, { chatId }] of controllers) {
+      for (const [controller, { chatId, conflater }] of subscribers) {
         if (chatId !== event.chatId) {
           continue;
         }
-        /* An unbounded queue would grow this process's heap for every event of a run nobody consumes. */
-        if ((controller.desiredSize ?? 0) < -fanOutQueueLimit) {
+        conflater.push(event);
+        /* An unbounded buffer would grow this process's heap for every boundary of a run nobody consumes. */
+        if (conflater.size > fanOutQueueLimit) {
           drop(controller, new Error('This subscriber fell too far behind; reattach from its cursor.'));
-          continue;
-        }
-        /* A subscriber whose connection died throws on `enqueue`; it must never fail the run it only watched. */
-        try {
-          controller.enqueue(event);
-        } catch {
-          drop(controller);
         }
       }
     },
     subscribe: (signal: AbortSignal, chatId: string): AsyncIterable<Event> => {
       let cleanup = (): void => undefined;
+      let wake = (): void => undefined;
       const receive = async function* (): AsyncGenerator<Event> {
         const stream = new ReadableStream<Event>({
           start(controller) {
@@ -227,12 +232,30 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
             }
             const release = own(chatId);
             let active = true;
+            const conflater = createLiveConflater<Event>({
+              /* A subscriber whose connection died throws on `enqueue`; it must never fail the run it only watched. */
+              deliver: (event) => {
+                try {
+                  controller.enqueue(event);
+                } catch {
+                  drop(controller);
+                }
+              },
+              /* Only while the reader has taken what it was given; otherwise the buffer merges. */
+              canDeliver: () => active && (controller.desiredSize ?? 0) > 0,
+              ...(now === undefined ? {} : { now }),
+            });
             const close = (reason?: Error): void => {
               if (!active) {
                 return;
               }
+              /* A clean end hands over what is buffered first; a failure drops it with the stream. */
+              if (reason === undefined) {
+                conflater.flush();
+              }
               active = false;
-              controllers.delete(controller);
+              conflater.close();
+              subscribers.delete(controller);
               try {
                 if (reason === undefined) {
                   controller.close();
@@ -249,8 +272,14 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
               close();
             };
             cleanup = close;
-            controllers.set(controller, { chatId, close });
+            wake = () => {
+              conflater.ready();
+            };
+            subscribers.set(controller, { chatId, conflater, close });
             signal.addEventListener('abort', abort, { once: true });
+          },
+          pull: () => {
+            wake();
           },
           cancel: () => {
             cleanup();
@@ -272,7 +301,7 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
     },
     close: (): void => {
       closed = true;
-      for (const { close } of controllers.values()) {
+      for (const { close } of subscribers.values()) {
         close();
       }
     },
@@ -382,7 +411,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         retireOversized(chatId);
       }
     };
-  });
+  }, options.monotonicNow);
   /** Chats whose writer this process holds open: their reads are the host's long poll. */
   const writers = new Set<string>();
   const writerGenerations = new Map<string, string>();
@@ -421,6 +450,13 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   let closing: Promise<void> | undefined;
   /* Set once the leadership binding exists; the host's callbacks before then have no chat to report. */
   const leading: { port?: LeadershipPort } = {};
+  /** The leader's posts to other tabs, conflated as one more subscriber: at most one per block per window (WP-08). */
+  const broadcast = createLiveConflater<SourceLiveEvent>({
+    deliver: (event) => {
+      leading.port?.liveEvent(event);
+    },
+    ...(options.monotonicNow === undefined ? {} : { now: options.monotonicNow }),
+  });
 
   const wakeReads = (chatId: string, reason: 'writer' | 'reroute' | 'source' = 'writer'): void => {
     const pass = passes.get(chatId);
@@ -678,7 +714,9 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       const qualified = { ...event, sourceGeneration };
       live.publish(qualified);
-      leading.port?.liveEvent(qualified);
+      if (leading.port !== undefined) {
+        broadcast.push(qualified);
+      }
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
@@ -1453,6 +1491,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
             failures.push(error);
           }
         };
+        broadcast.flush();
+        broadcast.close();
         await settle(async () => port.close());
         await settle(async () => host.close());
         const unclaimed = [...views.values()];

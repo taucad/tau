@@ -35,6 +35,7 @@ export type ModelInvocationIntent = {
   readonly surface: ModelInvocationSurface;
   readonly attempt: { readonly version: 1; readonly key: string };
   readonly providerWire: ModelProviderWire;
+  /** The parsed request, handed over: the invocation owner reads it in place, so the caller must not reuse or change it. */
   readonly body: unknown;
   readonly priceHeaders: Readonly<Record<string, string>>;
   readonly activity: FinancialActivityKind;

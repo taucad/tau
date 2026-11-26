@@ -45,6 +45,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly backgroundClient: postgres.Sql;
   private readonly connectionString: string;
   private readonly stopCapacity: (() => void) | undefined;
+  private warmTimer: NodeJS.Timeout | undefined;
+  /** The keep-alive in flight, awaited before the pools end. */
+  private warming: Promise<void> | undefined;
   private get isNoticeLogEnabled() {
     // Toggle to enable/disable verbose postgres notices logging.
     // Disabled by default as it is noisy during startup.
@@ -74,6 +77,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   public async onModuleDestroy(): Promise<void> {
+    clearInterval(this.warmTimer);
+    await this.warming;
     this.stopCapacity?.();
     await Promise.all([this.client.end(), this.backgroundClient.end()]);
     this.logger.info('Database connection closed');
@@ -82,7 +87,38 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   public async onModuleInit(): Promise<void> {
     await this.probeDatabaseConnectivity();
     await this.checkSchemaCompatibility();
+    this.startWarmConnections();
     this.logger.info('Database service initialized');
+  }
+
+  /**
+   * Keeps `DATABASE_POOL_WARM_CONNECTIONS` request connections open (chat performance WP-05, server audit S-04).
+   *
+   * postgres.js closes a connection after `idle_timeout` seconds unused, and human gaps between turns are
+   * minutes, so without this the first model step of most turns paid a TCP, pooler and SCRAM handshake per
+   * connection. Running that many `select 1` at once every half idle timeout makes the pool use (and so
+   * keep) that many connections. They count inside `DATABASE_POOL_MAX`, so the pooler budget is unchanged.
+   */
+  private startWarmConnections(): void {
+    const max = this.configService.get('DATABASE_POOL_MAX', { infer: true });
+    const warm = Math.min(this.configService.get('DATABASE_POOL_WARM_CONNECTIONS', { infer: true }), max);
+    if (warm <= 0) {
+      return;
+    }
+    const idleSeconds = this.configService.get('DATABASE_IDLE_TIMEOUT_SECONDS', { infer: true });
+    const keep = (): void => {
+      this.warming = (async (): Promise<void> => {
+        try {
+          await Promise.all(Array.from({ length: warm }, async () => this.client`select 1`));
+        } catch (error) {
+          // A failed keep-alive costs only the reconnect it was meant to save; the next request reports the fault.
+          this.logger.debug({ err: error }, 'Request pool keep-alive failed');
+        }
+      })();
+    };
+    this.warmTimer = setInterval(keep, Math.max(1000, Math.floor((idleSeconds * 1000) / 2)));
+    this.warmTimer.unref();
+    keep();
   }
 
   /**

@@ -38,8 +38,19 @@ afterEach(() => {
 const chatId = 'chat';
 
 /** A store whose filesystem holds `files` (other devices' segments) by path, and nothing else. */
-const createStore = (files: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map()): ChatSessionStore => {
-  const store = new ChatSessionStore();
+type Frame = (callback: () => void) => () => void;
+
+/* These cases pin what is shown, not when: live changes publish at once instead of on the next frame (WP-06). */
+const publishNow: Frame = (callback) => {
+  callback();
+  return () => undefined;
+};
+
+const createStore = (
+  files: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map(),
+  frame: Frame = publishNow,
+): ChatSessionStore => {
+  const store = new ChatSessionStore({ frame });
   const missing = async (): Promise<never> => {
     throw Object.assign(new Error('Missing record'), { code: 'ENOENT' });
   };
@@ -90,8 +101,8 @@ type Reader = Readonly<{
   dispose: () => void;
 }>;
 
-const openReader = async (): Promise<Reader> => {
-  const store = createStore();
+const openReader = async (frame?: Frame): Promise<Reader> => {
+  const store = createStore(new Map(), frame);
   const session = store.acquire(chatId, 'project');
   await vi.waitFor(() => {
     expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
@@ -772,6 +783,77 @@ describe('displayed transcript replay cases (T2)', () => {
         'skill-b': { state: 'output-available', output: 'skill-b instructions' },
       });
     } finally {
+      reader.dispose();
+    }
+  });
+});
+
+describe('frame clock (WP-06, LiveOverlay FrameClock)', () => {
+  it('should wake projection readers once per frame for live events and at once for a durable row', async () => {
+    const frames: Array<() => void> = [];
+    const reader = await openReader((callback) => {
+      frames.push(callback);
+      return () => {
+        frames.splice(frames.indexOf(callback), 1);
+      };
+    });
+    const text = { runId: 'run_1', messageId: 'step-1', contentIndex: 0 };
+    const rows = [
+      { type: 'run.lifecycle', state: 'admitted', attempt: 1 },
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'message.appended', message: { id: 'user-1', role: 'user', content: 'Make a cube.' } },
+      {
+        type: 'message.appended',
+        message: {
+          id: 'step-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Drafting' }],
+          metadata: { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } },
+        },
+      },
+    ].map((row, sequence) => logRow(sequence, row));
+    let wakes = 0;
+    const unsubscribe = reader.store.subscribeProjection(chatId, () => {
+      wakes++;
+    });
+    const live = (event: LiveFields): void => {
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- Each literal is one member of the union; spreading it loses the discriminant.
+      reader.store.receiveHostLiveEvent(chatId, { chatId, ...event } as AgentLiveEvent);
+    };
+    try {
+      await reader.run(rowsOf([0, 1, 2], rows));
+      for (const frame of frames.splice(0)) {
+        frame();
+      }
+      wakes = 0;
+
+      live({ type: 'text-start', ...text });
+      live({ type: 'text-delta', ...text, delta: 'Drafting', offset: 0 });
+      live({ type: 'text-delta', ...text, delta: ' a cube', offset: 8 });
+
+      expect(wakes).toBe(0);
+      expect(frames).toHaveLength(1);
+      frames.shift()!();
+      expect(wakes).toBe(1);
+      await settle();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 60);
+      });
+      expect(textOf(reader.session.messages)).toBe('Drafting a cube');
+
+      /* A durable row publishes at once, with the live change still waiting for its frame (DurableAtOnce, FrameAtomic). */
+      live({ type: 'text-delta', ...text, delta: '.', offset: 15 });
+      wakes = 0;
+      publishLogRows(reader.store, chatId, [rows[3]], 3);
+      expect(wakes).toBe(1);
+      expect(frames).toHaveLength(0);
+      await settle();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 60);
+      });
+      expect(textOf(reader.session.messages)).toBe('Drafting a cube.');
+    } finally {
+      unsubscribe();
       reader.dispose();
     }
   });

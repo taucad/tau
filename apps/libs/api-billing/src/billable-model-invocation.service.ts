@@ -213,9 +213,11 @@ export class BillableModelInvocationService {
   private async invokeBound(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
     const startedAt = performance.now();
     const inlineImageBytes = assertRequestBound(suppliedIntent.body);
+    /* Chat performance WP-14 step 6: the body is the caller's freshly parsed request (the gateway's Fastify body,
+     * the chat helper's `JSON.parse`), handed over and never read again by it, so it is used in place. The deep
+     * copy it used to get was a second graph of a body that can reach 32 MB. */
     const intent = {
       ...suppliedIntent,
-      body: structuredClone(suppliedIntent.body),
       priceHeaders: { ...suppliedIntent.priceHeaders },
     };
     const existing = await this.operation(intent);
@@ -393,11 +395,12 @@ export class BillableModelInvocationService {
     };
     // A caller that already left must not place a hold that only the recovery sweep releases.
     intent.signal.throwIfAborted();
-    let admission = await this.ledger.admitOperation(admissionInput);
+    // WP-14 (`AtomicAdmit`): the hold, the row and the dispatch intent commit together.
+    let admission = await this.ledger.admitOperation(admissionInput, { recordIntent: true });
     if (admission.status === 'denied' && admission.reason === 'concurrency_unavailable' && !recoveryAttempted) {
       await this.recoverCapacity(intent);
       intent.signal.throwIfAborted();
-      admission = await this.ledger.admitOperation(admissionInput);
+      admission = await this.ledger.admitOperation(admissionInput, { recordIntent: true });
     }
     if (admission.status === 'denied') {
       throw classified(this.denial(admission, intent, qualification.routeId), admission.reason);
@@ -410,7 +413,8 @@ export class BillableModelInvocationService {
         operationId: admission.operationId,
       };
     }
-    const row = await this.operation(intent);
+    const { dispatch: recorded } = admission;
+    const row = recorded?.operation ?? (await this.operation(intent));
     if (!row || row.id !== admission.operationId || row.requestDigest !== requestDigest) {
       throw new Error('Admitted model invocation identity is unavailable');
     }
@@ -423,10 +427,22 @@ export class BillableModelInvocationService {
           requestDigest,
         });
       }
+      if (recorded !== undefined) {
+        /* `ApiAbortCheck`: the intent is already recorded, so the step ends here at zero instead of waiting for the
+           sweep's grace. Nothing was sent to the supplier. */
+        await this.finishUnanswered(
+          qualification,
+          row,
+          admission.generation,
+          qualification.adapter
+            .createEvidenceCollector(qualification)
+            .failed(intent.signal.aborted ? 'client_abort' : 'deadline'),
+        );
+      }
       this.recordAdmission(intent, qualification, startedAt, 'cancelled');
-      return { state: 'pending', operationId: row.id };
+      return { state: recorded === undefined ? 'pending' : 'terminal', operationId: row.id };
     }
-    if (!(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
+    if (recorded === undefined && !(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
       this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };
     }
@@ -442,6 +458,8 @@ export class BillableModelInvocationService {
     startedAt: number,
     countSignal?: AbortSignal,
   ): Promise<BillableInvocationResult> {
+    /* `ApiDispatch` fences on the row as the database sees it at send time, not as the admission saw it: a process
+       paused between the commit and this line may find the operation recovered, cancelled or past due. */
     const remaining = await this.ledger.getDispatchTimeRemaining(row.id, generation);
     if (remaining <= 0) {
       this.recordAdmission(intent, qualification, startedAt, 'held');
@@ -558,7 +576,9 @@ export class BillableModelInvocationService {
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this
     // transition to recovery never abandons a response that is already being charged.
-    await this.ledger.markDispatchAccepted(row.id, generation);
+    // WP-14 (`LateAccept`): the first bytes are relayed without waiting for it, and a finish that commits first
+    // leaves it a no-op (its update requires a pending, intent-recorded row).
+    this.markAccepted(row.id, generation);
     const observed = this.observedBody(
       response.body,
       collector,
@@ -758,6 +778,23 @@ export class BillableModelInvocationService {
    * cannot be settled here (the sweep claimed it at its deadline, so this generation is stale, or the ledger did
    * not answer) stays pending and is recovery's, as it was before this path settled anything.
    */
+  /**
+   * Records the supplier's acceptance off the response path, held open against a stop.
+   *
+   * @param operationId - The operation.
+   * @param generation - The generation that dispatched it.
+   */
+  private markAccepted(operationId: string, generation: bigint): void {
+    const work = (async (): Promise<void> => {
+      try {
+        await this.ledger.markDispatchAccepted(operationId, generation);
+      } catch (error) {
+        this.logger.warn({ err: error, operationId }, 'Failed to record the supplier acceptance; recovery reads it');
+      }
+    })();
+    this.shutdown?.track(work);
+  }
+
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one immutable invocation checkpoint
   private async finishUnanswered(
     qualification: QualifiedBillableInvocation,

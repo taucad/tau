@@ -4,18 +4,28 @@ import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { useProject } from '#hooks/use-project.js';
 
-/** Applies the generated title for the first user message of a new chat. */
+/**
+ * Applies the generated title for the first user message of a new chat.
+ *
+ * The name request is a funded call of its own, and it took the same request-pool connections and account
+ * row lock as the chat's first model step, so it waits until that step has answered (`isAwaitingFirstStep`
+ * goes false; chat performance WP-05, server audit S-09). A step that never answers still ends the wait: the
+ * request leaves `submitted` when it errors, times out or is stopped, so no timer of its own is needed.
+ */
 export function useActiveChatNaming({
   activeChat,
   firstMessage,
   isProjectLoading,
   isChatsLoading,
+  isAwaitingFirstStep = false,
   applyGeneratedChatName,
 }: {
   readonly activeChat: ChatRecord | undefined;
   readonly firstMessage?: MyUIMessage;
   readonly isProjectLoading: boolean;
   readonly isChatsLoading: boolean;
+  /** True while the chat's request is sent and nothing has come back yet. */
+  readonly isAwaitingFirstStep?: boolean;
   readonly applyGeneratedChatName: (chatId: string, name: string) => Promise<unknown>;
 }): boolean {
   const client = useProjectNameClient();
@@ -28,6 +38,7 @@ export function useActiveChatNaming({
       !activeChat ||
       isProjectLoading ||
       isChatsLoading ||
+      isAwaitingFirstStep ||
       activeChat.name !== 'New chat' ||
       !firstMessage ||
       attemptedChatId.current === activeChat.id
@@ -59,7 +70,16 @@ export function useActiveChatNaming({
     return () => {
       cancelled = true;
     };
-  }, [activeChat, firstMessage, applyGeneratedChatName, client, isChatsLoading, isProjectLoading, projectId]);
+  }, [
+    activeChat,
+    firstMessage,
+    applyGeneratedChatName,
+    client,
+    isChatsLoading,
+    isAwaitingFirstStep,
+    isProjectLoading,
+    projectId,
+  ]);
 
   return isGenerating;
 }

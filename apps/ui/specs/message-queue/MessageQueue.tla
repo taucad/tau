@@ -301,6 +301,9 @@
 \* changes.
 \* HA2 review (2026-11-27): only a head that re-sends after a lost answer is a "Reconnecting…" cause; a coded wait
 \* shows its own line. A replayed answer that applied nothing is reported as before. No action or verdict changes.
+\* HA2 review round 2 (2026-11-27): the cue follows the HA5 table. A `wait` code with a line of its own shows that line
+\* after its bound and no cue; every other `wait` code and a lost answer show the cue and no line. No action or
+\* verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

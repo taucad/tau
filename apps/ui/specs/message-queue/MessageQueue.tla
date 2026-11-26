@@ -332,6 +332,8 @@
 \* acknowledges. The wait's line shows after `outboxWaitLineMilliseconds`. Holding is stuttering, never `Acknowledge`
 \* or a second id. A head that re-sends is one cause the "Reconnecting…" cue reads (HA-I8). No action or verdict
 \* changes.
+\* HA2 review (2026-11-27): only a head that re-sends after a lost answer is a "Reconnecting…" cause; a coded wait
+\* shows its own line. A replayed answer that applied nothing is reported as before. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

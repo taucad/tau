@@ -1733,8 +1733,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* A held chain or a hung recheck stalls this tick and so the next: the marker keeps its cadence meanwhile. */
       const touchingWhile = async <T>(work: Promise<T>): Promise<T> => {
         let timer: unknown;
+        /* Only while the chat still has a live run to mark: a settled or closed one stops touching. */
         const again = (): void => {
-          if (!closed) {
+          if (!closed && heartbeatTarget(store, chatId, deliver) !== undefined) {
             void touch();
             arm();
           }

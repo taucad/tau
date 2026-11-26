@@ -205,8 +205,9 @@ export type EventLogAppender = {
   anomalies(): Promise<readonly EventLogAnomaly[]>;
   /**
    * Mark this writer alive on its lock marker (HA-I10): the Node binding refreshes the marker's modification time
-   * through the handle it holds, so only its own marker's inode, never a successor's. Not queued behind appends, so a
-   * held chain never delays it. Absent where the writer keeps no marker (OPFS, provider).
+   * through the handle it holds, so only its own marker's inode, never a successor's; the provider binding rewrites
+   * its marker only while the text there is still its own. Not queued behind appends, so a held chain never delays it.
+   * Absent where the writer keeps no marker (OPFS).
    */
   touch?(): Promise<void>;
   /** Flush pending operations and release the underlying file handle. */

@@ -304,8 +304,20 @@ const openProviderWriter = async (
   const marker = `${Date.now()}\n`;
   await appendFile.call(fileSystem, lockPath, marker);
 
+  /* Whether the marker at the path is still this writer's: a `tau serve` that took a stale one over (HA-I10) wrote its
+   * own there, which this writer must neither refresh nor remove. */
+  const ownsMarker = async (): Promise<boolean> => {
+    const held = await fileSystem.readFile(lockPath).catch(() => undefined);
+    return held !== undefined && new TextDecoder().decode(held) === marker;
+  };
+  let closed = false;
+  /* Read through a call: the close can land across the touch's await, which narrowing cannot see. */
+  const isClosed = (): boolean => closed;
   const releaseWriterLock = async (): Promise<void> => {
-    await fileSystem.unlink(lockPath).catch(() => undefined);
+    closed = true;
+    if (await ownsMarker()) {
+      await fileSystem.unlink(lockPath).catch(() => undefined);
+    }
   };
   /*
    * WP-10 step B: with a fencing authority, rows are held here until `sync` sends them as one fenced append, so the
@@ -384,10 +396,9 @@ const openProviderWriter = async (
       return joined(await readBytes(), held);
     },
     /* HA-I10: a live provider writer keeps its marker fresh for a `tau serve` sharing the folder, which cannot see the
-     * Web Lock. Only its own marker: a successor's is left as it is. */
+     * Web Lock. Only its own marker, and never once it closes: a touch racing the close must not write it back. */
     touch: async () => {
-      const current = await fileSystem.readFile(lockPath).catch(() => undefined);
-      if (current !== undefined && new TextDecoder().decode(current) === marker) {
+      if (!isClosed() && (await ownsMarker()) && !isClosed()) {
         await fileSystem.writeFile(lockPath, new TextEncoder().encode(marker));
       }
     },

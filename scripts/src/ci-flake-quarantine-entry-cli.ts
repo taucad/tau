@@ -10,9 +10,16 @@
  * that changes only `quarantine.json` files, opens the pull request and, when the proposed tree validates and touches
  * nothing else, enables squash auto-merge so it lands through the merge queue (blueprint O2).
  *
- * A token that may not open pull requests (the Actions `GITHUB_TOKEN` when the repository does not allow Actions to
- * create them) still pushes the branch and the issues: each issue then names the branch to open. Any token works; the
- * pull request starts CI only when its author is not the Actions token.
+ * Two settings decide how far it gets, and they are separate. Opening the pull request needs a token that may create
+ * one: the Actions `GITHUB_TOKEN` may not while the repository does not let Actions create pull requests (tau-cloud
+ * `can_approve_pull_request_reviews = false`); such a token still pushes the branch and opens the issues, and each
+ * issue names the branch to open. Running CI on the pull request is another matter: events a `GITHUB_TOKEN` causes start
+ * no workflow, or one that waits for approval, so landing it without a person needs a token whose pull requests start
+ * CI. Either way the token needs the permissions listed under Env. A later run opens the pull request of any entry
+ * branch left without one, unless its proposal has expired.
+ *
+ * Writes start only when the checkout is the base branch's current commit: a checkout `main` has moved past, or one
+ * of another ref, plans against stale `quarantine.json` files, so that run writes nothing and the next one catches up.
  *
  * Usage: node scripts/src/ci-flake-quarantine-entry-cli.ts [--dry-run] [--offline] [--state-file <path>]
  *          [--state-branch flake-ledger] [--ledger scripts/src/flake-ledger.json] [--base main] [--today YYYY-MM-DD]
@@ -32,7 +39,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { parseQuarantine, splitTest, utcDay } from '@taucad/vitest-ci/quarantine';
+import { dayNumber, parseQuarantine, quarantineBounds, splitTest, utcDay } from '@taucad/vitest-ci/quarantine';
 
 import { client, GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
@@ -41,6 +48,7 @@ import type { Ledger } from '#ci-flake-ledger.js';
 import type { LedgerState } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 import {
+  addDays,
   entryBranchPrefix,
   flakeLabel,
   issueBody,
@@ -61,6 +69,7 @@ import type {
   Refusal,
   WorkspaceProject,
 } from '#ci-flake-quarantine-entry.js';
+import { readShadowRegistry } from '#ci-shadow-rows.js';
 import { quarantineProblems } from '#validate-quarantine.js';
 import type { QuarantineSource } from '#validate-quarantine.js';
 
@@ -218,7 +227,13 @@ export const validatePlan = (
   const admitted: PlannedEntry[] = [];
   const refused: Refusal[] = [...plan.refused];
   for (const planned of plan.admitted) {
-    const added = problemsWith([...admitted, planned]).filter((problem) => !baseline.has(problem));
+    let added: string[];
+    try {
+      added = problemsWith([...admitted, planned]).filter((problem) => !baseline.has(problem));
+    } catch (error) {
+      // An existing file that is not a quarantine object cannot take an entry; the baseline names its problem.
+      added = [`${planned.path} cannot take an entry: ${error instanceof Error ? error.message : String(error)}`];
+    }
     if (added.length === 0) {
       admitted.push(planned);
     } else {
@@ -450,8 +465,15 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
     const note = pull
       ? `Quarantined by #${pull.number} until ${planned.entry.expires}${merging ? ' (squash auto-merge on)' : ''}.`
       : `The quarantine entry is on branch \`${branch}\`, but this token may not open pull requests: open it at ${compare} (it touches only quarantine.json files${autoMerge ? ' and validates, so it may auto-merge' : ''}).`;
-    // oxlint-disable-next-line no-await-in-loop -- one comment per issue, in order
-    await comment(github, planned.entry.issue, note);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one comment per issue, in order
+      await comment(github, planned.entry.issue, note);
+    } catch (error) {
+      // One failed comment must not keep the other owners from the link; the pull request body names every issue.
+      outcome.push(
+        `Could not comment on #${planned.entry.issue}: ${error instanceof Error ? error.message : String(error)}.`,
+      );
+    }
   }
   if (failure !== undefined) {
     throw failure;
@@ -465,7 +487,7 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
  * from the branch's own commit. Auto-merge stays with whoever reviews it: this run did not validate that tree. Returns
  * one line per branch.
  */
-export const reconcileEntryBranches = async (github: Client, base: string): Promise<string[]> => {
+export const reconcileEntryBranches = async (github: Client, base: string, today: string): Promise<string[]> => {
   const repo = `/repos/${github.repository}`;
   const prefix = `refs/heads/${entryBranchPrefix}`;
   const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`);
@@ -481,7 +503,14 @@ export const reconcileEntryBranches = async (github: Client, base: string): Prom
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
-    const commit = await github.get<{ message: string }>(`${repo}/git/commits/${reference.object.sha}`);
+    const commit = await github.get<{ message: string; committer?: { date?: string } }>(
+      `${repo}/git/commits/${reference.object.sha}`,
+    );
+    const pushed = commit.committer?.date?.slice(0, 10);
+    if (pushed !== undefined && addDays(pushed, quarantineBounds.maximumAgeDays) < today) {
+      outcome.push(`\`${branch}\` holds an expired proposal; it is not opened and reserves nothing.`);
+      continue;
+    }
     const [title = `test(root): Quarantine entries from ${branch}`, ...rest] = commit.message.split('\n');
     try {
       // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
@@ -533,7 +562,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   if (
     (!offline && token === '') ||
     (offline && values['state-file'] === '') ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(values.today) ||
+    dayNumber(values.today) === undefined ||
     !Number.isInteger(maxRequests) ||
     maxRequests <= 0
   ) {
@@ -561,9 +590,24 @@ const main = async (args: readonly string[]): Promise<number> => {
     return 0;
   }
   const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  let write = !dryRun;
+  const notes: string[] = [];
+  if (write) {
+    const base = await github.get<{ object: { sha: string } }>(
+      `/repos/${repository}/git/ref/heads/${encodePath(values.base)}`,
+    );
+    if (base.object.sha !== baseSha) {
+      write = false;
+      notes.push(
+        `The checkout (${baseSha.slice(0, 12)}) is not \`${values.base}\` (${base.object.sha.slice(0, 12)}): nothing is written; the next run plans on the current base.`,
+      );
+    }
+  }
   const workspace = await readWorkspace(root);
-  const reconciled = dryRun ? [] : await reconcileEntryBranches(github, values.base);
-  const pending = offline ? [] : await readPending(github, values.base);
+  const registry = await readShadowRegistry(root);
+  const shadowTargets = new Set(registry.rows.map((row) => `${row.project}:${row.target}`));
+  const reconciled = write ? await reconcileEntryBranches(github, values.base, values.today) : [];
+  const pending = offline ? [] : await readPending(github, baseSha);
   const planned = planEntries({
     state,
     projects: workspace.projects,
@@ -572,6 +616,7 @@ const main = async (args: readonly string[]): Promise<number> => {
     owners: ledger,
     today: values.today,
     owner: values.owner || undefined,
+    shadowTargets,
   });
 
   // The validator reads the test files: from disk when the checkout has them, else at the checkout's commit.
@@ -602,9 +647,26 @@ const main = async (args: readonly string[]): Promise<number> => {
     today: values.today,
   });
 
+  // The writes take a few dozen requests at most (20 entries, an issue and a comment each, one branch); stop short of
+  // them rather than run out half-way, and leave the plan to the next run.
+  const writeBudget = 4 * plan.admitted.length + plan.refused.length + 20;
+  if (write && github.budget() < writeBudget) {
+    write = false;
+    notes.push(
+      `The request budget (${github.budget()} left) is short of the writes (${writeBudget}): nothing is written.`,
+    );
+  }
   let outcome: string[];
-  if (dryRun) {
-    outcome = ['Dry run: nothing written to GitHub.'];
+  if (write) {
+    ({ outcome } = await applyPlan(github, plan, {
+      base: values.base,
+      baseSha,
+      quarantines: workspace.quarantines,
+      problems: left,
+      today: values.today,
+    }));
+  } else {
+    outcome = [...notes, dryRun ? 'Dry run: nothing written to GitHub.' : 'Nothing written to GitHub.'];
     if (values.out) {
       for (const file of proposedFiles(workspace.quarantines, plan.admitted)) {
         const target = join(resolve(values.out), file.path);
@@ -615,14 +677,6 @@ const main = async (args: readonly string[]): Promise<number> => {
         outcome.push(`Wrote ${target}.`);
       }
     }
-  } else {
-    ({ outcome } = await applyPlan(github, plan, {
-      base: values.base,
-      baseSha,
-      quarantines: workspace.quarantines,
-      problems: left,
-      today: values.today,
-    }));
   }
   const markdown = renderPlanMarkdown(plan, [...reconciled, ...outcome]);
   console.log(markdown);

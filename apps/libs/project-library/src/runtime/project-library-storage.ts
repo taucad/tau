@@ -18,6 +18,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { serializeProjectManifest } from '@taucad/types';
 import type {
+  ProjectAbsence,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectLocator,
@@ -446,47 +447,83 @@ const removeProjectComposerRecords = async (
   }
 };
 
+/** The directory a persisted route binds, as a discovery locator names it. */
+const routeLocatorOf = (config: Exclude<ProjectFileSystemConfig, { backend: 'memory' }>): ProjectLocator => {
+  const storageRootKey = persistentStorageRootKey(config);
+  const relativeDirectory = config.providerBasePath;
+  switch (config.backend) {
+    case 'webaccess': {
+      return { backend: 'webaccess', storageRootKey, relativeDirectory, workspaceId: config.workspaceId };
+    }
+    case 'node': {
+      return { backend: 'node', storageRootKey, relativeDirectory, path: config.path ?? nodeHomeRoot() };
+    }
+    default: {
+      return { backend: config.backend, storageRootKey, relativeDirectory };
+    }
+  }
+};
+
 /**
- * The other directories that still carry a permanently deleted directory's project id, read once it is gone from its
- * locator. Every root must be observed, or "none" could be a root this pass did not see. The id back at the deleted
- * locator is a conflict, and so is the id found only elsewhere after a delete that found its directory already gone,
- * unless another copy carried the id when the delete was journaled: a sole copy's delete must not finish over a
- * project that moved.
+ * The other directories that still carry a permanently deleted directory's project id, read from storage once it is
+ * gone (fast-path blueprint FW2, index-contract review A1); the discovery index is never asked. When the route binds
+ * another directory, `verifyProjectRoute` proves it with two reads under the project's locks, and counts only for the
+ * directory it names, that one and not the deleted one. Otherwise `verifyAbsent` reads every directory's identity
+ * record under the project's lock: `present` names the copies, and `unknown` (a root not available, a read that
+ * failed) waits for the folder as a root this pass did not see did. The id back at the deleted locator is a conflict,
+ * and so is the id found only elsewhere after a delete that found its directory already gone, unless another copy
+ * carried the id when the delete was journaled: a sole copy's delete must not finish over a project that moved.
  */
 const remainingCopiesAfterDelete = async (
   fileManager: ProjectLibraryFileManager,
   operation: Extract<PendingProjectOperation, { kind: 'permanent-delete' }>,
   status: 'deleted' | 'absent',
-): Promise<ProjectOccurrence[]> => {
+): Promise<ProjectLocator[]> => {
   const { projectId, storage } = operation;
-  const discovery = await fileManager.client.listProjectManifests();
   const storageRootKey = persistentStorageRootKey(storage);
-  const rootStatus = discovery.roots.find((root) => persistentStorageRootKey(root.root) === storageRootKey);
-  if (rootStatus?.status !== 'complete' || discovery.roots.some((root) => root.status === 'inaccessible')) {
-    throw new PendingProjectRecoveryError('workspace-unavailable');
+  const isDeleted = (locator: Readonly<{ storageRootKey?: string; relativeDirectory?: string }>): boolean =>
+    locator.storageRootKey === storageRootKey && locator.relativeDirectory === storage.providerBasePath;
+  const config = await getProjectFileSystemConfig(projectId);
+  let remaining: ProjectLocator[] | undefined;
+  if (config !== undefined && config.backend !== 'memory') {
+    const routed = routeLocatorOf(config);
+    if (!isDeleted(routed)) {
+      const verification = await fileManager.client.verifyProjectRoute({ projectId });
+      if (
+        verification.status === 'verified' &&
+        verification.storageRootKey === routed.storageRootKey &&
+        verification.providerBasePath === routed.relativeDirectory
+      ) {
+        remaining = [routed];
+      }
+    }
   }
-  const occurrences = projectOccurrences(discovery, projectId);
-  const atLocator = occurrences.some(
-    (occurrence) =>
-      occurrence.locator.storageRootKey === storageRootKey &&
-      occurrence.locator.relativeDirectory === storage.providerBasePath,
-  );
-  if (atLocator || (status === 'absent' && occurrences.length > 0 && operation.copy !== true)) {
+  if (remaining === undefined) {
+    const absence = await fileManager.client.verifyAbsent(projectId);
+    if (absence.status === 'unknown') {
+      throw new PendingProjectRecoveryError('workspace-unavailable');
+    }
+    remaining = absence.status === 'present' ? [...absence.locators] : [];
+  }
+  if (
+    remaining.some((locator) => isDeleted(locator)) ||
+    (status === 'absent' && remaining.length > 0 && operation.copy !== true)
+  ) {
     throw new PendingProjectRecoveryError('identity-conflict');
   }
-  return occurrences;
+  return remaining;
 };
 
 /**
  * Finish deleting one copy while another directory still carries the id, so the project lives on there: its route
  * config, chats index, editor layout, library row and composer records stay. A route that bound the deleted copy moves
- * to the copy discovery lists first, as a pass would bind it; left on the deleted locator, a pass would sweep it as an
+ * to a copy storage just proved, as a pass would bind it; left on the deleted locator, a pass would sweep it as an
  * orphan whenever no single copy is left to rebind, and the state with it.
  */
 const settleCopyDelete = async (
   { fileManager, worker }: Readonly<{ fileManager: ProjectLibraryFileManager; worker: ProjectLibraryObjectStore }>,
   operation: Extract<PendingProjectOperation, { kind: 'permanent-delete' }>,
-  remaining: readonly ProjectOccurrence[],
+  remaining: readonly ProjectLocator[],
 ): Promise<void> => {
   const { projectId, storage } = operation;
   const config = await getProjectFileSystemConfig(projectId);
@@ -496,7 +533,7 @@ const settleCopyDelete = async (
     persistentStorageRootKey(config) === persistentStorageRootKey(storage) &&
     config.providerBasePath === storage.providerBasePath
   ) {
-    await setProjectFileSystemConfig(routeConfigFor(projectId, remaining[0]!.locator));
+    await setProjectFileSystemConfig(routeConfigFor(projectId, remaining[0]!));
   }
   await fileManager.workspace.syncProjectRoots();
   await worker.completePendingProjectOperation(operation.operationId);
@@ -692,6 +729,7 @@ export const scanDiscovery = async (
 export const planDiscovery = async (
   scan: DiscoveryScan,
   readiedWorker: () => Promise<unknown>,
+  verifyAbsent: (projectId: string) => Promise<ProjectAbsence>,
 ): Promise<DiscoveryPlan> => {
   const configs = new Map(scan.configs);
   const { quarantinedLocators } = scan;
@@ -772,7 +810,7 @@ export const planDiscovery = async (
     const identity = identityAtLocator.get(locator);
     return identity === undefined ? !occupiedLocators.has(locator) : identity !== projectId;
   };
-  const orphans = [...configs.values()].filter((config) => {
+  const nominated = [...configs.values()].filter((config) => {
     if (config.backend === 'memory') {
       return false;
     }
@@ -784,6 +822,11 @@ export const planDiscovery = async (
       !quarantinedLocators.has(locatorKey(storageRootKey, config.providerBasePath))
     );
   });
+  /* The pass only nominates (FW2, A1): an orphan's state is dropped only once storage proves no directory carries its
+   * id. A copy the index has not heard of keeps its state and is listed by the pass that evidence owes; a root that is
+   * not available, or a read that failed, waits. */
+  const proofs = await Promise.all(nominated.map(async (config) => verifyAbsent(config.projectId)));
+  const orphans = nominated.filter((_, index) => proofs[index]?.status === 'absent');
   // The worker deletes an orphan's chats, editor layout and library rows, so the prune waits for it, as today; the
   // machine checks the epoch after this read, so a pass whose epoch moved meanwhile prunes nothing (I7).
   await readiedWorker();

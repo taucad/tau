@@ -779,7 +779,8 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
 
   /**
    * Give an `adoption-required` directory an identity so it becomes a real project (R11): the id its route last bound
-   * when no other directory claims it, otherwise a fresh one.
+   * when no other directory carries it, otherwise a fresh one. The authority decides, under that id's project lock and
+   * from storage (`verifyAbsent`), never from a listing (fast-path FW2, index-contract review A1).
    *
    * @param locator - The directory.
    * @returns The adopted project.
@@ -787,14 +788,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   public readonly adoptProject = async (locator: ProjectLocator): Promise<Project> => {
     await this.#host.whenDiscoveryReady();
     // The route that last bound this directory keys its chats, library row and
-    // editor state: restore that id unless another directory now claims it (R6).
-    const [configs, discovery] = await Promise.all([getAllProjectFileSystemConfigs(), this.#host.discover()]);
+    // editor state: the authority restores that id unless another directory now carries it (R6).
+    const configs = await getAllProjectFileSystemConfigs();
     const remembered = configs.find((config) => routeBindsLocator(config, locator))?.projectId;
-    const claimed = discovery.entries.some((entry) => 'projectId' in entry && entry.projectId === remembered);
     const fileManager = await this.#host.facade();
     const manifest = await fileManager.client.adoptProjectDirectory(
       locator,
-      remembered === undefined || claimed ? undefined : { id: remembered },
+      remembered === undefined ? undefined : { id: remembered },
     );
     // The next discovery pass reconciles the route config from the manifest
     // now on disk, so nothing else has to be written here.
@@ -1047,10 +1047,11 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (config === undefined || !(await isOrphanedProjectRoute(config, fileManager.scopedStorage))) {
       return;
     }
-    /* A discovered identity naming the project elsewhere is not an orphan:
-     * releasing its route would let this import create a second copy. */
-    const { entries } = await this.#host.discover();
-    if (entries.some((entry) => 'projectId' in entry && entry.projectId === projectId)) {
+    /* An identity naming the project elsewhere is not an orphan: releasing its route would let this import create a
+     * second copy. Storage proves it, every directory read under the project's lock; a root that is not available, or
+     * a read that failed, keeps the refusal (fast-path FW2, index-contract review A1). */
+    const absence = await fileManager.client.verifyAbsent(projectId);
+    if (absence.status !== 'absent') {
       return;
     }
     await worker.deleteProjectResources(projectId);

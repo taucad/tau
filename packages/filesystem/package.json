@@ -109,6 +109,7 @@
   "devDependencies": {
     "@parcel/watcher": "catalog:",
     "@taucad/events": "workspace:*",
+    "@taucad/formal": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

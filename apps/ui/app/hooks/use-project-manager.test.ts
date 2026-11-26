@@ -17,6 +17,7 @@ import type {
   ProjectLocator,
   WatchEvent,
   WatchRequest,
+  ProjectAbsence,
 } from '@taucad/filesystem';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { rootedPathOf } from '@taucad/fs-client/rooted-content-client';
@@ -238,6 +239,18 @@ const mockWatchRecordFile = vi.fn(recordWatch);
 /* The authority's physical-scope listing, one level per call (R14 orphan check). */
 const mockReadScopedShallowDirectory = vi.fn<(path: string) => Promise<FileTreeNode[]>>();
 const mockVerifyProjectRoute = vi.fn<(input: { projectId: string }) => Promise<ProjectRouteVerification>>();
+/*
+ * Storage's answer to `verifyAbsent` (fast-path FW2, index-contract review A1): this suite's disk is what its discovery
+ * double lists, read without consuming a queued result or counting a call. A row that tests the proof itself sets
+ * its own answer.
+ */
+const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(async (projectId) => {
+  const listed = await mockListProjectManifests.getMockImplementation()?.();
+  const locators = (listed?.entries ?? []).flatMap((entry) =>
+    'projectId' in entry && entry.projectId === projectId ? [entry.locator] : [],
+  );
+  return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
+});
 const mockFileManager = {
   workerChangeChannel: mockWorkerChangeChannel,
   watchRecordFile: mockWatchRecordFile,
@@ -256,6 +269,7 @@ const mockFileManager = {
   client: {
     listProjectManifests: mockListProjectManifests,
     verifyProjectRoute: mockVerifyProjectRoute,
+    verifyAbsent: mockVerifyAbsent,
     adoptProjectDirectory: mockAdoptProjectDirectory,
     permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
@@ -1808,7 +1822,10 @@ describe('useProjectManager.createProject', () => {
       expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, { id: fakeProject.id });
     });
 
-    it('mints a fresh id on adoption when another directory now claims the remembered one', async () => {
+    /* Fast-path FW2 (A1): the page no longer decides from a listing whether another directory claims the remembered
+     * id; it hands the id to the authority, which restores it only when `verifyAbsent` reads no other directory
+     * carrying it under the project's lock, and mints otherwise (packages/filesystem project-directory-index tests). */
+    it('hands the remembered id to the authority to decide even when a listing shows it claimed', async () => {
       mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
       mockListProjectManifests.mockResolvedValue({
         roots: [{ status: 'complete', root: { backend: 'opfs' } }],
@@ -1837,7 +1854,7 @@ describe('useProjectManager.createProject', () => {
 
       await result.current.adoptProject(fakeLocator);
 
-      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, undefined);
+      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, { id: fakeProject.id });
     });
 
     /* The incident bytes: an extra asset key beside an intact identity. */

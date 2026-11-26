@@ -31,7 +31,7 @@ import type {
 } from '#mount-table.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
-import type { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+import type { ChangeNotification, CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import { projectIndexDirectory } from '#project-index/index-snapshot.js';
 import { isNotFoundError } from '#workspace-errors.js';
@@ -57,6 +57,26 @@ const maxConcurrentRootProbes = 2;
 /** States a re-check probes again; `conflict` and `error` need a changed configuration. */
 const recheckedRootStates: ReadonlySet<RootState> = new Set(['notFound', 'permission', 'unreachable']);
 
+/**
+ * A row whose modification time is this close to its capture is unsettled: a change in the same timestamp granule
+ * would leave an equal row, so its directory is dirty now and the next poll reports it changed again (discovery index
+ * A3; the Project Index's guard, `project-index/project-index.ts`).
+ */
+export const racyTimestampMilliseconds = 2000;
+
+/**
+ * Where the discovery index takes the facts this ingest receives, before its admission filter (discovery index A2 d,
+ * A3). Paths are provider-relative.
+ *
+ * @public
+ */
+export type DiscoveryEvidence = Readonly<{
+  note: (storageRootKey: string, paths: readonly string[]) => void;
+  cold: (storageRootKey: string, reason: 'reset' | 'observer') => void;
+  invalidateValidation: (storageRootKey: string) => void;
+  validated: (storageRootKey: string, at: number) => void;
+}>;
+
 /** Snapshot body published when the walked physical root is absent. */
 const missingExternalSnapshot = '<missing>';
 /** Every fact but `reset`: the ones that name a path the emitters project. */
@@ -77,6 +97,10 @@ type ObservedExternalRoot = {
   nativeActive: boolean;
   readonly pollSnapshots: Map<string, string>;
   tail: Promise<void>;
+  /** Settles once the observer is armed and the discovery-wide baseline captured (A2 e, A3). */
+  baseline: Promise<void>;
+  /** The last discovery-wide walk: when it started and ended, and the interval between the last two. */
+  lastWalk?: { startedAt: number; endedAt: number; pollPeriodMilliseconds?: number };
 };
 
 /**
@@ -150,6 +174,9 @@ export class ExternalChangeIngest {
   private _batchDepth = 0;
   private _disposed = false;
   private _stagedRoots: readonly StagedDiscoveryRoot[] = [];
+  private readonly _discovery: DiscoveryEvidence | undefined;
+  /** A counter that makes each unsettled snapshot row differ from every other. */
+  private _racyRows = 0;
 
   /**
    * Create the ingest over the authority's own collaborators.
@@ -165,6 +192,7 @@ export class ExternalChangeIngest {
     policy?: PathPolicy;
     disposeStorageRoot: (storageRootKey: string) => void;
     onRootStatusChange?: (roots: readonly RootStatus[]) => void;
+    discovery?: DiscoveryEvidence;
   }) {
     this._registry = options.registry;
     this._mountTable = options.mountTable;
@@ -174,6 +202,7 @@ export class ExternalChangeIngest {
     this._policy = options.policy;
     this._disposeStorageRoot = options.disposeStorageRoot;
     this._onRootStatusChange = options.onRootStatusChange;
+    this._discovery = options.discovery;
   }
 
   /**
@@ -202,6 +231,57 @@ export class ExternalChangeIngest {
     }
     await this._pollExternalRoot(state, entry.providerBasePath);
     return state.nativeActive;
+  }
+
+  /**
+   * Compare one root with storage as a whole now, whatever the poll cadence: the discovery index asks it of a root past
+   * its freshness window before a pass publishes the root (A3).
+   *
+   * @param storageRootKey - The root.
+   * @returns Whether a snapshot poll ran and was applied.
+   */
+  public async validate(storageRootKey: string): Promise<boolean> {
+    const state = this._observedExternalRoots.get(storageRootKey);
+    if (state?.directoryHandle === undefined) {
+      return false;
+    }
+    try {
+      await this._pollExternalRoot(state);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * What reports one root's changes: a snapshot source, a native observer, and the discovery-wide poll's period.
+   *
+   * @param storageRootKey - The root.
+   * @returns The channels, or undefined when nothing observes the root.
+   */
+  public channels(
+    storageRootKey: string,
+  ): Readonly<{ snapshot: boolean; native: boolean; pollPeriodMilliseconds?: number }> | undefined {
+    const state = this._observedExternalRoots.get(storageRootKey);
+    if (state === undefined) {
+      return undefined;
+    }
+    const pollPeriodMilliseconds = state.lastWalk?.pollPeriodMilliseconds;
+    return {
+      snapshot: state.directoryHandle !== undefined,
+      native: state.nativeActive,
+      ...(pollPeriodMilliseconds === undefined ? {} : { pollPeriodMilliseconds }),
+    };
+  }
+
+  /**
+   * Settles once a root's observer is armed and its discovery-wide baseline is captured, so the discovery index's
+   * first read of the root starts after every channel that could report a change to it (A2 e, A3).
+   *
+   * @param storageRootKey - The root.
+   */
+  public async armed(storageRootKey: string): Promise<void> {
+    await this._observedExternalRoots.get(storageRootKey)?.baseline;
   }
 
   /** Release every observed root's native subscription. */
@@ -496,9 +576,18 @@ export class ExternalChangeIngest {
       nativeActive: false,
       pollSnapshots: new Map(),
       tail: Promise.resolve(),
+      baseline: Promise.resolve(),
     };
+    /* A root admitted again is read from storage: whatever its index held may have changed unobserved meanwhile. */
+    this._discovery?.cold(storageRootKey, 'reset');
     this._observedExternalRoots.set(storageRootKey, state);
     const admission = this._armObservation(state);
+    state.baseline = (async () => {
+      await admission.catch(() => undefined);
+      if (directoryHandle !== undefined && !state.pollSnapshots.has('*')) {
+        await this._pollExternalRoot(state).catch(() => undefined);
+      }
+    })();
     if (directoryHandle === undefined) {
       await admission;
     }
@@ -573,6 +662,7 @@ export class ExternalChangeIngest {
         if (this._observedExternalRoots.get(storageRootKey) !== state) {
           return;
         }
+        this._takeDiscoveryEvidence(state, facts);
         if (facts.some(({ kind }) => kind === 'reset')) {
           if (state.nativeActive) {
             this._disableNativeObservation(state);
@@ -606,6 +696,7 @@ export class ExternalChangeIngest {
           return;
         }
         if (pendingReset) {
+          this._discoveryChannelLost(state);
           await state.provider.refresh?.();
           this._invalidateExternalDerivatives();
           this._emitExternalRootSummaries(state);
@@ -674,10 +765,22 @@ export class ExternalChangeIngest {
       return;
     }
     const scope = providerBasePath ?? '*';
+    const startedAt = Date.now();
     const snapshot = await this._createExternalSnapshot(state, providerBasePath);
     await this._queueExternalRootOperation(state, async () => {
       await this._applyExternalSnapshot(state, scope, snapshot);
+      if (scope === '*' && this._observedExternalRoots.get(state.storageRootKey) === state) {
+        this._discovery?.validated(state.storageRootKey, startedAt);
+      }
     });
+    if (scope === '*') {
+      const previous = state.lastWalk;
+      state.lastWalk = {
+        startedAt,
+        endedAt: Date.now(),
+        ...(previous === undefined ? {} : { pollPeriodMilliseconds: startedAt - previous.startedAt }),
+      };
+    }
   }
 
   /**
@@ -730,7 +833,7 @@ export class ExternalChangeIngest {
       this._emitExternalFact(state, change);
     }
     if (discoveryChanged) {
-      this._emitGlobalDiscoveryChange(state);
+      this._emitGlobalDiscoveryChange(state, physicalPaths);
     }
   }
 
@@ -965,6 +1068,7 @@ export class ExternalChangeIngest {
     state.unobserve?.();
     state.unobserve = undefined;
     state.nativeActive = false;
+    this._discoveryChannelLost(state);
     // async-iife: bootstrap — observer callbacks cannot await recovery, but reset facts
     // must remain serialized behind any native/poll operation already in flight.
     void (async (): Promise<void> => {
@@ -1037,12 +1141,63 @@ export class ExternalChangeIngest {
     return changed.length > maxLocalizedExternalChanges ? undefined : changed;
   }
 
-  private _emitGlobalDiscoveryChange(state: ObservedExternalRoot): void {
+  /**
+   * Tell this tab and its siblings that discovery may have changed in one root. The root fact is for an older tab;
+   * the named facts tell a sibling's discovery index which paths changed (discovery index A2 b). With none named, the
+   * sibling's index of the root goes cold.
+   */
+  private _emitGlobalDiscoveryChange(state: ObservedExternalRoot, physicalPaths: readonly string[] = []): void {
     this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: '/', backend: state.backend });
-    this._crossTabCoordinator.notifyDirectoryChange('/', {
-      storageRootKey: state.storageRootKey,
-      providerBasePath: '',
-    });
+    const named = physicalPaths.filter((path) => path !== '' && !isWorkspaceStatePath(path));
+    const facts = ['', ...named].map(
+      (providerBasePath): ChangeNotification => ({
+        type: 'directory-change',
+        path: '/',
+        authority: { storageRootKey: state.storageRootKey, providerBasePath },
+      }),
+    );
+    this._crossTabCoordinator.notifyChanges(facts);
+  }
+
+  /**
+   * The discovery index's tap on observer records, taken as they arrive and before any filter (A2 d): a path names its
+   * directory, a move both of its paths; a record the observer could not describe asks the root to be validated before
+   * a pass publishes it again, or makes it cold where it has no snapshot source.
+   */
+  private _takeDiscoveryEvidence(state: ObservedExternalRoot, facts: readonly ExternalChangeFact[]): void {
+    if (this._discovery === undefined) {
+      return;
+    }
+    const paths: string[] = [];
+    for (const fact of facts) {
+      if (fact.kind === 'reset') {
+        continue;
+      }
+      if (fact.kind === 'unknown') {
+        this._discoveryChannelLost(state);
+        continue;
+      }
+      paths.push(fact.path, ...(fact.from === undefined ? [] : [fact.from]));
+    }
+    if (paths.length > 0) {
+      this._discovery.note(state.storageRootKey, paths);
+    }
+  }
+
+  /** Rows a snapshot captured inside their racy window: their directories are dirty now (A3). */
+  private _noteUnsettled(state: ObservedExternalRoot, unsettled: readonly string[]): void {
+    if (unsettled.length > 0) {
+      this._discovery?.note(state.storageRootKey, unsettled);
+    }
+  }
+
+  /** An observer stopped or reported what it could not describe: validate the root once, or make it cold. */
+  private _discoveryChannelLost(state: ObservedExternalRoot): void {
+    if (state.directoryHandle === undefined) {
+      this._discovery?.cold(state.storageRootKey, 'observer');
+    } else {
+      this._discovery?.invalidateValidation(state.storageRootKey);
+    }
   }
 
   private _isDiscoveryRelevantPhysicalPath(path: string): boolean {
@@ -1080,9 +1235,21 @@ export class ExternalChangeIngest {
       const rows = await mapConcurrent(names, externalSnapshotConcurrency, toRow);
       return new Map(rows.filter((row): row is [name: string, row: string] => row[1] !== undefined));
     };
+    /* Rows modified within the racy window of this capture: their directories are dirty now (A3). */
+    const capturedAt = Date.now();
+    const unsettled: string[] = [];
     const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
       const file = await handle.getFile();
-      return [name, `${relative}\0file\0${file.size}\0${file.lastModified}`];
+      const row = `${relative}\0file\0${file.size}\0${file.lastModified}`;
+      /* Only the discovery-wide walk: its rows are the declarations discovery reads. A rooted poll feeds the Project
+       * Index, which keeps its own racy guard. */
+      if (providerBasePath === undefined && file.lastModified > capturedAt - racyTimestampMilliseconds) {
+        unsettled.push(relative);
+        this._racyRows += 1;
+        /* A row no later capture can equal, so the next poll reports it changed again. */
+        return [name, `${row}\0racy\0${this._racyRows}`];
+      }
+      return [name, row];
     };
     const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
       const childRelative = (name: string): string => (relative === '' ? name : `${relative}/${name}`);
@@ -1118,6 +1285,7 @@ export class ExternalChangeIngest {
           handle = await handle.getDirectoryHandle(part);
         }
         await walk(handle, parts.join('/'));
+        this._noteUnsettled(state, unsettled);
         return rows.join('\n');
       }
       // App state under a dot-prefixed root child never feeds discovery (F1).
@@ -1177,6 +1345,7 @@ export class ExternalChangeIngest {
       }
       throw error;
     }
+    this._noteUnsettled(state, unsettled);
     return rows.join('\n');
   }
 
@@ -1210,6 +1379,10 @@ export class ExternalChangeIngest {
     }
     const previous = state.pollSnapshots.get(scope);
     if (previous === undefined) {
+      if (scope === '*') {
+        /* The baseline: an index read before it could have missed a change no diff will report. */
+        this._discovery?.cold(state.storageRootKey, 'reset');
+      }
       if (state.nativeActive) {
         await state.provider.refresh?.();
         if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
@@ -1226,13 +1399,22 @@ export class ExternalChangeIngest {
       return;
     }
     const physicalPaths = this._diffExternalSnapshot(previous, next);
+    if (physicalPaths === undefined) {
+      if (scope === '*') {
+        this._discovery?.cold(state.storageRootKey, 'reset');
+      } else {
+        this._discovery?.note(state.storageRootKey, [scope]);
+      }
+    } else {
+      this._discovery?.note(state.storageRootKey, physicalPaths);
+    }
     await state.provider.refresh?.(physicalPaths);
     if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
     this._invalidateExternalDerivatives(physicalPaths === undefined ? undefined : { state, physicalPaths });
     this._emitExternalRootSummaries(state, scope === '*' ? undefined : scope);
-    this._emitGlobalDiscoveryChange(state);
+    this._emitGlobalDiscoveryChange(state, physicalPaths);
     state.pollSnapshots.set(scope, next);
   }
 }

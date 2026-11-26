@@ -193,6 +193,10 @@
 \* reply feeds the index. With `MaxUnheard = 0` no new action is enabled and every earlier verdict stands. The code:
 \* `remainingCopiesAfterDelete`, the orphan sweep, adopt and the orphaned-route release ask `verifyAbsent`
 \* (`project-library-storage.ts`, `project-library-commands.ts` re-reviewed in their final form).
+\* FW2 code (2026-11-26): `project-library.ts` hands the orphan sweep `verifyAbsent`, and `project-library-commands.ts`
+\* passes adopt's remembered id to the authority, which decides under `project:<id>`, and asks `verifyAbsent` before
+\* the orphaned-route release; `remainingCopiesAfterDelete` proves the route's copy by the directory it names or asks
+\* `verifyAbsent`. That is `AbsenceProof = "storage"`; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

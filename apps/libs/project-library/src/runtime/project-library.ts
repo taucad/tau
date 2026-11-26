@@ -483,6 +483,10 @@ export class ProjectLibrary<
                 quarantinedLocators: scan?.quarantinedLocators ?? new Map(),
               },
               async () => this.getReadiedWorker(),
+              async (projectId) => {
+                const fileManager = await this.#facade();
+                return fileManager.client.verifyAbsent(projectId);
+              },
             );
             this.#syncWriteStop();
             return planned;

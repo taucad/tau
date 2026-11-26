@@ -1,0 +1,22 @@
+{
+  "alphabet": [],
+  "sources": {
+    "external-change-ingest.ts": "4159591ca163377aa7d140d86eed1f9eb6fd4401b9b094d6e343f81f99dd4ce8",
+    "project-directories.ts": "e84deaee24d71f27dc96b843a36da4cd42854d9dd3c3d58b07cb1e12de517abc",
+    "project-directory-index.ts": "e98e7028aa589cca48a5d8b721d6f45242b09d8ef305a97f4dff65cf5d185ee1",
+    "provider-registry.ts": "0bc12d4951d4c65464f05475827b383ae1d98d17dda0b34099605da19e888d4a",
+    "remote-changes.ts": "ebc68b16410668908d6db6ec1de960ce9be0f95f8943f8d3bc16793dc125538d"
+  },
+  "specs": {
+    "DiscoveryIndex.tla": "ae66b707177b36107297471cacb880a483fe2419c275c28ff1805c05b76c0942"
+  },
+  "tables": {
+    "DiscoveryIndex.clear-unconditional.cfg": "1e926e59bfd267fc3cc174b4002ce6977d3417076768b74959dcde43a88ebb71",
+    "DiscoveryIndex.no-audit.cfg": "134abec4b010d35382d1bbb4869a465e76824e52b6bd744ad501ce94601462d6",
+    "DiscoveryIndex.read-before-arm.cfg": "bda6d298d9108f503be28c6c4c7fdaa519f1fda6ab9bc800edbafddff3d7afbc",
+    "DiscoveryIndex.tap-after-write.cfg": "26ea88da3e4841a985c17d9fba64374062ed6922532b7c241f14b430919a0a2e",
+    "DiscoveryIndex.target-lost.cfg": "165576d2f3f003be668a73b76880da7bd66ad366f5bc3a12a6950ba2afda83b7",
+    "DiscoveryIndex.target.cfg": "031c9452bbeeae31c53e8fe59a3d316759a8d815c5b6f26d16d991895e16cf1d",
+    "expected.json": "c1800ea109a7a69437fb6cbfa436b64e8be57cfeb75367ae9be518f53b2ddcd2"
+  }
+}

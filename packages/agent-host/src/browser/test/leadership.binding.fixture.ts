@@ -18,6 +18,8 @@ export const bindingDelays = {
   claimBound: 2000,
   queuedWriteBound: 2000,
   closedHostBound: 800,
+  claimRefusalRetry: 300,
+  claimRetry: 50,
 } as const;
 
 export const wait = async (milliseconds: number): Promise<void> =>
@@ -97,6 +99,7 @@ export const scriptedHost = (overrides: Partial<LeadershipHost> = {}): ScriptedH
     },
     claim: async () => {
       calls.push('claim');
+      return undefined;
     },
     relinquish: async () => {
       calls.push('relinquish');

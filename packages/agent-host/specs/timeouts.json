@@ -833,6 +833,30 @@
       "owner": "W6"
     },
     {
+      "id": "CLAIM-REFUSAL-RETRY",
+      "bound": "claimRefusalRetryMilliseconds: a claim refused WRITER_LOCKED after M2's grant is retried for at most the still-closing bound (chatClosingWaitMilliseconds, 10 s), then M2 relinquishes and releases the lock; any other refusal releases at once (HA4, AR3-6)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "delay: context.claimRefusalRetry",
+      "class": "Liveness",
+      "owner": "HA4"
+    },
+    {
+      "id": "CLAIM-RETRY",
+      "bound": "claimRetryMilliseconds: the pause before M2 claims a chat again after a WRITER_LOCKED claim refusal (1 s), within CLAIM-REFUSAL-RETRY (HA4)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "delay: context.claimRetry",
+      "class": "Backoff",
+      "owner": "HA4"
+    },
+    {
+      "id": "NODE-CLAIM-RETRY",
+      "bound": "Node reconcile: a claim refused WRITER_LOCKED is claimed again after claimRetryMilliseconds (1 s) until claimRefusalRetryMilliseconds (10 s) has passed; ends early on close; unref'd (HA4)",
+      "site": "packages/agent-host/src/launchers/node/node-leadership.ts",
+      "token": "setTimeout(resolve, claimRetry)",
+      "class": "Backoff",
+      "owner": "HA4"
+    },
+    {
       "id": "D14",
       "bound": "A project filesystem bridge's hello (15 s), so a hung provide or rebridge cannot hold its project's order",
       "site": "apps/ui/app/workers/agent-host.impl.ts",

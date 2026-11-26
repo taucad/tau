@@ -333,6 +333,9 @@ describe('locality is the placement, not the folder (HA-I1, residual R1)', () =>
       await vi.waitFor(() => {
         expect(chat.session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       }, bound);
+      /* The paired computer's read shows its run unsettled; that host may be gone, so the pick does not wait on it. */
+      publishLogRows(store, chatId, runningRows());
+      expect(store.getProjection(chatId)?.ledger.currentRunId).toBe('run_1');
       pick(chat.session, 'model-picked');
       await vi.waitFor(() => {
         expect(executionWrites(deps)).toBe(1);
@@ -344,6 +347,66 @@ describe('locality is the placement, not the folder (HA-I1, residual R1)', () =>
 });
 
 describe('the own source decides locality and follows the file (HA-I1)', () => {
+  /* Review round 3, finding 1: a browser chat switched to a paired computer stops reading the file and reads the host. */
+  it('should decide locality again when a pick moves the chat to a paired computer', async () => {
+    const disk = createDisk({ [recordPath]: '{"id":"chat_own"}', [ownLog]: settledLog });
+    const { store, deps } = createStore(disk);
+    const reads = { count: 0 };
+    const chat = open(store, quietHost([], reads));
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain('Gear made.');
+        expect(chat.session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      }, bound);
+      await settle();
+      expect(reads.count).toBe(0);
+      deps.getChat.mockResolvedValue(
+        record({ activeExecution: { kind: 'tau', model: 'model-picked', hostId: 'paired-computer' } }),
+      );
+      pick(chat.session, 'model-picked');
+      await vi.waitFor(() => {
+        expect(reads.count).toBeGreaterThan(0);
+      }, bound);
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* Review round 3, finding 3: the own watch follows a new capability incarnation, and one that closes is replaced. */
+  it('should register the own watch again on new dependencies and after it closes', async () => {
+    const disk = createDisk({ [recordPath]: '{"id":"chat_own"}', [ownLog]: settledLog });
+    const registered: Array<{ path: string; close: () => void; dispose: ReturnType<typeof vi.fn> }> = [];
+    const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path) => {
+      const closed = Promise.withResolvers<void>();
+      const entry = { path, close: closed.resolve, dispose: vi.fn() };
+      registered.push(entry);
+      return { ready: Promise.resolve(), closed: closed.promise, dispose: entry.dispose };
+    };
+    const { store, deps } = createStore(disk, record(), watch);
+    const chat = open(store, deadHost);
+    const own = () => registered.filter((entry) => entry.path === chatDirectory);
+    try {
+      await vi.waitFor(() => {
+        expect(own()).toHaveLength(1);
+      }, bound);
+      const next: NonNullable<ChatSessionDeps['watchRecordFile']> = (path, listener) => watch(path, listener);
+      store.setDependencies({ ...deps, watchRecordFile: next });
+      await vi.waitFor(() => {
+        expect(own()).toHaveLength(2);
+      }, bound);
+      expect(own()[0]?.dispose).toHaveBeenCalled();
+
+      /* A watch that stayed open a while and then closed is registered again at once. */
+      await settle(1100);
+      own()[1]?.close();
+      await vi.waitFor(() => {
+        expect(own()).toHaveLength(3);
+      }, bound);
+    } finally {
+      chat.close();
+    }
+  });
+
   /* Review finding 5: a first read that cannot hold the file keeps the host read; the chat is never left with neither. */
   it('should fall back to the host read when the first own read fails', async () => {
     const disk = createDisk({ [recordPath]: '{"id":"chat_own"}', [ownLog]: settledLog });

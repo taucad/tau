@@ -7,6 +7,7 @@ import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { chatProjectionLogic, selectRunPhase } from '#machines/chat-projection.logic.js';
 import {
   createOwnSegmentSource,
+  inPageAttachBackoffMilliseconds,
   readRefusalMilliseconds,
   unsettledReadPollMilliseconds,
 } from '#services/chat-own-segment-source.js';
@@ -322,6 +323,32 @@ describe('own segment source: the stale-run settler span (HA-I5)', () => {
     const settled = chat.onStaleRun.mock.calls.length;
     await pass(clock, unsettledReadPollMilliseconds * 3);
     expect(chat.onStaleRun.mock.calls.length).toBe(settled);
+    chat.stop();
+  });
+
+  it('should back the re-sent attach off to the cap, and start over when the span restarts', async () => {
+    const old = start - foreignRunStaleMilliseconds * 2;
+    const disk = createDisk({ [log]: line(admitted(old)) + line(running(old)), [marker]: '4242\n/x\n' });
+    disk.mtimes.set(marker, old);
+    const chat = follow(disk, clock);
+    await pass(clock);
+    await pass(clock, twoBeats);
+    expect(chat.onStaleRun).toHaveBeenCalledOnce();
+    const sendsOver = async (milliseconds: number): Promise<number> => {
+      const before = chat.onStaleRun.mock.calls.length;
+      for (let elapsed = 0; elapsed < milliseconds; elapsed += unsettledReadPollMilliseconds) {
+        // oxlint-disable-next-line no-await-in-loop -- each poll waits for the one before it.
+        await pass(clock, unsettledReadPollMilliseconds);
+      }
+      return chat.onStaleRun.mock.calls.length - before;
+    };
+    /* 1, 2, 4 and then the 8 s cap: four in the first 15 s, then one each 8 s. */
+    expect(await sendsOver(15_000)).toBe(4);
+    expect(await sendsOver(inPageAttachBackoffMilliseconds * 4)).toBe(4);
+
+    /* The writer comes back and touches its marker: the span restarts, so nothing goes while it is fresh. */
+    disk.mtimes.set(marker, clock.wall);
+    expect(await sendsOver(twoBeats)).toBe(0);
     chat.stop();
   });
 

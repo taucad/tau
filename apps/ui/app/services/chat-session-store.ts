@@ -870,9 +870,6 @@ const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || 
 /** How long a lost or refused host read may last before HA0 reports what it leaves the person with. Milliseconds. */
 export const chatReadLossBoundMilliseconds = 10_000;
 
-/** The longest wait between HA-I5 in-page `attach` sends while a stale own run stays unsettled. Milliseconds. */
-const inPageAttachBackoffMilliseconds = 60_000;
-
 /** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
 const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
@@ -973,9 +970,8 @@ type ObservedChat = {
   settledFor?: number;
   /** The watch on the chat's own files that wakes the source when another tab or app writes them (HA-I1). */
   ownWatch?: ObservationWatch;
-  /** HA-I5's in-page `attach` after a stale span: how many went unanswered, and when the next may go. */
-  inPageTries?: number;
-  inPageNextAt?: number;
+  /** When the own watch was last registered: a watch that closes is registered again at most once a poll. */
+  ownWatchAt?: number;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -1314,6 +1310,13 @@ export class ChatSessionStore {
         }
         for (const [chatId, chat] of this.#sessions) {
           this.#startRemoteObservation(chatId, chat.projectId);
+        }
+        /* The own watch follows the same capability incarnation (HA-I1). */
+        for (const [chatId, chat] of this.#observed) {
+          if (chat.source !== undefined) {
+            this.#watchOwnFiles(chatId, chat);
+            chat.source.wake();
+          }
         }
       });
     }
@@ -3891,11 +3894,7 @@ export class ChatSessionStore {
           if (!local) {
             return;
           }
-          /* Another tab or app writing the chat's own files (a shared folder's `tau serve`) wakes the source, as the
-           * host's watch of its log woke the host read. The foreign segments have their own watch. */
-          observed.ownWatch = this.#deps.watchRecordFile?.(directory, () => {
-            observed.source?.wake();
-          });
+          this.#watchOwnFiles(chatId, observed);
         }
         this.#ownVerdict(chatId, observed, verdict);
       },
@@ -3911,6 +3910,37 @@ export class ChatSessionStore {
       },
     });
     return first.promise;
+  }
+
+  /**
+   * Another tab or app writing the chat's own files (a shared folder's `tau serve`) wakes the source, as the host's
+   * watch of its log woke the host read; the foreign segments have their own watch. Any event wakes it, a reset
+   * included. A watch that closes wakes it too and is registered again; one that closes within a second of opening is
+   * left to the source's next current read, so a watch that cannot stay open is not re-opened in a loop.
+   */
+  #watchOwnFiles(chatId: string, observed: ObservedChat): void {
+    observed.ownWatch?.dispose();
+    const registeredAt = performance.now();
+    observed.ownWatchAt = registeredAt;
+    const watch = this.#deps.watchRecordFile?.(`/projects/${observed.projectId}/${chatRecordsPath(chatId)}`, () => {
+      observed.source?.wake();
+    });
+    observed.ownWatch = watch;
+    const dropped = async (): Promise<void> => {
+      try {
+        await watch?.closed;
+      } catch {
+        /* A watch that failed is closed too. */
+      }
+      if (observed.ownWatch === watch && watch !== undefined) {
+        observed.ownWatch = undefined;
+        if (observed.source !== undefined && performance.now() - registeredAt >= 1000) {
+          this.#watchOwnFiles(chatId, observed);
+        }
+        observed.source?.wake();
+      }
+    };
+    void dropped();
   }
 
   #stopOwnSource(observed: ObservedChat): void {
@@ -3944,9 +3974,8 @@ export class ChatSessionStore {
       return;
     }
     this.#answeredLogReads.add(chatId);
-    if (!this.#ownRunUnsettled(chatId)) {
-      observed.inPageTries = undefined;
-      observed.inPageNextAt = undefined;
+    if (observed.ownWatch === undefined && performance.now() - (observed.ownWatchAt ?? -Infinity) >= 1000) {
+      this.#watchOwnFiles(chatId, observed);
     }
     observed.attachment?.send({ type: 'own-read' });
     this.#syncProjection(chatId, 'none');
@@ -4023,23 +4052,14 @@ export class ChatSessionStore {
   }
 
   /**
-   * HA-I5's stale span completed: `attach` on this build's own host, whatever the record says; one at a time. A span
-   * that stays complete re-sends on the source's 1 s poll, backing off 1 s doubling to 60 s while the run stays
-   * unsettled, until an own read shows it settled.
+   * HA-I5's stale span completed: `attach` on this build's own host, whatever the record says; one at a time. The
+   * source paces the re-sends (`inPageAttachBackoffMilliseconds`).
    */
   #attachInPage(chatId: string, observed: ObservedChat): void {
     const connector = this.#projectHostConnectors.get(observed.projectId);
-    const at = performance.now();
-    if (
-      connector === undefined ||
-      this.#inPageAttaching.has(chatId) ||
-      (observed.inPageNextAt !== undefined && at < observed.inPageNextAt)
-    ) {
+    if (connector === undefined || this.#inPageAttaching.has(chatId)) {
       return;
     }
-    const tries = (observed.inPageTries ?? 0) + 1;
-    observed.inPageTries = tries;
-    observed.inPageNextAt = at + Math.min(1000 * 2 ** (tries - 1), inPageAttachBackoffMilliseconds);
     this.#inPageAttaching.add(chatId);
     /* ponytail: the route is a flag the connector's first, synchronous settings read sees; a connector port for the
      * in-page host replaces it if the connector grows one (HA2 owns host-connector.ts). */
@@ -5931,9 +5951,14 @@ export class ChatSessionStore {
                 });
                 signal.throwIfAborted();
                 if (observed !== undefined) {
+                  /* The pick may move the chat off this device (a paired computer) or onto it: locality is decided
+                   * again, so the new placement's turns are read where they are written (HA-I1). */
+                  this.#stopOwnSource(observed);
+                  observed.ownCurrent = undefined;
                   this.#stopObservedAttachment(input.chatId, observed);
                   this.#projectionTopics.get(input.chatId)?.emit();
                   observed.attempts = 0;
+                  observed.local = this.#startOwnSource(input.chatId, observed);
                   this.#startObservedAttachment(input.chatId, observed);
                 }
               };

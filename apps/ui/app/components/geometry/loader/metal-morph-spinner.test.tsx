@@ -184,4 +184,37 @@ describe('MetalMorphSpinner', () => {
     // matters here, and it is capped so a 3× display does not ask for a nine-times-larger source.
     expect(lastTarget().getSize()).toMatchObject({ pixelRatio: 2 });
   });
+
+  it('should answer its size from the resize observer, never from a layout read while the service paints', async () => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public observe = vi.fn();
+
+        public disconnect = vi.fn();
+
+        public constructor(callback: ResizeObserverCallback) {
+          resizeCallbacks.push(callback);
+        }
+      },
+    );
+    const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
+    render(<MetalMorphSpinner className='size-4' />);
+    const target = lastTarget();
+    const layoutRead = vi.spyOn(target.canvas, 'getBoundingClientRect');
+
+    act(() => {
+      for (const callback of resizeCallbacks) {
+        callback(
+          [{ contentRect: { width: 28, height: 28 } } as unknown as ResizeObserverEntry],
+          mock<ResizeObserver>(),
+        );
+      }
+    });
+
+    expect(target.getSize()).toMatchObject({ width: 28, height: 28 });
+    expect(target.getSize()).toMatchObject({ width: 28, height: 28 });
+    expect(layoutRead).not.toHaveBeenCalled();
+  });
 });

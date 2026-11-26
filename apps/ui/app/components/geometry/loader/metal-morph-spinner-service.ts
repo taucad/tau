@@ -19,6 +19,11 @@ import type {
  * each spinner owns: one context, one environment bake and one shader compile per page, and one `drawImage`
  * per visible spinner per frame.
  *
+ * The shared renderer runs on WebGPU only. Where the page has no WebGPU adapter, rendering 3D into a detached canvas
+ * and copying it per frame lands on the main thread (software GL, a blocklisted GPU, a remote desktop) and cost
+ * the chat most of its frame budget, so there the spinners keep their flat stand-ins for the life of the page
+ * (UI Policy, steady-state decorations).
+ *
  * Playback follows the same gates as a dedicated loader — it runs only while at least one spinner is on
  * screen with the document visible and motion allowed — and the renderer is released once the page has gone
  * without spinners for {@link idleDisposeDelay}.
@@ -137,6 +142,8 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   let sourceSize = minimumSourceSize;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let hasLoggedStartFailure = false;
+  /** Set once a start resolved to a backend other than WebGPU: the page keeps its flat spinners from then on. */
+  let isFlatOnly = false;
 
   const activeCount = (): number => {
     let count = 0;
@@ -274,10 +281,18 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
     if (creation !== undefined) {
       return creation;
     }
+    if (isFlatOnly) {
+      return;
+    }
     // A WebGPU canvas that cannot present starts once more on a fresh canvas, on WebGL (`startShowcaseRenderer`).
     creation = startShowcaseRenderer(async (backend) => {
       if (registrations.size === 0 && !isWarming) {
         // Everything unsubscribed while the adapter was being probed; do not open a context for nobody.
+        return;
+      }
+      if (backend !== 'webgpu') {
+        // No detached render and per-frame copy off WebGPU: the stand-ins are the composited flat spinner.
+        isFlatOnly = true;
         return;
       }
       const canvas = document.createElement('canvas');

@@ -137,12 +137,12 @@ describe('modelList', () => {
       }
     });
 
-    it('should include every row default in its own levels, sent at high', () => {
+    it('should include every row default in its own levels, sent at medium', () => {
       for (const model of getCloudCatalogEntries()) {
         const levels: readonly string[] | undefined = model.support?.reasoning?.levels;
         if (levels !== undefined) {
           expect(levels, model.id).toContain(forwardedDefault(model));
-          expect(forwardedDefault(model), model.id).toBe('high');
+          expect(forwardedDefault(model), model.id).toBe('medium');
         }
       }
     });
@@ -290,7 +290,7 @@ describe('ModelService', () => {
         maxTokens: 128_000,
         cost: { inputTokens: 2, outputTokens: 10, cacheReadTokens: 0.2, cacheWriteTokens: 2.5 },
       },
-      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'high' } },
+      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'medium' } },
     });
     expect(modelList.anthropic['claude-sonnet-5']?.recommended).toBe(false);
   });
@@ -319,7 +319,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -350,7 +350,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(fable52?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -381,7 +381,7 @@ describe('ModelService', () => {
         knowledgeCutoff: '2026-06',
         cost: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.05, cacheWriteTokens: 1.25 },
       },
-      configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
+      configuration: { streaming: true, reasoning: { effort: 'medium', summary: 'auto' } },
     });
     expect(gatewayModelRoutes()).toContainEqual({
       routeId: 'openai-gpt-6.1-terra',
@@ -456,7 +456,7 @@ describe('ModelService', () => {
       configuration: {
         streaming: true,
         maxOutputTokens: 64_000,
-        reasoning: { effort: 'high', summary: 'auto' },
+        reasoning: { effort: 'medium', summary: 'auto' },
       },
     });
     expect(modelList.xai['grok-4.6']?.recommended).toBe(false);

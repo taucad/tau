@@ -34,6 +34,9 @@ import { l2Tasks } from '#testing/live/kernel-routing-l2.tasks.js';
 /** The catalog row under test; `TAU_LIVE_MODEL` picks another, such as `anthropic-claude-opus-5.5`. */
 const modelId = process.env['TAU_LIVE_MODEL'] ?? 'anthropic-claude-sonnet-5.5';
 
+/** A folder to keep each task's event log in (`TAU_LIVE_LOG_DIR`), for reading transcripts; unset, they are deleted. */
+const keptLogs = process.env['TAU_LIVE_LOG_DIR'];
+
 describe.skipIf(!hasLiveCredential(modelId))(
   `kernel routing L2 on ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
   { repeats: liveRepeats },
@@ -44,19 +47,22 @@ describe.skipIf(!hasLiveCredential(modelId))(
 
     beforeAll(async () => {
       gateway = await startLiveGateway();
-      logs = await mkdtemp(join(tmpdir(), 'tau-api-live-l2-'));
+      logs = keptLogs ?? (await mkdtemp(join(tmpdir(), 'tau-api-live-l2-')));
     });
 
     afterAll(async () => {
       const passed = verdicts.filter(({ passed: ok }) => ok).length;
       console.log(`[kernel-routing-l2] summary ${JSON.stringify({ modelId, passed, of: verdicts.length })}`);
       await gateway.close();
-      await rm(logs, { recursive: true, force: true });
+      if (keptLogs === undefined) {
+        await rm(logs, { recursive: true, force: true });
+      }
     });
 
     it.each(l2Tasks.map((task) => [task.id, task] as const))('runs %s to a GeoSpec verdict', async (_id, task) => {
       const chatId = `${task.id}-${Date.now().toString(36)}`;
       let snapshot: HostRunSnapshot | undefined;
+      const started = performance.now();
       const verdict = await runL2Task({
         task,
         agent: async ({ registry }) => {
@@ -91,6 +97,9 @@ describe.skipIf(!hasLiveCredential(modelId))(
         `[kernel-routing-l2] metric ${JSON.stringify({
           ...verdict,
           modelId,
+          effort: liveSessionModel(modelId).reasoning?.effort,
+          wallTime: Math.round(performance.now() - started),
+          state: snapshot?.state,
           family: task.family,
           tools: snapshot === undefined ? [] : toolCalls(snapshot.messages).map((call) => call.toolName),
           ...(snapshot === undefined ? {} : runUsage(snapshot)),

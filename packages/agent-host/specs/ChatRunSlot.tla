@@ -85,7 +85,9 @@
 (* "resume", "steer", "cancel", "interrupt", "extpause" (X asks for        *)
 (* approval), "opening" (M1's opening and epochs), "stale" (a frozen       *)
 (* leader, relinquish), "placement" (W8 per attempt), "stop" (tools and    *)
-(* the stop bound), "close", "gateway" (an abstract model gateway).        *)
+(* the stop bound), "close", "gateway" (an abstract model gateway),       *)
+(* "claimretry" (HA4: a claim refused after W6's grant opens nothing, and *)
+(* W6 claims again: M2 until the still-closing bound, Node's reconcile).  *)
 (* Without "opening" the orphan is abandoned by the draft's attach, which  *)
 (* over-approximates M1's opening: moving recovery into the opening only   *)
 (* removes behaviours, so the draft's safety results carry over.           *)
@@ -676,6 +678,18 @@ sync ==
     /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
+\* HA4 (2026-11-27; RC3, H22): the claim after W6's grant is refused (a closing incarnation's WRITER_LOCKED, or a writer held
+\* elsewhere), so this incarnation neither opens nor writes. The claim is retried: `restart`'s fairness is that retry
+\* (M2 retries to the still-closing bound and releases; the next reconcile asks again; Node's reconcile retries).
+claimRefused ==
+    /\ Has("claimretry") /\ Claiming /\ alive /\ ~opened /\ ~claimed /\ crashes < MaxCrashes
+    /\ alive' = FALSE /\ crashes' = crashes + 1
+    /\ res' = None /\ drivers' = {} /\ steerQ' = {} /\ ending' = [r \in Runs |-> None]
+    /\ waiters' = {} /\ tools' = {}
+    /\ pc' = Reset
+    /\ lockFree' = FALSE /\ call' = 0 /\ callState' = "idle" /\ lostCount' = 0
+    /\ UNCHANGED <<log, claimed, revoked, answered, termVars, lease, started, completes, acked, gw, closeVars>>
+
 restart ==   \* W6 starts a new incarnation: it reads under the lock and writes nothing
     /\ ~alive /\ ~Barred
     /\ alive' = TRUE
@@ -842,7 +856,7 @@ Next ==
     \/ approvalRequested \/ steer \/ driverSteered
     \/ cancel \/ interrupt \/ pauseRecorded \/ resolveInterrupt
     \/ attach \/ markAbandoned \/ logOpened \/ logFenced
-    \/ crash \/ restart \/ freeze \/ staleAppend \/ relinquish
+    \/ crash \/ claimRefused \/ restart \/ freeze \/ staleAppend \/ relinquish
     \/ complete \/ settlementPublished \/ acknowledge \/ quiescent
     \/ modelCall \/ dispatch \/ sync \/ gatewaySettles \/ replyShown \/ replyLost \/ invocationResolved
     \/ close \/ logClosed
@@ -946,6 +960,9 @@ Safety ==
 \* Quiescence: RunsAtRest. A run a closed host left open is reconciled when a host next starts (D10).
 RunsAtRest == hostState = "closed" \/ \A r \in Runs : ~Live(r)
 AdmittedRunEnds == \A r \in Runs : Live(r) ~> (~Live(r) \/ hostState = "closed")               \* I35
+
+\* Quiescence: RunsAtRest. HA4: every orphan is eventually abandoned, refused claims included.
+OrphanAbandoned == \A r \in Runs : Orphan(r) ~> (~Orphan(r) \/ hostState = "closed")
 
 \* Quiescence: ReservationSettled.
 ReservationSettled == res = None \/ res \in drivers

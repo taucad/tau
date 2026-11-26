@@ -247,7 +247,7 @@ function PostHogLifecycle({
       return undefined;
     }
     const recording = posthog.config.session_recording;
-    const blockSelector = replayBlockSelector(recording.blockSelector, isReplayContentAllowed);
+    const blockSelector = replayBlockSelector(recording.blockSelector ?? undefined, isReplayContentAllowed);
     if (recording.blockSelector !== blockSelector) {
       /* The recorder (rrweb) reads its block selector once, when it starts, and keeps what it already serialised. A
          changed decision therefore ends the running recording and starts a new one, whose full snapshot follows the

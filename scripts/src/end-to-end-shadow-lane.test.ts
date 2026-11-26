@@ -31,6 +31,7 @@ type Job = {
   readonly if?: string;
   readonly name?: string;
   readonly needs?: string | readonly string[];
+  readonly outputs?: Record<string, string>;
   readonly steps?: readonly Step[];
   readonly strategy?: { readonly 'fail-fast'?: boolean | string; readonly matrix?: Record<string, unknown> };
   readonly 'continue-on-error'?: boolean;
@@ -109,9 +110,9 @@ describe('ci.yml shadow lane (operator ruling Q1)', () => {
     expect(step(lane, 'Install browsers for Vitest Browser (system dependencies)')?.with).toEqual({
       'playwright-browsers': expression('matrix.suite.browsers'),
     });
-    expect(step(lane, 'Install browsers for Vitest Browser')?.env).toEqual({
-      BROWSERS: expression('matrix.suite.browsers'),
-    });
+    expect(Object.entries(step(lane, 'Install browsers for Vitest Browser')?.env ?? {})).toEqual([
+      ['BROWSERS', expression('matrix.suite.browsers')],
+    ]);
   });
 
   it('should upload its outcome rows as an e2e-queue row does, under a prefix the required gate leaves out', () => {
@@ -168,8 +169,7 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
     expect(targets[shadowTarget]?.executor).toBe('nx:noop');
   });
 
-  it('should list each family file once, as test:e2e runs it, with no file another tier owns', () => {
-    const suite = targets['test:e2e'];
+  it('should list each family file once, with no file another tier owns', () => {
     const excluded = new Set([
       ...listed('timingBudgetSpecs'),
       ...listed('hostSpecs'),
@@ -178,16 +178,22 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
       'src/global-setup-preflight.spec.ts',
     ]);
     expect(excluded.size).toBeGreaterThan(15);
-    const seen: string[] = [];
+    const specs = families.flatMap((family) => specsOf(family).map((spec) => `${family}: ${spec}`));
+    for (const entry of specs) {
+      const spec = entry.split(': ')[1] ?? '';
+      expect(existsSync(resolve(root, 'apps/ui-e2e', spec)), entry).toBe(true);
+      expect(excluded.has(spec), entry).toBe(false);
+    }
+    const files = specs.map((entry) => entry.split(': ')[1]);
+    expect(files.length).toBe(new Set(files).size);
+  });
+
+  it('should run each family as test:e2e runs its files, one row per family', () => {
+    const suite = targets['test:e2e'];
     for (const family of families) {
       const target = targets[family];
       const specs = specsOf(family);
       expect(specs.length, family).toBeGreaterThan(0);
-      for (const spec of specs) {
-        expect(existsSync(resolve(root, 'apps/ui-e2e', spec)), `${family}: ${spec}`).toBe(true);
-        expect(excluded.has(spec), `${family}: ${spec}`).toBe(false);
-      }
-      seen.push(...specs);
       // The suite's own env fixture and its first command, ui:build under it; no shards, so one row is the suite.
       expect(target?.options?.env, family).toEqual(suite?.options?.env);
       expect(target?.options?.commands?.[0], family).toEqual(suite?.options?.commands?.[0]);
@@ -198,7 +204,6 @@ describe('ui-e2e journey families (DC-25, global review ruling 5)', () => {
         specs.includes('src/external-agent.spec.ts') ? suite?.dependsOn : [],
       );
     }
-    expect(seen.length).toBe(new Set(seen).size);
   });
 
   it("should install the browsers each family's Vitest instances launch, and no other", () => {

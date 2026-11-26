@@ -149,12 +149,17 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
   let stopped = false;
   /* Read through a call: `stopped` changes across awaits, which narrowing cannot see. */
   const isStopped = (): boolean => stopped;
+  const isUnreadable = (): boolean => unreadable;
   const runAgain = (): boolean => again && !stopped;
   let reading: Promise<void> | undefined;
   let again = false;
   let poll: ReturnType<typeof setTimeout> | undefined;
   /** When a suspect read was first seen, on the monotonic clock. */
   let suspectSince: number | undefined;
+  /* A held log that went missing was said once; the next read that holds rows again lifts it. */
+  let missingSaid = false;
+  /* The last pass could not read: the poll reads again, so a failed first read never strands the chat. */
+  let unreadable = false;
   /** The settler span (HA-I5): when it started, and the row and mtime it last saw. */
   let staleSince: number | undefined;
   let lastChange: string | undefined;
@@ -234,6 +239,7 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
       bytes = await client.readFile(`${directory}/events.jsonl`);
     } catch (error) {
       if (!isNotFound(error)) {
+        unreadable = true;
         input.onVerdict('unreadable'); // A root not mounted: keep what is held and read again (U14, U26).
         return;
       }
@@ -247,6 +253,7 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
       try {
         record = await judgeAbsence();
       } catch {
+        unreadable = true;
         input.onVerdict('unreadable'); // Nothing readable: a read failure, retried on the next wake.
         return;
       }
@@ -258,8 +265,11 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
         return;
       }
       if (held) {
-        /* Held rows with an absent log stay suspect: a fetch rewrite during a project switch never blanks own turns. */
-        if (suspectExpired()) {
+        /* Held rows with an absent log stay suspect: a fetch rewrite during a project switch never blanks own turns.
+         * Once said, `missing` stands until rows return, and the 1 Hz re-read stops. */
+        if (!missingSaid && suspectExpired()) {
+          suspectSince = undefined;
+          missingSaid = true;
           input.onVerdict('missing');
         }
         return;
@@ -274,6 +284,7 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
         publishWhole(empty);
       }
       view = empty;
+      missingSaid = false;
       input.onVerdict('current', record);
       return;
     }
@@ -286,6 +297,7 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
       } else {
         publishWhole(view);
       }
+      missingSaid = false;
       input.onVerdict('current', 'rows');
       return;
     }
@@ -302,6 +314,7 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
     suspectSince = undefined;
     view = createReplayFacts(bytes, `own-${randomUuid()}`);
     publishWhole(view);
+    missingSaid = false;
     input.onVerdict('current', 'rows');
   };
 
@@ -342,13 +355,14 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
   const run = async (): Promise<void> => {
     do {
       again = false;
+      unreadable = false;
       // oxlint-disable-next-line no-await-in-loop -- single flight: a wake during a read runs one more after it.
       await readOnce();
       // oxlint-disable-next-line no-await-in-loop -- the span reads the view this pass left.
       const unsettled = isStopped() ? false : await checkSpan();
       clearTimeout(poll);
       poll = undefined;
-      if (!isStopped() && (unsettled || suspectSince !== undefined) && visible()) {
+      if (!isStopped() && (unsettled || suspectSince !== undefined || isUnreadable()) && visible()) {
         poll = setTimeout(wake, unsettledReadPollMilliseconds); // Bound: unsettledReadPollMilliseconds.
       }
     } while (runAgain());

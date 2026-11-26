@@ -285,6 +285,9 @@
 \* only after the pick's writes and route restart. A chat this device holds reads its own segment from the file, and
 \* `attach` and the in-page route are new host commands. Dispatch, acknowledgement and the gate are untouched; the
 \* new hold refines `Ready`, as the gate's other holds do. No action or verdict changes.
+\* HA1 review (2026-11-27): the hold is lifted only by the pick that set it, so a newer pick that supersedes a deferred
+\* one keeps the queue held until its own writes are done. Only a chat whose own run the file shows defers a pick.
+\* The pick's mark is a symbol of its own. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

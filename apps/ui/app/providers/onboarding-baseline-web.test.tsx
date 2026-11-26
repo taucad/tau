@@ -74,7 +74,7 @@ afterAll(() => {
 });
 
 // The SDK singleton is loaded once per module graph, so these run in order.
-describe('onboarding baseline through the web analytics boundary', () => {
+describe('onboarding baseline through the web analytics boundary', { shuffle: false }, () => {
   it('captures nothing while consent is declined', async () => {
     store.remove(firstSeenStorageName);
     markFirstSeen();

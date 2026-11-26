@@ -86,7 +86,7 @@ afterAll(() => {
 });
 
 // The SDK singleton is loaded once per module graph, so these run in order.
-describe('PostHog-backed flags through the web analytics boundary', () => {
+describe('PostHog-backed flags through the web analytics boundary', { shuffle: false }, () => {
   it('resolves to defaults and requests no flags when analytics are declined', async () => {
     const view = render(tree(), { wrapper: MemoryRouter });
     await settle();

@@ -188,7 +188,8 @@ const settle = async (): Promise<void> => {
 const pageviews = (calls: ReadonlyArray<readonly unknown[]>): number =>
   calls.filter((call) => call[0] === '$pageview').length;
 
-describe('WebAnalyticsProvider', () => {
+// The SDK singleton is loaded once per module graph, so these run in order.
+describe('WebAnalyticsProvider', { shuffle: false }, () => {
   // Must run first: the SDK singleton is loaded once per module graph.
   it('should clear stale PostHog storage on a declined cold load without starting the SDK', async () => {
     localStorage.setItem('ph_phc_test_key_posthog', '{"distinct_id":"stale"}');

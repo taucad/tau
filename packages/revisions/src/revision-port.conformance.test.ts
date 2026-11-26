@@ -215,7 +215,10 @@ describe('the conformance table', () => {
 });
 
 const conformance = (adapter: Adapter): void => {
-  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, () => {
+  /* One store per adapter, built once: each case reads the tags, refs and
+   * checkouts the cases before it left, so the suite runs in source order even
+   * under `--sequence.shuffle` (burn-in on tau#2909). */
+  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, { shuffle: false }, () => {
     let harness: Harness;
     let port: RevisionPort;
     let base: RevisionId;
@@ -1575,7 +1578,8 @@ describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', (
  */
 describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture', () => {
   for (const adapter of adapters) {
-    describe.runIf(adapter.enabled)(adapter.name, () => {
+    /* One remote fixture per adapter, whose refs each case moves: source order, as above. */
+    describe.runIf(adapter.enabled)(adapter.name, { shuffle: false }, () => {
       let harness: Harness;
       let port: RevisionPort;
       let fixture: Awaited<ReturnType<typeof startGitHttpBackend>>;

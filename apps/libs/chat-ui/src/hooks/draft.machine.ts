@@ -39,6 +39,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { isAttachmentMediaType } from '@taucad/agent-host/wire';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
+import { unflattened } from '#utils/message-attachments.js';
 import {
   annotationsOf,
   brokenAnnotationLimit,
@@ -309,6 +310,10 @@ const loadMessage = (message: MyUIMessage | undefined): LoadedDraft => {
       loaded.legacy.push(part.url);
     }
   }
+  // A sent message's flattened images give way to their originals: the draft draws its comments live.
+  const editable = unflattened(loaded.attachments, loaded.annotations);
+  loaded.attachments = editable.attachments;
+  loaded.annotations = editable.annotations;
   return loaded;
 };
 

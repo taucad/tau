@@ -72,7 +72,7 @@ import { readChatPlacementsShared, writeChatPlacement } from '@taucad/chat-ui/db
 import type { ComposerRecord, ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';
 import { createChatAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
-import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
+import { attachmentReferencesOf } from '@taucad/chat-ui/utils/message-attachments';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { DraftAttachmentBytes } from '#components/comments/prepare-annotated-send.js';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
@@ -543,6 +543,7 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
     text: request.content,
     ...(request.attachments === undefined ? {} : { attachments: request.attachments }),
     ...(request.references === undefined ? {} : { references: request.references }),
+    ...(request.annotations === undefined ? {} : { annotations: request.annotations }),
   });
 }
 
@@ -2533,8 +2534,9 @@ export class ChatSessionStore {
     }
     return {
       async read(attachment) {
-        const { record } = await session.composer;
-        return record.attachments.read(attachment);
+        const { record, chatAttachments } = await session.composer;
+        // An edit's originals were promoted with the message they were sent in, so they live with the chat.
+        return (await record.attachments.read(attachment)) ?? chatAttachments.read(attachment);
       },
       async put(bytes, mediaType, filename) {
         const { record } = await session.composer;
@@ -3978,9 +3980,8 @@ export class ChatSessionStore {
    * @returns Whether every one of them is the composer's now.
    */
   async #retainAttachments(session: InternalSession, message: MyUIMessage): Promise<boolean> {
-    const attachments = message.parts.flatMap((part) =>
-      part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
-    );
+    // The originals of flattened images come back too, so the returned draft can be drawn again.
+    const attachments = attachmentReferencesOf(message);
     if (attachments.length === 0) {
       return true;
     }

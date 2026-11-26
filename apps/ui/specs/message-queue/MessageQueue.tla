@@ -254,6 +254,11 @@
 \* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
 \* changes.
 \* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
+\* Comment pins S2 review (2026-11-26): an edit names its comments and is flattened like a send before its turn is
+\* requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`); a returned message's originals are
+\* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
+\* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
+\* before it is sent. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

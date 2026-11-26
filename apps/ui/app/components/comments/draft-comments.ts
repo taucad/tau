@@ -7,7 +7,7 @@ import type {
   AnnotationView,
   MessageAnnotations,
 } from '@taucad/chat/annotations';
-import { isSameCamera } from '#components/comments/image-projection.js';
+import { angleBetweenViews, isSameCamera, projectToImage } from '#components/comments/image-projection.js';
 
 /*
  * The draft's comments as pure steps over its annotations record. The draft machine stores the record
@@ -38,6 +38,8 @@ export type PlacedPin = Readonly<{
   imageId: string;
   /** Whether that picture is new and still has to be taken. */
   needsPicture: boolean;
+  /** The stored picture this pin's picture takes the place of, after a small orbit: the draft drops it. */
+  retakenAttachment?: string;
 }>;
 
 /**
@@ -57,9 +59,54 @@ const isSameScene = (a: AnnotationView, b: PinScene): boolean =>
   a.revision === b.revision &&
   a.scene === b.scene;
 
+/** The most a view may turn for its pins' picture to be taken again, in degrees (charter D4). */
+const retakeAngle = 20;
+
+/** Whether a pin is seen from a camera: inside the frame, on a surface that faces it. */
+const isSeenFrom = (camera: AnnotationCamera, comment: AnnotationComment): boolean => {
+  if (comment.model === undefined) {
+    return false;
+  }
+  const { point, normal } = comment.model;
+  const projected = projectToImage(camera, point);
+  if (projected === undefined || projected.at.some((fraction) => fraction < 0 || fraction > 1)) {
+    return false;
+  }
+  if (normal === undefined) {
+    return true;
+  }
+  // A perspective camera sees the point from where it stands; an orthographic one sees every point along one direction.
+  const seenFrom = camera.projection.kind === 'perspective' ? point : camera.target;
+  const toward: AnnotationVec3 = [
+    camera.position[0] - seenFrom[0],
+    camera.position[1] - seenFrom[1],
+    camera.position[2] - seenFrom[2],
+  ];
+  return normal[0] * toward[0] + normal[1] * toward[1] + normal[2] * toward[2] > 0;
+};
+
+/**
+ * The picture a pin placed after a small orbit is taken with again: the newest picture taken only for pins on the
+ * same scene, when the view has turned less than {@link retakeAngle} and every pin on it is still seen (charter D4).
+ */
+const retakenImage = (current: MessageAnnotations, placement: PinPlacement): AnnotatedImage | undefined => {
+  const newest = current.images.findLast((image) => image.forPin === true);
+  if (
+    newest?.view === undefined ||
+    newest.marks.length > 0 ||
+    !isSameScene(newest.view, placement.scene) ||
+    angleBetweenViews(newest.view.camera, placement.camera) >= retakeAngle
+  ) {
+    return undefined;
+  }
+  const pinned = current.comments.filter((comment) => comment.image === newest.id);
+  return pinned.every((comment) => isSeenFrom(placement.camera, comment)) ? newest : undefined;
+};
+
 /**
  * Places a pin: a new comment, on the picture another pin already has when both were placed from the same camera on
- * the same scene, else on a new picture.
+ * the same scene. After a small orbit the newest pin picture is taken again from the new camera and keeps its pins;
+ * otherwise the pin gets a new picture.
  *
  * @param annotations - The draft's record.
  * @param placement - The surface, the camera and what the viewer showed.
@@ -75,7 +122,9 @@ export function placePin(annotations: MessageAnnotations | undefined, placement:
       isSameScene(image.view, placement.scene) &&
       isSameCamera(image.view.camera, placement.camera),
   );
+  const retaken = shared === undefined ? retakenImage(current, placement) : undefined;
   const image: AnnotatedImage = shared ?? {
+    // A retaken picture is a new image, so a picture still on its way for the old one finds no image and is dropped.
     id: placement.newImageId,
     width: placement.size.width,
     height: placement.size.height,
@@ -89,16 +138,23 @@ export function placePin(annotations: MessageAnnotations | undefined, placement:
     image: image.id,
     model: { point: placement.point, normal: placement.normal, ...(placement.part ? { part: placement.part } : {}) },
   };
+  // A picture comment has no image id of its own to compare, so the retaken id is checked first.
+  const retakenId = retaken?.id;
+  const carried = current.comments.map((existing) =>
+    retakenId !== undefined && existing.image === retakenId ? { ...existing, image: image.id } : existing,
+  );
+  const images = current.images.filter((existing) => existing.id !== retakenId);
   return {
     annotations: {
       ...current,
-      comments: [...current.comments, comment],
-      images: shared ? current.images : [...current.images, image],
+      comments: [...carried, comment],
+      images: shared ? images : [...images, image],
       nextNumber: number + 1,
     },
     number,
     imageId: image.id,
     needsPicture: shared === undefined,
+    ...(retaken?.attachment === undefined ? {} : { retakenAttachment: retaken.attachment }),
   };
 }
 

@@ -91,9 +91,12 @@ jobs:
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
           # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
           # lane (`e2e-queue`) whenever its project is affected, so it is not run here. It never moves back.
+          # A shadow row (`test:e2e:shadow`, operator ruling Q1) runs in ci.yml's `e2e-shadow` lane on the same events,
+          # so its nightly row ends when its shadow row starts (CI decomposition global review, ruling 8).
           pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
-          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets["test:e2e:queue"].dependsOn // [] | .[]
-            | if type == "string" then "\($project):\(.)" else error("\($project):test:e2e:queue depends on \(tojson), not a target name") end]' \
+          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets as $targets
+            | ["test:e2e:queue", "test:e2e:shadow"][] as $list | $targets[$list].dependsOn // [] | .[]
+            | if type == "string" then "\($project):\(.)" else error("\($project):\($list) depends on \(tojson), not a target name") end]' \
             "$RUNNER_TEMP/graph.json")
           echo "Ratcheted into the merge queue: $ratcheted"
           add_suite() {

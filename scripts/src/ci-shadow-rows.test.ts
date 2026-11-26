@@ -15,6 +15,7 @@ import {
   renderShadowMarkdown,
   retainShadowRows,
   shadowBar,
+  shadowRowKey,
   shadowRowsOf,
   shadowTarget,
   streakFromHistory,
@@ -250,11 +251,15 @@ describe('the shadow-row registry', () => {
     ]);
   });
 
-  it('should find no shadow row in the workspace today, so no row changes its gate', async () => {
+  it("should read the workspace's shadow rows, the ui-e2e journey families and the service worker suite (DC-25)", async () => {
     const { readShadowRegistry } = await import('#ci-shadow-rows.js');
     const workspace = await readShadowRegistry(resolve(import.meta.dirname, '../..'));
+    // No entry is refused, so none is also a gating suite (ruling 7: a suite is in one list or the other).
     expect(workspace.problems).toEqual([]);
-    expect(workspace.rows).toEqual([]);
+    const keys = workspace.rows.map((row) => shadowRowKey(row));
+    expect(keys).toContain('ui-e2e:test:e2e:service-worker');
+    expect(keys.filter((key) => key.startsWith('ui-e2e:test:e2e:journey-')).length).toBeGreaterThanOrEqual(15);
+    expect(new Set(workspace.rows.map((row) => row.projectFile))).toEqual(new Set(['apps/ui-e2e/project.json']));
   });
 });
 

@@ -307,6 +307,25 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     ]);
   });
 
+  it('should leave every shadow row out of the nightly matrix, since its shadow row runs it (ruling 8)', () => {
+    const { status, stderr, labels } = planNightly({
+      'ui-e2e': {
+        name: 'ui-e2e',
+        data: {
+          targets: {
+            'test:e2e:development': target(),
+            'test:e2e:service-worker': target(),
+            'test:e2e:browser-host': target(),
+            'test:e2e:queue': target({ dependsOn: ['test:e2e:development'] }),
+            'test:e2e:shadow': target({ dependsOn: ['test:e2e:service-worker'] }),
+          },
+        },
+      },
+    });
+    expect(status, stderr).toBe(0);
+    expect(labels).toEqual(['ui-e2e test:e2e:browser-host']);
+  });
+
   it('should fail the plan when a job-per-dependency aggregate names no target of its project', () => {
     for (const dependsOn of [[], ['test:e2e:missing'], [{ projects: ['ui'], target: 'build' }]]) {
       const { status, stderr } = planNightly({

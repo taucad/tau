@@ -284,6 +284,11 @@ export const countConclusions = (runs: readonly WorkflowRun[]): ConclusionCounts
 export const requiredGateJob = 'Run affected tasks';
 /** The merge queue's `Fail fast (<lane>)` jobs cancel their run after a lane failed; they are not the failure. */
 const failFastPrefix = 'Fail fast';
+/**
+ * The `Shadow end-to-end (<suite>)` rows (`e2e-shadow` in `ci.yml`, operator ruling Q1) gate nothing: a failed one is
+ * the flake ledger's to count against its shadow bar, never the run's failure.
+ */
+export const shadowRowPrefix = 'Shadow end-to-end';
 
 const attemptOf = (job: WorkflowJob): number => job.run_attempt ?? 1;
 
@@ -299,13 +304,14 @@ export const latestAttempt = (jobs: readonly WorkflowJob[]): WorkflowJob[] => {
   return jobs.filter((job) => attemptOf(job) === latest);
 };
 
-/** Jobs of the first attempt that failed on their own: not the required gate and not a `Fail fast` job. */
+/** Jobs of the first attempt that failed on their own: not the required gate, a `Fail fast` job or a shadow row. */
 export const failedJobs = (jobs: readonly WorkflowJob[]): WorkflowJob[] =>
   firstAttempt(jobs).filter(
     (job) =>
       Boolean(job.conclusion && failedConclusions.has(job.conclusion)) &&
       job.name !== requiredGateJob &&
-      !job.name.startsWith(failFastPrefix),
+      !job.name.startsWith(failFastPrefix) &&
+      !job.name.startsWith(shadowRowPrefix),
   );
 
 /** The job that failed first: the earliest-completed of {@link failedJobs}, a completion tie broken by name. */

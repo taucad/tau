@@ -305,7 +305,11 @@ const openProviderWriter = async (
   await appendFile.call(fileSystem, lockPath, marker);
 
   /* Whether the marker at the path is still this writer's: a `tau serve` that took a stale one over (HA-I10) wrote its
-   * own there, which this writer must neither refresh nor remove. */
+   * own there, which this writer must neither refresh nor remove.
+   * ponytail: read-compare-then-unlink (or write) leaves a window between the read and the change, since a provider
+   * has no compare-and-delete. A Node takeover landing inside it loses its marker to this unlink, or has it rewritten;
+   * Node's verify-after-settle inode check then stands down on an unlink within its settle. Closing it needs a
+   * provider compare-and-swap, or a kernel lock the browser can see. */
   const ownsMarker = async (): Promise<boolean> => {
     const held = await fileSystem.readFile(lockPath).catch(() => undefined);
     return held !== undefined && new TextDecoder().decode(held) === marker;

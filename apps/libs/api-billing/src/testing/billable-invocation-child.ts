@@ -66,6 +66,15 @@ if (!databaseUrl) {
 const client = postgres(databaseUrl, { max: 1 });
 const database = drizzle(client, { schema });
 class CheckpointLedger extends CreditLedgerService {
+  public override async admitOperation(
+    ...args: Parameters<CreditLedgerService['admitOperation']>
+  ): ReturnType<CreditLedgerService['admitOperation']> {
+    const admitted = await super.admitOperation(...args);
+    if (admitted.status === 'admitted' && admitted.dispatch !== undefined) {
+      await continueAfter('intent_recorded');
+    }
+    return admitted;
+  }
   public override async markDispatchIntent(operationId: string, generation: bigint): Promise<boolean> {
     const marked = await super.markDispatchIntent(operationId, generation);
     if (marked) {

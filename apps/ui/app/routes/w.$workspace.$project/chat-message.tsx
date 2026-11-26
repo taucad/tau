@@ -959,6 +959,9 @@ export const ChatMessage = memo(function ({
   const [isEditing, setIsEditing] = useState(false);
 
   const isUser = message?.role === messageRole.user;
+  /* A request still on its way to the host is not a turn yet: there is nothing to edit until the host has it. */
+  const isDeparting = useChatSelector((state) => state.departingMessageId === messageId);
+  const isEditable = isUser && !isDeparting;
   const isCollapsedUserMessage = isUser && !isEditing;
 
   const collapsedUserRows = useMemo(() => {
@@ -1029,7 +1032,7 @@ export const ChatMessage = memo(function ({
   }
 
   const toggleEdit = (): void => {
-    if (!isUser) {
+    if (!isEditable) {
       return;
     }
 
@@ -1129,10 +1132,10 @@ export const ChatMessage = memo(function ({
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
-              role={isUser ? 'button' : undefined}
-              tabIndex={isUser ? 0 : undefined}
-              onClick={isUser ? handleEditClick : undefined}
-              onKeyDown={isUser ? handleEditKeyDown : undefined}
+              role={isEditable ? 'button' : undefined}
+              tabIndex={isEditable ? 0 : undefined}
+              onClick={isEditable ? handleEditClick : undefined}
+              onKeyDown={isEditable ? handleEditKeyDown : undefined}
             >
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />

@@ -47,6 +47,15 @@ function RuntimeChatSessionStore({ children }: { readonly children: React.ReactN
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;
 }
 
+/**
+ * The chat session store when a provider is mounted, for a surface that also renders without one.
+ *
+ * @returns The store, or `undefined` outside a provider.
+ */
+export function useOptionalChatSessionStore(): ChatSessionStore | undefined {
+  return useContext(ChatSessionStoreContext);
+}
+
 export function useChatSessionStore(): ChatSessionStore {
   const store = useContext(ChatSessionStoreContext);
   if (!store) {

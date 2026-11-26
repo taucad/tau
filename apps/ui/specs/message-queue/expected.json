@@ -69,6 +69,14 @@
       "kind": "witness",
       "ref": "CaptureTerminalAtSubmit removed: stop during queue save must not authorize a pre-stop gesture"
     },
+    "MessageQueue.withdraw-releases-held.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "HeldWaitsForPerson"
+      },
+      "kind": "witness",
+      "ref": "HoldBehindWithdraw removed: a send queued behind one taken back with Stop must wait for the person"
+    },
     "QueuePlacement.target.cfg": {
       "tier": "pr",
       "expect": "pass"

@@ -873,6 +873,14 @@
       "owner": "use_skill startup latency T2"
     },
     {
+      "id": "D-UI-11",
+      "bound": "A taken-back request's outbox write asked again while the composer holds new text (250 ms doubling, 3 retries), then the person is told",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "setTimeout(resolve, takeBackRetryDelay",
+      "class": "Backoff",
+      "owner": "chat UX F2"
+    },
+    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

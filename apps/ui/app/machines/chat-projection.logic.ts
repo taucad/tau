@@ -25,6 +25,7 @@ import {
   liveForeignRun,
   mergeSegmentRows,
   parseSegmentFrom,
+  turnWithdrawnCode,
   unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
@@ -170,6 +171,11 @@ export type RunView = Readonly<{
   /** Provider identities resolve rewind prefixes independently from context compaction. */
   providerIds?: readonly string[];
   retired?: true;
+  /**
+   * The run's cancelled row says the person took the request back before the turn was kept (`TURN_WITHDRAWN`), read
+   * from whichever log holds the run, so every page and device leaves its request out alike ({@link isRetractedRun}).
+   */
+  withdrawn?: true;
   /** Each history message the active segment appended and its chunk range, so a rewind removes exactly what it dropped. */
   messages?: readonly ProjectedMessageRange[];
 }>;
@@ -831,8 +837,12 @@ const foldRunViews = (
           ]);
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
-    const { terminal: _terminal, ...prior } = previous ?? {};
+    const { terminal: _terminal, withdrawn: _withdrawn, ...prior } = previous ?? {};
     const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
+    const withdrawn =
+      row.type === 'run.lifecycle'
+        ? terminal === 'cancelled' && row.detail?.code === turnWithdrawnCode
+        : previous?.withdrawn === true;
     const rewrittenPrefix = rewriteMessage ? [...chunksOf(initialChunks)] : undefined;
     const correctedInput =
       rewriteMessage && message.role === 'tool-input'
@@ -932,6 +942,7 @@ const foldRunViews = (
             providerIds: [...(steering === undefined ? (previous?.providerIds ?? []) : []), providerId],
           }),
       ...(finalState === undefined ? {} : { terminal: finalState }),
+      ...(withdrawn ? { withdrawn: true } : {}),
     };
   }
   for (const [runId, blocks] of blockMaps) {
@@ -1492,20 +1503,63 @@ export const selectRunElsewhereRecheckDelay = (projection: ChatProjection, now: 
   return changesAt === undefined ? undefined : Math.min(Math.max(0, changesAt - now), longestTimerMilliseconds);
 };
 
-/** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
+/** Framing that can exist even when no assistant content reached the person. */
+const nonOutputChunkTypes: ReadonlySet<string> = new Set([
+  'start',
+  'start-step',
+  'finish-step',
+  'finish',
+  'abort',
+  'message-metadata',
+  'data-acp-session',
+  'data-acp-activity',
+]);
+
+/**
+ * Whether a run's own stream carried anything the person could read: text, reasoning, a tool or data beyond framing.
+ *
+ * @param view - The run's projected view.
+ * @returns `true` once any output chunk is present.
+ * @public
+ */
+export const runViewHasOutput = (view: RunView): boolean =>
+  [...chunksSince(view.chunks)].some((chunk) => !nonOutputChunkTypes.has(chunk.type)) ||
+  (view.segments?.length ?? 0) > 0;
+
+/**
+ * Whether a run is withdrawn from the transcript: the person stopped it before anything came back and before the
+ * agent kept its turn, and asked for the request back (`TURN_WITHDRAWN`, written by the host, so every page and
+ * device agrees). Any other cancellation (a steer, a closed project, a Stop of a kept turn) keeps the request where
+ * it is. A run that produced output keeps its place.
+ *
+ * @param view - The run's projected view.
+ * @returns `true` when the run's request is not shown.
+ * @public
+ */
+export const isRetractedRun = (view: RunView): boolean =>
+  view.withdrawn === true && view.user !== undefined && view.steering === undefined && !runViewHasOutput(view);
+
+/**
+ * Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. A retracted run
+ * ({@link isRetractedRun}) is left out unless `withRetracted` asks for every request the log holds.
+ *
+ * @public
+ */
 export const selectTranscriptSource = (
   projection: TranscriptProjection,
+  { withRetracted = false }: Readonly<{ withRetracted?: boolean }> = {},
 ): ReadonlyArray<RunView & { readonly runId: string }> => {
   const remote = projection.remote?.views;
-  const known = transcriptSources.get(projection.views);
+  const cache = withRetracted ? transcriptSourcesWithRetracted : transcriptSources;
+  const known = cache.get(projection.views);
   if (known !== undefined && known.remote === remote) {
     return known.runs;
   }
   const runs = Object.entries({ ...remote, ...projection.views })
-    .filter(([, view]) => view.retired !== true)
+    .filter(([, view]) => view.retired !== true && (withRetracted || !isRetractedRun(view)))
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
-  transcriptSources.set(projection.views, { remote, runs });
+  cache.set(projection.views, { remote, runs });
   return runs;
 };
 
@@ -1513,10 +1567,13 @@ export const selectTranscriptSource = (
 export type TranscriptProjection = Pick<ChatProjection, 'views' | 'remote' | 'live'>;
 
 /** Run order, memoised on the identity of the views it was sorted from. */
-const transcriptSources = new WeakMap<
+type TranscriptSources = WeakMap<
   ChatProjection['views'],
   Readonly<{ remote: ChatProjection['views'] | undefined; runs: ReturnType<typeof selectTranscriptSource> }>
->();
+>;
+const transcriptSources: TranscriptSources = new WeakMap();
+/** The same order with retracted runs kept, for the readers that ask for every request the log holds. */
+const transcriptSourcesWithRetracted: TranscriptSources = new WeakMap();
 
 /** Each chunks value's reduction; an appended value continues the reduction of the value it extends. */
 const reductions = new WeakMap<ProjectedChunks, ChunkReduction>();

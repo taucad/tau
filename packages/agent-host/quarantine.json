@@ -1,0 +1,14 @@
+{
+  "$schema": "../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "src/node/node-event-log.test.ts > Node event log > the kernel writer lock > should admit a writer after the holding worker thread terminates",
+      "owner": "rifont",
+      "issue": 2875,
+      "class": "unreproduced",
+      "created": "2026-11-26",
+      "expires": "2026-12-10",
+      "evidence": "3 flake events (retry 3) in its last 3 executions; runs 45723524855, 45725484171, 45735230142"
+    }
+  ]
+}

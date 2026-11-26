@@ -1,0 +1,14 @@
+{
+  "$schema": "../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "app/routes/w.$workspace.$project/chat-workbench-dockview.test.tsx > workbench adapter record apply (A0.3) > I10: should not land a record apply computed before the person's edit over that edit",
+      "owner": "rifont",
+      "issue": 2874,
+      "class": "unreproduced",
+      "created": "2026-11-26",
+      "expires": "2026-12-10",
+      "evidence": "8 flake events (retry 8) in its last 8 executions; runs 45723524855, 45726017294, 45726018707, 45726014010, 45727690231, 45729739399, 45735230142, 45783384444"
+    }
+  ]
+}

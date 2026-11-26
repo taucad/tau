@@ -356,8 +356,21 @@ export function CommentPins(): React.JSX.Element | undefined {
   };
   useLayoutEffect(() => {
     hostRef.current = host;
+    const surface = comments?.heads.surface;
+    if (surface) {
+      surface.current = {
+        pick(at) {
+          const { hit } = pickAt(at);
+          return hit === undefined ? undefined : toPick(hit);
+        },
+        hover: host.hover,
+      };
+    }
     return () => {
       hostRef.current = undefined;
+      if (surface) {
+        surface.current = undefined;
+      }
     };
   });
 

@@ -158,6 +158,74 @@ export function placePin(annotations: MessageAnnotations | undefined, placement:
   };
 }
 
+/** The record after a pin was moved. */
+export type MovedPin = Omit<PlacedPin, 'number'> &
+  Readonly<{
+    /** The pin pictures nothing is pinned on any more: the draft drops them. */
+    orphanedAttachments: readonly string[];
+  }>;
+
+/**
+ * Moves a draft pin to another surface point, keeping its number and words (charter D14). Its picture follows D4: the
+ * same picture when the camera and scene have not changed since it was taken, otherwise the pin is placed again from
+ * the current view, and a picture it leaves with nothing else on it goes.
+ *
+ * @param annotations - The draft's record.
+ * @param number - The pin to move.
+ * @param placement - The new surface, the camera and what the viewer showed.
+ * @returns The next record and the pin's picture, or `undefined` when there is no such pin.
+ */
+export function movePin(
+  annotations: MessageAnnotations,
+  number: number,
+  placement: PinPlacement,
+): MovedPin | undefined {
+  const moving = annotations.comments.find((comment) => comment.number === number);
+  if (moving?.model === undefined) {
+    return undefined;
+  }
+  const model = {
+    point: placement.point,
+    normal: placement.normal,
+    ...(placement.part ? { part: placement.part } : {}),
+  };
+  const current = annotations.images.find((image) => image.id === moving.image);
+  if (
+    current?.view !== undefined &&
+    isSameScene(current.view, placement.scene) &&
+    isSameCamera(current.view.camera, placement.camera)
+  ) {
+    return {
+      annotations: {
+        ...annotations,
+        comments: annotations.comments.map((comment) => (comment.number === number ? { ...comment, model } : comment)),
+      },
+      imageId: current.id,
+      needsPicture: false,
+      orphanedAttachments: [],
+    };
+  }
+  const { annotations: without, orphanedAttachments } = removeComments(
+    annotations,
+    (comment) => comment.number === number,
+  );
+  const placed = placePin(without, placement);
+  return {
+    annotations: {
+      ...placed.annotations,
+      // The moved pin keeps its number and words, so the counter does not advance.
+      comments: placed.annotations.comments
+        .map((comment) => (comment.number === placed.number ? { ...comment, number, text: moving.text } : comment))
+        .toSorted((a, b) => a.number - b.number),
+      nextNumber: nextCommentNumber(annotations),
+    },
+    imageId: placed.imageId,
+    needsPicture: placed.needsPicture,
+    orphanedAttachments,
+    ...(placed.retakenAttachment === undefined ? {} : { retakenAttachment: placed.retakenAttachment }),
+  };
+}
+
 /**
  * Sets a comment's words.
  *

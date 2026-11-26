@@ -182,3 +182,73 @@ it('should not present a stale approval when cancelled while preparing settings 
     parent.stop();
   }
 });
+
+it.each([
+  ['an empty title', { toolCallId: 'call-unknown', title: '' }, 'Allow call-unknown?'],
+  ['no title and an empty id', { toolCallId: '' }, 'Allow this tool call?'],
+])('should put a non-empty prompt before the person for a request with %s (E-6)', async (_case, toolCall, prompt) => {
+  const approve = vi.fn<AcpLentSeams['approve']>(async () => ({ interruptId: 'i-1', outcome: 'cancelled' }));
+  const seams: AcpLentSeams = { append: async () => undefined, approve, signal: new AbortController().signal };
+  const fakes = createFakeCallbackActors();
+  const parent = createFakeParent();
+  const machine = provideAcpSession({
+    createId: () => crypto.randomUUID(),
+    seams: () => seams,
+    publishSkills: async () => [],
+  }).provide({ actors: { adapterConnection: fakes.actor('connection') } });
+  const actor = createActor(machine, {
+    input: {
+      key: 'fake:chat-1',
+      opening: {
+        adapter,
+        cwd: '/work',
+        mcpServers: [],
+        sessionMessageId: 'session-message',
+        sessionCommitted: false,
+        notices: false,
+      },
+      lend: { requestId: 'run-1:0', prompt: { fresh: [{ type: 'text', text: 'hi' }] } },
+      parentRef: parent.ref,
+    },
+  });
+  const answer = (result: unknown): void => {
+    const call = fakes.deliveries
+      .filter((delivery) => delivery.name === 'connection')
+      .map((delivery) => delivery.event)
+      .findLast((event) => event.type === 'call');
+    fakes.sendBack('connection', {
+      type: 'callSettled',
+      id: String(call?.['id']),
+      at: 0,
+      answer: { method: String(call?.['method']), result },
+    });
+  };
+  actor.start();
+  try {
+    await flush();
+    answer({ protocolVersion, agentCapabilities: {} });
+    answer({ sessionId: 'acp-1' });
+    await flush();
+    await flush();
+    fakes.sendBack('connection', {
+      type: 'vendorRequest',
+      id: 'permission-1',
+      request: {
+        method: 'session/request_permission',
+        params: {
+          sessionId: 'acp-1',
+          toolCall,
+          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+        },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(approve).toHaveBeenCalledOnce();
+    });
+
+    expect(approve.mock.calls[0]?.[0]).toMatchObject({ prompt });
+  } finally {
+    actor.stop();
+    parent.stop();
+  }
+});

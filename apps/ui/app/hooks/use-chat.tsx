@@ -38,11 +38,12 @@
  *   on missing sessions to keep cross-chat dispatch safe.
  */
 
-import type { ChatView } from '#services/deferred-chat.js';
+import type { ChatStatus } from 'ai';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
@@ -56,7 +57,6 @@ import { noComposerTrays } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ComposerTray } from '@taucad/chat-ui/services/chat-composer-trays';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type {
   DraftAttachment,
@@ -69,9 +69,7 @@ import { pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
-type ChatInstance = ChatView;
-
-type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
+type SendMessageInput = MyUIMessage;
 
 const emptyMessages: readonly MyUIMessage[] = Object.freeze([]);
 
@@ -86,13 +84,6 @@ export type ChatContextValue = {
    * explicit `chatId` argument).
    */
   activeChatId: string;
-  /**
-   * The live AI SDK `Chat` instance for the resolved chat. Always defined
-   * for the active chat (the provider guarantees the session). May be
-   * `undefined` only when the caller passes an explicit `chatId` that is
-   * not currently mounted (cross-chat read pattern).
-   */
-  chat: ChatInstance | undefined;
   /**
    * Persistence machine for the resolved chat. Always defined for the
    * active chat; may be `undefined` for cross-chat reads of non-mounted
@@ -109,12 +100,10 @@ export type ChatContextValue = {
 };
 
 type SessionSnapshotFields = {
-  chat: ChatInstance | undefined;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined;
 };
 
 const emptySessionSnapshot: SessionSnapshotFields = {
-  chat: undefined,
   persistenceActorRef: undefined,
 };
 
@@ -123,7 +112,6 @@ function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapsho
     return emptySessionSnapshot;
   }
   return {
-    chat: session.chat,
     persistenceActorRef: session.persistenceActorRef,
   };
 }
@@ -141,11 +129,10 @@ export function useChatContext(chatId?: string): ChatContextValue {
   return useMemo<ChatContextValue>(
     () => ({
       activeChatId: resolvedChatId,
-      chat: snapshot.chat,
       persistenceActorRef: snapshot.persistenceActorRef,
       draftActorRef: active.draftActorRef,
     }),
-    [resolvedChatId, snapshot.chat, snapshot.persistenceActorRef, active.draftActorRef],
+    [resolvedChatId, snapshot.persistenceActorRef, active.draftActorRef],
   );
 }
 
@@ -161,10 +148,17 @@ export type CombinedChatState = {
   agentInvocations: string;
   /** The transcript's load state (I21): the lane draws no empty-chat state while it is `loading`. */
   transcript: ChatTranscriptState;
+  /**
+   * The newest request in `messages` while it is still on its way to the host: shown as sent, but not yet a turn of
+   * the transcript, so it cannot be edited or rated yet.
+   */
+  departingMessageId: string | undefined;
+  /** What the chat says while a send waits for its host to take it (PERF-5). */
+  hostWait: string | undefined;
   /** The composer trays whose height the lane reserves while their reads are pending (U10). */
   rememberedComposerTrays: readonly ComposerTray[];
-  status: ChatInstance['status'];
-  error: Error | undefined;
+  /** The run phase, else the command in flight (T3). */
+  status: ChatStatus;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
   /** Durable host facts and the current read-only attachment, not SDK stream state. */
@@ -183,6 +177,8 @@ export type CombinedChatState = {
   activeKernel: KernelId | undefined;
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
@@ -249,10 +245,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   );
   const getSnapshot = useCallback((): T => {
     const session = store.get(activeChatId);
-    const chat = session?.chat;
     const messages = session?.messages ?? emptyMessages;
     const projection = store.getProjection(activeChatId);
-    const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
+    const status = store.getChatStatus(activeChatId);
     const draftContext = draftActorRef.getSnapshot().context;
     const persistenceContext = persistenceActorRef?.getSnapshot().context;
     const state: CombinedChatState = {
@@ -270,9 +265,10 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
         return store.getMessagePresentation(activeChatId).agentInvocations;
       },
       transcript: selectChatTranscript(session),
+      departingMessageId: store.departingSendOf(activeChatId),
+      hostWait: store.hostWaitOf(activeChatId),
       rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
       status,
-      error: chat?.error,
       persistedError: persistenceContext?.persistedError,
       projection,
       attachmentStatus: store.getAttachmentStatus(activeChatId),
@@ -282,6 +278,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       activeKernel: persistenceContext?.activeKernel,
       draftText: draftContext.draftText,
       draftAttachments: draftContext.draftAttachments,
+      draftAnnotations: draftContext.draftAnnotations,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
@@ -330,6 +327,8 @@ export function useChatById<T>(chatId: string, selector: (state: CombinedChatSta
 export type DraftState = {
   draftText: string;
   draftAttachments: readonly DraftAttachment[];
+  /** The new-message draft's comments and annotated pictures. */
+  draftAnnotations: MessageAnnotations | undefined;
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
@@ -367,6 +366,7 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
     () => ({
       draftText: draftContext.draftText,
       draftAttachments: draftContext.draftAttachments,
+      draftAnnotations: draftContext.draftAnnotations,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
@@ -399,6 +399,8 @@ export type DraftAttachmentOptions = {
   readonly preserveOriginal?: boolean;
   /** The picked, dropped or pasted file's declared `type`, for the intake counter; the bytes decide the label (I1). */
   readonly declaredType?: string;
+  /** The annotated image this attachment is the picture of: once stored, that image names it. */
+  readonly annotationImageId?: string;
 };
 
 const sourceFields = (
@@ -420,6 +422,8 @@ export type DraftActions = {
    */
   addDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeDraftAttachment: (index: number) => void;
+  /** Replace the new-message draft's comments and annotated pictures; a record over a limit is refused. */
+  setDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
   clearDraft: () => void;
@@ -448,6 +452,9 @@ export function useDraftActions(): DraftActions {
       },
       removeDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeDraftAttachment', index });
+      },
+      setDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setDraftAnnotations', annotations });
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
@@ -510,7 +517,6 @@ export type ChatActions = DraftActions & {
    */
   continueChat: () => void;
   stop: (origin: StopOrigin) => void;
-  setMessages: (messages: MyUIMessage[]) => void;
   editMessage: (
     messageId: string,
     content: string,
@@ -569,8 +575,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!requireSession('sendMessage')) {
           return;
         }
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
-        const outgoingMessage = message as MyUIMessage;
+        const outgoingMessage = message;
         /* I5: the composer is this message's only copy until the dispatch
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
@@ -605,17 +610,13 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         store.stopRun(resolvedChatId, origin);
       },
-      setMessages(messages: MyUIMessage[]) {
-        const session = requireSession('setMessages');
-        if (!session) {
-          return;
-        }
-        store.replaceMessages(resolvedChatId, messages);
-      },
-
       startEditingMessage(messageId: string, originalMessage?: MyUIMessage) {
         const session = resolveSession();
-        const resolved = originalMessage ?? session?.messages.find((m) => m.id === messageId);
+        const resolved =
+          originalMessage ??
+          (session === undefined
+            ? undefined
+            : store.getCurrentTranscript(resolvedChatId).find((m) => m.id === messageId));
         draftActorRef.send({ type: 'startEditingMessage', messageId, originalMessage: resolved });
       },
 
@@ -625,7 +626,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        if (!session.messages.some((m) => m.id === messageId)) {
+        if (!store.getCurrentTranscript(resolvedChatId).some((m) => m.id === messageId)) {
           return;
         }
         void store.requestTurn(resolvedChatId, {

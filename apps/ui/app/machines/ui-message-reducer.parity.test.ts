@@ -1,16 +1,18 @@
 /**
- * The transcript fold's last step against the pinned AI SDK (use_skill startup latency blueprint, T1, I-4): after
- * every row and live event of every fixture log and replay sequence, `reduceChunks` shows what the SDK's own readers
- * show for the same chunks, except for the deviations named here. The SDK is the oracle until T4 freezes its answers.
+ * The transcript fold's last step against the AI SDK's answers, frozen (use_skill startup latency blueprint, T1, T4,
+ * I-4): after every row and live event of every fixture log and replay sequence, `reduceChunks` shows what the pinned
+ * SDK's readers showed for the same chunks when T4 removed them, except for D1 below. The answers are content hashes in
+ * `__fixtures__/ui-message-reducer.parity.json`, one per distinct chunk sequence and per partial-JSON text; a chunk
+ * sequence with no frozen answer fails, so a new fixture row cannot pass unseen. Regenerate the file only against the
+ * SDK oracle this test replaced (git history of this file, T1), never from `reduceChunks` itself.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { createUIMessageStream, parsePartialJson as sdkParsePartialJson, readUIMessageStream } from 'ai';
-import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
+import type { UIMessageChunk } from 'ai';
 import type { AgentLiveEvent } from '@taucad/agent-host';
-import type { MyUIMessage } from '@taucad/chat';
 import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
 import type { ChunkReduction } from '@taucad/chat-ui/services/ui-message-reducer';
 import { parsePartialJson } from '@taucad/chat-ui/utils/partial-json';
@@ -19,104 +21,22 @@ import type { ChatProjection, ChatProjectionEvent, ProjectedChunks } from '#mach
 import { logRow, prestartedSkillPairRows } from '#machines/chat-projection.fixture.js';
 
 // ===========================================================================
-// Oracles: the two SDK readers the page runs today
+// Frozen answers of the pinned SDK readers (T4)
 // ===========================================================================
 
-type Oracle = Readonly<{ message: MyUIMessage | undefined; error?: string }>;
+const here = dirname(import.meta.filename);
 
-/** The live chat's reader, as `materializeRun` and the run watch drive it: failure rows are the ledger's, not parts. */
-const readOracle = async (chunks: readonly UIMessageChunk[]): Promise<Oracle> => {
-  const stream = new ReadableStream<UIMessageChunk>({
-    start(controller) {
-      for (const chunk of chunks) {
-        if (chunk.type !== 'error') {
-          controller.enqueue(chunk);
-        }
-      }
-      controller.close();
-    },
-  });
-  let message: MyUIMessage | undefined;
-  try {
-    for await (const next of readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
-      message = next;
-    }
-  } catch (error) {
-    return { message, error: String(error) };
-  }
-  return { message };
-};
+type Frozen = Readonly<{
+  /** Chunk sequence hash → [message hash, skipped count]. */
+  messages: Readonly<Record<string, readonly [string, number]>>;
+  /** Partial-JSON text hash → hash of the parsed value of each of its prefixes, in order. */
+  partialJson: Readonly<Record<string, string>>;
+}>;
 
-/** Whether `materializeRun` reads these chunks through the finished-stream path instead. */
-const finishedEligible = (chunks: readonly UIMessageChunk[]): boolean => {
-  const last = chunks.at(-1);
-  return (
-    last?.type === 'finish' &&
-    last.messageMetadata !== undefined &&
-    last.messageMetadata !== null &&
-    chunks.some((chunk) => chunk.type === 'start') &&
-    chunks.every((chunk) => chunk.type !== 'start' || typeof chunk.messageId === 'string')
-  );
-};
+// oxlint-disable-next-line typescript/consistent-type-assertions -- The frozen fixture's shape is the type above.
+const frozen = JSON.parse(readFileSync(join(here, '__fixtures__/ui-message-reducer.parity.json'), 'utf8')) as Frozen;
 
-/** The finished-run path `materializeRun` uses for a completed run (`createUIMessageStream`'s finish message). */
-const finishOracle = async (chunks: readonly UIMessageChunk[]): Promise<Oracle> => {
-  let message: MyUIMessage | undefined;
-  const completed = createUIMessageStream<MyUIMessage>({
-    generateId: () => '',
-    execute({ writer }) {
-      for (const chunk of chunks) {
-        if (chunk.type !== 'error') {
-          // oxlint-disable-next-line typescript/consistent-type-assertions -- The projector's chunks are MyUIMessage chunks.
-          writer.write(chunk as InferUIMessageChunk<MyUIMessage>);
-        }
-      }
-    },
-    onFinish({ responseMessage }) {
-      message = structuredClone(responseMessage);
-    },
-  });
-  const reader = completed.getReader();
-  try {
-    for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- Drain the processor before reading its finish message.
-      const { done } = await reader.read();
-      if (done) {
-        break;
-      }
-    }
-  } catch (error) {
-    return { message, error: String(error) };
-  } finally {
-    reader.releaseLock();
-  }
-  return { message };
-};
-
-// ===========================================================================
-// Named deviations (each replaces the SDK behaviour with the assertion below)
-// ===========================================================================
-
-/**
- * D1, total: a chunk that does not fit (an output, approval or delta with no call or block) makes the SDK reader throw
- * and end the stream, and today's store then blocks the transcript. The fold skips that chunk, counts it, and shows
- * what the SDK shows for the same chunks without it.
- */
-const expectTotalDeviation = async (chunks: readonly UIMessageChunk[], ours: ChunkReduction): Promise<void> => {
-  expect(ours.skipped).toBeGreaterThan(0);
-  const fitting: UIMessageChunk[] = [];
-  let before: ChunkReduction | undefined;
-  for (const chunk of chunks) {
-    const after = reduceChunks([chunk], before);
-    if (after.skipped === (before?.skipped ?? 0)) {
-      fitting.push(chunk);
-    }
-    before = after;
-  }
-  const oracle = await readOracle(fitting);
-  expect(oracle.error).toBeUndefined();
-  expect(ours.message).toEqual(oracle.message);
-};
+const hash = (text: string): string => createHash('sha256').update(text).digest('base64url').slice(0, 16);
 
 // ===========================================================================
 // The harness: every chunk owner of a projection, after every event
@@ -152,25 +72,13 @@ const createParityCheck = () => {
   let compared = 0;
   let overlays = 0;
 
-  const checkOwner = async ({ key, chunks }: Owner, label: string): Promise<void> => {
+  const checkOwner = ({ key, chunks }: Owner, label: string): void => {
     const all = chunksOf(chunks);
     const ours = reduceChunks(all);
     compared++;
-    const oracle = await readOracle(all);
-    if (oracle.error === undefined) {
-      expect(ours.message, `${label}: ${key}`).toEqual(oracle.message);
-      expect(ours.skipped, `${label}: ${key}`).toBe(0);
-    } else {
-      await expectTotalDeviation(all, ours);
-    }
-    const finished = finishedEligible(all) ? await finishOracle(all) : undefined;
-    if (finished?.error === undefined) {
-      if (finished !== undefined) {
-        expect(ours.message, `${label}: ${key} (finished)`).toEqual(finished.message);
-      }
-    } else {
-      await expectTotalDeviation(all, ours);
-    }
+    const answer = frozen.messages[hash(JSON.stringify(all))];
+    expect(answer, `${label}: ${key} has no frozen SDK answer`).toBeDefined();
+    expect([hash(JSON.stringify(ours.message ?? null)), ours.skipped], `${label}: ${key}`).toEqual(answer);
     // A suffix continues the previous reduction to the same message.
     const prior = previous.get(key);
     if (prior !== undefined && sameChunks(prior.chunks, all.slice(0, prior.chunks.length))) {
@@ -180,12 +88,14 @@ const createParityCheck = () => {
     previous.set(key, { chunks: all, reduction: ours });
   };
 
-  const check = async (projection: ChatProjection, label: string): Promise<void> => {
+  const check = (projection: ChatProjection, label: string): void => {
     const changed = ownersOf(projection).filter(({ chunks }) => !checked.has(chunks));
     for (const { chunks } of changed) {
       checked.add(chunks);
     }
-    await Promise.all(changed.map(async (owner) => checkOwner(owner, label)));
+    for (const owner of changed) {
+      checkOwner(owner, label);
+    }
     // Overlay: once the live overlay holds nothing the log does not, it shows what the durable chunks show.
     const { live } = projection;
     const view = live === undefined ? undefined : projection.views[live.runId];
@@ -213,15 +123,14 @@ const batchOf = (rows: readonly unknown[], cursor: number, endCursor: number): C
 });
 
 /** Fold each row as its own batch, checking parity after each, then the whole log as one batch. */
-const replay = async (rows: readonly unknown[], name: string) => {
+const replay = (rows: readonly unknown[], name: string) => {
   const parity = createParityCheck();
   let state = initialChatProjection;
   for (const [at, row] of rows.entries()) {
     state = reduceChatProjection(state, batchOf([row], at, rows.length)).state;
-    // oxlint-disable-next-line no-await-in-loop -- Parity is checked after each row, in log order.
-    await parity.check(state, `${name} row ${String(at)}`);
+    parity.check(state, `${name} row ${String(at)}`);
   }
-  await parity.check(reduceChatProjection(initialChatProjection, batchOf(rows, 0, rows.length)).state, `${name} whole`);
+  parity.check(reduceChatProjection(initialChatProjection, batchOf(rows, 0, rows.length)).state, `${name} whole`);
   return parity.counts();
 };
 
@@ -229,7 +138,6 @@ const replay = async (rows: readonly unknown[], name: string) => {
 // Inputs
 // ===========================================================================
 
-const here = dirname(import.meta.filename);
 const chatLogRoot = join(here, '../../../../packages/agent-host/specs/ChatLog');
 
 const readRows = (path: string): unknown[] =>
@@ -348,13 +256,12 @@ const steeringMidStream = (): readonly ChatProjectionEvent[] => {
   ];
 };
 
-const replayEvents = async (events: readonly ChatProjectionEvent[], name: string) => {
+const replayEvents = (events: readonly ChatProjectionEvent[], name: string) => {
   const parity = createParityCheck();
   let state = initialChatProjection;
   for (const [index, event] of events.entries()) {
     state = reduceChatProjection(state, event).state;
-    // oxlint-disable-next-line no-await-in-loop -- Parity is checked after each event, in order.
-    await parity.check(state, `${name} event ${String(index)}`);
+    parity.check(state, `${name} event ${String(index)}`);
   }
   return parity.counts();
 };
@@ -363,29 +270,34 @@ const replayEvents = async (events: readonly ChatProjectionEvent[], name: string
 // Tests
 // ===========================================================================
 
-describe('reduceChunks parity with the pinned AI SDK reader (T1)', () => {
-  it('should show what the SDK shows after every row of every fixture log', async () => {
-    const counts = await Promise.all(fixtureLogs().map(async ([name, rows]) => replay(rows, name)));
+describe('reduceChunks parity with the frozen AI SDK reader answers (T1, T4)', () => {
+  it('should show what the SDK showed after every row of every fixture log', () => {
+    const counts = fixtureLogs().map(([name, rows]) => replay(rows, name));
     expect(counts.reduce((total, { compared }) => total + compared, 0)).toBeGreaterThan(100);
   });
 
-  it('should show what the SDK shows after every row and live event of Run D', async () => {
-    const { compared, overlays } = await replayEvents(prestartedPairEvents(), 'Run D');
+  it('should show what the SDK showed after every row and live event of Run D', () => {
+    const { compared, overlays } = replayEvents(prestartedPairEvents(), 'Run D');
     expect(compared).toBeGreaterThan(10);
     expect(overlays).toBeGreaterThan(0);
   });
 
-  it('should show what the SDK shows after every row of Run D folded row by row', async () => {
-    const { compared } = await replay(prestartedSkillPairRows(), 'Run D rows');
+  it('should show what the SDK showed after every row of Run D folded row by row', () => {
+    const { compared } = replay(prestartedSkillPairRows(), 'Run D rows');
     expect(compared).toBeGreaterThan(5);
   });
 
-  it('should show what the SDK shows when a steering input folds while text streams', async () => {
-    const { compared } = await replayEvents(steeringMidStream(), 'steering');
+  it('should show what the SDK showed when a steering input folds while text streams', () => {
+    const { compared } = replayEvents(steeringMidStream(), 'steering');
     expect(compared).toBeGreaterThan(5);
   });
 
-  it('should skip and count an output with no call where the SDK throws (D1)', async () => {
+  /*
+   * D1, total: a chunk that does not fit (an output, approval or delta with no call or block) made the SDK reader throw
+   * ("No tool invocation found") and end the stream, and the store then blocked the transcript. The fold skips that
+   * chunk, counts it, and shows what the SDK showed for the same chunks without it.
+   */
+  it('should skip and count an output with no call where the SDK throws (D1)', () => {
     const chunks: UIMessageChunk[] = [
       { type: 'start', messageId: 'm' },
       { type: 'text-start', id: 't' },
@@ -394,14 +306,14 @@ describe('reduceChunks parity with the pinned AI SDK reader (T1)', () => {
       { type: 'text-delta', id: 'missing-block', delta: 'lost' },
       { type: 'text-delta', id: 't', delta: ' after' },
     ];
-    const oracle = await readOracle(chunks);
-    expect(oracle.error).toContain('No tool invocation found');
-
     const ours = reduceChunks(chunks);
 
     expect(ours.skipped).toBe(2);
-    expect(ours.message?.parts).toEqual([{ type: 'text', text: 'Before after', state: 'streaming' }]);
-    await expectTotalDeviation(chunks, ours);
+    expect(ours.message).toEqual({
+      id: 'm',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Before after', state: 'streaming' }],
+    });
   });
 });
 
@@ -469,7 +381,7 @@ const generatedJson = (): string[] => {
   ];
 };
 
-describe('parsePartialJson parity with the pinned AI SDK (T1)', () => {
+describe('parsePartialJson parity with the frozen AI SDK answers (T1, T4)', () => {
   const corpus = [
     ...new Set([
       ...fixtureLogs().flatMap(([, rows]) => toolInputsOf(rows)),
@@ -478,25 +390,23 @@ describe('parsePartialJson parity with the pinned AI SDK (T1)', () => {
     ]),
   ];
 
-  it('should parse every prefix of every fixture tool input and generated text as the SDK does', async () => {
+  it('should parse every prefix of every fixture tool input and generated text as the SDK did', () => {
     expect(corpus.length).toBeGreaterThan(100);
     let prefixes = 0;
     for (const text of corpus) {
+      const values: string[] = [];
       for (let end = 0; end <= text.length; end++) {
-        const prefix = text.slice(0, end);
-        // oxlint-disable-next-line no-await-in-loop -- The SDK parser is asynchronous; prefixes are compared in order.
-        const { value } = await sdkParsePartialJson(prefix);
-        expect(parsePartialJson(prefix), JSON.stringify(prefix)).toEqual(value);
+        values.push(String(JSON.stringify(parsePartialJson(text.slice(0, end)))));
         prefixes++;
       }
+      const answer = frozen.partialJson[hash(text)];
+      expect(answer, `${JSON.stringify(text)} has no frozen SDK answer`).toBeDefined();
+      expect(hash(values.join('\n')), JSON.stringify(text)).toBe(answer);
     }
     expect(prefixes).toBeGreaterThan(5000);
   });
 
-  it('should reject a prototype-polluting key as the SDK does', async () => {
-    const text = '{"__proto__": {"polluted": true}}';
-    const sdk = await sdkParsePartialJson(text);
-    expect(sdk.value).toBeUndefined();
-    expect(parsePartialJson(text)).toBeUndefined();
+  it('should reject a prototype-polluting key as the SDK did', () => {
+    expect(parsePartialJson('{"__proto__": {"polluted": true}}')).toBeUndefined();
   });
 });

@@ -86,14 +86,24 @@ export type MockBrowserCall =
   | 'stream'
   | 'slice';
 
-/** A `File` whose reads report themselves as browser calls. */
-const countedFile = (file: File, onBrowserCall: MockRootHandleOptions['onBrowserCall']): File => {
+/**
+ * A `File` or `Blob` whose reads report themselves as browser calls. A `slice()` is decorated too, so a range read
+ * through it (`slice(…).stream()`) is counted as well.
+ *
+ * @param blob - The file, or a blob sliced from it.
+ * @param onBrowserCall - The root's browser-call observer; none leaves the blob as it is.
+ * @returns The same blob, its reads counted.
+ */
+const countedBlob = <Counted extends Blob>(
+  blob: Counted,
+  onBrowserCall: MockRootHandleOptions['onBrowserCall'],
+): Counted => {
   if (onBrowserCall === undefined) {
-    return file;
+    return blob;
   }
-  for (const call of ['arrayBuffer', 'text', 'stream', 'slice'] as const) {
-    const original = file[call].bind(file) as (...arguments_: unknown[]) => unknown;
-    Object.defineProperty(file, call, {
+  for (const call of ['arrayBuffer', 'text', 'stream'] as const) {
+    const original = blob[call].bind(blob) as (...arguments_: unknown[]) => unknown;
+    Object.defineProperty(blob, call, {
       configurable: true,
       value: (...arguments_: unknown[]): unknown => {
         onBrowserCall(call);
@@ -101,7 +111,15 @@ const countedFile = (file: File, onBrowserCall: MockRootHandleOptions['onBrowser
       },
     });
   }
-  return file;
+  const slice = blob.slice.bind(blob);
+  Object.defineProperty(blob, 'slice', {
+    configurable: true,
+    value: (...arguments_: Parameters<Blob['slice']>): Blob => {
+      onBrowserCall('slice');
+      return countedBlob(slice(...arguments_), onBrowserCall);
+    },
+  });
+  return blob;
 };
 
 /** Each directory's child table, so a file handle can move itself between directories. */
@@ -296,7 +314,7 @@ class MockFileHandle {
     if (this._parent.get(this.name) !== this._entry) {
       throw new DOMException(`File not found: ${this.name}`, 'NotFoundError');
     }
-    return countedFile(
+    return countedBlob(
       new File([this._entry.content], this.name, {
         lastModified: this._entry.lastModified,
       }),

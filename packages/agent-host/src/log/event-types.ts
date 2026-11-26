@@ -167,11 +167,20 @@ export type ProviderMessage =
  * @returns Whether it is what the person said.
  * @public
  */
-export const isPersonsMessage = (message: ProviderMessage): boolean => {
-  if (message.role !== 'user') {
-    return false;
-  }
-  const kind = message.metadata?.tauInternal?.['kind'];
+export const isPersonsMessage = (message: ProviderMessage): boolean =>
+  message.role === 'user' && isPersonsMetadata(message.metadata);
+
+/**
+ * Whether a user row's metadata leaves it the person's words: it carries no Tau-internal kind, or one that marks the
+ * person's own message (an external agent's turn, or a turn its run abandoned). The one kind rule `isPersonsMessage`
+ * and the model's context (`isPersonsContextMessage`) both read.
+ *
+ * @param metadata - A user row's durable metadata, if any.
+ * @returns Whether the row is what the person said.
+ * @internal
+ */
+export const isPersonsMetadata = (metadata: ProviderMessageMetadata | undefined): boolean => {
+  const kind = metadata?.tauInternal?.['kind'];
   return kind === undefined || kind === 'external-agent' || kind === abandonedTurnKind;
 };
 

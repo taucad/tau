@@ -26,6 +26,11 @@
       "import": "./src/utils/index.ts",
       "default": "./src/utils/index.ts"
     },
+    "./annotations": {
+      "types": "./src/annotations/index.ts",
+      "import": "./src/annotations/index.ts",
+      "default": "./src/annotations/index.ts"
+    },
     "./references": {
       "types": "./src/references/index.ts",
       "import": "./src/references/index.ts",

@@ -16,6 +16,7 @@ import {
   useLayoutEffect,
   useReducer,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { useSelector } from '@xstate/react';
@@ -24,7 +25,7 @@ import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { recoveryActions } from '#lib/recovery-actions.js';
-import type { RecoveryActionId } from '#lib/recovery-actions.js';
+import type { RecoveryAction, RecoveryActionId } from '#lib/recovery-actions.js';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type {
@@ -676,9 +677,10 @@ function databaseNoticeCopy(errorName: string): Readonly<{
   switch (errorName) {
     case 'VersionError': {
       return {
+        /* D3: the database is not damaged, only newer. Updating brings the folders back; a reset would only lose them. */
         description:
-          'A newer Tau opened the database this device keeps. Home is open and your files are safe. Update Tau to bring back your folders, or reset the database.',
-        actions: ['updateTau', 'resetLocalDatabase', 'resetFolderList', 'showLogs'],
+          'A newer Tau opened the database this device keeps. Home is open and your files are safe. Update Tau to bring back your folders.',
+        actions: ['updateTau', 'showLogs', 'troubleshooting'],
         offersRetry: false,
       };
     }
@@ -710,12 +712,42 @@ function databaseNoticeCopy(errorName: string): Readonly<{
  */
 function DatabaseNotice({ fileManagerRef }: { readonly fileManagerRef: FileManagerRef }): React.ReactNode {
   const degraded = useSelector(fileManagerRef, (state) => state.context.degraded);
+  /* An action that cannot be undone, waiting for its confirmation. */
+  const [confirming, setConfirming] = useState<RecoveryAction>();
   if (degraded?.input !== 'records') {
     return undefined;
   }
   const title = "Tau's local database is unavailable";
   const copy = databaseNoticeCopy(degraded.errorName);
   const actions = recoveryActions(copy.actions);
+  if (confirming?.kind === 'run' && confirming.confirm !== undefined) {
+    const { run } = confirming;
+    return (
+      <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+        <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+        <p className='min-w-0 flex-1 text-sm'>{confirming.confirm.question}</p>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={() => {
+            setConfirming(undefined);
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type='button'
+          variant='destructive'
+          onClick={() => {
+            setConfirming(undefined);
+            void run();
+          }}
+        >
+          {confirming.confirm.label}
+        </Button>
+      </div>
+    );
+  }
   return (
     <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
       <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
@@ -731,7 +763,11 @@ function DatabaseNotice({ fileManagerRef }: { readonly fileManagerRef: FileManag
             type='button'
             variant='outline'
             onClick={() => {
-              void action.run();
+              if (action.confirm === undefined) {
+                void action.run();
+              } else {
+                setConfirming(action);
+              }
             }}
           >
             {action.label}

@@ -1,5 +1,5 @@
 {
-  "$comment": "What each library mutation may ask of the filesystem authority on the 386-directory profile (project-library fast-path blueprint FW0), held by discovery-budget.test.ts. A ceiling only goes down: a count above it fails, and a count below it fails until the ceiling is lowered to match. `scan` and `verification` are what one full discovery scan and one targeted route verification cost on the profile, measured by packages/filesystem/src/project-directories.discovery-cost.test.ts; a change there changes them here. A discovery read is a file read or listing made to learn what a project directory holds.",
+  "$comment": "What each library mutation may ask of the filesystem authority on the 386-directory profile (project-library fast-path blueprint FW0), held by discovery-budget.test.ts. A ceiling only goes down: a count above it fails, and a count below it fails until the ceiling is lowered to match. `scan` and `verification` are what one full discovery scan and one targeted route verification cost on the profile, measured and held to these figures by packages/filesystem/src/project-directories.discovery-cost.test.ts; a change there changes them here. A discovery read is a file read or listing made to learn what a project directory holds. A record read is one `tau.json` read through the record client, outside a scan or a verification.",
   "profile": {
     "home": 84,
     "workspace": 302,
@@ -19,84 +19,98 @@
     "delete-copy": {
       "scans": 2,
       "verifications": 1,
+      "recordReads": 0,
       "discoveryReads": 1550,
       "browserCalls": 4656
     },
     "permanent-delete": {
       "scans": 2,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 1548,
       "browserCalls": 4648
     },
     "use-this-folder": {
       "scans": 2,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 1548,
       "browserCalls": 4648
     },
     "create": {
       "scans": 2,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 1548,
       "browserCalls": 4648
     },
     "duplicate": {
       "scans": 2,
       "verifications": 0,
+      "recordReads": 1,
       "discoveryReads": 1548,
       "browserCalls": 4648
     },
     "rename": {
       "scans": 1,
       "verifications": 0,
+      "recordReads": 1,
       "discoveryReads": 774,
       "browserCalls": 2324
     },
     "trash": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "restore": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "chat-create": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "chat-soft-delete": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "chat-delete": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "chat-purge": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "chat-recency": {
       "scans": 0,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 0,
       "browserCalls": 0
     },
     "window-focus": {
       "scans": 1,
       "verifications": 0,
+      "recordReads": 0,
       "discoveryReads": 774,
       "browserCalls": 2324
     }

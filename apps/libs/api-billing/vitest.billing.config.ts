@@ -1,4 +1,4 @@
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** Only the test-owned launcher supplies this suite's database; dotenv loading is disabled. */
@@ -8,6 +8,7 @@ export default defineConfig({
   cacheDir: '../../../node_modules/.vite/apps/libs/api-billing-foundation',
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
     globalSetup: ['./src/testing/billing-foundation.setup.ts'],

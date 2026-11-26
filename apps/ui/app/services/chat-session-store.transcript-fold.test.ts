@@ -5,13 +5,11 @@
  * transcript is a synchronous fold of the projection, so a committed result shows without waiting for a later step.
  */
 
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentLiveEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSession } from '#services/chat-session-store.js';
-import * as Projection from '#machines/chat-projection.logic.js';
 import { mock } from 'vitest-mock-extended';
 import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import {
@@ -29,10 +27,6 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
-beforeAll(async () => {
-  await loadChatSdk();
-});
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -43,11 +37,14 @@ afterEach(() => {
 
 const chatId = 'chat';
 
-const createStore = (): ChatSessionStore => {
+/** A store whose filesystem holds `files` (other devices' segments) by path, and nothing else. */
+const createStore = (files: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map()): ChatSessionStore => {
   const store = new ChatSessionStore();
   const missing = async (): Promise<never> => {
     throw Object.assign(new Error('Missing record'), { code: 'ENOENT' });
   };
+  const under = (directory: string): string[] =>
+    [...files.keys()].flatMap((path) => (path.startsWith(`${directory}/`) ? [path.slice(directory.length + 1)] : []));
   store.setDependencies({
     getChat: async () => ({ id: chatId, resourceId: 'project', name: '', messages: [], createdAt: 0, updatedAt: 0 }),
     patchChat: async () => undefined,
@@ -55,8 +52,8 @@ const createStore = (): ChatSessionStore => {
     consumeChatStartupRequest: async () => undefined,
     commitCancelledDraftRestore: async () => undefined,
     client: {
-      readFile: missing,
-      readdir: async () => [],
+      readFile: async (path: string) => files.get(path) ?? missing(),
+      readdir: async (path: string) => under(path),
       exists: async () => false,
       writeFile: async () => undefined,
       rmdir: async () => undefined,
@@ -127,6 +124,11 @@ const openReader = async (): Promise<Reader> => {
       await settle();
       record();
     }
+    /* The transcript a reader sees moves at most every 50 ms (D-UI-10): let the trailing announcement land. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 60);
+    });
+    record();
   };
   return {
     store,
@@ -613,7 +615,10 @@ describe('displayed transcript replay cases (T2)', () => {
       publishLogPage(reader.store, chatId, runD.slice(4), { cursor: 4, endCursor: runD.length });
       await settle();
 
-      expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      /* The reread's end shows with the next transcript announcement (D-UI-10). */
+      await vi.waitFor(() => {
+        expect(textOf(reader.session.messages)).toBe('Building the washer.');
+      });
       expectNoRegression([...reader.seen, reader.session.messages]);
     } finally {
       reader.dispose();
@@ -719,9 +724,45 @@ describe('displayed transcript replay cases (T2)', () => {
     expect(shown).toEqual(logged);
   });
 
-  it('should show the transcript when the SDK cannot reconstruct the run', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.spyOn(Projection, 'materializeTranscript').mockRejectedValue(new Error('No tool invocation found'));
+  it("should settle the parts of Run D arriving through another device's segment", async () => {
+    const segment = `/projects/project/.tau/chats/${chatId}/events/peer.jsonl`;
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const write = (rows: readonly unknown[]): void => {
+      files.set(segment, new TextEncoder().encode(rows.map((row) => `${JSON.stringify(row)}\n`).join('')));
+    };
+    const store = createStore(files);
+    const session = store.acquire(chatId, 'project');
+    try {
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      publishLogRows(store, chatId, []);
+      write(runD.slice(0, 9));
+      await store.refreshRemoteSegments(chatId, 'project');
+      await vi.waitFor(() => {
+        expect(toolsOf(session.messages)).toEqual({
+          'skill-a': { state: 'input-available' },
+          'skill-b': { state: 'input-available' },
+        });
+      });
+      expect(store.getProjection(chatId)?.remote?.views['run_1']).toBeDefined();
+
+      write(runD);
+      await store.refreshRemoteSegments(chatId, 'project');
+
+      await vi.waitFor(() => {
+        expect(toolsOf(session.messages)).toEqual({
+          'skill-a': { state: 'output-available', output: 'skill-a instructions' },
+          'skill-b': { state: 'output-available', output: 'skill-b instructions' },
+        });
+      });
+      expect(textOf(session.messages)).toBe('Building the washer.');
+    } finally {
+      store.release(chatId);
+    }
+  });
+
+  it('should show the transcript with no SDK reader on its path (T4)', async () => {
     const reader = await openReader();
     try {
       await reader.run(rowsOf([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], runD));

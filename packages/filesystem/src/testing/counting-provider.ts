@@ -95,11 +95,15 @@ const insideCall = new AsyncLocalStorage<true>();
 
 /** One method replaced by a wrapper that tallies its calls in the current window and delegates. */
 const countMethod = (
-  target: Record<string, unknown>,
+  target: FileSystemProvider,
   name: string,
   tally: { calls: Map<string, number>; kinds: Map<ProviderCallKind, number> },
 ): void => {
-  const original = target[name] as (...arguments_: unknown[]) => unknown;
+  const method: unknown = Reflect.get(target, name);
+  if (typeof method !== 'function') {
+    return;
+  }
+  const original = method as (...arguments_: unknown[]) => unknown;
   Object.defineProperty(target, name, {
     configurable: true,
     writable: true,
@@ -124,10 +128,9 @@ const countMethod = (
  */
 export const countProviderCalls = (provider: FileSystemProvider): CountingProvider => {
   const tally = { calls: new Map<string, number>(), kinds: new Map<ProviderCallKind, number>() };
-  const target = provider as unknown as Record<string, unknown>;
-  const names = methodNames(provider).filter((name) => !Object.hasOwn(target, name));
+  const names = methodNames(provider).filter((name) => !Object.hasOwn(provider, name));
   for (const name of names) {
-    countMethod(target, name, tally);
+    countMethod(provider, name, tally);
   }
   const sum = (filter: (name: string) => boolean): number => {
     let total = 0;
@@ -158,7 +161,7 @@ export const countProviderCalls = (provider: FileSystemProvider): CountingProvid
     },
     restore: () => {
       for (const name of names) {
-        Reflect.deleteProperty(target, name);
+        Reflect.deleteProperty(provider, name);
       }
     },
   };

@@ -28,11 +28,13 @@ expectTypeOf<DraftEvent['type']>().toEqualTypeOf<
   | 'clearEditDraft'
   | 'clearMessageEdit'
   | 'flushNow'
+  | 'setDraftAnnotations'
+  | 'setEditDraftAnnotations'
   | 'imageResized'
   | 'attachmentStored'
 >();
 expectTypeOf<DraftEmitted['type']>().toEqualTypeOf<
-  'imageResizeFailed' | 'attachmentStoreFailed' | 'attachmentRefused'
+  'imageResizeFailed' | 'attachmentStoreFailed' | 'attachmentRefused' | 'annotationsRefused'
 >();
 
 // Drafts hold references, never data URLs; a stored attachment is a draft attachment.

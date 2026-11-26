@@ -27,7 +27,7 @@ const modelIds: readonly string[] = [
     .filter((entry) => isModelListEntryEnabled(entry))
     .map(({ id }) => id),
   'anthropic-claude-sonnet-5.5',
-  'openai-gpt-5.6-luna',
+  'openai-gpt-6-luna',
   'xai-grok-4.7',
 ];
 

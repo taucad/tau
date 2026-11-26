@@ -97,7 +97,7 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ? {
         inputCounters: new Map([
           [
-            'openai-gpt-5.6-luna',
+            'openai-gpt-6-luna',
             {
               qualification: 'controlled-local-zero',
               environment: 'development',
@@ -123,7 +123,7 @@ try {
     attempt: { version: 1, key: command.attemptKey },
     providerWire: 'openai-responses',
     body: {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       stream: true,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI Responses wire field
       max_output_tokens: 1,

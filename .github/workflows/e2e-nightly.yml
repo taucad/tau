@@ -7,20 +7,22 @@ name: E2E nightly
 # `test:e2e:desktop:live` and the live GitHub account rows `test:e2e:live:github`,
 # C10 and A4) do not run here: they skipped every night for want of a runner or
 # secrets, and their home is the release gate (CI decomposition global review
-# 2026-11-24, ruling 12), which does not run them yet. Each night the suites run
-# against the head of `main`, with the GeoSpec engine installed from
+# 2026-11-24, ruling 12), which does not run them yet. It has no schedule (operator ruling Q4,
+# 2026-11-24): a row that is red every night on the same files is not coverage, so the workflow
+# runs on `workflow_dispatch` only, for an owner to prove a fix against the head of `main`, and the
+# file is deleted when the last owner issue closes. The GeoSpec engine installs from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
-# nightly, never a merge gate. A suite that passes five consecutive nightlies moves to ci.yml's
-# merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix.
-# `workflow_dispatch` takes an optional commit to run against instead, and `flag_state` runs the
+# run, never a merge gate. A suite that passed five consecutive runs moves to ci.yml's
+# merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix;
+# a later suite qualifies through a non-gating shadow row in the queue instead (operator ruling Q1).
+# A dispatch takes an optional commit to run against, and `flag_state` runs the
 # browser and desktop suites with every page opened in one of the four onboarding flag states
-# (`TAU_E2E_FLAG_STATE`, `apps/ui-e2e/src/support/flag-state.ts`); the schedule leaves it unset,
-# which is all-off. The packaged desktop suite runs on every staging candidate
-# (`desktop-packaged.yml`, called from `release-desktop-staging.yml`), not here (DS-4).
+# (`TAU_E2E_FLAG_STATE`, `apps/ui-e2e/src/support/flag-state.ts`); all-off by default.
+# Darwin `runtime-e2e` (#342) stays here until that issue closes, then moves to the desktop
+# candidate gate (`release-desktop-staging.yml`), as the Intel rows did (INTEL-1).
+# The packaged desktop suite runs on every staging candidate (`desktop-packaged.yml`, called from `release-desktop-staging.yml`), not here (DS-4).
 
 on:
-  schedule:
-    - cron: '23 13 * * *' # 13:23 UTC, 02:23 in New Zealand
   workflow_dispatch:
     inputs:
       sha:
@@ -89,9 +91,12 @@ jobs:
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
           # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
           # lane (`e2e-queue`) whenever its project is affected, so it is not run here. It never moves back.
+          # A shadow row (`test:e2e:shadow`, operator ruling Q1) runs in ci.yml's `e2e-shadow` lane on the same events,
+          # so its nightly row ends when its shadow row starts (CI decomposition global review, ruling 8).
           pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
-          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets["test:e2e:queue"].dependsOn // [] | .[]
-            | if type == "string" then "\($project):\(.)" else error("\($project):test:e2e:queue depends on \(tojson), not a target name") end]' \
+          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets as $targets
+            | ["test:e2e:queue", "test:e2e:shadow"][] as $list | $targets[$list].dependsOn // [] | .[]
+            | if type == "string" then "\($project):\(.)" else error("\($project):\($list) depends on \(tojson), not a target name") end]' \
             "$RUNNER_TEMP/graph.json")
           echo "Ratcheted into the merge queue: $ratcheted"
           add_suite() {

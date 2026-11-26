@@ -475,8 +475,9 @@ export const settledMarkerEnvelope = (
  *
  * The stream wrapper records a failed call as an assistant message carrying the
  * transport-failure diagnostic. Left in place, pi refuses to continue from an
- * assistant tail and the recovery reminder tells the model a network drop
- * cancelled tools that in fact settled. The marker takes one of two shapes:
+ * assistant tail and the recovery reminder tells the model its last reply
+ * failed, when the failure was the transport's and its tools in fact settled.
+ * The marker takes one of two shapes:
  * nothing ran after it, and retracting it restores the exact context the failed
  * call was built from; or a tool it had already started settled behind it, and
  * only its envelope can change ({@link settledMarkerEnvelope}) because a rewind

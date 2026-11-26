@@ -1,6 +1,8 @@
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { useChatContext } from '#hooks/use-chat.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { selectQueueStrip } from '#services/outbox-gate.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { ChatMessageQueueView } from '@taucad/chat-ui/components/chat-message-queue-view';
@@ -14,10 +16,16 @@ function ConnectedQueue({
 }): React.JSX.Element {
   const store = useChatSessionStore();
   const context = useSelector(actor, (snapshot) => snapshot.context);
+  /* A send nothing runs ahead of is in the thread, and a stopped one on its way back to the composer is neither: the
+   * strip shows only work waiting behind a turn. */
+  const subscribe = useCallback((listener: () => void) => store.subscribeChat(chatId, listener), [chatId, store]);
+  const readUnqueued = useCallback(() => store.unqueuedSendOf(chatId), [chatId, store]);
+  const unqueuedId = useSyncExternalStore(subscribe, readUnqueued, readUnqueued);
+  const { items, sendingId } = useMemo(() => selectQueueStrip(context, unqueuedId), [context, unqueuedId]);
   return (
     <ChatMessageQueueView
-      items={context.items}
-      {...(context.sendingId === undefined ? {} : { sendingId: context.sendingId })}
+      items={items}
+      {...(sendingId === undefined ? {} : { sendingId })}
       {...(context.error === undefined ? {} : { error: context.error })}
       onEdit={async (id, text) => store.editQueuedMessage(chatId, id, text)}
       onSteer={async (id) => store.steerQueuedMessage(chatId, id)}

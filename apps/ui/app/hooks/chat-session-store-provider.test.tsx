@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -29,30 +28,6 @@ const harness = vi.hoisted(() => ({
     readdir: vi.fn(async () => []),
     unlink: vi.fn(async () => undefined),
     rmdir: vi.fn(async () => undefined),
-  },
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id = '';
-    public messages = [];
-    public status = 'ready';
-    public error = undefined;
-    public sendMessage = vi.fn();
-    public regenerate = vi.fn();
-    public stop = vi.fn();
-    public '~registerMessagesCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerStatusCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerErrorCallback' = (): (() => void) => {
-      return () => undefined;
-    };
   },
 }));
 
@@ -147,12 +122,6 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
   }
 };
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 describe('ChatSessionStoreProvider', () => {
   beforeEach(() => {

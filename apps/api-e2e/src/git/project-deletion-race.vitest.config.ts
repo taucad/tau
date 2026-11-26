@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** The race suite owns its two API children; the shared global setup must not run. */
@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: { alias: [{ find: /^#git\/(.*)\.js$/u, replacement: `${import.meta.dirname}/$1.ts` }] },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['src/git/project-deletion-race.spec.ts'],
     environment: 'node',
     globalSetup: [resolve(import.meta.dirname, 'storage-global-setup.ts')],

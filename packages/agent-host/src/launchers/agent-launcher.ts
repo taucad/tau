@@ -18,7 +18,9 @@ import type { ExternalAgentPort } from '#host/external-agent.js';
 import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
-import type { EventLogAppender } from '#log/event-log-appender.js';
+import { v1Batch } from '#log/event-log-appender.js';
+import type { EventLogAppender, EventLogBatch } from '#log/event-log-appender.js';
+import { EventLogError } from '#log/event-log-error.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
@@ -90,6 +92,12 @@ export type AgentLauncherOptions = Readonly<{
   turnPlacement?: CreateTauAgentHostOptions['placement'];
   /** The host's timers (M1's idle eviction and bounds); the defaults when absent. */
   delays?: CreateTauAgentHostOptions['delays'];
+  /**
+   * How long, in milliseconds, before this launcher asks again for the claim of a chat whose log still shows a run no
+   * driver holds; each further ask waits twice as long, up to {@link driverlessRetryCeiling} times this.
+   * {@link driverlessRetryMilliseconds} when absent.
+   */
+  driverlessRetry?: number | undefined;
   /** The clock every incarnation runs on; the process's timers when absent. */
   clock?: CreateTauAgentHostOptions['clock'];
   /**
@@ -123,6 +131,14 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /**
+   * One bounded page of this device's own rows, answered at once: from this process's writer while it holds one, else
+   * from the log's bytes as they are. Like {@link AgentLauncher.read} it takes no lock and assumes no leadership
+   * (RH-R1), so it is how an observer reads a chat, whether or not a run of it is live.
+   */
+  readEvents(
+    input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+  ): Promise<EventLogBatch>;
   /** Immutable provisional catch-up pages followed by exact current-byte validation; cancellation releases the lease. */
   catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Read the current leadership actor only; never requests a lock or sends a chat command. */
@@ -263,6 +279,17 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
   };
 };
 
+/**
+ * How long the launcher waits before it asks again for the claim of a chat whose log still shows a run no driver
+ * holds, in milliseconds. The first ask is made at once.
+ *
+ * @internal
+ */
+export const driverlessRetryMilliseconds = 1000;
+
+/** The longest wait between two such asks, as a multiple of {@link driverlessRetryMilliseconds}. @internal */
+export const driverlessRetryCeiling = 32;
+
 const refused = (commandId: string, code: RefusalCode | string, message: string): CommandAnswer => ({
   commandId,
   generation: 0,
@@ -381,8 +408,14 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
    * parking past it. An entry lives only while a pass does.
    */
   const passes = new Map<string, { count: number; wakes: number; sourceWakes: number }>();
-  /** Chats some verb has named: the first one checks for a run with no driver (RH-R1, RH-R15). */
-  const named = new Set<string>();
+  /**
+   * Chats whose log shows a run no driver here holds, whose claim this launcher has asked for (RH-R1, RH-R15): how
+   * often, and the wait before the next ask while one runs. A claim that cannot end the run leaves the log as it was
+   * (storage still refuses the row, another process holds the writer), so the ask is repeated for as long as something
+   * reads the chat, each time after twice the wait.
+   */
+  const driverless = new Map<string, { asks: number; waiting: ReturnType<typeof setTimeout> | undefined }>();
+  const driverlessRetry = options.driverlessRetry ?? driverlessRetryMilliseconds;
   const stopped = new AbortController();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -560,6 +593,15 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
+    if (handed === undefined && leading.port?.opensWriter(chatId) === false) {
+      /* RH-R1: only a claim opens the writer. Anything else that reads through the host once the chat was relinquished
+       * (an observer's page read, a read parked across the relinquish) is refused here, rather than taking the chat's
+       * exclusive handle where no relinquish closes it and every later claim is refused `WRITER_LOCKED`. */
+      throw new EventLogError(
+        'LOG_CLOSED',
+        `This process does not hold chat ${chatId}'s writer, which opens only under the chat's lock. Read the chat through the launcher.`,
+      );
+    }
     const log = await (handed ?? binding.openWriter(chatId, writerOpen));
     writers.add(chatId);
     writerGenerations.set(chatId, createPortableId());
@@ -831,15 +873,43 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     })();
   }
 
-  /** RH-R1: the first verb naming a chat, and any attach, that finds a run no driver here holds asks for a claim. */
+  /** The chat's run has a driver, or has ended: nothing is owed an ask, and the next orphan starts its waits anew. */
+  const driven = (chatId: string): void => {
+    clearTimeout(driverless.get(chatId)?.waiting);
+    driverless.delete(chatId);
+  };
+
+  /**
+   * RH-R1: a verb that finds a run no driver here holds asks for the chat's claim, which abandons the run once it holds
+   * the chat's lock and writes nothing while another tab leads. Every pass over the bytes asks, not only the first to
+   * name the chat: a run that began after it loses its driver too, when its leader tab dies while this one watches, or
+   * when its log refuses a write for a reason that is not a fence and its incarnation closes. An ask the wait since the
+   * last one has not passed is skipped unless `always` (an attach); the wait's end wakes the chat's parked reads, whose
+   * next pass asks again.
+   */
   const checkDriver = (chatId: string, ledger: ChatLedger, always: boolean): boolean => {
-    const first = !named.has(chatId);
-    named.add(chatId);
-    if (!first && !always) {
-      return false;
-    }
     /* M1's own predicate (RH-R9): a paused external run and its pending interrupts are orphans too. */
     if (!isOrphaned(ledger) || writers.has(chatId)) {
+      driven(chatId);
+      return false;
+    }
+    const asked = driverless.get(chatId);
+    if (asked?.waiting === undefined && !closed) {
+      const entry: { asks: number; waiting: ReturnType<typeof setTimeout> | undefined } = {
+        asks: (asked?.asks ?? 0) + 1,
+        waiting: undefined,
+      };
+      entry.waiting = setTimeout(
+        () => {
+          entry.waiting = undefined;
+          wakeReads(chatId, 'source');
+        },
+        driverlessRetry * Math.min(2 ** (entry.asks - 1), driverlessRetryCeiling),
+      ); // Bound: driverlessRetryMilliseconds, doubled per ask up to driverlessRetryCeiling.
+      /* A wait never keeps a daemon's process open at shutdown (Node's timers). */
+      (entry.waiting as { unref?: () => void } | undefined)?.unref?.();
+      driverless.set(chatId, entry);
+    } else if (!always) {
       return false;
     }
     port.reconcile(chatId, { wait: true });
@@ -906,7 +976,6 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         'This Tau host is not paired with your account, so it cannot start a Tau run. Pair it (the `tau serve` terminal shows a code), then send the message again. Reading chats and external agents keep working.',
       );
     }
-    named.add(chatId);
     return port.execute(chatId, command, async (epoch) => {
       if (typeof epoch === 'number') {
         host.assumeLeadership(chatId, epoch);
@@ -1321,6 +1390,26 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
     },
+    readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
+      if (closed) {
+        throw Object.assign(new Error('The Tau agent launcher is closed.'), {
+          code: 'HOST_CLOSED' satisfies RefusalCode,
+        });
+      }
+      requireChatPathSegment(chatId);
+      if (writers.has(chatId)) {
+        try {
+          return await host.readEvents({ chatId, cursor, limit, maxBytes });
+        } catch (error) {
+          /* The writer closed under this read (the chat was relinquished): its rows are the bytes now. */
+          if ((error as { readonly code?: unknown }).code !== ('LOG_CLOSED' satisfies RefusalCode)) {
+            throw error;
+          }
+        }
+      }
+      const chat = await view(chatId);
+      return v1Batch(await chat.log.readBatch({ cursor, limit, maxBytes }));
+    },
     stoppability: (chatId) => port.stoppability(chatId),
     liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),
     admittedRuns: async () => {
@@ -1342,6 +1431,10 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           clearTimeout(timer);
         }
         retirements.clear();
+        for (const { waiting } of driverless.values()) {
+          clearTimeout(waiting);
+        }
+        driverless.clear();
         for (const observation of observations.values()) {
           observation.close();
         }

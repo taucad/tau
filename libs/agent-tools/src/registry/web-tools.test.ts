@@ -224,4 +224,56 @@ describe('createGatewayWebResearchClient', () => {
       code: 'WEB_RESEARCH_HTTP_401',
     });
   });
+
+  /* A request the gateway accepts and never answers, as a stalled edge leaves it: it settles only when its signal does. */
+  const neverAnswers = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+    const { promise, reject } = Promise.withResolvers<Response>();
+    const signal = init?.signal ?? new AbortController().signal;
+    const refuse = (): void => {
+      reject(signal.reason as Error);
+    };
+    if (signal.aborted) {
+      refuse();
+    }
+    signal.addEventListener('abort', refuse);
+    return promise;
+  });
+
+  it('should fail a request the gateway never answers once its deadline passes', async () => {
+    const client = createGatewayWebResearchClient({
+      baseUrl: 'https://api.tau.test',
+      fetch: neverAnswers,
+      answerMilliseconds: 20,
+    });
+
+    await expect(client.search({ query: 'q', signal: new AbortController().signal })).rejects.toMatchObject({
+      code: 'WEB_RESEARCH_TIMEOUT',
+    });
+  });
+
+  it('should give the model a coded timeout, not a held turn, when the gateway never answers', async () => {
+    const client = createGatewayWebResearchClient({
+      baseUrl: 'https://api.tau.test',
+      fetch: neverAnswers,
+      answerMilliseconds: 20,
+    });
+
+    const result = await invoke(client, toolName.webBrowser, { urls: ['https://x.test'] });
+
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'WEB_RESEARCH_TIMEOUT' } });
+  });
+
+  it('should report a Stop as the abort it is, not as a timeout', async () => {
+    const client = createGatewayWebResearchClient({
+      baseUrl: 'https://api.tau.test',
+      fetch: neverAnswers,
+      answerMilliseconds: 10_000,
+    });
+    const stop = new AbortController();
+
+    const searching = client.search({ query: 'q', signal: stop.signal });
+    stop.abort();
+
+    await expect(searching).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

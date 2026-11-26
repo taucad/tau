@@ -6,6 +6,11 @@ import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { parseAdmissionFailureForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { refusalOfGesture } from '#utils/run-auto-resume-plan.js';
+import type { RefusedGesture } from '#utils/run-auto-resume-plan.js';
+import { readIdentityState } from '#lib/identity-answer.js';
+import { errorCategory } from '@taucad/types/constants';
+import { errorCategoryTitles } from '@taucad/chat/utils';
 import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-placement.js';
@@ -94,6 +99,32 @@ const awaitCloudOpenWritten = async (projectId: string, signal?: AbortSignal): P
   }
 };
 
+/**
+ * Refuse a turn this document would host for a person the auth server has answered is signed out (launch audit N-5).
+ *
+ * The model gateway admits only a signed-in account, and the resident host calls it with this page's session. Without
+ * this check the session was first asked for by the gateway, one process and several seconds after the page had
+ * started the run and drawn it as working. The refusal is the gateway's own 401 as a `ChatError`, so it reaches the
+ * sign-in card. It fails open while the answer is unknown or unverified: the gateway stays the authority.
+ *
+ * @param modelName - The model's name, for the refusal.
+ * @throws The refusal, as an `Error` whose message is the `ChatError` JSON.
+ */
+const refuseSignedOutTurn = (modelName: string): void => {
+  if (readIdentityState() !== 'signed-out') {
+    return;
+  }
+  throw new Error(
+    JSON.stringify({
+      category: errorCategory.auth,
+      title: errorCategoryTitles[errorCategory.auth],
+      message: `Sign in to use ${modelName}.`,
+      code: 'UNAUTHENTICATED',
+      httpStatus: 401,
+    }),
+  );
+};
+
 /** The single admission path every verb of one chat goes through. @public */
 export type TurnAdmission = Readonly<{
   /**
@@ -104,8 +135,8 @@ export type TurnAdmission = Readonly<{
    * @returns The daemon a daemon-placed turn runs on; nothing for a browser-hosted one.
    */
   admitExecution: (turnExecution?: CadAgentExecution, signal?: AbortSignal) => Promise<ChatExecutionTarget>;
-  /** Surface a dropped dispatch on the same banner the transport errors use. */
-  surfaceDispatchFailure: (error: unknown) => void;
+  /** Surface a dropped dispatch on the same banner the transport errors use, as a refusal of the gesture it was. */
+  surfaceDispatchFailure: (error: unknown, gesture: RefusedGesture) => void;
 }>;
 
 /**
@@ -185,6 +216,10 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
             { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
           );
         }
+        /* N-5: a turn this document hosts runs on this page's session. A daemon runs on its own credential. */
+        if (daemonHostId === undefined) {
+          refuseSignedOutTurn(resolved.name);
+        }
         /* R9: a turn the account cannot fund is refused here, before any
          * turn is dispatched, with the same credits payload the
          * gateway's own 402 would have carried. An unavailable balance or a
@@ -200,7 +235,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   );
 
   const surfaceDispatchFailure = useCallback(
-    (error: unknown): void => {
+    (error: unknown, gesture: RefusedGesture): void => {
       console.error('[useTurnAdmission] turn admission failed', error);
       store.get(activeChatId)?.persistenceActorRef.send({
         type: 'setPersistedError',
@@ -208,8 +243,17 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
          * reaches offers a restart rather than a resume. The distinction is
          * structural and belongs here, where it is a fact rather than a guess
          * at the message. */
-        error: parseAdmissionFailureForPersistence(
-          error instanceof Error ? error : new Error('Durable workspace admission failed', { cause: error }),
+        error: refusalOfGesture(
+          parseAdmissionFailureForPersistence(
+            error instanceof Error ? error : new Error('Durable workspace admission failed', { cause: error }),
+          ),
+          {
+            kind: gesture,
+            /* A projection reads as caught up before its first answer; only an attached one has read the log. */
+            projection:
+              store.getAttachmentStatus(activeChatId) === 'attached' ? store.getProjection(activeChatId) : undefined,
+            createId: randomUuid,
+          },
         ),
       });
     },

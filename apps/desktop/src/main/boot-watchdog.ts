@@ -88,8 +88,11 @@ export type BootWatchdog = {
   readonly loadFailed: (load: { readonly isMainFrame: boolean; readonly errorCode: number }) => void;
   /** The first `loadURL` rejected; `errno` is Chromium's error, when the rejection carries one. */
   readonly loadRejected: (errno?: number) => void;
-  /** `render-process-gone` on the main window. */
-  readonly rendererGone: () => void;
+  /**
+   * An unexpected `render-process-gone` on the main window (not one main ended on purpose). Returns true when the
+   * death was the first load failing, which this rule owns: the renderer reload policy then leaves it alone.
+   */
+  readonly rendererGone: () => boolean;
   /** A boot stage the renderer reported. */
   readonly stage: (stage: 'shell-mounted' | 'home-ready') => void;
   readonly suspend: () => void;
@@ -190,10 +193,12 @@ export const createBootWatchdog = (host: BootWatchdogHost): BootWatchdog => {
     recoveryShown = true;
     host.offerRecovery(trigger);
   };
-  const firstLoadFailed = (): void => {
-    if (!windowLoaded && !isShellMounted) {
-      open('load-failed');
+  const firstLoadFailed = (): boolean => {
+    if (windowLoaded || isShellMounted) {
+      return false;
     }
+    open('load-failed');
+    return true;
   };
 
   return {
@@ -218,9 +223,7 @@ export const createBootWatchdog = (host: BootWatchdogHost): BootWatchdog => {
         firstLoadFailed();
       }
     },
-    rendererGone: () => {
-      firstLoadFailed();
-    },
+    rendererGone: () => firstLoadFailed(),
     stage: (stage) => {
       if (stage === 'shell-mounted') {
         isShellMounted = true;

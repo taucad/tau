@@ -2,7 +2,7 @@ import process from 'node:process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,7 @@ export default defineConfig({
     testTimeout: 600_000,
     hookTimeout: 600_000,
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     // Gaxios and google-auth-library `await import('node-fetch')` at request
     // time, which vite-node resolves relative to the test file rather than the
     // importer. Node's own resolver restores what gaxios expects.

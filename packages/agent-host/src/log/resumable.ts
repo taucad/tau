@@ -72,6 +72,29 @@ export const isResumableRunFailure = (
 };
 
 /**
+ * A `cancelled` row's detail code: the person took the request back (`cancel.withdraw`) before the turn was kept, so
+ * nothing continues it and every page leaves the request out of the thread. A Stop that keeps the turn is
+ * `USER_STOPPED` instead; a cancel that neither keeps nor withdraws the turn (a steer, a project close) carries no
+ * detail. A lifecycle detail, not a refusal.
+ *
+ * @public
+ */
+export const turnWithdrawnCode = 'TURN_WITHDRAWN';
+
+/**
+ * Whether a cancel now keeps the run's turn for continuation: the turn is durable and, for an external agent, its
+ * prompt was issued. The host's one rule for writing `USER_STOPPED` rather than leaving the request unkept
+ * (`TURN_WITHDRAWN` when the person took it back), and the guard `isUserStoppedRun` reads back.
+ *
+ * @param run - The durable run ledger entry.
+ * @returns `true` when a Stop now keeps the turn.
+ * @internal
+ */
+export const retainsTurn = (
+  run: Readonly<{ committed: boolean; kind: 'tau' | 'external'; externalPrompted?: boolean }> | undefined,
+): boolean => run?.committed === true && (run.kind === 'tau' || run.externalPrompted === true);
+
+/**
  * Whether an intentional Stop retained a committed turn for continuation.
  *
  * @param run - The durable run ledger entry.
@@ -88,11 +111,7 @@ export const isUserStoppedRun = (
         externalPrompted?: boolean;
       }>
     | undefined,
-): boolean =>
-  run?.lifecycle === 'cancelled' &&
-  run.failure?.code === 'USER_STOPPED' &&
-  run.committed &&
-  (run.kind === 'tau' || run.externalPrompted === true);
+): boolean => run?.lifecycle === 'cancelled' && run.failure?.code === 'USER_STOPPED' && retainsTurn(run);
 
 /**
  * Whether `continue` resumes this run rather than replaying it: a deliberate Stop that kept its committed turn, or a

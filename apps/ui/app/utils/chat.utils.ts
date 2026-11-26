@@ -1,3 +1,5 @@
+import { withAnnotations, withoutAnnotatedImage } from '@taucad/chat/annotations';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ToolUIPart } from 'ai';
 import type {
   CadAgentExecution,
@@ -851,6 +853,18 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
 }
 
 /**
+ * The text a draft becomes when it is sent.
+ *
+ * The editor's draft keeps the whitespace the person typed around it (a Shift+Enter, a trailing space, a pasted
+ * newline); the message does not. Whoever asks "is this draft the text that message took?" composes the draft the same
+ * way first, so the answer cannot differ from the message by the builder's own normalisation.
+ *
+ * @param draftText - The composer's text, as the editor holds it.
+ * @returns The text the message carries.
+ */
+export const composeDraftText = (draftText: string): string => draftText.trim();
+
+/**
  * The one user-message builder for every chat verb that sends what the person
  * composed (submit, edit).
  *
@@ -868,8 +882,10 @@ export function buildUserMessage(input: {
   readonly attachments?: readonly StoredAttachmentRef[];
   /** Structured references the composer's chips held; matched to the text's `@cad[...]` tokens. */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures. */
+  readonly annotations?: MessageAnnotations;
 }): MyUIMessage {
-  const text = input.text.trim();
+  const text = composeDraftText(input.text);
   const references = messageReferences(text, input.references ?? []);
   return {
     id: generatePrefixedId(idPrefix.message),
@@ -889,7 +905,10 @@ export function buildUserMessage(input: {
       ),
       ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
     ],
-    metadata: { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) },
+    metadata: withAnnotations(
+      { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) } as const,
+      input.annotations,
+    ),
   };
 }
 
@@ -908,11 +927,20 @@ export function buildEditedUserMessage(
     readonly text: string;
     readonly attachments?: readonly StoredAttachmentRef[];
     readonly references?: readonly CadReference[];
+    /** The edit's comments and annotated pictures. Without them the original's stay, less any whose image the edit removed. */
+    readonly annotations?: MessageAnnotations;
   },
 ): MyUIMessage {
-  const { references: previous = [], ...metadata } = original.metadata ?? {};
+  const { references: previous = [], annotations: sent, ...metadata } = original.metadata ?? {};
+  const kept = new Set((input.attachments ?? []).map((attachment) => attachmentUrl(attachment)));
+  const annotations =
+    input.annotations ??
+    (input.attachments === undefined
+      ? sent
+      : withoutAnnotatedImage(sent, (image) => image.attachment === undefined || !kept.has(image.attachment)));
   const built = buildUserMessage({
     text: input.text,
+    ...(annotations === undefined ? {} : { annotations }),
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     // A later reference wins its token, so the edit composer's chips go last.
     references: [...previous, ...(input.references ?? [])],

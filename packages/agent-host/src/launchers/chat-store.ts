@@ -65,6 +65,12 @@ export type LeadershipPort = Readonly<{
   ) => Promise<CommandAnswer>;
   read: (input: ReadInput, local: () => Promise<ReadAnswer>) => Promise<ReadAnswer>;
   role: (chatId: string) => Readonly<{ role: 'leader' | 'follower' | 'none'; epoch: number }>;
+  /**
+   * Whether this process may open the chat's writer now. A binding whose writer is the chat's lock opens it only while
+   * its leadership holds the chat (the browser: M2's `readView`, until its relinquish), so nothing else that reaches
+   * for the log takes the lock where no relinquish frees it. Node leads every chat it opens.
+   */
+  opensWriter: (chatId: string) => boolean;
   /** A read-only view of whether this process can route a cancel to a live compatible holder. */
   stoppability: (chatId: string) => 'stoppable' | 'other-build' | 'background-window';
   /** A term's first append is its claim. */

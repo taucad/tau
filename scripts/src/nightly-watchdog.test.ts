@@ -6,11 +6,20 @@ import {
   candidateRunNumber,
   judge,
   judgeCandidates,
+  judgeDebt,
+  judgeLedgerJob,
+  ledgerJobVerdict,
+  readAllRuns,
+  judgeNeverQuarantine,
+  judgeQuarantine,
   judgeRuns,
   maxAge,
   scheduledWorkflows,
 } from '#nightly-watchdog.js';
-import type { CandidateRun, RunJob, ScheduledRun, ScheduledWorkflow } from '#nightly-watchdog.js';
+import type { CandidateRun, LedgerRun, RunJob, ScheduledRun, ScheduledWorkflow } from '#nightly-watchdog.js';
+import { emptyState } from '#ci-flake-ledger-state.js';
+import type { FlakeEvent, IdentityState, LedgerState } from '#ci-flake-ledger-state.js';
+import type { WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 
 const now = new Date('2026-11-08T18:30:00Z');
 const daily: ScheduledWorkflow = { file: 'e2e-nightly.yml', name: 'E2E nightly', crons: ['23 13 * * *'] };
@@ -65,10 +74,12 @@ describe('nightly watchdog', () => {
   it('should find every scheduled workflow in the repository, including itself', async () => {
     const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
     const files = found.map((workflow) => workflow.file);
-    expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'nightly-watchdog.yml', 'release-gate.yml']));
+    expect(files).toEqual(expect.arrayContaining(['nightly-watchdog.yml', 'release-gate.yml']));
     // Retired nightlies (§ 5b): the release gate and the drift check replace them, so the watchdog skips them.
     expect(files).not.toContain('formal-nightly.yml');
     expect(files).not.toContain('shell-conformance.yml');
+    // The e2e nightly is dispatch-only (operator ruling Q4), so it can never read as a missing scheduled run.
+    expect(files).not.toContain('e2e-nightly.yml');
   });
 
   describe('a workflow scheduled more than once a day (release gate, C3)', () => {
@@ -258,6 +269,212 @@ describe('nightly watchdog', () => {
         now,
       });
       expect(verdicts).toEqual([]);
+    });
+  });
+
+  describe('flake quarantine expiry (FQ-9)', () => {
+    const entry = (expiryDay: string, renewed = false): Record<string, unknown> => ({
+      test: 'src/store.test.ts > store > should keep the order',
+      issue: 12,
+      expires: expiryDay,
+      ...(renewed ? { renewal: { by: 'rifont', on: '2026-12-01' } } : {}),
+    });
+    const file = (entries: unknown[]): { path: string; text: string } => ({
+      path: 'packages/host/quarantine.json',
+      text: JSON.stringify({ entries }),
+    });
+
+    it('should page for an entry on its expiry day and every day after, and not before', () => {
+      const verdicts = judgeQuarantine(
+        [file([entry('2026-12-04'), entry('2026-12-01', true), entry('2026-12-05'), 'not an entry'])],
+        '2026-12-04',
+      );
+
+      expect(verdicts.map((verdict) => [verdict.state, verdict.detail])).toEqual([
+        [
+          'failed',
+          'src/store.test.ts > store > should keep the order (owner issue #12) expires today: the flake ledger removes the entry and the test gates again; the operator may renew it once, to 28 days',
+        ],
+        [
+          'failed',
+          'src/store.test.ts > store > should keep the order (owner issue #12) expired on 2026-12-01: the flake ledger removes the entry and the test gates again',
+        ],
+      ]);
+      expect(verdicts[0]).toMatchObject({
+        workflow: { file: 'packages/host/quarantine.json', name: 'Flake quarantine expiry' },
+        url: 'https://github.com/taucad/tau/issues/12',
+      });
+    });
+
+    it('should read nothing from a malformed quarantine.json', () => {
+      expect(judgeQuarantine([{ path: 'a/quarantine.json', text: 'not json' }], '2026-12-04')).toEqual([]);
+    });
+  });
+
+  describe('flake ledger job (FQ-11)', () => {
+    const ledgerRun = (createdAt: string, conclusion: string, event = 'workflow_run'): LedgerRun => ({
+      ...run(createdAt, 'completed', conclusion),
+      event,
+    });
+
+    it('should pass when no ledger run of the last 24 h failed', () => {
+      expect(judgeLedgerJob([], now)).toMatchObject({ state: 'ok', workflow: { file: 'flake-ledger.yml' } });
+      // Older than 24 h, a scheduled run (the scheduled-workflow row reports it) and a replaced run.
+      expect(
+        judgeLedgerJob(
+          [
+            ledgerRun('2026-11-07T10:00:00Z', 'failure'),
+            ledgerRun('2026-11-08T04:41:00Z', 'failure', 'schedule'),
+            ledgerRun('2026-11-08T12:00:00Z', 'cancelled'),
+          ],
+          now,
+        ).state,
+      ).toBe('ok');
+    });
+
+    it('should fail on a red or timed-out ledger run of the last 24 h, linking the newest', () => {
+      const verdict = judgeLedgerJob(
+        [ledgerRun('2026-11-08T09:00:00Z', 'failure'), ledgerRun('2026-11-08T12:00:00Z', 'timed_out')],
+        now,
+      );
+      expect(verdict.state).toBe('failed');
+      expect(verdict.detail).toMatch(/^2 red ledger runs in the last 24 h \(newest timed_out\)/u);
+      expect(verdict.url).toBe('https://github.com/taucad/tau/actions/runs/1');
+      expect(judgeLedgerJob([ledgerRun('2026-11-08T12:00:00Z', 'startup_failure')], now).state).toBe('failed');
+    });
+
+    it('should report a ledger run listing it cannot read as a failed row, not stop the report', async () => {
+      const failed = await ledgerJobVerdict(async () => {
+        throw new Error('GitHub API 503');
+      }, now);
+      expect(failed).toMatchObject({
+        workflow: { file: 'flake-ledger.yml' },
+        state: 'failed',
+        detail: "the ledger job's runs could not be read: GitHub API 503",
+      });
+      const read = await ledgerJobVerdict(async () => [ledgerRun('2026-11-08T12:00:00Z', 'success')], now);
+      expect(read.state).toBe('ok');
+    });
+
+    it('should read every page of the ledger runs, and fail closed when a listing stops short of its count', async () => {
+      const page = (count: number, total: number): { total_count: number; workflow_runs: LedgerRun[] } => ({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+        total_count: total,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+        workflow_runs: Array.from({ length: count }, () => ledgerRun('2026-11-08T12:00:00Z', 'success')),
+      });
+      expect(await readAllRuns(async (number) => page(number === 1 ? 100 : 20, 120))).toHaveLength(120);
+      expect(await readAllRuns(async () => page(0, 0))).toEqual([]);
+      // A page past the end reports a total of 0: the first page's count still decides.
+      await expect(readAllRuns(async (number) => (number === 1 ? page(100, 150) : page(0, 0)))).rejects.toThrow(
+        'the listing ended at 100 of 150 runs',
+      );
+      // The API returns at most 1,000 results for a filtered listing.
+      await expect(readAllRuns(async () => page(100, 1500))).rejects.toThrow('at or over the listing cap of 1000');
+      await expect(readAllRuns(async () => page(100, 1000))).rejects.toThrow('1000 ledger runs in a day');
+      expect(await readAllRuns(async (number) => page(number <= 9 ? 100 : 99, 999))).toHaveLength(999);
+    });
+  });
+
+  describe('flake quarantine debt (FQ-11)', () => {
+    const file = (path: string, count: number): { path: string; text: string } => ({
+      path,
+      text: JSON.stringify({ entries: Array.from({ length: count }, (_, index) => ({ test: `t${index}` })) }),
+    });
+
+    it('should pass below both caps and name the fullest file', () => {
+      const verdict = judgeDebt([file('apps/ui/quarantine.json', 3), file('apps/ui-e2e/quarantine.json', 7)]);
+      expect(verdict).toMatchObject({
+        state: 'ok',
+        detail: '10 of 20 entries in the workspace; fullest apps/ui-e2e/quarantine.json 7 of 8',
+      });
+      expect(judgeDebt([]).detail).toBe('0 of 20 entries in the workspace');
+    });
+
+    it('should page when a project or the workspace is at its cap', () => {
+      const project = judgeDebt([file('apps/ui-e2e/quarantine.json', 8)]);
+      expect(project.state).toBe('failed');
+      expect(project.detail).toContain('; apps/ui-e2e/quarantine.json 8 of 8: a new qualifying flake is refused');
+      const workspace = judgeDebt([0, 1, 2, 3].map((index) => file(`libs/p${index}/quarantine.json`, 5)));
+      expect(workspace.state).toBe('failed');
+      expect(workspace.detail).toMatch(/^the quarantine debt is full: 20 of 20 entries in the workspace: /u);
+      expect(judgeDebt([{ path: 'a/quarantine.json', text: 'not json' }]).state).toBe('ok');
+    });
+  });
+
+  describe('never-quarantine flake (FQ-11)', () => {
+    const projects = new Map<string, WorkspaceProject>([
+      ['api', { name: 'api', root: 'apps/api', tags: [] }],
+      ['ui', { name: 'ui', root: 'apps/ui', tags: [] }],
+    ]);
+    const event = (at: string, shadow = false): FlakeEvent => ({
+      kind: 'same-hash',
+      at,
+      run: 2,
+      attempt: 1,
+      failedRun: 1,
+      failedAttempt: 1,
+      variant: 'linux-x64',
+      execution: 1,
+      ...(shadow ? { shadow: true } : {}),
+    });
+    const identity = (project: string, file: string, events: FlakeEvent[]): IdentityState => ({
+      project,
+      targetKey: 'test',
+      file,
+      firstSeen: '2026-11-01T00:00:00Z',
+      lastSeen: '2026-11-08T00:00:00Z',
+      lastFailure: '2026-11-08T00:00:00Z',
+      executions: 10,
+      failures: 1,
+      retriedPasses: 0,
+      passStreak: 0,
+      variants: {},
+      events,
+      openFailures: [],
+      passHashes: [],
+      failureShas: [],
+      aliases: [],
+    });
+    const state = (identities: Record<string, IdentityState>): LedgerState => ({ ...emptyState(now), identities });
+
+    it('should page on a gating flake event of the last 24 h of a never-quarantine test', () => {
+      const verdicts = judgeNeverQuarantine(
+        state({
+          'api › src/billing/charge.test.ts > charge > should charge once': identity(
+            'api',
+            'src/billing/charge.test.ts',
+            [event('2026-11-08T10:00:00Z')],
+          ),
+          // Quarantinable: the entry rule handles it.
+          'ui › src/viewer.test.ts > viewer > should render': identity('ui', 'src/viewer.test.ts', [
+            event('2026-11-08T10:00:00Z'),
+          ]),
+          // Older than 24 h, a shadow row's event, a project the checkout lacks.
+          'api › src/auth/old.test.ts > a': identity('api', 'src/auth/old.test.ts', [event('2026-11-07T10:00:00Z')]),
+          'api › src/auth/shadow.test.ts > a': identity('api', 'src/auth/shadow.test.ts', [
+            event('2026-11-08T10:00:00Z', true),
+          ]),
+          'gone › src/auth/x.test.ts > a': identity('gone', 'src/auth/x.test.ts', [event('2026-11-08T10:00:00Z')]),
+        }),
+        projects,
+        now,
+      );
+      expect(verdicts).toEqual([
+        {
+          workflow: { file: 'flake-ledger', name: 'Never-quarantine flake', crons: [] },
+          state: 'failed',
+          detail:
+            'api › src/billing/charge.test.ts > charge > should charge once (money (billing)): 1 flake event in the last 24 h, failing run 1: it keeps gating; the agent owes a class within 24 hours',
+        },
+      ]);
+    });
+
+    it('should report a healthy row with no such event or no ledger state', () => {
+      expect(judgeNeverQuarantine(state({}), projects, now)).toMatchObject([{ state: 'ok' }]);
+      expect(judgeNeverQuarantine(undefined, projects, now)).toMatchObject([
+        { state: 'ok', detail: 'no ledger state yet' },
+      ]);
     });
   });
 });

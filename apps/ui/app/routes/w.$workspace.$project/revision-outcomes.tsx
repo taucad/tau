@@ -5,6 +5,8 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { turnWithdrawnCode } from '@taucad/agent-host';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
@@ -56,6 +58,23 @@ export const useTurnOutcomes = (projectId: string): readonly TurnOutcomeNotice[]
     () => noOutcomes,
   );
 
+/**
+ * Whether a turn ended the ordinary way a person ends one: let go before it recorded anything (`TURN_RELEASED`)
+ * because the person stopped it (`USER_STOPPED`) or took the request back (`TURN_WITHDRAWN`), with no change recorded
+ * to the project. The person saw that outcome happen, so nothing more is said. A release this page cannot place, or
+ * one after a recorded change, still says so.
+ *
+ * @param event - The revision event.
+ * @param stoppedByPerson - Whether the chat's log shows the person stopped that run and it recorded no change; `false`
+ *   when this page does not know.
+ * @returns `true` when the release is silent.
+ */
+export const isOrdinaryRelease = (
+  event: WorkerRevisionEvent,
+  stoppedByPerson: (chatId: string, runId: string) => boolean,
+): boolean =>
+  event.type === 'turn.failed' && event.code === 'TURN_RELEASED' && stoppedByPerson(event.chatId, event.runId);
+
 const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
   if (event.type === 'turn.finalized' || event.type === 'chats.projected' || event.type === 'checkout.changed') {
     return undefined;
@@ -68,6 +87,54 @@ const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNot
     code: event.type === 'turn.failed' ? event.code : undefined,
   };
 };
+
+/** How long a release waits for its run's ending row before it is judged without it. Milliseconds. */
+const releaseSettle = 5000;
+
+type RunLog = Readonly<{
+  getProjection: (
+    chatId: string,
+  ) => { ledger: { runs: Record<string, { lifecycle?: string } | undefined> } } | undefined;
+  subscribeProjection: (chatId: string, listener: () => void) => () => void;
+}>;
+
+/**
+ * Settle once this page's log shows the run ended, or the bound has passed.
+ *
+ * @param wait - What to wait for.
+ * @param wait.log - The chat logs this page folds.
+ * @param wait.chatId - The chat.
+ * @param wait.runId - The run.
+ * @param wait.bound - The longest wait. Milliseconds.
+ * @returns A promise that settles either way.
+ */
+const whenRunEnds = async ({
+  log,
+  chatId,
+  runId,
+  bound,
+}: Readonly<{ log: RunLog; chatId: string; runId: string; bound: number }>): Promise<void> =>
+  new Promise((resolve) => {
+    const ended = (): boolean => {
+      const lifecycle = log.getProjection(chatId)?.ledger.runs[runId]?.lifecycle;
+      return lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';
+    };
+    if (ended()) {
+      resolve();
+      return;
+    }
+    const finish = (): void => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(finish, bound);
+    const unsubscribe = log.subscribeProjection(chatId, () => {
+      if (ended()) {
+        finish();
+      }
+    });
+  });
 
 /**
  * The two outcomes that are not a settlement, given a surface (W5 review R5).
@@ -86,6 +153,7 @@ export function RevisionOutcomes(): undefined {
   const client = useRevisionClient();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
+  const sessions = useOptionalChatSessionStore();
   const workspace = useProjectWorkspace({ enableNoContext: true });
   const openHistory = (): void => {
     workspace?.openPanel('revisions');
@@ -98,18 +166,8 @@ export function RevisionOutcomes(): undefined {
     if (client === undefined) {
       return undefined;
     }
-    return client.subscribeEvents((event) => {
-      if (event.type === 'chats.projected') {
-        if (event.projectId !== projectId) {
-          return;
-        }
-        void queryClient.invalidateQueries({ queryKey: ['chats', projectId] });
-        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
-        for (const chatId of event.chatIds) {
-          void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
-        }
-        return;
-      }
+    let disposed = false;
+    const report = (event: WorkerRevisionEvent): void => {
       const notice = noticeOf(projectId, event);
       if (notice === undefined) {
         return;
@@ -136,8 +194,49 @@ export function RevisionOutcomes(): undefined {
       }
       const copy = describeRevisionFailure('turn', notice.code);
       toast.error(copy.title, { description: copy.description });
+    };
+    const stoppedByPerson = (chatId: string, runId: string): boolean => {
+      const run = sessions?.getProjection(chatId)?.ledger.runs[runId];
+      const code = run?.failure?.code;
+      return (
+        run?.lifecycle === 'cancelled' &&
+        (code === 'USER_STOPPED' || code === turnWithdrawnCode) &&
+        Object.keys(run.changes ?? {}).length === 0
+      );
+    };
+    const judgeRelease = async (event: Extract<WorkerRevisionEvent, { type: 'turn.failed' }>): Promise<void> => {
+      if (sessions !== undefined) {
+        await whenRunEnds({ log: sessions, chatId: event.chatId, runId: event.runId, bound: releaseSettle });
+      }
+      if (!disposed && !isOrdinaryRelease(event, stoppedByPerson)) {
+        report(event);
+      }
+    };
+    const unsubscribe = client.subscribeEvents((event) => {
+      if (event.type === 'chats.projected') {
+        if (event.projectId !== projectId) {
+          return;
+        }
+        void queryClient.invalidateQueries({ queryKey: ['chats', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
+        for (const chatId of event.chatIds) {
+          void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+        }
+        return;
+      }
+      if (event.type === 'turn.failed' && event.code === 'TURN_RELEASED' && sessions !== undefined) {
+        /* A turn let go at the stop bound is released before its run's ending row is written, and the two reach this
+         * page on separate channels: decide once this page's log has the run's end, or the bound has passed. */
+        void judgeRelease(event);
+        return;
+      }
+      report(event);
     });
-  }, [client, projectId, queryClient]);
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [client, projectId, queryClient, sessions]);
 
   return undefined;
 }

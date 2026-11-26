@@ -1,15 +1,18 @@
 import type { CadReference } from '@taucad/chat/references';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
+import type { AnnotatedSend } from '#components/comments/prepare-annotated-send.js';
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
-import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
+import type { RefusedGesture } from '#utils/run-auto-resume-plan.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
@@ -27,14 +30,16 @@ export type CadChatSubmitInput = {
   readonly attachments?: readonly StoredAttachmentRef[];
   /** The composer chips' structured geometry references (blueprint D6). */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures; images with pins or marks are flattened before sending. */
+  readonly annotations?: MessageAnnotations;
 };
 
 /**
  * Public surface of the CAD chat client. UI assembly sites express gestures
  * through these verbs, never a raw SDK request or hand-built host command.
  *
- * `ChatSessionStore` turns each gesture into one command id and a projection
- * watch. The persistence machine retains only chat record/error/composer state;
+ * `ChatSessionStore` turns each gesture into one command id; its run reaches
+ * the transcript through the log's projection. The persistence machine retains only chat record/error/composer state;
  * the host log owns run lifecycle, transcript and settlement.
  *
  * @public
@@ -73,12 +78,10 @@ export type CadChatClient = {
    * A send during an external agent's live turn queues behind that turn.
    */
   steerOrSubmit: (text: string) => Promise<void>;
-  /** Live message list from the bound `Chat` instance. */
+  /** The displayed transcript: the fold of the chat's log, with the accepted gesture (T2). */
   messages: readonly MyUIMessage[];
-  /** Live status from the bound `Chat` instance. */
+  /** The run phase, else the command in flight (T3). A run's failure is its log's, read from the chat's error. */
   status: ChatStatus;
-  /** Live error from the bound `Chat` instance. */
-  error: Error | undefined;
   /**
    * Snapshot of the agent config the next turn's admission will use.
    */
@@ -94,9 +97,8 @@ const promotionToastId = 'chat-attachment-promotion';
  * Composes:
  * - {@link useCadAgentConfig} — the assembler hook that builds the per-turn
  *   `agent` payload from the current UI producer hooks.
- * - {@link useActiveChatInstance} — the module-private accessor for the live
- *   AI SDK `Chat` instance owned by the chat-session store. Exposed via the
- *   client's `messages`/`status`/`error` reads.
+ * - {@link useChatSelector} — the chat's transcript and status, read from the
+ *   chat-session store's fold of the host log.
  * - {@link useChatActions} — the gesture entry point into the session store.
  *
  * Exposes profile-aware verbs (`submit`, `edit`). Verb identities are
@@ -106,12 +108,11 @@ const promotionToastId = 'chat-attachment-promotion';
  * @public
  */
 export const useCadChatClient = (): CadChatClient => {
-  const chat = useActiveChatInstance();
   const actions = useChatActions();
   const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
   // The CAD chat client is session-required by construction (it composes
-  // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
+  // `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
@@ -138,7 +139,11 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
+    async (
+      gesture: Extract<RefusedGesture, 'send' | 'edit'>,
+      attachments: readonly StoredAttachmentRef[],
+      send: () => void | Promise<void>,
+    ): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -146,7 +151,7 @@ export const useCadChatClient = (): CadChatClient => {
           support: resolved.model?.support,
         });
         if (blocked !== undefined) {
-          surfaceDispatchFailure(new Error(blocked));
+          surfaceDispatchFailure(new Error(blocked), gesture);
           return;
         }
       }
@@ -175,12 +180,38 @@ export const useCadChatClient = (): CadChatClient => {
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
-      const userMessage = buildUserMessage(input);
-      await withAttachments(input.attachments ?? [], async () =>
+      // A message without annotations is sent as it always was, with no step before it.
+      let send: AnnotatedSend = { attachments: input.attachments ?? [], annotations: undefined, originals: [] };
+      if (input.annotations !== undefined) {
+        try {
+          // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
+          const { sendAnnotated } = await loadCode(async () => import('#components/comments/annotated-send.js'));
+          send = await sendAnnotated({
+            attachments: send.attachments,
+            annotations: input.annotations,
+            store: store.draftAttachmentBytes(activeChatId),
+          });
+        } catch (error) {
+          console.error('[useCadChatClient] annotated images could not be prepared', error);
+          toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
+            id: promotionToastId,
+          });
+          return;
+        }
+      }
+      const attachments = input.attachments === undefined ? undefined : send.attachments;
+      const userMessage = buildUserMessage({
+        text: input.text,
+        ...(attachments === undefined ? {} : { attachments }),
+        ...(input.references === undefined ? {} : { references: input.references }),
+        ...(send.annotations === undefined ? {} : { annotations: send.annotations }),
+      });
+      // The untouched originals are kept with the chat beside what is sent, so an edit can start from them again.
+      await withAttachments('send', [...send.attachments, ...send.originals], async () =>
         actions.sendMessage(userMessage, {
           execution: agent.execution,
           queueIntent,
-          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+          ...(attachments === undefined ? {} : { attachments }),
         }),
       );
     },
@@ -190,7 +221,7 @@ export const useCadChatClient = (): CadChatClient => {
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
-      void withAttachments(input.attachments ?? [], () => {
+      void withAttachments('edit', input.attachments ?? [], () => {
         actions.editMessage(messageId, input.text, {
           ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
           ...(input.references === undefined ? {} : { references: input.references }),
@@ -228,7 +259,6 @@ export const useCadChatClient = (): CadChatClient => {
     steerOrSubmit,
     messages,
     status,
-    error: chat.error,
     agent,
   };
 };

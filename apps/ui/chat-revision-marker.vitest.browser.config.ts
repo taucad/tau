@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -14,6 +14,7 @@ export default defineConfig({
   optimizeDeps: { include: ['buffer', '@taucad/revisions > isomorphic-git'] },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     globals: true,
     include: ['app/routes/w.$workspace.$project/chat-revision-marker.test.tsx'],
     fileParallelism: false,

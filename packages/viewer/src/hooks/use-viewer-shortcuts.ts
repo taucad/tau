@@ -78,6 +78,7 @@ const outcomePhrases: Readonly<Record<ViewerShortcutOutcome, string>> = {
   measureOn: 'Measure on',
   measureOff: 'Measure off',
   measureNeedsModel: 'A model is required for measurement',
+  commentOff: 'Comment off',
   gridShown: 'Grid shown',
   gridHidden: 'Grid hidden',
   perspective: 'Perspective',

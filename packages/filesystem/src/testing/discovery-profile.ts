@@ -189,6 +189,7 @@ export async function createDiscoveryProfile(
   });
   const workspaceScope = {
     backend: 'webaccess',
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The in-memory handle tree implements only the members a provider calls, not the DOM's whole `FileSystemDirectoryHandle`; this is the one place it stands in for it.
     directoryHandle: workspace.root as unknown as FileSystemDirectoryHandle,
     workspaceId: 'wsp_discoveryprofile00000',
   } as const;

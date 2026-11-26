@@ -10,10 +10,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@taucad/chat';
+import type { ProjectManifest } from '@taucad/types';
 import { ProjectLibrary } from '#runtime/project-library.js';
 import type { ProjectLibraryServices } from '#runtime/project-library.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
-import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
+import { ProjectCommands } from '#runtime/project-library-commands.js';
+import type {
+  ProjectCommandsHost,
+  ProjectLibraryChatSessions,
+  ProjectLibrarySessions,
+  ProjectTemplates,
+} from '#runtime/project-library-commands.js';
 import type { ProjectLibraryRootFacade, ProjectLibraryWorker } from '#types/project-library-io.types.js';
 import type { ChatStorage } from '#types/chat-storage.types.js';
 
@@ -46,6 +53,26 @@ vi.mock('@taucad/agent-host/browser', () => ({
         leases.released += 1;
       },
     };
+  },
+}));
+
+/* A create's storage: the Home backend, and an allocation that records the name it is asked for. */
+const creation = vi.hoisted(() => ({
+  storageResolved: vi.fn(),
+  allocatedNames: [] as string[],
+}));
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getHomeStorageBackend: async () => {
+    creation.storageResolved();
+    return 'opfs';
+  },
+}));
+vi.mock('#runtime/project-library-storage.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  allocateProjectBasePath: async (_client: unknown, _root: unknown, name: string) => {
+    creation.allocatedNames.push(name);
+    throw new Error('stop after allocation');
   },
 }));
 
@@ -265,5 +292,105 @@ describe('ProjectLibrary project commands (A4a, row L7)', () => {
     libraries.push(unwired);
     await expect(unwired.commands.closeProjectSession('p1')).rejects.toThrow('built without the sessions registry');
     await expect(bare.commands.closeProjectSession('p1')).resolves.toBeUndefined();
+  });
+});
+
+describe('ProjectCommands.createProject naming (C1)', () => {
+  /* One macrotask: every settled promise has run its continuations. */
+  const settle = async (): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+  type Host = ProjectCommandsHost<ProjectLibraryWorker, Projection>;
+
+  /** A host whose worker, facade and templates the test supplies; nothing else is reached before allocation. */
+  const hostWith = (readiedWorker: Host['readiedWorker'], projectTemplates: Partial<ProjectTemplates>): Host =>
+    mock<Host>({
+      services: { ...services, projectTemplates: { ...services.projectTemplates, ...projectTemplates } },
+      readiedWorker,
+      facade: async () => mock<ProjectLibraryRootFacade>(),
+    });
+
+  /** The manifest a template makes for a name. */
+  const manifestNamed = (name: string): Omit<ProjectManifest, '$schema'> => ({
+    name,
+    description: '',
+    tags: [],
+    assets: {},
+  });
+
+  const createWith = () => {
+    const worker = Promise.withResolvers<ProjectLibraryWorker>();
+    const name = Promise.withResolvers<string>();
+    const generate = vi.fn(async () => name.promise);
+    const templates = {
+      createInitialProject: vi.fn<ProjectTemplates['createInitialProject']>((options) => ({
+        projectData: manifestNamed(options.projectName),
+        files: {},
+      })),
+      getKernelOption: (): ReturnType<ProjectTemplates['getKernelOption']> => ({
+        mainFile: 'main.scad',
+        emptyCode: '',
+        ecosystem: 'npm',
+      }),
+      getKernelDependencies: vi.fn<ProjectTemplates['getKernelDependencies']>(async () => ({})),
+      getKernelProjectTemplate: vi.fn<ProjectTemplates['getKernelProjectTemplate']>(async () => undefined),
+    };
+    const commands = new ProjectCommands(hostWith(async () => worker.promise, templates));
+    const created = commands.createProject(
+      {
+        kernel: 'openscad',
+        initialMessage: { content: 'A wall bracket for a 32 mm pipe' },
+        location: { kind: 'home' },
+      },
+      { generate },
+    );
+    return { worker, name, generate, templates, created };
+  };
+
+  afterEach(() => {
+    creation.storageResolved.mockClear();
+    creation.allocatedNames.length = 0;
+  });
+
+  it('should start naming before the worker is ready, and await it only at directory allocation', async () => {
+    const { worker, name, generate, templates, created } = createWith();
+    await settle();
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'A wall bracket for a 32 mm pipe', imageUrls: [] }),
+    );
+    expect(creation.storageResolved).not.toHaveBeenCalled();
+
+    worker.resolve(mock<ProjectLibraryWorker>());
+    await settle();
+    /* The worker, the storage and the template reads all went ahead while the name is still pending. */
+    expect(creation.storageResolved).toHaveBeenCalledTimes(1);
+    expect(templates.getKernelDependencies).toHaveBeenCalledTimes(1);
+    expect(templates.getKernelProjectTemplate).toHaveBeenCalledTimes(1);
+    expect(creation.allocatedNames).toEqual([]);
+
+    name.resolve('Pipe Wall Bracket');
+    await expect(created).rejects.toThrow('stop after allocation');
+    expect(creation.allocatedNames).toEqual(['Pipe Wall Bracket']);
+  });
+
+  it('should take a supplied name without asking for one', async () => {
+    const generate = vi.fn(async () => 'unused');
+    const worker = mock<ProjectLibraryWorker>();
+    const host = hostWith(async () => worker, { createEntrylessProject: manifestNamed });
+    const created = new ProjectCommands(host).createProject(
+      {
+        kernel: 'auto',
+        projectName: 'Pipe Wall Bracket',
+        initialMessage: { content: 'A wall bracket' },
+        location: { kind: 'home' },
+      },
+      { generate },
+    );
+
+    await expect(created).rejects.toThrow('stop after allocation');
+    expect(generate).not.toHaveBeenCalled();
+    expect(creation.allocatedNames).toEqual(['Pipe Wall Bracket']);
   });
 });

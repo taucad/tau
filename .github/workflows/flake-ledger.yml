@@ -43,6 +43,11 @@
 # rows, so every `project.json` is checked out too. The count against the Q1 bar (100 consecutive passing runs) is kept
 # in the state, and `shadow-row-promotion.yml` proposes the promotion of a row that meets it. A test's flake events in
 # a shadow row never count toward the quarantine entry rule: the row gates nothing.
+#
+# Last, it writes the flake quarantine metrics table (FQ-11, blueprint D9) to the job summary on every run: the rows
+# the ledger state, the `quarantine.json` files and the owner issues give. The rows that need every merge-group run's
+# jobs are the weekly `ci-queue-health.yml` report's, which shows them all; the nightly watchdog alerts on a red run of
+# this job, an expired entry, a full debt and a never-quarantine flake.
 name: Flake ledger
 
 on:
@@ -100,6 +105,8 @@ jobs:
             scripts/src/ci-flake-quarantine-entry-cli.ts
             scripts/src/ci-flake-quarantine-release.ts
             scripts/src/ci-flake-quarantine-release-cli.ts
+            scripts/src/ci-flake-metrics.ts
+            scripts/src/ci-flake-metrics-cli.ts
             scripts/src/validate-quarantine.ts
             scripts/src/flake-regression.ts
             scripts/src/flake-repro.ts
@@ -147,3 +154,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           INGEST_COMPLETE: ${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}
         run: node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"
+
+      # The D9 table (FQ-11), whatever the steps before it did: it reads the state as it now stands.
+      - name: Report the flake quarantine metrics
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/src/ci-flake-metrics-cli.ts

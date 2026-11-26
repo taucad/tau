@@ -16,13 +16,19 @@
  * they meet the entry rule. The job-pair section above stays for failures with no outcome row (a job that failed
  * outside a test). `--since` and `--until` replay a fixed window.
  *
+ * Flake quarantine metrics (FQ-11, blueprint D9): every row of D9's table from the same window, by
+ * `ci-flake-metrics.ts`. It adds the pull requests merged into `--branch` in the window and their queue events, the
+ * owner issues the release automation marks, the runs and jobs of the stress and agent workflows, and the checkout's
+ * `quarantine.json` files to what the sections above read.
+ *
  * Writes the JSON report and appends the Markdown summary to `--summary` (default `$GITHUB_STEP_SUMMARY`).
  * `ci-queue-health.yml` runs it weekly and posts nothing.
  *
  * Usage: node scripts/src/ci-queue-health-cli.ts [--days 7] [--flake-days 14] [--out <path>] [--summary <file>]
  *          [--workflow ci.yml] [--event merge_group] [--max-requests 5000] [--branch main]
  *          [--ledger scripts/src/flake-ledger.json] [--ledger-branch flake-ledger] [--since <iso>] [--until <iso>]
- * Env: GITHUB_TOKEN (needs `actions: read`), GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
+ * Env: GITHUB_TOKEN (needs `actions: read`, `issues: read`, `pull-requests: read`), GITHUB_REPOSITORY (default
+ * taucad/tau), GITHUB_API_URL.
  * Exit codes: 0 report written (it may be partial when the request budget ran out or a run's jobs were refused);
  * 1 API failure listing the runs; 2 usage;
  * 3 report written and a flake needs someone: an unowned or expired repeat offender, ledger entry or marker.
@@ -65,7 +71,12 @@ import {
 } from '#ci-flake-ledger.js';
 import type { ComparedFile, FlakeEntry, FlakePair, FlakeReport, Ledger } from '#ci-flake-ledger.js';
 import { renderLedgerMarkdown, summarizeLedger } from '#ci-flake-ledger-state.js';
+import type { LedgerState } from '#ci-flake-ledger-state.js';
 import { branchStore, stateBranch } from '#ci-flake-ledger-store.js';
+import { metricRows, renderMetricsMarkdown } from '#ci-flake-metrics.js';
+import type { MetricRow } from '#ci-flake-metrics.js';
+import { readLandings, readOwnerIssues, readUsage } from '#ci-flake-metrics-cli.js';
+import { readWorkspace } from '#ci-flake-quarantine-entry-cli.js';
 
 const concurrency = 4;
 
@@ -309,14 +320,13 @@ const flakePass = async (options: {
  * workflow keeps on its branch, and how many completed queue and `main` runs of the window the state has not counted.
  * A missing branch is reported (the ledger has not run yet); a state that cannot be read fails the report.
  */
-const ledgerSection = async (options: {
-  readonly github: Client;
+const ledgerSection = (options: {
+  readonly state: LedgerState | undefined;
   readonly branch: string;
   readonly window: { readonly from: string; readonly to: string };
   readonly runs: readonly WorkflowRun[];
-}): Promise<{ markdown: string; json: unknown }> => {
-  const { github, branch, window, runs } = options;
-  const state = await branchStore(github, branch).read();
+}): { markdown: string; json: unknown } => {
+  const { state, branch, window, runs } = options;
   if (!state) {
     return {
       markdown: `## Test flake ledger (FQ-2)\n\nNo ledger state on the \`${branch}\` branch yet: \`flake-ledger.yml\` writes it after its first run.\n`,
@@ -348,6 +358,44 @@ const ledgerSection = async (options: {
       })),
     },
   };
+};
+
+/**
+ * The flake quarantine metrics section (FQ-11): every row of blueprint D9 from the window's live data. The queue rows
+ * need the merge-group evidence, so a report run with another `--event` leaves them unmeasured and says why.
+ */
+const metricsSection = async (options: {
+  readonly github: Client;
+  readonly window: { readonly from: string; readonly to: string };
+  readonly branch: string;
+  /** The queue report's evidence, when it read merge-group runs. */
+  readonly queue: {
+    readonly evidence: readonly RunEvidence[];
+    readonly mergedNothingShare: number;
+    readonly event: string;
+  };
+  readonly queueRuns: readonly WorkflowRun[];
+  readonly ledger: LedgerState | undefined;
+}): Promise<MetricRow[]> => {
+  const { github, window, branch, queue, queueRuns, ledger } = options;
+  const today = window.to.slice(0, 10);
+  const [landings, issues, usage, workspace] = await Promise.all([
+    readLandings(github, window, branch),
+    readOwnerIssues(github, today),
+    readUsage(github, window),
+    readWorkspace(process.cwd()),
+  ]);
+  return metricRows({
+    window,
+    today,
+    queue: queue.event === 'merge_group' ? queue : undefined,
+    landings: { landings, queueRuns },
+    ledger,
+    quarantines: workspace.quarantines,
+    issues,
+    usage,
+    absent: 'the report ran with an `--event` other than `merge_group`, or without `--ledger-branch`',
+  });
 };
 
 const dedupe = (runs: readonly WorkflowRun[]): WorkflowRun[] => [...new Map(runs.map((run) => [run.id, run])).values()];
@@ -439,9 +487,10 @@ const main = async (args: readonly string[]): Promise<number> => {
     now,
   });
 
+  const ledgerState = values['ledger-branch'] ? await branchStore(github, values['ledger-branch']).read() : undefined;
   const testLedger = values['ledger-branch']
-    ? await ledgerSection({
-        github,
+    ? ledgerSection({
+        state: ledgerState,
         branch: values['ledger-branch'],
         window: flakeWindow,
         runs: [...queueRuns, ...pushRuns],
@@ -454,23 +503,29 @@ const main = async (args: readonly string[]): Promise<number> => {
       ? queueRuns.filter((run) => inWindow(run))
       : dedupe(await listRuns(github, { workflow: values.workflow, event: values.event, ...window }));
   const evidence = await gather({ github, runs, branch: values.branch, cache });
-  const report = {
-    ...buildReport({
-      repository,
-      workflow: values.workflow,
-      event: values.event,
-      window,
-      generatedAt: now.toISOString(),
-      evidence,
-    }),
-    flakes,
-    ...(testLedger ? { testLedger: testLedger.json } : {}),
-  };
+  const queueReport = buildReport({
+    repository,
+    workflow: values.workflow,
+    event: values.event,
+    window,
+    generatedAt: now.toISOString(),
+    evidence,
+  });
+  const metrics = await metricsSection({
+    github,
+    window,
+    branch: values.branch,
+    queue: { evidence, mergedNothingShare: queueReport.classes.mergedNothingShare, event: values.event },
+    // Every run of the flake window: a pull request landing in the report window keeps its earlier attempts.
+    queueRuns,
+    ledger: ledgerState,
+  });
+  const report = { ...queueReport, flakes, ...(testLedger ? { testLedger: testLedger.json } : {}), metrics };
 
   const out = resolve(values.out);
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, `${JSON.stringify(report, null, 2)}\n`);
-  const markdown = `${renderMarkdown(report)}\n${renderFlakeMarkdown(flakes, now)}${testLedger ? `\n${testLedger.markdown}` : ''}`;
+  const markdown = `${renderMarkdown(report)}\n${renderMetricsMarkdown(metrics, window)}\n${renderFlakeMarkdown(flakes, now)}${testLedger ? `\n${testLedger.markdown}` : ''}`;
   console.log(markdown);
   if (values.summary) {
     await appendFile(values.summary, `${markdown}\n`);

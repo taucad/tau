@@ -102,7 +102,11 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
         })
       | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
       | { readonly status: 'unidentifiable' }
-      | { readonly status: 'copy-unproven'; readonly reason: 'absent' | 'unknown' }
+      | {
+          readonly status: 'copy-unproven';
+          readonly reason: 'absent' | 'unknown';
+          readonly unavailable?: readonly ProjectLocator[];
+        }
     >();
   });
 

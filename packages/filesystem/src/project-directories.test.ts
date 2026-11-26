@@ -688,14 +688,13 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(await rootProvider.readFile(`${directory}/user-file.txt`))).toBe('keep me');
     });
 
-    /* Fast-path FW3: a removal takes the manifest first and the identity last, so a directory holding nothing is one
-     * cut short after its identity record went; the replay finishes it (blueprint, S4 crash table). */
-    it('finishes an empty manifest-less directory, a removal cut short after its identity record', async () => {
+    /* Fast-path FW3 review m2: a directory holding nothing names no id, so its husk goes and the answer is absent. */
+    it('removes an empty manifest-less directory and answers absent', async () => {
       await rootProvider.mkdir(directory, { recursive: true });
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
+      ).resolves.toEqual({ status: 'absent', remaining: [], absence: 'absent' });
 
       expect(await rootProvider.exists(directory)).toBe(false);
     });
@@ -816,7 +815,9 @@ describe('WorkspaceFileService', () => {
       expect(await rootProvider.readFile(ambiguousPath, 'utf8')).toBe('foreign marker casing');
     });
 
-    it('restores the exact manifest bytes when final directory removal fails', async () => {
+    /* Fast-path FW3 review M2: a failed removal puts the identity back and never the manifest, so a gutted directory
+     * never looks whole again; the replay finishes it from the identity record. */
+    it('restores the identity record, not the manifest, when final directory removal fails', async () => {
       await writePhysicalProject();
       const manifestPath = `${directory}/tau.json`;
       const manifest = await rootProvider.readFile(manifestPath);
@@ -833,7 +834,8 @@ describe('WorkspaceFileService', () => {
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
       ).rejects.toThrow('final directory removal failed');
-      expect(await rootProvider.readFile(manifestPath)).toEqual(manifest);
+      expect(await rootProvider.exists(manifestPath)).toBe(false);
+      expect(manifest.byteLength).toBeGreaterThan(0);
       expect(
         parseProjectIdentityBytes(await rootProvider.readFile(`${directory}/${projectIdentityPath}`)).projectId,
       ).toBe(projectId);

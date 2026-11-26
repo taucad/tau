@@ -79,6 +79,11 @@
 \* authority read does. `locationsOf` only reads the index. A fresh listing of a root's names compares and unlists, as
 \* the sweep's does. The removal takes the manifest before the identity record, which no action models. Every action
 \* and verdict is unchanged. Re-pinned again after the probe's helpers took their arguments as records (lint only).
+\* FW3 review (2026-11-26): a probe installs a held reading only under a name the root's listing holds exactly, so a
+\* locator spelled another way on a case-folding volume never adds a name (`ReadEnd` installs for the directory it
+\* read); a surviving copy is checked against a fresh listing of its root, which compares and unlists as the sweep's
+\* does. The removal takes the manifest first and finishes a directory whose identity record names the id; no action
+\* models it. Every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

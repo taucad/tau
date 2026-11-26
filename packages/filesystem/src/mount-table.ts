@@ -272,6 +272,11 @@ export type PermanentDeleteProjectDirectoryInput = {
   readonly copy?: boolean;
   /** Other known locations of the id the caller nominates (its route's directory); the authority adds its index's. */
   readonly locations?: readonly ProjectLocator[];
+  /**
+   * Locations under a pending delete of their own (FW3 review M2): a directory whose removal may be under way proves no
+   * copy, so the authority leaves these out of its probes and its sweep.
+   */
+  readonly exclude?: ReadonlyArray<Readonly<{ storageRootKey: string; relativeDirectory: string }>>;
 };
 
 /**
@@ -293,7 +298,12 @@ export type PermanentDeleteProjectDirectoryResult =
   | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
   | { readonly status: 'unidentifiable' }
   /** `copy` was set and no other directory holds the id now (`absent`), or one could not be read (`unknown`). */
-  | { readonly status: 'copy-unproven'; readonly reason: 'absent' | 'unknown' };
+  | {
+      readonly status: 'copy-unproven';
+      readonly reason: 'absent' | 'unknown';
+      /** The locations that could not be read, when one could not (an unavailable folder). */
+      readonly unavailable?: readonly ProjectLocator[];
+    };
 
 /** Exact scoped request for committing one journal-backed project directory. @public */
 export type CommitPendingProjectDirectoryInput = {

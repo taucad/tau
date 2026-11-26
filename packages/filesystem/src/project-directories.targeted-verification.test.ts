@@ -1,10 +1,14 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import * as fc from 'fast-check';
 import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import { createDiscoveryProfile, discoveryProfileHomeId } from '#testing/discovery-profile.js';
+import {
+  createDiscoveryProfile,
+  discoveryProfileHomeId,
+  discoveryProfileWorkspaceId,
+} from '#testing/discovery-profile.js';
 import type { DiscoveryProfile, DiscoveryProfileShape } from '#testing/discovery-profile.js';
 import { ExternalChangeIngest } from '#external-change-ingest.js';
 import type { ProjectDirectoryReading } from '#project-directories.js';
@@ -127,6 +131,18 @@ const directoriesCarrying = async (profile: DiscoveryProfile, projectId: string)
     }
   }
   return found.toSorted();
+};
+/** The whole copies of an id, read from scratch: a manifest beside an identity record naming it (review m4). */
+const wholeCopies = async (profile: DiscoveryProfile, projectId: string): Promise<string[]> => {
+  const whole: string[] = [];
+  for (const key of await directoriesCarrying(profile, projectId)) {
+    const [root, name] = key.split(':') as ['home' | 'workspace', string];
+    // oxlint-disable-next-line no-await-in-loop -- A from-scratch read, one directory at a time.
+    if (await profile.providers[root].exists(`${name}/tau.json`)) {
+      whole.push(key);
+    }
+  }
+  return whole;
 };
 const keyOfLocator = (roots: Roots, locator: ProjectLocator): string =>
   `${locator.storageRootKey === roots.home ? 'home' : 'workspace'}:${locator.relativeDirectory}`;
@@ -301,7 +317,7 @@ describe('the permanent delete answers what remains under its lock (FW3, step 5)
         scope: profile.workspaceScope,
         copy: true,
       }),
-    ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown' });
+    ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown', unavailable: [homeAt(roots, 'home-000')] });
     expect(await directoriesCarrying(profile, discoveryProfileHomeId(0))).toEqual([
       'home:home-000',
       'workspace:copy-000',
@@ -373,7 +389,7 @@ describe('the permanent delete answers what remains under its lock (FW3, step 5)
     ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'unknown' });
   });
 
-  it('should take the manifest before the identity record, and the identity record last of the two', async () => {
+  it('should take the manifest first and the identity record last (review M2)', async () => {
     const profile = await profileOf();
     await profile.service.listProjectManifests();
     const unlinked: string[] = [];
@@ -390,7 +406,8 @@ describe('the permanent delete answers what remains under its lock (FW3, step 5)
       scope: { backend: 'opfs' },
     });
 
-    expect(unlinked.slice(-2)).toEqual(['home-002/tau.json', `home-002/${projectIdentityPath}`]);
+    expect(unlinked[0]).toBe('home-002/tau.json');
+    expect(unlinked.at(-1)).toBe(`home-002/${projectIdentityPath}`);
   });
 });
 
@@ -413,16 +430,27 @@ describe('the replay of an interrupted removal (FW3)', () => {
       status: 'deleted',
     },
     {
+      /* Review M2: the manifest goes first, so the rest of the contents may still be there. */
+      name: 'the manifest removed, contents and the identity record left',
+      write: async (profile: DiscoveryProfile) => {
+        await profile.writeBehind('home', 'home-002/src/left.ts', new TextEncoder().encode('x'));
+        await profile.writeBehind('home', 'home-002/.tau/chats/c/chat.json', new TextEncoder().encode('{}'));
+      },
+      remove: ['home-002/tau.json'],
+      status: 'deleted',
+    },
+    {
+      /* Review m2: no identity record is left to name the id, so the husk is removed and reported absent. */
       name: 'both markers removed, the state directory left',
       write: async () => undefined,
       remove: ['home-002/tau.json', `home-002/${projectIdentityPath}`],
-      status: 'deleted',
+      status: 'absent',
     },
     {
       name: 'everything removed but the directory',
       write: async () => undefined,
       remove: ['home-002/tau.json', 'home-002/.tau'],
-      status: 'deleted',
+      status: 'absent',
     },
     { name: 'the directory removed', write: async () => undefined, remove: ['home-002'], status: 'absent' },
   ] as const;
@@ -448,9 +476,17 @@ describe('the replay of an interrupted removal (FW3)', () => {
 
   it.each([
     {
-      name: 'a file beside the identity record',
+      name: 'files and no identity record',
       write: async (profile: DiscoveryProfile) => {
+        await profile.removeBehind('home', 'home-002/.tau');
         await profile.writeBehind('home', 'home-002/notes.txt', new TextEncoder().encode('keep'));
+      },
+    },
+    {
+      name: 'a file where the state directory would be',
+      write: async (profile: DiscoveryProfile) => {
+        await profile.removeBehind('home', 'home-002/.tau');
+        await profile.writeBehind('home', 'home-002/.tau', new TextEncoder().encode('not a directory'));
       },
     },
     {
@@ -472,7 +508,198 @@ describe('the replay of an interrupted removal (FW3)', () => {
         scope: { backend: 'opfs' },
       }),
     ).resolves.toEqual({ status: 'unidentifiable' });
-    expect(await profile.providers.home.exists('home-002/.tau')).toBe(true);
+    expect(await profile.providers.home.exists('home-002')).toBe(true);
+  });
+
+  /* Review m2: an empty directory that never held the id is not reported as a deletion of it. */
+  it('should report an empty directory that never held the id absent', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    await profile.writeBehind('home', 'stranger/x', new Uint8Array());
+    await profile.removeBehind('home', 'stranger/x');
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(3),
+        providerBasePath: 'stranger',
+        scope: { backend: 'opfs' },
+      }),
+    ).resolves.toMatchObject({ status: 'absent' });
+  });
+});
+
+/* The adversarial review of FW3: what may prove a copy, and what remains. */
+describe('only a different, whole directory proves a copy (FW3 review M1, M2, m1)', () => {
+  /** Make the folder's provider resolve `FOLDER-000` to `folder-000`, as a case-folding volume does. */
+  const foldCase = (profile: DiscoveryProfile): void => {
+    const provider = profile.providers.workspace;
+    const fold = (path: string): string => path.replace(/^FOLDER-000/u, 'folder-000');
+    for (const name of ['readFile', 'exists', 'stat', 'readdir', 'readdirEntries'] as const) {
+      const method: unknown = Reflect.get(provider, name);
+      if (typeof method === 'function') {
+        const folded = async (path: string, ...rest: unknown[]): Promise<unknown> =>
+          Reflect.apply(method, provider, [fold(path), ...rest]) as Promise<unknown>;
+        Object.defineProperty(provider, name, { configurable: true, writable: true, value: folded });
+        onTestFinished(() => {
+          Reflect.deleteProperty(provider, name);
+        });
+      }
+    }
+    const { refresh } = provider;
+    if (refresh !== undefined) {
+      vi.spyOn(provider, 'refresh').mockImplementation(async (paths?: readonly string[]) =>
+        Reflect.apply(refresh, provider, [paths?.map((path) => fold(path))]),
+      );
+    }
+  };
+
+  /* T1: a locator spelled in another case reads the target's own files on a case-folding root. */
+  it('should not count the target, spelled another way, as its own surviving copy', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const roots = await rootsOf(profile);
+    foldCase(profile);
+    const projectId = discoveryProfileWorkspaceId(0);
+    const alias = workspaceAt(roots, 'FOLDER-000');
+
+    const result = await profile.service.permanentlyDeleteProjectDirectory({
+      projectId,
+      providerBasePath: 'folder-000',
+      scope: profile.workspaceScope,
+      copy: true,
+      locations: [alias],
+    });
+
+    expect(result).toMatchObject({ status: 'copy-unproven', reason: 'absent' });
+    vi.restoreAllMocks();
+    expect(await directoriesCarrying(profile, projectId)).toEqual(['workspace:folder-000']);
+  });
+
+  it('should not list a directory under another spelling after a probe reads it', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const roots = await rootsOf(profile);
+    foldCase(profile);
+
+    await profile.service.probeProjectDirectories({
+      projectId: discoveryProfileWorkspaceId(0),
+      locators: [workspaceAt(roots, 'FOLDER-000')],
+    });
+    const { entries } = await profile.service.listProjectManifests();
+
+    expect(entries.map((entry) => entry.locator.relativeDirectory)).not.toContain('FOLDER-000');
+  });
+
+  /* T4 / M2: a removal cut short in its contents must leave a directory that proves no copy. */
+  it('should not let a directory whose removal was cut short prove a copy', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const projectId = discoveryProfileHomeId(0);
+    await profile.writeBehind('workspace', 'copy-000/main.ts', new TextEncoder().encode('export {};'));
+    const { readdir } = profile.providers.workspace;
+    let cut = true;
+    vi.spyOn(profile.providers.workspace, 'readdir').mockImplementation(async function (
+      this: unknown,
+      path: string,
+      ...rest: unknown[]
+    ) {
+      if (path === 'copy-000' && cut) {
+        cut = false;
+        throw unreadable();
+      }
+      return Reflect.apply(readdir, this, [path, ...rest]) as Promise<string[]>;
+    } as typeof readdir);
+    /* Tab 1 deletes the folder copy and dies in its contents. */
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    ).rejects.toThrow();
+    vi.restoreAllMocks();
+
+    /* Tab 2 deletes the Home copy, proven by the folder copy before tab 1 began. */
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'home-000',
+        scope: { backend: 'opfs' },
+        copy: true,
+      }),
+    ).resolves.toMatchObject({ status: 'copy-unproven' });
+    expect(await directoriesCarrying(profile, projectId)).toContain('home:home-000');
+  });
+
+  it('should finish, on replay, a removal cut short after its manifest', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    await profile.writeBehind('workspace', 'copy-000/main.ts', new TextEncoder().encode('export {};'));
+    await profile.removeBehind('workspace', 'copy-000/tau.json');
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    ).resolves.toMatchObject({ status: 'deleted' });
+    expect(await profile.providers.workspace.exists('copy-000')).toBe(false);
+  });
+
+  it('should leave out a location the caller says is under a pending delete', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const roots = await rootsOf(profile);
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'home-000',
+        scope: { backend: 'opfs' },
+        copy: true,
+        exclude: [{ storageRootKey: roots.workspace, relativeDirectory: 'copy-000' }],
+      }),
+    ).resolves.toMatchObject({ status: 'copy-unproven', reason: 'absent' });
+    const { locations } = await profile.service.probeProjectDirectories({
+      projectId: discoveryProfileHomeId(0),
+      known: true,
+      exclude: [{ storageRootKey: roots.workspace, relativeDirectory: 'copy-000' }],
+    });
+    expect(locations.map((location) => location.locator.relativeDirectory)).toEqual(['home-000']);
+  });
+
+  it('should name the folder it could not read when it refuses a copy delete', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const roots = await rootsOf(profile);
+    loseRoot(roots.home);
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown', unavailable: [homeAt(roots, 'home-000')] });
+  });
+
+  /* T2 / m1: an identity record with no manifest is a husk, not a copy to keep state for. */
+  it('should not name a husk the sweep finds as a remaining copy', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    await profile.removeBehind('workspace', 'copy-000/tau.json');
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'home-000',
+        scope: { backend: 'opfs' },
+      }),
+    ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'unknown' });
   });
 });
 
@@ -631,7 +858,7 @@ describe('what remains, whatever the index holds (FW3, S2 property)', () => {
     const other = discoveryProfileHomeId(1);
     const homeDirectories = ['home-000', 'home-001', 'home-002'];
     const workspaceDirectories = ['copy-000', 'folder-000', 'folder-001'];
-    const carrier = fc.constantFrom<'id' | 'other' | 'none'>('id', 'other', 'none');
+    const carrier = fc.constantFrom<'id' | 'husk' | 'other' | 'none'>('id', 'husk', 'other', 'none');
     const reading = fc.oneof(
       fc.constant<ProjectDirectoryReading | undefined>(undefined),
       fc.constant<ProjectDirectoryReading>({ kind: 'not-a-project' }),
@@ -680,8 +907,13 @@ describe('what remains, whatever the index holds (FW3, S2 property)', () => {
                 : profile.writeBehind(
                     root,
                     `${name}/${projectIdentityPath}`,
-                    identity(carried === 'id' ? projectId : other),
+                    identity(carried === 'other' ? other : projectId),
                   ));
+              if (carried === 'husk') {
+                /* A removal cut short after its manifest: the identity record names the id, and nothing is whole. */
+                // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
+                await profile.removeBehind(root, `${name}/tau.json`);
+              }
             }
             for (const [index, { root, name }] of all.entries()) {
               const indexed = [...indexedHome, ...indexedWorkspace][index];
@@ -696,6 +928,7 @@ describe('what remains, whatever the index holds (FW3, S2 property)', () => {
             }
             const chosen = all[target]!;
             const before = await directoriesCarrying(profile, projectId);
+            const wholeBefore = await wholeCopies(profile, projectId);
 
             const result = await profile.service.permanentlyDeleteProjectDirectory({
               projectId,
@@ -706,11 +939,12 @@ describe('what remains, whatever the index holds (FW3, S2 property)', () => {
             });
 
             const after = await directoriesCarrying(profile, projectId);
+            const wholeAfter = await wholeCopies(profile, projectId);
             const chosenKey = `${chosen.root}:${chosen.name}`;
-            const report = `${JSON.stringify(result)} before ${JSON.stringify(before)} after ${JSON.stringify(after)}`;
+            const report = `${JSON.stringify(result)} before ${JSON.stringify(before)} after ${JSON.stringify(after)} whole ${JSON.stringify(wholeAfter)}`;
             /* No directory but the target is removed, and the target only while it held the id. */
             expect(after, report).toEqual(
-              carriers[target] === 'id' && result.status === 'deleted'
+              (carriers[target] === 'id' || carriers[target] === 'husk') && result.status === 'deleted'
                 ? before.filter((key) => key !== chosenKey)
                 : before,
             );
@@ -719,19 +953,24 @@ describe('what remains, whatever the index holds (FW3, S2 property)', () => {
               if (result.absence === 'absent') {
                 expect(after, report).toEqual([]);
               }
-              /* Every remaining copy holds the id. */
+              /* Every remaining copy is a whole copy of the id, never a husk (review m1). */
               for (const locator of result.remaining ?? []) {
-                expect(after, report).toContain(keyOfLocator(roots, locator));
+                expect(wholeAfter, report).toContain(keyOfLocator(roots, locator));
               }
               /* An empty answer is never silent: it says absent or unknown. */
               expect((result.remaining ?? []).length > 0 || result.absence !== undefined, report).toBe(true);
               /* With the Trash waived, a copy survives any delete that removed something. */
-              if (copy && result.status === 'deleted') {
-                expect(after.length, report).toBeGreaterThan(0);
+              if (copy && result.status === 'deleted' && carriers[target] === 'id') {
+                expect(wholeAfter.length, report).toBeGreaterThan(0);
               }
             }
             if (result.status === 'copy-unproven') {
-              expect(before, report).toEqual([chosenKey]);
+              /* Refused only when no other whole copy existed, and nothing was removed. */
+              expect(
+                wholeBefore.filter((key) => key !== chosenKey),
+                report,
+              ).toEqual([]);
+              expect(after, report).toEqual(before);
             }
           } finally {
             profile.dispose();
@@ -762,13 +1001,22 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
   ];
 
   /** Exclusive Web Locks shared by both tabs, granted in request order per name. */
-  const sharedLocks = (): Readonly<{
+  const sharedLocks = (
+    jitter?: () => number,
+  ): Readonly<{
     request: (name: string, options: unknown, grant: () => Promise<unknown>) => Promise<unknown>;
     query: () => Promise<unknown>;
   }> => {
     const tails = new Map<string, Promise<void>>();
     return {
       request: async (name, _options, grant) => {
+        /* Seeded jitter before each request joins its queue: the tabs' lock requests interleave differently per seed. */
+        for (let turns = jitter?.() ?? 0; turns > 0; turns -= 1) {
+          // oxlint-disable-next-line no-await-in-loop -- Yield to the other tab, one macrotask at a time.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 0);
+          });
+        }
         const previous = tails.get(name) ?? Promise.resolve();
         const released = Promise.withResolvers<void>();
         const tail = (async (): Promise<void> => {
@@ -790,14 +1038,18 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
     };
   };
 
-  type Tab = Readonly<{ service: WorkspaceFileService; own: string; other: string }> & {
+  type Tab = Readonly<{ service: WorkspaceFileService; own: string; others: readonly string[] }> & {
     copy: boolean;
     outcome: string;
   };
 
-  const twoTabs = async (): Promise<Readonly<{ a: Tab; b: Tab; home: ReturnType<typeof createMockRootHandle> }>> => {
+  /** One tab per copy, each deleting its own copy, over one Home holding those copies and one other project. */
+  const tabsOver = async (
+    copies: readonly string[],
+    jitter?: () => number,
+  ): Promise<Readonly<{ tabs: Tab[]; home: ReturnType<typeof createMockRootHandle> }>> => {
     const home = createMockRootHandle();
-    for (const name of ['copy-a', 'copy-b', 'other']) {
+    for (const name of [...copies, 'other']) {
       const id = name === 'other' ? discoveryProfileHomeId(8) : projectId;
       // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
       const directory = await home.getDirectoryHandle(name, { create: true });
@@ -822,9 +1074,9 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
       }
     }
     vi.stubGlobal('FileSystemObserver', undefined);
-    vi.stubGlobal('navigator', { storage: { getDirectory: async () => home }, locks: sharedLocks() });
+    vi.stubGlobal('navigator', { storage: { getDirectory: async () => home }, locks: sharedLocks(jitter) });
     const databasePrefix = `tau-two-tab-delete-${randomUuid()}`;
-    const tab = async (own: string, other: string): Promise<Tab> => {
+    const tab = async (own: string): Promise<Tab> => {
       const registry = new ProviderRegistry({ databasePrefix });
       const rootKey = `memory:two-tab-${randomUuid()}`;
       const mountTable = new MountTable();
@@ -848,22 +1100,22 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
       disposers.push(() => {
         service.dispose();
       });
-      return { service, own, other, copy: false, outcome: 'not-run' };
+      return { service, own, others: copies.filter((name) => name !== own), copy: false, outcome: 'not-run' };
     };
-    return { a: await tab('copy-a', 'copy-b'), b: await tab('copy-b', 'copy-a'), home };
+    const tabs: Tab[] = [];
+    for (const own of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- One tab at a time.
+      tabs.push(await tab(own));
+    }
+    return { tabs, home };
   };
 
-  it.each([
-    ...orders.map((order) => ({ order: order.join(' → '), steps: order })),
-    { order: 'all at once', steps: [] },
-  ])('should leave one copy, or ask for the Trash, when they interleave as $order', async ({ steps }) => {
-    const { a, b, home } = await twoTabs();
-    const [root] = await a.service.getRootStatuses();
-    const homeKey = root!.storageRootKey;
+  /** What the library does in one tab: probe the other copies, then delete with `copy` only when one was proven. */
+  const probeAndDelete = (homeKey: string) => {
     const probe = async (tab: Tab): Promise<void> => {
       const { locations } = await tab.service.probeProjectDirectories({
         projectId,
-        locators: [{ backend: 'opfs', storageRootKey: homeKey, relativeDirectory: tab.other }],
+        locators: tab.others.map((name) => ({ backend: 'opfs', storageRootKey: homeKey, relativeDirectory: name })),
         known: true,
         except: { storageRootKey: homeKey, relativeDirectory: tab.own },
       });
@@ -882,6 +1134,60 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
       });
       tab.outcome = result.status;
     };
+    return { probe, remove };
+  };
+
+  const copiesLeft = async (home: ReturnType<typeof createMockRootHandle>): Promise<string[]> => {
+    const left: string[] = [];
+    for await (const [name] of home.entries()) {
+      left.push(name);
+    }
+    return left;
+  };
+
+  const twoTabs = async (): Promise<Readonly<{ a: Tab; b: Tab; home: ReturnType<typeof createMockRootHandle> }>> => {
+    const { tabs, home } = await tabsOver(['copy-a', 'copy-b']);
+    return { a: tabs[0]!, b: tabs[1]!, home };
+  };
+
+  /* Review m4: every tab runs at once, and seeded jitter at each lock request interleaves them at the lock queue. */
+  it.each([2, 3].flatMap((count) => Array.from({ length: 10 }, (_, seed) => ({ count, seed: seed + 1 }))))(
+    'should leave a whole copy when $count tabs delete $count copies at once (seed $seed)',
+    async ({ count, seed }) => {
+      let state = seed;
+      const jitter = (): number => {
+        state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return state % 4;
+      };
+      const copies = ['copy-a', 'copy-b', 'copy-c'].slice(0, count);
+      const { tabs, home } = await tabsOver(copies, jitter);
+      const [root] = await tabs[0]!.service.getRootStatuses();
+      const { probe, remove } = probeAndDelete(root!.storageRootKey);
+
+      await Promise.all(
+        tabs.map(async (tab) => {
+          await probe(tab);
+          await remove(tab);
+        }),
+      );
+
+      const listed = await copiesLeft(home);
+      const left = listed.filter((name) => copies.includes(name));
+      expect(left.length).toBeGreaterThan(0);
+      expect(tabs.filter((tab) => tab.outcome === 'deleted')).toHaveLength(count - left.length);
+      for (const tab of tabs.filter((candidate) => left.includes(candidate.own))) {
+        expect(['copy-unproven', 'trash-required']).toContain(tab.outcome);
+      }
+    },
+  );
+
+  it.each([
+    ...orders.map((order) => ({ order: order.join(' → '), steps: order })),
+    { order: 'all at once', steps: [] },
+  ])('should leave one copy, or ask for the Trash, when they interleave as $order', async ({ steps }) => {
+    const { a, b, home } = await twoTabs();
+    const [root] = await a.service.getRootStatuses();
+    const { probe, remove } = probeAndDelete(root!.storageRootKey);
     if (steps.length === 0) {
       await Promise.all(
         [a, b].map(async (tab) => {
@@ -897,10 +1203,7 @@ describe('two tabs deleting the last two copies at once (FW3, copy proof held th
       }
     }
 
-    const left: string[] = [];
-    for await (const [name] of home.entries()) {
-      left.push(name);
-    }
+    const left = await copiesLeft(home);
     const survivor = left.find((name) => name === 'copy-a' || name === 'copy-b');
     expect(left.filter((name) => name.startsWith('copy-'))).toHaveLength(1);
     const [kept, deleted] = survivor === 'copy-a' ? [a, b] : [b, a];

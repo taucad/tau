@@ -1299,6 +1299,7 @@ const permanentDeleteInputSchema = z.looseObject({
   scope: storageRootConfigSchema,
   copy: z.boolean().optional(),
   locations: z.array(projectLocatorSchema).optional(),
+  exclude: z.array(z.looseObject({ storageRootKey: z.string(), relativeDirectory: z.string() })).optional(),
 });
 /* `remaining` and `absence` are optional on the wire: an authority from before them answers without, and the caller
  * reads their absence as no proof (fast-path FW3). */
@@ -1310,13 +1311,18 @@ const permanentDeleteResultSchema = discriminatedResultUnion('status', [
   }),
   z.looseObject({ status: z.literal('unidentifiable') }),
   z.looseObject({ status: z.literal('identity-mismatch'), actualProjectId: projectIdSchema }),
-  z.looseObject({ status: z.literal('copy-unproven'), reason: z.enum(['absent', 'unknown']) }),
+  z.looseObject({
+    status: z.literal('copy-unproven'),
+    reason: z.enum(['absent', 'unknown']),
+    unavailable: z.array(projectLocatorSchema).optional(),
+  }),
 ]);
 const projectDirectoryProbeRequestSchema = z.looseObject({
   projectId: projectIdSchema.optional(),
   locators: z.array(projectLocatorSchema).optional(),
   known: z.boolean().optional(),
   except: z.looseObject({ storageRootKey: z.string(), relativeDirectory: projectDirectoryPathSchema }).optional(),
+  exclude: z.array(z.looseObject({ storageRootKey: z.string(), relativeDirectory: z.string() })).optional(),
   root: z.string().optional(),
 });
 const projectDirectoryProbeSchema = z.looseObject({

@@ -5,15 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { defaultFilter } from 'cmdk';
 import { useIsMobile } from '#hooks/use-mobile.js';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from '#components/command.js';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
 import {
   Drawer,
   DrawerAction,
@@ -34,6 +26,8 @@ import {
   comboboxViewTriggerClass,
   menuGroupHeadingClass,
   menuViewBackClass,
+  menuViewFooterClass,
+  menuViewHeaderClass,
   menuViewTriggerChevronClass,
 } from '#components/menu.variants.js';
 import {
@@ -739,7 +733,7 @@ function NestedItemList<T>({
       <CommandList key={stack.view} className={viewStackEnterClass(stack.direction)}>
         <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
         {view ? (
-          <CommandGroup forceMount>
+          <CommandGroup forceMount className={menuViewHeaderClass}>
             <CommandItem
               forceMount
               value={backValue}
@@ -760,27 +754,24 @@ function NestedItemList<T>({
           </CommandGroup>
         ))}
         {view !== undefined || isSearching || subViews.length === 0 ? null : (
-          <>
-            <CommandSeparator />
-            <CommandGroup data-slot='combobox-sub-views'>
-              {subViews.map((subView) => (
-                <CommandItem
-                  key={subView.id}
-                  value={viewValue(subView.id)}
-                  keywords={[subView.title]}
-                  data-slot='combobox-sub-view-trigger'
-                  aria-haspopup='true'
-                  className={comboboxViewTriggerClass}
-                  onSelect={() => {
-                    open(subView);
-                  }}
-                >
-                  {subView.label}
-                  <ChevronRight aria-hidden className={menuViewTriggerChevronClass} />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
+          <CommandGroup data-slot='combobox-sub-views' className={menuViewFooterClass}>
+            {subViews.map((subView) => (
+              <CommandItem
+                key={subView.id}
+                value={viewValue(subView.id)}
+                keywords={[subView.title]}
+                data-slot='combobox-sub-view-trigger'
+                aria-haspopup='true'
+                className={comboboxViewTriggerClass}
+                onSelect={() => {
+                  open(subView);
+                }}
+              >
+                {subView.label}
+                <ChevronRight aria-hidden className={menuViewTriggerChevronClass} />
+              </CommandItem>
+            ))}
+          </CommandGroup>
         )}
       </CommandList>
     </Command>

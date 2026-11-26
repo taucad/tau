@@ -51,7 +51,7 @@ import {
   DrawerTrigger,
   useIsInsideDrawer,
 } from '@taucad/ui/components/drawer';
-import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { menuItemVariants, menuViewFooterClass, menuViewHeaderClass } from '@taucad/ui/components/menu.variants';
 import { stepBackOnEmptySearch, ViewStackBack, viewStackEnterClass } from '@taucad/ui/components/view-stack';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
@@ -1036,7 +1036,7 @@ function ModelList({
         {hasMore ? <MoreModelsRow onOpen={onMore} /> : null}
       </CommandList>
       {agent.kind === 'tau' && !isMore ? (
-        <div className='border-t p-1'>
+        <div className={menuViewFooterClass}>
           <button
             type='button'
             className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
@@ -1333,7 +1333,7 @@ function Sheet({
           {runsOn.notice ? <Notice text={runsOn.notice} /> : null}
           {/* E7: Settings is a row like the others, naming what is not at its default, and opens its page. */}
           {settings.length > 0 ? (
-            <div className='flex flex-col border-t p-1'>
+            <div className={cn('flex flex-col', menuViewFooterClass)}>
               <button
                 ref={optionsRowRef}
                 type='button'
@@ -1361,7 +1361,7 @@ function Sheet({
           className={cn('flex max-h-[min(25rem,70vh)] flex-col', viewStackEnterClass('forward'))}
         >
           {/* A full-width back row as tall as the list rows below it. */}
-          <div className='flex shrink-0 border-b p-1'>
+          <div className={cn('flex', menuViewHeaderClass)}>
             <ViewStackBack
               parentLabel={view === 'models' && isFromAgents ? 'agents' : backLabels[view]}
               onBack={back}

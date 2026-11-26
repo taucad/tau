@@ -7,8 +7,12 @@ import { useMemo } from 'react';
 import { Bot, Check, ChevronRight } from 'lucide-react';
 import type { TauAgentHostId } from '@taucad/chat';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
-import { CommandGroup, CommandItem, CommandSeparator } from '@taucad/ui/components/command';
-import { comboboxViewTriggerClass, menuViewTriggerChevronClass } from '@taucad/ui/components/menu.variants';
+import { CommandGroup, CommandItem } from '@taucad/ui/components/command';
+import {
+  comboboxViewTriggerClass,
+  menuViewFooterClass,
+  menuViewTriggerChevronClass,
+} from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import type { IconId } from '@taucad/ui-kit/icons/svg-icon';
@@ -170,22 +174,19 @@ export function AcpModelRows({
 /** The More models row, drawn as the kernel picker draws More kernels. */
 export function MoreModelsRow({ onOpen }: { readonly onOpen: () => void }): React.JSX.Element {
   return (
-    <>
-      <CommandSeparator />
-      <CommandGroup>
-        <CommandItem
-          value={moreModelsValue}
-          keywords={['More models']}
-          data-slot='sheet-more-models'
-          aria-haspopup='true'
-          className={comboboxViewTriggerClass}
-          onSelect={onOpen}
-        >
-          More models
-          <ChevronRight aria-hidden='true' className={menuViewTriggerChevronClass} />
-        </CommandItem>
-      </CommandGroup>
-    </>
+    <CommandGroup className={menuViewFooterClass}>
+      <CommandItem
+        value={moreModelsValue}
+        keywords={['More models']}
+        data-slot='sheet-more-models'
+        aria-haspopup='true'
+        className={comboboxViewTriggerClass}
+        onSelect={onOpen}
+      >
+        More models
+        <ChevronRight aria-hidden='true' className={menuViewTriggerChevronClass} />
+      </CommandItem>
+    </CommandGroup>
   );
 }
 

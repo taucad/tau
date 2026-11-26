@@ -7,6 +7,7 @@
  * memory: a reload reads the chat's record, which holds the message.
  */
 import { useCallback, useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
 
 /** The project's route scope, `<workspace>/<project>` slugs as the route names them. */
 type DepartingScope = string;
@@ -19,20 +20,10 @@ export const departingFirstMessageLimit = 120_000;
 
 let departing: Readonly<{ scope: DepartingScope; text: string }> | undefined;
 let standInExpiry: ReturnType<typeof setTimeout> | undefined;
-const listeners = new Set<() => void>();
+/* Every lane drawing the stand-in, told when it changes. */
+const changes = new Topic<undefined>();
 
-const notify = (): void => {
-  for (const listener of listeners) {
-    listener();
-  }
-};
-
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-};
+const subscribe = (listener: () => void): (() => void) => changes.subscribe(listener);
 
 /**
  * Name the message leaving for a new project's chat. One at a time: a newer one replaces it.
@@ -46,7 +37,7 @@ export function departFirstMessage(scope: DepartingScope, text: string): void {
   standInExpiry = setTimeout(() => {
     arriveFirstMessage(scope);
   }, departingFirstMessageLimit);
-  notify();
+  changes.emit(undefined);
 }
 
 /**
@@ -61,7 +52,7 @@ export function arriveFirstMessage(scope: DepartingScope): void {
   departing = undefined;
   clearTimeout(standInExpiry);
   standInExpiry = undefined;
-  notify();
+  changes.emit(undefined);
 }
 
 /**

@@ -4,9 +4,9 @@
  * Each row runs one mutation through a started `ProjectLibrary`, with the listing query mounted as the library page
  * mounts it, on the 386-directory profile (`createLibraryProfile`: 84 projects in Home, 302 in one folder, three ids
  * with a copy in each), and counts what the library asks of the authority until everything it started has settled:
- * full discovery scans and targeted route verifications. `discovery-budget.ceiling.json` holds each mutation to its
- * counts, with the discovery reads and browser calls they cost at the per-call figures the filesystem cost test
- * measures. Counts are the minimum for one tab: no observation runs, so no watch adds a pass.
+ * full discovery scans, targeted route verifications and direct `tau.json` record reads. `discovery-budget.ceiling.json`
+ * holds each mutation to its counts, with the discovery reads and browser calls they cost at the per-call figures the
+ * filesystem cost test measures. Counts are the minimum for one tab: no observation runs, so no watch adds a pass.
  */
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
@@ -89,7 +89,14 @@ type Ceiling = Readonly<{
 }>;
 
 /** What one mutation cost. */
-type Budget = { scans: number; verifications: number; discoveryReads: number; browserCalls: number };
+type Budget = {
+  scans: number;
+  verifications: number;
+  /** `tau.json` reads through the record client, outside a scan or a verification. */
+  recordReads: number;
+  discoveryReads: number;
+  browserCalls: number;
+};
 
 const ceiling = JSON.parse(
   readFileSync(path.join(import.meta.dirname, 'discovery-budget.ceiling.json'), 'utf8'),
@@ -237,10 +244,19 @@ const mutations: Readonly<Record<string, (harness: Harness) => Promise<unknown>>
   },
 };
 
-/** What `counts` cost at the per-call figures the ceiling's `scan` and `verification` rows carry. */
-const budgetOf = ({ scans, verifications }: Readonly<{ scans: number; verifications: number }>): Budget => ({
+/**
+ * What `counts` cost at the per-call figures the ceiling's `scan` and `verification` rows carry. Those rows are held to
+ * what the filesystem cost test measures by that test (`project-directories.discovery-cost.test.ts`), so they cannot
+ * drift from the authority's real cost.
+ */
+const budgetOf = ({
   scans,
   verifications,
+  recordReads,
+}: Readonly<{ scans: number; verifications: number; recordReads: number }>): Budget => ({
+  scans,
+  verifications,
+  recordReads,
   discoveryReads:
     scans * (ceiling.scan.fileReads + ceiling.scan.listings) +
     verifications * (ceiling.verification.fileReads + ceiling.verification.listings),
@@ -264,7 +280,7 @@ describe('discovery budget per library mutation', () => {
     const measured = budgetOf(harness.profile.counts());
     const committed = ceiling.mutations[name];
     const report = `${name} measured ${JSON.stringify(measured)}; ceiling ${JSON.stringify(committed)}`;
-    for (const key of ['scans', 'verifications', 'discoveryReads', 'browserCalls'] as const) {
+    for (const key of ['scans', 'verifications', 'recordReads', 'discoveryReads', 'browserCalls'] as const) {
       expect(measured[key], `${report}: ${key} rose above its ceiling`).toBeLessThanOrEqual(committed?.[key] ?? 0);
       expect(measured[key], `${report}: ${key} fell below its ceiling; lower the ceiling to match`).toBe(
         committed?.[key],

@@ -92,6 +92,11 @@ export type LibraryProfileCounts = Readonly<{
   verifications: number;
   /** Root re-syncs (`syncProjectRoots`); not a discovery read, counted to show its share. */
   rootSyncs: number;
+  /**
+   * Direct record reads: `recordFiles.readFile` calls, each one file read of a project's `tau.json` outside a scan or
+   * a verification, counted whether or not the file exists.
+   */
+  recordReads: number;
 }>;
 
 type ProfileDirectory = {
@@ -193,7 +198,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     states.set(projectId, { projectId, lastActivityAt: 1_600_000_000_000 + index });
   }
 
-  let counts = { scans: 0, verifications: 0, rootSyncs: 0 };
+  let counts = { scans: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
   const rootOf = (storage: Readonly<{ backend: string }>): 'home' | 'workspace' =>
     storage.backend === 'webaccess' ? 'workspace' : 'home';
   const routedDirectory = (projectId: string): ProfileDirectory | undefined => {
@@ -289,6 +294,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
   const manifestPath = /^\/projects\/([^/]+)\/tau\.json$/u;
   const recordFiles = {
     readFile: async (path: string, encoding?: 'utf8') => {
+      counts = { ...counts, recordReads: counts.recordReads + 1 };
       const projectId = manifestPath.exec(path)?.[1];
       const directory = projectId === undefined ? undefined : routedDirectory(projectId);
       if (directory === undefined) {
@@ -517,7 +523,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     workspaceScope,
     counts: () => counts,
     reset: () => {
-      counts = { scans: 0, verifications: 0, rootSyncs: 0 };
+      counts = { scans: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
     },
   };
 };

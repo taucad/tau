@@ -391,8 +391,8 @@ export type ReleaseTrack = {
   /** The runs of the current count, oldest first, the newest {@link maximumStreakRuns}. */
   streakRuns: StreakRun[];
   /**
-   * The passes of the count's runs older than the newest {@link maximumStreakRuns}, one bucket per hour they ran in,
-   * oldest first: a late failure among them drops only its hour and those before it.
+   * The passes of the count's runs older than the newest {@link maximumStreakRuns}, one bucket per instant their runs
+   * were created, oldest first: a late failure among them drops only the buckets at or before it.
    */
   trimmed?: Array<{ readonly passes: number; readonly from: string; readonly to: string }> | undefined;
   /** The newest run with a failure. */

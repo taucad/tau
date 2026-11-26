@@ -48,7 +48,7 @@ import { client, GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import type { LedgerState } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
-import { addDays, identityHashOf, quarantinePath } from '#ci-flake-quarantine-entry.js';
+import { addDays, identityHashOf, quarantinePath, returnKey } from '#ci-flake-quarantine-entry.js';
 import {
   automationComments,
   branchExists,
@@ -529,6 +529,17 @@ const removeLabel = async (github: Client, issue: number, label: string): Promis
   }
 };
 
+/**
+ * Whether a pending removal's deferred auto-merge may be requested: every owner issue told, the removal still
+ * validating, and, for a release, a complete count this run, the only one on which its bar is rechecked.
+ */
+export const mayResumeAutoMerge = (check: {
+  readonly kind: RemovalKind;
+  readonly releases: boolean;
+  readonly unnoted: readonly string[];
+  readonly problems: readonly string[];
+}): boolean => check.unnoted.length === 0 && check.problems.length === 0 && (check.releases || check.kind === 'expiry');
+
 /** Marks the body of a removal pull request the ledger means to auto-merge once every owner issue is told. */
 export const autoMergeMarker = '<!-- flake-ledger: auto-merge -->';
 
@@ -642,7 +653,9 @@ export const closeReleased = async (
   const onMain = new Set(context.tests.map((test) => test.entry.issue));
   const outcome: string[] = [];
   const handled = new Set<number>();
-  // Newest merge first: when two releases of one issue landed, the newer settles it.
+  // Each variant entry an issue releases is settled on its own: `<issue> <return key>`.
+  const settled = new Set<string>();
+  // Newest merge first: when two releases of one entry landed, the newer settles it.
   const landed = [...context.landed].sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
   for (const release of landed) {
     const released = release.mergedAt.slice(0, 10);
@@ -660,11 +673,16 @@ export const closeReleased = async (
         id === undefined ||
         typeof created !== 'string' ||
         typeof expires !== 'string' ||
-        onMain.has(issue) ||
-        handled.has(issue)
+        onMain.has(issue)
       ) {
         continue;
       }
+      const entryVariant = typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined;
+      const key = returnKey(identityHashOf(id), entryVariant);
+      if (settled.has(`${issue} ${key}`)) {
+        continue;
+      }
+      settled.add(`${issue} ${key}`);
       handled.add(issue);
       // oxlint-disable-next-line no-await-in-loop -- one issue at a time
       const [current, comments] = await Promise.all([
@@ -672,20 +690,17 @@ export const closeReleased = async (
         automationComments(github, issue),
       ]);
       const noted = markersIn(comments).some(
-        (marker) => marker.kind === 'released' && marker.record.branch === release.branch,
+        (marker) =>
+          marker.kind === 'released' &&
+          marker.record.branch === release.branch &&
+          returnKey(marker.record.identity, marker.record.variant) === key,
       );
       const labels = labelNames(current.labels);
       const done =
         noted && current.state === 'closed' && labels.includes(releasedLabel) && !labels.includes(releasingLabel);
       // A return after this release reopened the issue for the operator: it is theirs now, never closed again.
       const returned = comments.some((body) =>
-        body.includes(
-          returnMarker({
-            identity: identityHashOf(id),
-            released,
-            variant: typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined,
-          }),
-        ),
+        body.includes(returnMarker({ identity: identityHashOf(id), released, variant: entryVariant })),
       );
       if (done || returned) {
         continue;
@@ -873,7 +888,10 @@ const main = async (args: readonly string[]): Promise<number> => {
         held.map((removal) => ({ kind: pending.kind, removal, branch: pending.branch, where })),
       );
       outcome.push(...unnoted);
-      if (unnoted.length === 0 && pending.pull !== undefined && problemsOf(held).length === 0) {
+      if (
+        pending.pull !== undefined &&
+        mayResumeAutoMerge({ kind: pending.kind, releases, unnoted, problems: problemsOf(held) })
+      ) {
         // oxlint-disable-next-line no-await-in-loop -- one branch at a time
         const resumed = await resumeAutoMerge(github, pending.pull);
         if (resumed !== undefined) {

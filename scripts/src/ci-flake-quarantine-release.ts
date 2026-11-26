@@ -135,7 +135,7 @@ const passesOf = (runs: ReadonlyArray<{ readonly passes: number }>): number =>
  * Count one run attempt into a track, in run order whatever order the runs are ingested in: a run that completes late
  * takes its place by when it was created. A failure ends the count there, so passes of runs created before it no
  * longer count, and a late pass from before the newest failure never joins the count after it. Runs past the newest
- * {@link maximumStreakRuns} fold into `trimmed`, one bucket per hour, which keeps their passes and when they ran.
+ * {@link maximumStreakRuns} fold into `trimmed`, one bucket per run creation instant, which keeps their passes and when.
  */
 /** Run order: by creation time, then run, then attempt (the attempts of one run share its creation time). */
 const runOrder = (
@@ -145,12 +145,19 @@ const runOrder = (
 
 type TrimmedBucket = { readonly passes: number; readonly from: string; readonly to: string };
 
-/** Fold a run's passes into the hour bucket it ran in, keeping the buckets in order. */
+/** The most trimmed buckets kept: older ones drop off, which only shortens the span the count is known to cover. */
+const maximumTrimmed = 2400;
+
+/**
+ * Fold a run's passes into the bucket of the instant its run was created (its attempts, and runs created at the same
+ * instant, share one), keeping the buckets in order.
+ */
 const foldTrimmed = (buckets: readonly TrimmedBucket[], run: StreakRun): TrimmedBucket[] => {
-  const hour = run.at.slice(0, 13);
-  const index = buckets.findIndex((bucket) => bucket.from.slice(0, 13) === hour);
+  const index = buckets.findIndex((bucket) => bucket.from === run.at);
   if (index === -1) {
-    return [...buckets, { passes: run.passes, from: run.at, to: run.at }].sort((a, b) => a.from.localeCompare(b.from));
+    return [...buckets, { passes: run.passes, from: run.at, to: run.at }]
+      .sort((a, b) => a.from.localeCompare(b.from))
+      .slice(-maximumTrimmed);
   }
   return buckets.map((bucket, at) =>
     at === index
@@ -170,8 +177,8 @@ const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number)
       track.lastFailure = { run: attempt.run, attempt: attempt.attempt, at: attempt.at };
     }
     track.streakRuns = track.streakRuns.filter((run) => runOrder(run, attempt) > 0);
-    // A bucket wholly after the failure keeps its passes; the one it fell in is dropped, since which of its passes
-    // came after is unknown.
+    // A bucket of a run created after the failure keeps its passes; one created at the same instant is dropped, since
+    // whether it ran after the failure is unknown.
     const kept = (track.trimmed ?? []).filter((bucket) => bucket.from > attempt.at);
     track.trimmed = kept.length > 0 ? kept : undefined;
   } else if (track.lastFailure === undefined || runOrder(attempt, track.lastFailure) > 0) {

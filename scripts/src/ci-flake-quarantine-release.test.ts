@@ -16,6 +16,7 @@ import {
   reconcileRemovals,
   resumeAutoMerge,
   autoMergeMarker,
+  mayResumeAutoMerge,
 } from '#ci-flake-quarantine-release-cli.js';
 import type { LandedRemoval } from '#ci-flake-quarantine-release-cli.js';
 import {
@@ -326,7 +327,7 @@ describe('the count in run order', () => {
     expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix', passes: 301 });
   });
 
-  it('should keep the trimmed passes after a late failure among them, dropping only its hour and before', () => {
+  it('should keep the trimmed passes after a late failure among them, the same hour included', () => {
     const tests = testsOf([entryOf()]);
     const state = emptyState(new Date('2026-11-20T00:00:00Z'));
     // 100 passes on November 21 (one an hour from 00:00, then every few minutes), then 300 on November 24.
@@ -341,8 +342,8 @@ describe('the count in run order', () => {
     });
 
     const track = state.quarantineTracks?.[tests[0]?.key ?? ''];
-    // Passes from 11:00 to 19:48 survive (45 of them): the 10:00 hour is dropped with everything before it.
-    expect(track?.streak).toBe(345);
+    // Every pass after 10:30 survives (47 of them, from 10:36 on), the ones in the same hour included.
+    expect(track?.streak).toBe(347);
     expect(releaseVerdict(track)).toMatchObject({ met: true, kind: 'no-fix' });
   });
 
@@ -793,7 +794,7 @@ describe('the release job', () => {
       '/issues/19/comments': [
         {
           body: removalMarker('released', {
-            identity: 'abcd',
+            identity: identityHashOf(`host › ${testName}`),
             path,
             created: '2026-11-20',
             expires: '2026-12-04',
@@ -933,6 +934,37 @@ describe('the release job', () => {
     expect(requests.find((request) => request.method === 'PATCH' && request.path.endsWith('/issues/30'))?.body).toEqual(
       { state: 'closed', state_reason: 'completed' },
     );
+  });
+
+  it('should record each variant a release of one owner issue removed', async () => {
+    const { github, requests } = fakeGitHub({ 'labels=flake%3Areleasing': [] });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch: 'flake-release/2026-11-26-bbbb',
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [
+          { path, entry: entryOf({ issue: 31, variant: { browser: 'firefox' } }) },
+          { path, entry: entryOf({ issue: 31, variant: { browser: 'webkit' } }) },
+        ],
+      },
+    ];
+
+    await closeReleased(github, { tests: [], landed, identityOf: (_file, test) => `host › ${test}` });
+
+    const notes = requests
+      .filter((request) => request.method === 'POST' && request.path.endsWith('/issues/31/comments'))
+      .map((request) => lastLanded([(request.body as { body: string }).body])?.variant);
+    expect(notes).toEqual([{ browser: 'firefox' }, { browser: 'webkit' }]);
+  });
+
+  it('should not resume the auto-merge of a pending release on a partial count', () => {
+    const ready = { unnoted: [], problems: [] };
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: false })).toBe(false);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'expiry', releases: false })).toBe(true);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true })).toBe(true);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'release', releases: true, unnoted: ['failed'] })).toBe(false);
+    expect(mayResumeAutoMerge({ ...ready, kind: 'expiry', releases: true, problems: ['invalid'] })).toBe(false);
   });
 
   it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {

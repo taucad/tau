@@ -61,7 +61,7 @@ INCORRECT:
 
 ### 2. Never repeat what the reserved head already excludes
 
-`/.tau/*` excludes every member of the root `.tau/` directory. An unversioned row that is root-matched (`anchored: true`) and lives directly or deeply inside `.tau/` gets no line. The generator derives this; do not add an override that re-emits such a row.
+`/.tau/*` excludes every member of the root `.tau/` directory. An unversioned row that is root-matched (`anchored: true`), lives directly or deeply inside `.tau/`, and sits under no versioned row that a `!` line re-includes gets no line. A row beneath a re-included one (`.tau/skills/private` under `!/.tau/skills`) is no longer under the head and keeps its own line. The generator derives both (`coveredByHead`); do not add an override that re-emits a covered row.
 
 ### 3. Never ignore what Git or its owning tool already leaves untracked
 

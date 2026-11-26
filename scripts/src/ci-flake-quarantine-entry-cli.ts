@@ -428,20 +428,51 @@ export const pushFiles = async (
 };
 
 /**
- * Hand an owner issue to the operator: reopen it, label it `flake:needs-operator` and say why. A return within 30
- * days of release goes to the operator, not the agent (FQ-9, D5).
+ * Hand an owner issue to the operator: label it `flake:needs-operator`, say why, and reopen it last. A return within
+ * 30 days of release goes to the operator, not the agent (FQ-9, D5). The handoff is complete only when the issue is
+ * open and labelled, so a run that failed half-way is finished by the next.
  */
 export const reopenForOperator = async (github: Client, issue: number, note: string): Promise<void> => {
   const repo = `/repos/${github.repository}`;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
-  await github.send('PATCH', `${repo}/issues/${issue}`, { state: 'open', state_reason: 'reopened' });
   await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
   await comment(github, issue, note);
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+  await github.send('PATCH', `${repo}/issues/${issue}`, { state: 'open', state_reason: 'reopened' });
+};
+
+/** The most pages a list is read to: 1,000 items. */
+const maximumPages = 10;
+
+/** Every item of a paged REST list, up to {@link maximumPages} pages of 100. */
+export const readPages = async <T>(github: Client, path: string): Promise<T[]> => {
+  const items: T[] = [];
+  for (let page = 1; page <= maximumPages; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order
+    const batch = await github.get<T[]>(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    items.push(...batch);
+    if (batch.length < 100) {
+      break;
+    }
+  }
+  return items;
+};
+
+/** An issue comment; `user` is `null` for a deleted account. */
+type IssueComment = { readonly body?: string; readonly user?: { readonly type?: string } };
+
+/**
+ * The comments of an issue that an app wrote, oldest first: the ledger's markers are read only from them, so a
+ * person's comment cannot pose as the automation's record (a GitHub App acts as a `Bot` user).
+ */
+export const automationComments = async (github: Client, issue: number): Promise<string[]> => {
+  const comments = await readPages<IssueComment>(github, `/repos/${github.repository}/issues/${issue}/comments`);
+  return comments.filter((entry) => entry.user?.type === 'Bot').map((entry) => entry.body ?? '');
 };
 
 type ReleasedIssue = {
   readonly number: number;
   readonly state?: string;
+  readonly labels?: ReadonlyArray<{ readonly name?: string } | string>;
   // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
   readonly pull_request?: unknown;
 };
@@ -465,17 +496,19 @@ export const readReturns = async (github: Client, today: string): Promise<Map<st
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one issue's comments at a time
-      const comments = await github.get<Array<{ body?: string }>>(
-        `${repo}/issues/${issue.number}/comments?per_page=100`,
-      );
-      const landed = lastLanded(comments.map((entry) => entry.body ?? ''));
+      const landed = lastLanded(await automationComments(github, issue.number));
       const known = landed ? returns.get(landed.identity) : undefined;
       if (
         landed &&
         isRecentRelease(landed.released, today) &&
         (known === undefined || known.released < landed.released)
       ) {
-        returns.set(landed.identity, { ...landed, issue: issue.number, open: issue.state === 'open' });
+        const labels = (issue.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name));
+        returns.set(landed.identity, {
+          ...landed,
+          issue: issue.number,
+          handedOff: issue.state === 'open' && labels.includes(operatorLabel),
+        });
       }
     }
     if (issues.length < 100) {
@@ -533,7 +566,7 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
   for (const refusal of plan.refused.filter((entry) => entry.returned !== undefined)) {
     const issue = refusal.returned?.issue ?? 0;
     issues.set(refusal.id, issue);
-    if (refusal.returned?.open === true) {
+    if (refusal.returned?.handedOff === true) {
       outcome.push(`#${issue} is already open for the operator: a return that is not quarantined again.`);
       continue;
     }
@@ -553,7 +586,7 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
       issueBody(planned, { repository: github.repository, entry: planned.entry }),
     );
     issues.set(planned.id, issue);
-    if (planned.returned && planned.returned.open !== true) {
+    if (planned.returned && planned.returned.handedOff !== true) {
       // oxlint-disable-next-line no-await-in-loop -- issues are updated one at a time
       await reopenForOperator(
         github,
@@ -647,6 +680,38 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
 };
 
 /**
+ * The entries a branch's commit adds: those of its `quarantine.json` files that the commit it was built on lacks. A
+ * returned entry keeps its first `expires` (FQ-9), so a proposal can expire sooner than 14 days after its push.
+ */
+export const proposedEntries = async (github: Client, sha: string): Promise<Array<Record<string, unknown>>> => {
+  const repo = `/repos/${github.repository}`;
+  const commit = await github.get<{
+    readonly parents?: ReadonlyArray<{ readonly sha: string }>;
+    readonly files?: ReadonlyArray<{ readonly filename: string; readonly status: string }>;
+  }>(`${repo}/commits/${sha}`);
+  const parent = commit.parents?.[0]?.sha;
+  const added: Array<Record<string, unknown>> = [];
+  for (const file of commit.files ?? []) {
+    if (baseName(file.filename) !== 'quarantine.json' || file.status === 'removed') {
+      continue;
+    }
+    const read = async (ref: string): Promise<string> =>
+      github.getText(`${repo}/contents/${encodePath(file.filename)}?ref=${ref}`, 'application/vnd.github.raw+json');
+    // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
+    const after = await read(sha);
+    // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
+    const before = file.status === 'added' || parent === undefined ? '{"entries":[]}' : await read(parent);
+    const known = new Set(parseQuarantine(before).entries.map((entry) => JSON.stringify(entry)));
+    for (const entry of parseQuarantine(after).entries) {
+      if (typeof entry === 'object' && entry !== null && !known.has(JSON.stringify(entry))) {
+        added.push(entry as Record<string, unknown>);
+      }
+    }
+  }
+  return added;
+};
+
+/**
  * Open the pull request of every entry branch that has none: a run whose pull request failed, or a token that may not
  * open one, leaves the branch behind, and `readPending` holds its tests, so a later run with a token that may opens it
  * from the branch's own commit. Auto-merge stays with whoever reviews it: this run did not validate that tree. Returns
@@ -672,7 +737,12 @@ export const reconcileEntryBranches = async (github: Client, base: string, today
       `${repo}/git/commits/${reference.object.sha}`,
     );
     const pushed = commit.committer?.date?.slice(0, 10);
-    if (pushed !== undefined && addDays(pushed, quarantineBounds.maximumAgeDays) < today) {
+    // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+    const proposed = await proposedEntries(github, reference.object.sha);
+    if (
+      (pushed !== undefined && addDays(pushed, quarantineBounds.maximumAgeDays) < today) ||
+      proposed.some((entry) => typeof entry['expires'] === 'string' && entry['expires'] < today)
+    ) {
       outcome.push(`\`${branch}\` holds an expired proposal; it is not opened and reserves nothing.`);
       continue;
     }

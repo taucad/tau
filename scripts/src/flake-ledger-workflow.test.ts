@@ -132,7 +132,16 @@ describe('flake ledger workflow', () => {
     // Entries are planned only from a complete ingestion.
     expect((entry as { if?: string } | undefined)?.if).toBe(`\${{ steps.ingest.outcome == 'success' }}`);
     // Release and expiry too, and an expiry is due on its day even when the entry step failed.
-    const release = steps.findIndex((step) => step.run === 'node scripts/src/ci-flake-quarantine-release-cli.ts');
+    const release = steps.findIndex((step) =>
+      step.run?.startsWith('node scripts/src/ci-flake-quarantine-release-cli.ts'),
+    );
+    // A test is released only from a count of every pending run.
+    expect(steps[release]?.run).toBe(
+      'node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"',
+    );
+    expect((steps[release] as { env?: Record<string, string> } | undefined)?.env?.['INGEST_COMPLETE']).toBe(
+      `\${{ steps.ingest.outputs.complete }}`,
+    );
     expect(release).toBeGreaterThan(steps.indexOf(entry ?? {}));
     expect((steps[release] as { if?: string } | undefined)?.if).toBe(
       `\${{ !cancelled() && steps.ingest.outcome == 'success' }}`,

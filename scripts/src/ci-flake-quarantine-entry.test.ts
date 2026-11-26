@@ -127,7 +127,7 @@ const fakeGitHub = (
     refusePullRequests?: boolean;
     pullStatus?: number;
     issues?: unknown[];
-    branches?: Array<{ branch: string; pulls: unknown[]; pushed?: string }>;
+    branches?: Array<{ branch: string; pulls: unknown[]; pushed?: string; proposed?: unknown[] }>;
     failComment?: number;
   } = {},
 ) => {
@@ -156,6 +156,15 @@ const fakeGitHub = (
         const pulls: unknown = options.branches?.find(({ branch }) => branch === head)?.pulls ?? [];
         return pulls as T;
       }
+      if (path.includes('/tau/commits/head-')) {
+        const branch = path.slice(path.indexOf('/commits/head-') + '/commits/head-'.length);
+        const proposed = options.branches?.find((entry) => entry.branch === branch)?.proposed;
+        const commit: unknown = {
+          parents: [{ sha: 'parent' }],
+          files: proposed ? [{ filename: 'packages/host/quarantine.json', status: 'modified' }] : [],
+        };
+        return commit as T;
+      }
       if (path.includes('/git/commits/head-')) {
         const branch = path.slice(path.indexOf('/git/commits/head-') + '/git/commits/head-'.length);
         const pushed = options.branches?.find((entry) => entry.branch === branch)?.pushed ?? '2026-11-21';
@@ -174,8 +183,16 @@ const fakeGitHub = (
       }
       throw new Error(`unexpected GET ${path}`);
     },
-    async getText(): Promise<string> {
-      throw new Error('unexpected getText');
+    async getText(path: string): Promise<string> {
+      const head = /ref=head-(.+)$/u.exec(path)?.[1];
+      if (head !== undefined) {
+        const proposed = options.branches?.find((entry) => entry.branch === head)?.proposed ?? [];
+        return JSON.stringify({ entries: proposed });
+      }
+      if (path.endsWith('ref=parent')) {
+        return JSON.stringify({ entries: [] });
+      }
+      throw new Error(`unexpected getText ${path}`);
     },
     async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
       throw new Error('unexpected getBytes');
@@ -392,6 +409,25 @@ describe('the replay week (FQ-6 acceptance)', () => {
       '`flake-quarantine/2026-11-01-aaaaaaaa` holds an expired proposal; it is not opened and reserves nothing.',
     ]);
     expect(requests.some((request) => request.path.endsWith('/pulls'))).toBe(false);
+  });
+
+  it('should not open an entry branch whose proposed entry has expired, though pushed in the last 14 days', async () => {
+    const { github, requests } = fakeGitHub({
+      branches: [
+        {
+          branch: 'flake-quarantine/2026-11-21-aaaaaaaa',
+          pulls: [],
+          proposed: [{ test: 'src/a.test.ts > a > b', created: '2026-11-08', expires: '2026-11-22' }],
+        },
+      ],
+    });
+
+    const outcome = await reconcileEntryBranches(github, 'main', '2026-11-23');
+
+    expect(requests.some((request) => request.method === 'POST')).toBe(false);
+    expect(outcome).toEqual([
+      '`flake-quarantine/2026-11-21-aaaaaaaa` holds an expired proposal; it is not opened and reserves nothing.',
+    ]);
   });
 
   it('should comment on every other owner issue when one comment fails', async () => {
@@ -826,7 +862,7 @@ describe('the 30-day return (FQ-9)', () => {
   });
 
   it('should not reopen or comment again on a return an earlier run handed to the operator', async () => {
-    const open = { ...record, expires: '2026-11-21', open: true };
+    const open = { ...record, expires: '2026-11-21', handedOff: true };
     const refused = plan(replayWeek(), { returns: new Map([[record.identity, open]]) }).refused.filter(
       (refusal) => refusal.kind === 'returned',
     );
@@ -844,28 +880,41 @@ describe('the 30-day return (FQ-9)', () => {
 
   it('should read the releases of the last 30 days from the owner issues', async () => {
     const requests: string[] = [];
+    const bot = { type: 'Bot' };
     const answer = (path: string): unknown => {
       if (path.includes('/issues?')) {
         return [
-          { number: 77, state: 'closed' },
+          { number: 77, state: 'closed', labels: [{ name: 'flake:released' }] },
           { number: 78, state: 'closed' },
           { number: 79, state: 'closed', pull_request: {} },
-          { number: 80, state: 'open' },
+          { number: 80, state: 'open', labels: [{ name: 'flake:released' }, { name: 'flake:needs-operator' }] },
+          // Reopened, but the label never landed: the handoff is not complete.
+          { number: 81, state: 'open', labels: ['flake:released'] },
         ];
       }
       if (path.includes('/issues/77/comments')) {
-        return [
-          { body: removalMarker('release', record) },
-          { body: removalMarker('released', { ...record, released: '2026-11-14' }) },
-        ];
+        // The marker is on the second page of comments; a person's marker after it does not count.
+        return path.endsWith('page=1')
+          ? Array.from({ length: 100 }, () => ({ body: 'noise', user: bot }))
+          : [
+              { body: removalMarker('released', { ...record, released: '2026-11-14' }), user: bot },
+              { body: removalMarker('released', { ...record, released: '2026-11-20' }), user: { type: 'User' } },
+            ];
       }
       if (path.includes('/issues/78/comments')) {
         // Released more than 30 days ago.
-        return [{ body: removalMarker('released', { ...record, identity: 'old', released: '2026-10-01' }) }];
+        return [{ body: removalMarker('released', { ...record, identity: 'old', released: '2026-10-01' }), user: bot }];
       }
       if (path.includes('/issues/80/comments')) {
-        // Reopened by an earlier run: still the same entry.
-        return [{ body: removalMarker('released', { ...record, identity: 'reopened', released: '2026-11-18' }) }];
+        // Reopened and labelled by an earlier run: still the same entry, already with the operator.
+        return [
+          { body: removalMarker('released', { ...record, identity: 'reopened', released: '2026-11-18' }), user: bot },
+        ];
+      }
+      if (path.includes('/issues/81/comments')) {
+        return [
+          { body: removalMarker('released', { ...record, identity: 'half', released: '2026-11-18' }), user: bot },
+        ];
       }
       throw new Error(`unexpected GET ${path}`);
     };
@@ -886,8 +935,9 @@ describe('the 30-day return (FQ-9)', () => {
     const returns = await readReturns(github, '2026-11-22');
 
     expect([...returns.values()]).toEqual([
-      { ...record, issue: 77, released: '2026-11-14', open: false },
-      { ...record, identity: 'reopened', issue: 80, released: '2026-11-18', open: true },
+      { ...record, issue: 77, released: '2026-11-14', handedOff: false },
+      { ...record, identity: 'reopened', issue: 80, released: '2026-11-18', handedOff: true },
+      { ...record, identity: 'half', issue: 81, released: '2026-11-18', handedOff: false },
     ]);
     expect(requests[0]).toContain('state=all&labels=flake%3Areleased&since=2026-10-23T00:00:00Z');
     expect(requests.some((path) => path.includes('/issues/79/'))).toBe(false);

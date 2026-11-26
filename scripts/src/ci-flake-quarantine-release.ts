@@ -69,8 +69,12 @@ export type QuarantinedTest = {
   readonly entry: QuarantineEntry;
 };
 
-/** A track's key: an entry is one test and variant in one file. */
-export const trackKey = (path: string, entry: QuarantineEntry): string => `${path} ${entryKey(entry)}`;
+/**
+ * A track's key: an entry is one test and variant in one file, made for one owner issue on one day. A renewal keeps
+ * both, so it keeps its count; an entry that replaces another for the same test starts a count of its own.
+ */
+export const trackKey = (path: string, entry: QuarantineEntry): string =>
+  `${path} ${entryKey(entry)} #${entry.issue} ${entry.created}`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -124,6 +128,52 @@ export const quarantinedTests = (
 const covers = (test: QuarantinedTest, row: OutcomeRow): boolean =>
   variantCovers(test.entry.variant, { browser: row.variant.browser, os: row.variant.os, target: row.targetKey });
 
+const passesOf = (runs: readonly StreakRun[]): number => runs.reduce((sum, run) => sum + run.passes, 0);
+
+/**
+ * Count one run attempt into a track, in run order whatever order the runs are ingested in: a run that completes late
+ * takes its place by when it was created. A failure ends the count there, so passes of runs created before it no
+ * longer count, and a late pass from before the newest failure never joins the count after it. Runs past the newest
+ * {@link maximumStreakRuns} fold into `trimmed`, which keeps their passes and when they ran.
+ */
+const countAttempt = (track: ReleaseTrack, attempt: StreakRun, failures: number): void => {
+  if (failures > 0) {
+    track.failures += failures;
+    if (track.lastFailure === undefined || attempt.at >= track.lastFailure.at) {
+      track.lastFailure = { run: attempt.run, attempt: attempt.attempt, at: attempt.at };
+    }
+    track.streakRuns = track.streakRuns.filter((run) => run.at > attempt.at);
+    if (track.trimmed && track.trimmed.from <= attempt.at) {
+      // Some trimmed passes may be later than the failure; which is unknown, so none counts.
+      track.trimmed = undefined;
+    }
+  } else if (track.lastFailure === undefined || attempt.at > track.lastFailure.at) {
+    if (track.trimmed && attempt.at <= track.trimmed.to) {
+      track.trimmed = {
+        passes: track.trimmed.passes + attempt.passes,
+        from: attempt.at < track.trimmed.from ? attempt.at : track.trimmed.from,
+        to: track.trimmed.to,
+      };
+    } else {
+      track.streakRuns = [...track.streakRuns, attempt].sort(
+        (a, b) => a.at.localeCompare(b.at) || a.run - b.run || a.attempt - b.attempt,
+      );
+    }
+    while (track.streakRuns.length > maximumStreakRuns) {
+      const [oldest] = track.streakRuns;
+      track.streakRuns = track.streakRuns.slice(1);
+      if (oldest) {
+        track.trimmed = {
+          passes: (track.trimmed?.passes ?? 0) + oldest.passes,
+          from: track.trimmed && track.trimmed.from < oldest.at ? track.trimmed.from : oldest.at,
+          to: oldest.at,
+        };
+      }
+    }
+  }
+  track.streak = (track.trimmed?.passes ?? 0) + passesOf(track.streakRuns);
+};
+
 /**
  * Count one run attempt's outcome rows into the quarantined tests' tracks (in place). Call it before `ingestRun`
  * records the attempt as ingested: like the ledger, it counts the rows this run executed at this attempt or an
@@ -170,7 +220,8 @@ export const countQuarantineRun = (
     }
     seen.add(rowKey);
     for (const test of byId.get(row.id) ?? []) {
-      if (!covers(test, row)) {
+      // Only runs from the entry's day on: a backlog ingested after the entry landed holds runs from before it.
+      if (!covers(test, row) || run.created_at < `${test.entry.created}T00:00:00Z`) {
         continue;
       }
       const attempts = counts.get(test.key) ?? new Map<number, { passes: number; failures: number }>();
@@ -203,18 +254,11 @@ export const countQuarantineRun = (
     state.quarantineTracks[test.key] = track;
     for (const [rowAttempt, count] of [...attempts.entries()].sort(([a], [b]) => a - b)) {
       track.executions += count.passes + count.failures;
-      if (count.failures > 0) {
-        track.failures += count.failures;
-        track.streak = 0;
-        track.streakRuns = [];
-        track.lastFailure = { run: run.id, attempt: rowAttempt, at: run.created_at };
-      } else {
-        track.streak += count.passes;
-        track.streakRuns = [
-          ...track.streakRuns,
-          { run: run.id, attempt: rowAttempt, at: run.created_at, passes: count.passes },
-        ].slice(-maximumStreakRuns);
-      }
+      countAttempt(
+        track,
+        { run: run.id, attempt: rowAttempt, at: run.created_at, passes: count.passes },
+        count.failures,
+      );
     }
     counted.push(test.key);
   }
@@ -250,33 +294,37 @@ export type ReleaseVerdict = {
   readonly days: number;
 };
 
-const spanDays = (runs: readonly StreakRun[]): number => {
-  const first = runs[0];
-  const last = runs.at(-1);
-  return first && last ? (Date.parse(last.at) - Date.parse(first.at)) / dayMilliseconds : 0;
-};
+const spanDays = (from: string | undefined, to: string | undefined): number =>
+  from !== undefined && to !== undefined ? (Date.parse(to) - Date.parse(from)) / dayMilliseconds : 0;
 
 /** Whether a track meets the release bar, with the linked fix when there is one. */
 export const releaseVerdict = (track: ReleaseTrack | undefined, fix?: LinkedFix): ReleaseVerdict => {
   const runs = track?.streakRuns ?? [];
+  const trimmed = track?.trimmed;
+  const last = runs.at(-1)?.at ?? trimmed?.to;
+  const allDays = spanDays(trimmed?.from ?? runs[0]?.at, last);
   const withoutFix: ReleaseVerdict = {
-    met: (track?.streak ?? 0) >= releaseBar.withoutFix && spanDays(runs) >= releaseBar.minimumDays,
+    met: (track?.streak ?? 0) >= releaseBar.withoutFix && allDays >= releaseBar.minimumDays,
     kind: 'no-fix',
     passes: track?.streak ?? 0,
     bar: releaseBar.withoutFix,
-    days: spanDays(runs),
+    days: allDays,
   };
   if (!fix || withoutFix.met) {
     return withoutFix;
   }
-  const after = runs.filter((run) => run.at >= fix.mergedAt);
-  const passes = after.reduce((sum, run) => sum + run.passes, 0);
+  // Strictly after the merge: a run created at the same instant may not have tested the fix.
+  const merged = Date.parse(fix.mergedAt);
+  const after = runs.filter((run) => Date.parse(run.at) > merged);
+  const trimmedAfter = trimmed !== undefined && Date.parse(trimmed.from) > merged ? trimmed : undefined;
+  const passes = passesOf(after) + (trimmedAfter?.passes ?? 0);
+  const days = spanDays(trimmedAfter?.from ?? after[0]?.at, after.at(-1)?.at ?? trimmedAfter?.to);
   return {
-    met: passes >= releaseBar.withFix && spanDays(after) >= releaseBar.minimumDays,
+    met: passes >= releaseBar.withFix && days >= releaseBar.minimumDays,
     kind: 'fix',
     passes,
     bar: releaseBar.withFix,
-    days: spanDays(after),
+    days,
   };
 };
 
@@ -335,6 +383,11 @@ export type RemovalInput = {
   readonly pending: readonly PendingRemoval[];
   /** `YYYY-MM-DD` (UTC). */
   readonly today: string;
+  /**
+   * Whether the count may release anything: `false` after an incomplete ingestion, whose count may miss a newer
+   * failure. Expiries still proceed, and pending releases are left as they are.
+   */
+  readonly releases?: boolean | undefined;
 };
 
 /**
@@ -343,6 +396,7 @@ export type RemovalInput = {
  * holds its entries while each is still on `main` unchanged and, for a release, still meets the bar.
  */
 export const planRemovals = (input: RemovalInput): RemovalPlan => {
+  const mayRelease = input.releases !== false;
   const planned = input.tests.map((test): PlannedRemoval => {
     const fix = input.fixes.get(test.key);
     return { ...test, verdict: releaseVerdict(input.tracks[test.key], fix), fix };
@@ -358,9 +412,11 @@ export const planRemovals = (input: RemovalInput): RemovalPlan => {
         ? 'it removes no entry'
         : tests.some((test) => test === undefined)
           ? 'an entry it removes is no longer on main as it was'
-          : pending.kind === 'release' && tests.some((test) => !test?.verdict.met)
+          : pending.kind === 'release' && mayRelease && tests.some((test) => !test?.verdict.met)
             ? 'a test it releases no longer meets the bar'
-            : undefined;
+            : pending.kind === 'expiry' && mayRelease && tests.some((test) => test?.verdict.met)
+              ? 'a test it expires now meets the release bar'
+              : undefined;
     if (reason !== undefined) {
       stale.push({ ...pending, reason });
       continue;
@@ -380,7 +436,7 @@ export const planRemovals = (input: RemovalInput): RemovalPlan => {
     const branch = heldBy.get(test.key);
     if (branch !== undefined) {
       held.push({ ...test, branch });
-    } else if (test.verdict.met) {
+    } else if (mayRelease && test.verdict.met) {
       releases.push(test);
     } else if (test.entry.expires <= input.today) {
       expiries.push(test);
@@ -483,6 +539,8 @@ export type ReleaseRecord = {
   readonly renewal?: QuarantineRenewal | undefined;
   /** The day the release landed and the issue closed: on a `released` marker only. */
   readonly released?: string | undefined;
+  /** The removal branch that proposed it: ties a release to the pull request that must land. */
+  readonly branch?: string | undefined;
 };
 
 /** The markers the ledger leaves on an owner issue: a removal proposed, and a release that landed. */
@@ -516,6 +574,7 @@ export const markersIn = (
         ) {
           const renewal = isRecord(value['renewal']) ? (value['renewal'] as QuarantineRenewal) : undefined;
           const released = typeof value['released'] === 'string' ? value['released'] : undefined;
+          const branch = typeof value['branch'] === 'string' ? value['branch'] : undefined;
           found.push({
             kind: match[1] as MarkerKind,
             record: {
@@ -525,6 +584,7 @@ export const markersIn = (
               expires: value['expires'],
               ...(renewal ? { renewal } : {}),
               ...(released ? { released } : {}),
+              ...(branch ? { branch } : {}),
             },
           });
         }
@@ -554,8 +614,8 @@ export const lastLanded = (texts: readonly string[]): (ReleaseRecord & { readonl
 export type ReturnRecord = ReleaseRecord & {
   readonly issue: number;
   readonly released: string;
-  /** Already reopened for the operator by an earlier run. */
-  readonly open?: boolean | undefined;
+  /** Already handed to the operator by an earlier run: the issue is open and labelled `flake:needs-operator`. */
+  readonly handedOff?: boolean | undefined;
 };
 
 /** Whether a release is recent enough that the test's return is the same entry (D5). */
@@ -565,7 +625,7 @@ export const isRecentRelease = (released: string, today: string): boolean =>
 /** The comment a release puts on the owner issue. */
 export const releaseComment = (
   removal: PlannedRemoval,
-  context: { readonly identity: string; readonly where: string },
+  context: { readonly identity: string; readonly where: string; readonly branch: string },
 ): string =>
   [
     removalMarker('release', {
@@ -574,6 +634,7 @@ export const releaseComment = (
       created: removal.entry.created,
       expires: removal.entry.expires,
       ...(removal.entry.renewal ? { renewal: removal.entry.renewal } : {}),
+      branch: context.branch,
     }),
     `**Released**: ${verdictLine(removal)} (testing policy § 16.5). ${context.where} Once it lands the test gates again and this issue closes. A return within ${returnWindowDays} days re-enters as the same entry and goes to the operator.`,
   ].join('\n');
@@ -581,7 +642,7 @@ export const releaseComment = (
 /** The comment an expiry puts on the owner issue. */
 export const expiryComment = (
   removal: PlannedRemoval,
-  context: { readonly identity: string; readonly where: string },
+  context: { readonly identity: string; readonly where: string; readonly branch: string },
 ): string =>
   [
     removalMarker('expiry', {
@@ -590,6 +651,7 @@ export const expiryComment = (
       created: removal.entry.created,
       expires: removal.entry.expires,
       ...(removal.entry.renewal ? { renewal: removal.entry.renewal } : {}),
+      branch: context.branch,
     }),
     `**Expired** on ${removal.entry.expires} (${removal.entry.renewal ? 'day 28, after the one operator renewal' : 'day 14'}) at ${verdictLine(removal)}: the entry is removed and the test gates again (testing policy § 16.3). ${context.where} The nightly watchdog pages the operator while the entry is on main at or past its expiry.` +
       (removal.entry.renewal

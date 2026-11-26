@@ -49,6 +49,7 @@ import type { LedgerState } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 import { identityHashOf } from '#ci-flake-quarantine-entry.js';
 import {
+  automationComments,
   branchExists,
   comment,
   enableAutoMerge,
@@ -56,12 +57,14 @@ import {
   mayAutoMerge,
   pushFiles,
   readTestFiles,
+  readPages,
   readWorkspace,
   trackedPaths,
   treeProblems,
 } from '#ci-flake-quarantine-entry-cli.js';
 import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
 import {
+  markersIn,
   expiryBranchPrefix,
   expiryComment,
   lastRemoval,
@@ -192,7 +195,7 @@ export const readLinkedFixes = async (github: Client, issue: number): Promise<Li
       fixes.push({ pull: pull.number, mergedAt: pull.merged_at });
     }
   }
-  const timeline = await github.get<TimelineEvent[]>(`${repo}/issues/${issue}/timeline?per_page=100`);
+  const timeline = await readPages<TimelineEvent>(github, `${repo}/issues/${issue}/timeline`);
   for (const event of timeline) {
     const source = event.source?.issue;
     const mergedAt = source?.pull_request?.merged_at;
@@ -226,14 +229,55 @@ export const readFixes = async (
   return fixes;
 };
 
+/** Whether every entry a removal removes is still in the base's `quarantine.json` exactly as the branch found it. */
+const stillOnBase = async (github: Client, pending: PendingRemoval, base: string): Promise<boolean> => {
+  const paths = [...new Set(pending.removed.map((removed) => removed.path))];
+  for (const path of paths) {
+    let text: string;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
+      text = await github.getText(
+        `/repos/${github.repository}/contents/${encodePath(path)}?ref=${encodeURIComponent(base)}`,
+        'application/vnd.github.raw+json',
+      );
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) {
+        return false;
+      }
+      throw error;
+    }
+    const onBase = new Set(removedEntries(text, '{"entries":[]}').map((entry) => JSON.stringify(entry)));
+    if (pending.removed.some((removed) => removed.path === path && !onBase.has(JSON.stringify(removed.entry)))) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /**
- * Open the pull request of every current removal branch that has none, and close the open pull request of every
- * stale one. Auto-merge stays with whoever reviews a pull request this run did not push. Returns one line per branch.
+ * Open the pull request of every current removal branch that has none, once its entries are read again on the base
+ * (one renewed since the plan was made is not removed), and close the open pull request of every stale one.
+ * Auto-merge stays with whoever reviews a pull request this run did not push. Returns one line per branch.
  */
-export const reconcileRemovals = async (github: Client, plan: RemovalPlan, base: string): Promise<string[]> => {
+export const reconcileRemovals = async (
+  github: Client,
+  plan: RemovalPlan,
+  context: { readonly base: string; readonly kinds?: ReadonlySet<RemovalKind> | undefined },
+): Promise<string[]> => {
   const repo = `/repos/${github.repository}`;
+  const { base } = context;
   const outcome: string[] = [];
-  for (const pending of plan.current.filter((entry) => entry.pull === undefined)) {
+  const pendingWithout = plan.current.filter(
+    (entry) => entry.pull === undefined && (context.kinds === undefined || context.kinds.has(entry.kind)),
+  );
+  for (const pending of pendingWithout) {
+    // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+    if (!(await stillOnBase(github, pending, base))) {
+      outcome.push(
+        `\`${pending.branch}\` is not opened: an entry it removes changed on \`${base}\` since this run planned.`,
+      );
+      continue;
+    }
     const [first, ...rest] = (pending.message ?? '').split('\n');
     const title =
       first === undefined || first.trim() === ''
@@ -245,7 +289,7 @@ export const reconcileRemovals = async (github: Client, plan: RemovalPlan, base:
         title,
         head: pending.branch,
         base,
-        body: `${rest.join('\n').trim()}\n\nOpened by a later run of the flake ledger for a ${pending.kind} branch that had no pull request; its entries are still on \`${base}\` as it found them. Auto-merge is left to the reviewer.\n`,
+        body: `${rest.join('\n').trim()}\n\nOpened by a later run of the flake ledger for a ${pending.kind} branch that had no pull request. When this run checked, its entries were on \`${base}\` as the branch found them; check that none was renewed since before merging. Auto-merge is left to the reviewer.\n`,
       });
       outcome.push(`Opened #${pull.number} for \`${pending.branch}\`, which had no pull request.`);
     } catch (error) {
@@ -268,6 +312,62 @@ export const reconcileRemovals = async (github: Client, plan: RemovalPlan, base:
   }
   return outcome;
 };
+
+/** One owner issue to tell about a removal branch. */
+export type OwnerNote = {
+  readonly kind: RemovalKind;
+  readonly removal: PlannedRemoval;
+  readonly branch: string;
+  /** Where the removal is: its pull request, or the branch and a compare link. */
+  readonly where: string;
+};
+
+/**
+ * Make sure each owner issue carries its removal's comment (once per branch, found by the marker's branch) and label
+ * (`flake:releasing` for a release, `flake:needs-operator` for an expiry). It runs after a push and again on every
+ * later run while the branch is pending, so an update that failed is finished then, without a second comment.
+ */
+export const ensureOwnerNotes = async (github: Client, notes: readonly OwnerNote[]): Promise<string[]> => {
+  const repo = `/repos/${github.repository}`;
+  const outcome: string[] = [];
+  for (const note of notes) {
+    const { issue } = note.removal.entry;
+    const label = note.kind === 'release' ? releasingLabel : operatorLabel;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
+      const [current, comments] = await Promise.all([
+        github.get<LabelledIssue>(`${repo}/issues/${issue}`),
+        automationComments(github, issue),
+      ]);
+      const noted = markersIn(comments).some(
+        (marker) => marker.kind === note.kind && marker.record.branch === note.branch,
+      );
+      if (!noted) {
+        const context = { identity: identityHashOf(note.removal.id), where: note.where, branch: note.branch };
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
+        await comment(
+          github,
+          issue,
+          note.kind === 'release' ? releaseComment(note.removal, context) : expiryComment(note.removal, context),
+        );
+      }
+      if (!labelNames(current.labels).includes(label)) {
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
+        await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [label] });
+      }
+    } catch (error) {
+      // One failed issue must not keep the other owners from the link; the next run tries it again.
+      outcome.push(`Could not update #${issue}: ${error instanceof Error ? error.message : String(error)}.`);
+    }
+  }
+  return outcome;
+};
+
+/** Where a pending removal is, for its owner issue. */
+const whereOf = (repository: string, base: string, pending: { branch: string; pull?: number | undefined }): string =>
+  pending.pull === undefined
+    ? `The removal is on branch \`${pending.branch}\`, but this token may not open pull requests: open it at https://github.com/${repository}/compare/${base}...${encodePath(pending.branch)}?expand=1 (it touches only quarantine.json files).`
+    : `The removal is #${pending.pull}.`;
 
 export type RemovalContext = {
   readonly kind: RemovalKind;
@@ -348,92 +448,80 @@ export const applyRemovals = async (github: Client, context: RemovalContext): Pr
   const where = pull
     ? `The removal is #${pull.number}${merging ? ' (squash auto-merge on)' : ''}.`
     : `The removal is on branch \`${branch}\`, but this token may not open pull requests: open it at ${compare} (it touches only quarantine.json files${autoMerge ? ' and validates, so it may auto-merge' : ''}).`;
-  for (const removal of removals) {
-    const identity = identityHashOf(removal.id);
-    const body =
-      kind === 'release' ? releaseComment(removal, { identity, where }) : expiryComment(removal, { identity, where });
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
-      await comment(github, removal.entry.issue, body);
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
-      await github.send('POST', `${repo}/issues/${removal.entry.issue}/labels`, {
-        labels: [kind === 'release' ? releasingLabel : operatorLabel],
-      });
-    } catch (error) {
-      // One failed issue must not keep the other owners from the link; the pull request body names every issue.
-      outcome.push(
-        `Could not update #${removal.entry.issue}: ${error instanceof Error ? error.message : String(error)}.`,
-      );
-    }
-  }
+  outcome.push(
+    ...(await ensureOwnerNotes(
+      github,
+      removals.map((removal) => ({ kind, removal, branch, where })),
+    )),
+  );
   if (failure !== undefined) {
     throw failure;
   }
   return outcome;
 };
 
+/** The day the removal branch's pull request merged, if it did. */
+const mergedDay = async (github: Client, branch: string): Promise<string | undefined> => {
+  const owner = github.repository.split('/')[0] ?? '';
+  const pulls = await github.get<Pull[]>(
+    `/repos/${github.repository}/pulls?state=closed&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
+  );
+  return pulls.find((pull) => pull.merged_at)?.merged_at?.slice(0, 10);
+};
+
 /**
  * Close the owner issue of every release that has landed: an issue labelled `flake:releasing` whose entry is no
- * longer on `main` and whose newest removal comment is a release closes as completed, labelled `flake:released`. One
- * whose newest removal is an expiry only loses `flake:releasing`: the test was not fixed.
+ * longer on `main`, whose newest removal comment is a release, and whose release branch's pull request merged. It
+ * closes as completed, labelled `flake:released`, with a comment recording the day the release merged: the start of
+ * the 30-day return window. An entry that left `main` another way (an expiry, or by hand) only loses
+ * `flake:releasing`: the release did not land. Markers are read only from comments an app wrote.
  */
 export const closeReleased = async (
   github: Client,
-  context: { readonly tests: readonly QuarantinedTest[]; readonly today: string },
+  context: { readonly tests: readonly QuarantinedTest[] },
 ): Promise<string[]> => {
-  const { tests, today } = context;
   const repo = `/repos/${github.repository}`;
-  const onMain = new Set(tests.map((test) => test.entry.issue));
+  const onMain = new Set(context.tests.map((test) => test.entry.issue));
   const outcome: string[] = [];
-  for (let page = 1; page <= 3; page += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- pages are read in order
-    const issues = await github.get<LabelledIssue[]>(
-      `${repo}/issues?state=all&labels=${encodeURIComponent(releasingLabel)}&per_page=100&page=${page}`,
+  const issues = await readPages<LabelledIssue>(
+    github,
+    `${repo}/issues?state=all&labels=${encodeURIComponent(releasingLabel)}`,
+  );
+  for (const issue of issues) {
+    if (issue.pull_request !== undefined || onMain.has(issue.number)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+    const last = lastRemoval(await automationComments(github, issue.number));
+    const others = labelNames(issue.labels).filter((name) => name !== releasingLabel);
+    const landed =
+      last?.kind === 'release' && last.record.branch !== undefined
+        ? // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+          await mergedDay(github, last.record.branch)
+        : undefined;
+    if (last === undefined || landed === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+      await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels: others });
+      outcome.push(
+        `#${issue.number} left quarantine without its release landing: \`${releasingLabel}\` removed, the issue stays as it is.`,
+      );
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+    await comment(
+      github,
+      issue.number,
+      `${removalMarker('released', { ...last.record, released: landed })}\nThe release merged on ${landed}: the entry is no longer on main and the test gates again. A return within 30 days reopens this issue as the same entry, for the operator.`,
     );
-    for (const issue of issues) {
-      if (issue.pull_request !== undefined || onMain.has(issue.number)) {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-      const comments = await github.get<Array<{ body?: string }>>(
-        `${repo}/issues/${issue.number}/comments?per_page=100`,
-      );
-      const last = lastRemoval(comments.map((entry) => entry.body ?? ''));
-      const others = labelNames(issue.labels).filter((name) => name !== releasingLabel);
-      if (last?.kind !== 'release') {
-        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-        await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels: others });
-        outcome.push(
-          `#${issue.number} left quarantine by an expiry: \`${releasingLabel}\` removed, the issue stays open.`,
-        );
-        continue;
-      }
-      const labels = [...new Set([...others, releasedLabel])];
-      // The landed release, with its day: a return within 30 days of it re-enters as this entry.
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-      await comment(
-        github,
-        issue.number,
-        `${removalMarker('released', { ...last.record, released: today })}\nThe release has landed: the entry is no longer on main and the test gates again. A return within 30 days reopens this issue as the same entry, for the operator.`,
-      );
-      if (issue.state === 'open') {
-        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-        await github.send('PATCH', `${repo}/issues/${issue.number}`, {
-          state: 'closed',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
-          state_reason: 'completed',
-          labels,
-        });
-        outcome.push(`Closed #${issue.number}: released.`);
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-        await github.send('PATCH', `${repo}/issues/${issue.number}`, { labels });
-        outcome.push(`Labelled #${issue.number} \`${releasedLabel}\`; it was already closed.`);
-      }
-    }
-    if (issues.length < 100) {
-      break;
-    }
+    const labels = [...new Set([...others, releasedLabel])];
+    // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+    await github.send(
+      'PATCH',
+      `${repo}/issues/${issue.number}`,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+      issue.state === 'open' ? { state: 'closed', state_reason: 'completed', labels } : { labels },
+    );
+    outcome.push(`Closed #${issue.number}: released on ${landed}.`);
   }
   return outcome;
 };
@@ -454,6 +542,7 @@ const main = async (args: readonly string[]): Promise<number> => {
         out: { type: 'string', default: '' },
         summary: { type: 'string', default: process.env['GITHUB_STEP_SUMMARY'] ?? '' },
         'max-requests': { type: 'string', default: '1500' },
+        releases: { type: 'string', default: 'true' },
       },
     }));
   } catch (error) {
@@ -468,6 +557,7 @@ const main = async (args: readonly string[]): Promise<number> => {
     (!offline && token === '') ||
     (offline && values['state-file'] === '') ||
     dayNumber(values.today) === undefined ||
+    (values.releases !== 'true' && values.releases !== 'false') ||
     !Number.isInteger(maxRequests) ||
     maxRequests <= 0
   ) {
@@ -506,7 +596,18 @@ const main = async (args: readonly string[]): Promise<number> => {
   const tests = quarantinedTests(workspace, values.today);
   const pending = offline ? [] : await readPendingRemovals(github);
   const fixes = offline ? new Map<string, LinkedFix | undefined>() : await readFixes(github, tests, state);
-  const plan = planRemovals({ tests, tracks: state.quarantineTracks ?? {}, fixes, pending, today: values.today });
+  const releases = values.releases === 'true';
+  const plan = planRemovals({
+    tests,
+    tracks: state.quarantineTracks ?? {},
+    fixes,
+    pending,
+    today: values.today,
+    releases,
+  });
+  if (!releases) {
+    notes.push('The ingestion did not count every pending run: nothing is released this run; expiries proceed.');
+  }
 
   const removals = [...plan.releases, ...plan.expiries];
   const contents = await readTestFiles(offline ? undefined : github, {
@@ -514,15 +615,17 @@ const main = async (args: readonly string[]): Promise<number> => {
     paths: trackedPaths(workspace, []),
     ref: baseSha,
   });
+  // Only the problems a removal brings: an expired entry elsewhere on `main` is its own expiry's to remove.
+  const checks = { readTracked: (path: string) => contents.get(path), today: values.today };
+  const baseline = new Set(treeProblems(workspace, [], checks));
   const problemsOf = (kind: readonly PlannedRemoval[]): string[] =>
-    treeProblems(workspace, removalFiles(workspace.quarantines, kind), {
-      readTracked: (path) => contents.get(path),
-      today: values.today,
-    });
+    treeProblems(workspace, removalFiles(workspace.quarantines, kind), checks).filter(
+      (problem) => !baseline.has(problem),
+    );
 
   // Two branches, an issue comment and a label each, the reconciliation and the closing: stop short of the writes
   // rather than run out half-way, and leave them to the next run.
-  const writeBudget = 3 * removals.length + 3 * plan.current.length + 2 * plan.stale.length + 40;
+  const writeBudget = 5 * removals.length + 4 * plan.held.length + 3 * plan.current.length + 2 * plan.stale.length + 40;
   if (write && github.budget() < writeBudget) {
     write = false;
     notes.push(
@@ -531,7 +634,32 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   const outcome: string[] = [...notes];
   if (write) {
-    outcome.push(...(await reconcileRemovals(github, plan, values.base)));
+    outcome.push(
+      ...(await reconcileRemovals(github, plan, {
+        base: values.base,
+        kinds: releases ? undefined : new Set<RemovalKind>(['expiry']),
+      })),
+    );
+    // The owner issues of pending removals: a comment or label an earlier run failed to write.
+    const branches = new Map(plan.current.map((pending) => [pending.branch, pending]));
+    outcome.push(
+      ...(await ensureOwnerNotes(
+        github,
+        plan.held.flatMap((held) => {
+          const pending = branches.get(held.branch);
+          return pending
+            ? [
+                {
+                  kind: pending.kind,
+                  removal: held,
+                  branch: held.branch,
+                  where: whereOf(repository, values.base, pending),
+                },
+              ]
+            : [];
+        }),
+      )),
+    );
     for (const [kind, planned] of [
       ['release', plan.releases],
       ['expiry', plan.expiries],
@@ -549,7 +677,7 @@ const main = async (args: readonly string[]): Promise<number> => {
         })),
       );
     }
-    outcome.push(...(await closeReleased(github, { tests, today: values.today })));
+    outcome.push(...(await closeReleased(github, { tests })));
   } else {
     outcome.push(dryRun ? 'Dry run: nothing written to GitHub.' : 'Nothing written to GitHub.');
     if (values.out) {

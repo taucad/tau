@@ -386,10 +386,12 @@ export type ReleaseTrack = {
   executions: number;
   /** Executions that failed, or passed only on the recorded retry. */
   failures: number;
-  /** Consecutive passing executions, up to the newest: the count against the bar without a fix. */
+  /** Consecutive passing executions, up to the newest: the count against the bar without a fix (`trimmed` included). */
   streak: number;
   /** The runs of the current count, oldest first, the newest {@link maximumStreakRuns}. */
   streakRuns: StreakRun[];
+  /** The passes of the count's runs older than the newest {@link maximumStreakRuns}, and when they ran. */
+  trimmed?: { readonly passes: number; readonly from: string; readonly to: string } | undefined;
   /** The newest run with a failure. */
   lastFailure?: { readonly run: number; readonly attempt: number; readonly at: string } | undefined;
 };

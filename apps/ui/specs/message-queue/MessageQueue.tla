@@ -326,6 +326,11 @@
 \* Send now spoken in flight (2026-11-27): the row the person sent with Send now keeps its live region while its
 \* durable steer is in flight, past `onSteer` settling, and an automatic send stays silent. Presentation only. No action
 \* or verdict changes.
+\* Host attachment HA2 (2026-11-27): a replayed or dispatched queued command's outcome follows its code's retry class
+\* (HA-I4). Every `wait` code, and an answer lost past the command's bound, holds the item to send again by its key,
+\* as an owner wait already did; `never`, `resume` and `reauth` still fail it with its card. Only a durable answer
+\* acknowledges. The wait's line shows after `outboxWaitLineMilliseconds`. Holding is stuttering, never `Acknowledge`
+\* or a second id. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

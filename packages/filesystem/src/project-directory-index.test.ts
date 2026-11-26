@@ -1,6 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import * as fc from 'fast-check';
 import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
@@ -66,6 +67,31 @@ const counter = (name: WorkerTimingCounter): number => workerTimings.summarize(0
 const homeKeyOf = async (profile: DiscoveryProfile): Promise<string> => {
   const [home] = await profile.service.getRootStatuses();
   return home!.storageRootKey;
+};
+
+/** Fire the audit timer tick by tick for `intervals` audit intervals, and report the whole cycles it ran per interval. */
+const fullCyclesPerInterval = async (
+  audit: MockInstance<ProjectDirectories['auditDiscovery']>,
+  intervals: number,
+  lateness: (tick: number) => number = () => 0,
+): Promise<number[]> => {
+  const perInterval: number[] = [];
+  let tick = 0;
+  for (let round = 0; round < intervals; round += 1) {
+    const before = audit.mock.calls.filter(([share]) => share === undefined).length;
+    for (let elapsed = 0; elapsed < discoveryAuditIntervalMilliseconds; elapsed += 15_000) {
+      vi.setSystemTime(Date.now() + lateness(tick));
+      tick += 1;
+      // oxlint-disable-next-line no-await-in-loop -- One audit tick at a time, as the timer fires them.
+      await vi.advanceTimersByTimeAsync(15_000);
+      // oxlint-disable-next-line no-await-in-loop -- The tick's audit settles before the next.
+      await vi.waitFor(() => {
+        expect(audit.mock.results.every((result) => result.type !== 'incomplete')).toBe(true);
+      });
+    }
+    perInterval.push(audit.mock.calls.filter(([share]) => share === undefined).length - before);
+  }
+  return perInterval;
 };
 
 describe('A1: the index nominates and storage decides', () => {
@@ -236,6 +262,18 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
     expect(renamed?.status === 'valid' ? renamed.manifest.name : undefined).toBe('Renamed by the provider');
     expect(cost.providers.home.fileReads).toBe(2);
     expect(profile.index.view(homeKey)?.dirty).toEqual([]);
+  });
+
+  /* Review N5: a file at the top of a root is not a directory, so it enters neither the names nor the dirty set. */
+  it('should not take a top-level file this authority writes for a directory', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const homeKey = await homeKeyOf(profile);
+
+    await profile.providers.home.writeFile('notes.txt', new TextEncoder().encode('a file, not a project'));
+
+    expect(profile.index.view(homeKey)).toMatchObject({ dirty: [] });
+    expect(profile.index.view(homeKey)?.names).not.toContain('notes.txt');
   });
 
   it('should keep a directory dirty when a fact arrives while its read runs', () => {
@@ -452,7 +490,7 @@ describe('A3: freshness is bounded by the authority', () => {
   });
 
   /* Review m3: a long gap between polls never stretches the freshness window past the cadence the page polls at. */
-  it('should validate a polled root past 30 s even when its polls were an hour apart', async () => {
+  it('should validate a polled root past three blurred walk periods even when its polls were an hour apart', async () => {
     const profile = await profileOf();
     let now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -463,10 +501,67 @@ describe('A3: freshness is bounded by the authority', () => {
     await profile.service.listProjectManifests();
     const validate = vi.spyOn(ExternalChangeIngest.prototype, 'validate');
 
-    now += 60_000;
+    /* Past 3 × 50 s, the most the window grows to. */
+    now += 151_000;
     await profile.service.listProjectManifests();
 
     expect(validate).toHaveBeenCalledOnce();
+  });
+
+  /* Review N2: the racy window follows each file's read, not the walk's start, so a long walk misses no rewrite. */
+  it('should report a same-size rewrite of a file the walk captured 3 s after it began', async () => {
+    const profile = await profileOf({ ...small, timestampGranularity: 2000 });
+    let now = Math.ceil((Date.now() + 10_000) / 2000) * 2000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    await profile.service.pollExternalChanges();
+    await profile.service.listProjectManifests();
+    const walkStartedAt = now + 10_000;
+    const identityPath = `folder-001/${projectIdentityPath}`;
+    /* Written 3 s into a 6 s walk, which reads the folder then: its 2 s granule began 1 s before the read. */
+    now = walkStartedAt + 3000;
+    await profile.writeBehind('workspace', identityPath, identity(discoveryProfileWorkspaceId(70)));
+    /* The walk takes its start before its first await, then reads the folder 3 s in. */
+    const prototype = ExternalChangeIngest.prototype as unknown as Record<string, (...rest: unknown[]) => unknown>;
+    const snapshot = prototype['_createExternalSnapshot']!;
+    const walk = vi.spyOn(prototype, '_createExternalSnapshot').mockImplementation(function (
+      this: unknown,
+      ...rest: unknown[]
+    ) {
+      const reading = now;
+      now = walkStartedAt;
+      const walked = snapshot.apply(this, rest);
+      now = reading;
+      return walked;
+    });
+    await profile.service.pollExternalChanges();
+    walk.mockRestore();
+    expect(listedIds(await listedEntries(profile)).get('webaccess:folder-001')).toBe(discoveryProfileWorkspaceId(70));
+
+    /* The same size, in the same granule; the next poll runs once that granule has passed, so its own row is settled. */
+    now = walkStartedAt + 3500;
+    await profile.writeBehind('workspace', identityPath, identity(discoveryProfileWorkspaceId(71)));
+    now = walkStartedAt + 6000;
+    await profile.service.pollExternalChanges();
+
+    expect(listedIds(await listedEntries(profile)).get('webaccess:folder-001')).toBe(discoveryProfileWorkspaceId(71));
+  });
+
+  /* Review N4: the window follows the discovery-wide walk's cadence, so a pass inside it walks nothing first. */
+  it('should not validate a polled root again inside three walk periods of 40 s', async () => {
+    const profile = await profileOf();
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    now += 2 * racyTimestampMilliseconds;
+    await profile.service.pollExternalChanges();
+    now += 40_000;
+    await profile.service.pollExternalChanges();
+    await profile.service.listProjectManifests();
+    const validate = vi.spyOn(ExternalChangeIngest.prototype, 'validate');
+
+    now += 60_000;
+    await profile.service.listProjectManifests();
+
+    expect(validate).not.toHaveBeenCalled();
   });
 
   /* Review m4: a file dated in the future is not inside the racy window of every poll. */
@@ -508,6 +603,10 @@ describe('A3: freshness is bounded by the authority', () => {
 
 describe('A4: the audit', () => {
   it('should list a change whose fact was dropped within one audit interval, and count it once', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const profile = await profileOf();
     await profile.service.listProjectManifests();
     const homeKey = await homeKeyOf(profile);
@@ -516,11 +615,10 @@ describe('A4: the audit', () => {
     await profile.writeBehind('home', `home-005/${projectIdentityPath}`, identity(discoveryProfileHomeId(66)));
     expect(listedIds(await listedEntries(profile)).get('opfs:home-005')).toBe(discoveryProfileHomeId(5));
 
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + discoveryAuditIntervalMilliseconds + 1000);
-    await profile.service.pollExternalChanges();
-    await vi.waitFor(() => {
-      expect(counter('discovery.auditMismatch') - before.all).toBe(1);
-    });
+    /* One interval of the rolling audit, tick by tick; no whole overdue cycle is needed. */
+    const audit = vi.spyOn(ProjectDirectories.prototype, 'auditDiscovery');
+    expect(await fullCyclesPerInterval(audit, 1)).toEqual([0]);
+    expect(counter('discovery.auditMismatch') - before.all).toBe(1);
 
     expect(counter('discovery.auditMismatch.exclusive') - before.exclusive).toBe(1);
     expect(profile.index.entry(homeKey, 'home-005')?.reading).toMatchObject({ projectId: discoveryProfileHomeId(66) });
@@ -547,6 +645,50 @@ describe('the audit schedule (review M3)', () => {
 
       expect(audit.mock.calls.length).toBeGreaterThan(0);
       expect(audit.mock.calls.filter(([share]) => share === undefined)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the audit schedule (review N1, N3)', () => {
+  /* N1: a root whose audit cannot start a cycle must not make every tick a whole cycle of the healthy roots. */
+  it('should run at most one whole cycle per interval while one root keeps failing to list', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const profile = await profileOf();
+      await profile.service.listProjectManifests();
+      const { workspace } = profile.providers;
+      const listing = workspace.readdirEntries!.bind(workspace);
+      vi.spyOn(workspace, 'readdirEntries').mockImplementation(async (path: string) => {
+        if (path === '') {
+          throw new Error('The folder could not be listed.');
+        }
+        return listing(path);
+      });
+      const audit = vi.spyOn(ProjectDirectories.prototype, 'auditDiscovery');
+
+      const perInterval = await fullCyclesPerInterval(audit, 3);
+
+      expect(Math.max(...perInterval)).toBeLessThanOrEqual(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /* N3: the rolling audit's wrap and the overdue threshold never coincide, at a size whose cycle takes the interval. */
+  it('should run no whole cycle at 40 directories over three intervals', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const profile = await profileOf({ home: 40, workspace: 1, duplicates: 0 });
+      await profile.service.listProjectManifests();
+      const audit = vi.spyOn(ProjectDirectories.prototype, 'auditDiscovery');
+
+      /* The cycle takes the whole interval (40 directories, one a tick); the tick that ends it fires a millisecond late,
+       * as a real interval does. */
+      const perInterval = await fullCyclesPerInterval(audit, 3, (tick) => (tick === 39 ? 1 : 0));
+
+      expect(perInterval).toEqual([0, 0, 0]);
     } finally {
       vi.useRealTimers();
     }

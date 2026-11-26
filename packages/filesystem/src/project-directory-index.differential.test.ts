@@ -137,8 +137,15 @@ const apply = (index: ProjectDirectoryIndex<ProjectDirectoryReading>, model: Mod
           reading: readingOf(read.value),
           determined: true,
         });
-        /* The ghost: a lost fact is repaired only by a read no other read of the directory overlaps. */
-        if (outcome.status === 'installed' && read.value === model.disk.get(directory) && !isRead(model, directory)) {
+        /* The ghost: a lost fact is repaired by a read no other read of the directory with an older capture overlaps. */
+        if (
+          outcome.status === 'installed' &&
+          read.value === model.disk.get(directory) &&
+          readers.every((other) => {
+            const overlapping = model.reading.get(readKey(directory, other));
+            return overlapping === undefined || overlapping.value === model.disk.get(directory);
+          })
+        ) {
           model.lost.delete(directory);
         }
       }

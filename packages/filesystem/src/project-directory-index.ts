@@ -329,8 +329,12 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     this._bytes += bytes;
     root.entries.set(name, previous !== undefined && !changed ? previous : { reading, bytes });
     root.dirty.delete(name);
-    /* The directory's counter stays where it is: lowered, it would let a slower reader that took an older value
-     * install the older bytes it read (review M1). */
+    /* The directory's counter never falls: lowered, it would let a slower reader that took an older value install the
+     * older bytes it read (review M1). A reading that changed moves it, so an overlapping read that captured before
+     * this one is refused even when no evidence arrived between them. */
+    if (changed) {
+      root.evidenceAt.set(name, this._tick());
+    }
     root.names.add(name);
     this._gauge();
     return { status: 'installed', changed };

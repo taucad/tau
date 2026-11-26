@@ -381,9 +381,10 @@ const freshnessWindow = (channels: DiscoveryRootChannels | undefined): number =>
     return 5 * 60_000;
   }
   if (channels?.snapshot === true) {
-    /* The page polls an unobserved folder every 2 s, or every 10 s while blurred; a longer gap between two polls (a
-     * hidden tab) never stretches the window (review m3). */
-    const pollPeriod = Math.min(Math.max(channels.pollPeriodMilliseconds ?? 10_000, 2000), 10_000);
+    /* The page walks a whole unobserved folder every fifth poll: every 10 s focused, every 50 s blurred. The period is
+     * the time between two such walks, clamped to that cadence, so a longer gap (a hidden tab) never stretches the
+     * window (review m3) and a shorter one never shrinks it below what the page's walks keep (review N4). */
+    const pollPeriod = Math.min(Math.max(channels.pollPeriodMilliseconds ?? 10_000, 10_000), 50_000);
     return Math.max(3 * pollPeriod, 30_000);
   }
   return discoveryAuditIntervalMilliseconds;
@@ -749,7 +750,11 @@ export class ProjectDirectories {
       if (view?.currency !== 'warm' || (state !== undefined && state !== 'available')) {
         continue;
       }
-      oldestCycle = Math.min(oldestCycle, await this._auditRoot({ scope, storageRootKey, view }, share));
+      const completed = await this._auditRoot({ scope, storageRootKey, view }, share);
+      /* A root whose audit failed this time is left out: it would hold every other root's cycle back (review N1). */
+      if (completed !== undefined) {
+        oldestCycle = Math.min(oldestCycle, completed);
+      }
     }
     /* oxlint-enable eslint/no-await-in-loop -- End audit. */
     return Number.isFinite(oldestCycle) ? oldestCycle : undefined;
@@ -1221,7 +1226,8 @@ export class ProjectDirectories {
    *
    * @param root - The root, its scope and its index view.
    * @param share - The share of its directories to re-read; all when omitted.
-   * @returns When the root last completed a whole cycle, or `-Infinity` while it has not completed one.
+   * @returns When the root last completed a whole cycle, `-Infinity` while it has not completed one, or undefined when its
+   *   audit could not run this time (its provider or its listing failed), which says nothing about its cycle (review N1).
    */
   private async _auditRoot(
     root: Readonly<{
@@ -1230,14 +1236,14 @@ export class ProjectDirectories {
       view: NonNullable<ReturnType<ProjectDirectoryIndex<ProjectDirectoryReading>['view']>>;
     }>,
     share: number | undefined,
-  ): Promise<number> {
+  ): Promise<number | undefined> {
     const { scope, storageRootKey, view } = root;
     {
       let provider: FileSystemProvider;
       try {
         provider = await this._registry.getProvider(scope);
       } catch {
-        return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+        return undefined;
       }
       const channels = this._rootChannels(storageRootKey);
       const kind =
@@ -1253,7 +1259,7 @@ export class ProjectDirectories {
         const names = await this._listNames(provider);
         if (!Array.isArray(names)) {
           this._auditCycles.delete(storageRootKey);
-          return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+          return undefined;
         }
         if (view.namesListed && names.join('\0') !== view.names.join('\0')) {
           mismatched = true;

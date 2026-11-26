@@ -1552,7 +1552,8 @@ export class WorkspaceFileService {
    */
   private _auditTick(onlyWhenOverdue: boolean): void {
     const now = Date.now();
-    const overdue = now - this._audit.cycledAt > discoveryAuditIntervalMilliseconds;
+    /* One and a half intervals: the rolling cycle wraps within one, so its wrap never meets the threshold (review N3). */
+    const overdue = now - this._audit.cycledAt > 1.5 * discoveryAuditIntervalMilliseconds;
     if (this._audit.running || this._auditTimer === undefined || (onlyWhenOverdue && !overdue)) {
       return;
     }
@@ -1567,6 +1568,10 @@ export class WorkspaceFileService {
         const cycledAt = await this._projectDirectories.auditDiscovery(overdue ? undefined : share);
         if (cycledAt !== undefined) {
           this._audit.cycledAt = Math.max(this._audit.cycledAt, cycledAt);
+        }
+        /* An overdue whole cycle runs at most once per interval, whatever a root that keeps failing reports (review N1). */
+        if (overdue) {
+          this._audit.cycledAt = Math.max(this._audit.cycledAt, now);
         }
       } catch {
         /* A failed audit leaves its directories as they were; the next tick tries again. */

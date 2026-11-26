@@ -1240,12 +1240,17 @@ export class ExternalChangeIngest {
     const unsettled: string[] = [];
     const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
       const file = await handle.getFile();
+      const readAt = Date.now();
       const row = `${relative}\0file\0${file.size}\0${file.lastModified}`;
       /* Only the discovery-wide walk: its rows are the declarations discovery reads. A rooted poll feeds the Project
-       * Index, which keeps its own racy guard. */
-      /* Inside the window on either side of the capture: a file dated later than that is not settling, and reporting it
-       * on every poll would never let it settle (review m4). */
-      if (providerBasePath === undefined && Math.abs(file.lastModified - capturedAt) < racyTimestampMilliseconds) {
+       * Index, which keeps its own racy guard. The window runs from the walk's start to this file's read, each widened
+       * by a granule: a long walk reads a file well after it began (review N2), and a file dated past its read is not
+       * settling, so reporting it on every poll would never let it settle (review m4). */
+      if (
+        providerBasePath === undefined &&
+        file.lastModified > capturedAt - racyTimestampMilliseconds &&
+        file.lastModified < readAt + racyTimestampMilliseconds
+      ) {
         unsettled.push(relative);
         this._racyRows += 1;
         /* A row no later capture can equal, so the next poll reports it changed again. */

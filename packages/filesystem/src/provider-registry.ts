@@ -18,22 +18,41 @@ import type { BatchEntry } from '#changeset.js';
  */
 export type ProviderWriteTap = (storageRootKey: string, paths: readonly string[]) => () => void;
 
-/** The paths each mutating provider method names, from its arguments. */
+/**
+ * A path a file operation names. A file at the top of a root is never a project directory, so it is left out: the
+ * discovery index would otherwise take it for a directory (review N5). A path below the top names its directory.
+ */
+const filePath = (path: unknown): string[] => (String(path).replace(/^\/+/u, '').includes('/') ? [String(path)] : []);
+
+/** The paths each mutating provider method names, from its arguments; a directory operation names its path whatever its depth. */
 const mutatingMethods: Readonly<Record<string, (arguments_: readonly unknown[]) => string[]>> = {
-  writeFile: ([path]) => [String(path)],
-  appendFile: ([path]) => [String(path)],
-  writeFileStream: ([path]) => [String(path)],
-  writeFileChecked: ([input]) => [String((input as { path: unknown }).path)],
-  deleteFileChecked: ([input]) => [String((input as { path: unknown }).path)],
+  writeFile: ([path]) => filePath(path),
+  appendFile: ([path]) => filePath(path),
+  writeFileStream: ([path]) => filePath(path),
+  writeFileChecked: ([input]) => filePath((input as { path: unknown }).path),
+  deleteFileChecked: ([input]) => filePath((input as { path: unknown }).path),
   mkdir: ([path]) => [String(path)],
-  unlink: ([path]) => [String(path)],
+  unlink: ([path]) => filePath(path),
   rmdir: ([path]) => [String(path)],
-  setFileMode: ([path]) => [String(path)],
+  setFileMode: ([path]) => filePath(path),
   rename: ([from, to]) => [String(from), String(to)],
   applyBatch: ([entries]) =>
-    (entries as readonly BatchEntry[]).flatMap((entry) =>
-      entry.op === 'move' ? [entry.from, entry.to] : [entry.path],
-    ),
+    (entries as readonly BatchEntry[]).flatMap((entry) => {
+      switch (entry.op) {
+        case 'move': {
+          return [entry.from, entry.to];
+        }
+        case 'mkdir': {
+          return [entry.path];
+        }
+        case 'delete': {
+          return entry.kind === 'file' ? filePath(entry.path) : [entry.path];
+        }
+        default: {
+          return filePath(entry.path);
+        }
+      }
+    }),
 };
 /**
  * Configuration for {@link ProviderRegistry}.

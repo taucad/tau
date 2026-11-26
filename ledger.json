@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T14:53:46.392Z",
+  "updatedAt": "2026-11-26T14:59:37.936Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2887,6 +2887,19 @@
       "counted": 1535,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45843614942,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "338cd748aa7aa72555dff3e4e474c1671b8d5646",
+      "at": "2026-11-26T14:59:23Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3232,14 +3245,14 @@
       }
     },
     "apps-runtime-e2e:vitest": {
-      "executions": 41,
-      "tests": 41,
+      "executions": 42,
+      "tests": 42,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:40:19Z",
-      "lastSeen": "2026-11-26T12:18:14Z",
+      "lastSeen": "2026-11-26T14:59:23Z",
       "targets": {
-        "vitest linux-x64 project=suites": 8
+        "vitest linux-x64 project=suites": 9
       }
     },
     "archive-core:test": {
@@ -7990,6 +8003,17 @@
           "failed": []
         }
       ]
+    }
+  },
+  "quarantineTracks": {
+    "apps/ui-e2e/quarantine.json [\"src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB\",\"firefox\",null,null] #2788 2026-11-25": {
+      "path": "apps/ui-e2e/quarantine.json",
+      "id": "ui-e2e › src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB",
+      "since": "2026-11-26T14:59:37.936Z",
+      "executions": 0,
+      "failures": 0,
+      "streak": 0,
+      "streakRuns": []
     }
   }
 }

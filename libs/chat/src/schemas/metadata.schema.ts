@@ -12,6 +12,7 @@ import { fileDigestSchema, refusalReasons } from '#schemas/tools/arrange-workben
 import { messageStatuses, snapshotKernelUnavailableReason } from '#constants/message.constants.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { cadReferencesSchema } from '#references/cad-reference.schema.js';
+import { messageAnnotationsSchema } from '#annotations/annotations.schema.js';
 import { kernelPreferences, kernelProviders } from '@taucad/types/constants';
 
 /**
@@ -165,4 +166,10 @@ export const messageMetadataSchema = z.object({
   status: z.enum(messageStatuses).optional(),
   /** The structured geometry references a user message carries; its text holds each one's `@cad[...]` token. */
   references: cadReferencesSchema.optional(),
+  /**
+   * The numbered comments and annotated images a user message carries (comment pins and image mark up). A record this
+   * build cannot read is dropped with the rest of the message kept, so a newer writer never costs an older reader the
+   * message.
+   */
+  annotations: messageAnnotationsSchema.optional().catch(undefined),
 });

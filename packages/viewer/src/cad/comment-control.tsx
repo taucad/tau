@@ -1,37 +1,49 @@
-/**
- * SPIKE (chat pointers design): the Comment tool's toggle and its row in the viewer bar.
- */
+import { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { MessageSquarePlus } from 'lucide-react';
 import { ToolToggle } from '#cad/section-view-control.jsx';
-import { commentPinsStore, useCommentPins } from '#cad/comment-pins.store.js';
+import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
+
+type CommentControlProps = Readonly<{
+  /** Runs once the toggle has started commenting and its row is on screen. */
+  onStart?: () => void;
+}>;
 
 /**
- * Starts and stops commenting; stopping keeps every pin.
+ * Starts and stops commenting; stopping keeps every pin. Starting turns Measure off, since both read a click.
  *
- * @param props - The formatted shortcut the tooltip shows.
- * @returns The toggle.
+ * @public
  */
-export function CommentControl({ shortcut }: { readonly shortcut?: string }): React.JSX.Element {
-  const isActive = useCommentPins((state) => state.isActive);
+export function CommentControl({ onStart }: CommentControlProps): React.JSX.Element {
+  const graphicsRef = useGraphics();
+  const isCommentActive = useGraphicsSelector((state) => state.context.isCommentActive);
+
+  const handleToggle = useCallback(() => {
+    // Synchronous, so the commenting row exists when `onStart` moves focus into it.
+    flushSync(() => {
+      graphicsRef.send({ type: 'setCommentActive', payload: !isCommentActive });
+    });
+    if (!isCommentActive) {
+      onStart?.();
+    }
+  }, [graphicsRef, isCommentActive, onStart]);
+
   return (
     <ToolToggle
       tool='comment'
       name='Comment'
       label='Comment'
       icon={<MessageSquarePlus className='size-4' />}
-      isActive={isActive}
-      shortcut={shortcut}
-      onToggle={() => {
-        commentPinsStore.setActive(!isActive);
-      }}
+      isActive={isCommentActive}
+      onToggle={handleToggle}
     />
   );
 }
 
 /**
- * The running Comment tool's row: only what to do. The count and removal live in the composer's comment list.
+ * The running Comment tool's row: only what to do. The comments themselves live in the chat composer.
  *
- * @returns The row's options.
+ * @public
  */
 export function CommentOptions(): React.JSX.Element {
   return <span className='px-1 text-xs text-muted-foreground'>Click the model to pin a comment</span>;

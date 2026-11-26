@@ -1,533 +1,470 @@
 /**
- * SPIKE (chat pointers design): comment pins anchored to model surfaces.
+ * Comment pins in the scene: numbered pins standing on model surfaces, and the Comment tool's click.
  *
- * Proves the viewer half of the design: a click raycasts the model through the same BVH path Measure uses, the pin
- * stands along the surface normal, keeps a constant screen size, follows the camera, and reports where its head sits
- * so a DOM button can be the accessible, crisp numbered head. Not production code: state lives in the spike store.
+ * A pin is drawn at a constant screen size along its surface normal, once through the model (faint) and once against
+ * it (solid), so it is never lost behind a part. Its numbered head is a DOM element the host draws; this scene reports
+ * where each head is when the camera or the pins change. While the tool is on, a click raycasts the model through the
+ * clipping-aware BVH path Measure uses and gives the surface to the host.
+ *
+ * @module
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { addAfterEffect, useFrame, useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import type { EventManager } from '@react-three/fiber';
-import CameraControlsImpl from 'camera-controls';
+import { useActorRef } from '@xstate/react';
+import type { ActorRefFrom } from 'xstate';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
-import { commentPinsStore, pinsInScope, useCommentPins } from '#cad/comment-pins.store.js';
-import type { CommentPin, CommentPinView, CommentSurfacePick } from '#cad/comment-pins.store.js';
+import { useCommentPins } from '#cad/comment-pins.jsx';
+import type { CommentSurfacePick } from '#cad/comment-pins.jsx';
 import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRenderFrame } from '#hooks/use-graphics.jsx';
+import { getGraphicsCameraState } from '#graphics/graphics-camera.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { commentInputMachine } from '#machines/comment-input.machine.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import { raycastFirstVisibleMeshHit, isFatLineMesh } from '#graphics/three/utils/bvh-raycast.js';
+import { createCommentPointerAdapter } from '#graphics/three/react/comment-pins.adapter.js';
+import type { CommentPointerAt, CommentSceneHost } from '#graphics/three/react/comment-pins.adapter.js';
+import { isFatLineMesh, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { getModelComponentIdInHierarchy } from '#graphics/three/utils/model-component-owner.js';
-import { getGltfOccurrenceLayers } from '#graphics/three/utils/gltf-surface-batches.js';
-import { sceneTag, sceneTagData, hasSceneTagInHierarchy } from '#graphics/three/utils/scene-tags.js';
+import { hasSceneTagInHierarchy, sceneTag, sceneTagData } from '#graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#graphics/three/utils/scene-tags.js';
 
-/** Screen-space pin geometry, in CSS pixels. */
-const stemLengthPx = 26;
-const stemRadiusPx = 1;
-const baseRadiusPx = 5;
-/** A press that moves farther than this is an orbit, not a pin. */
-const clickSlopPx = 4;
+type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
-const blockingTags = new Set<SceneTagKey>([
+/** Screen-space pin geometry, in CSS pixels. */
+const stemLength = 26;
+const stemRadius = 1;
+const footRadius = 5;
+
+/**
+ * The mark-up ink and its casing, as the `--markup-ink` token gives them to the DOM. A Three material takes a colour
+ * value, and a pin must read the same on every theme and material, so the scene keeps them fixed.
+ */
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- the scene's copy of the `--markup-ink` token (charter D10).
+const markupInk = '#d6249f';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- the casing that keeps the ink legible on any material.
+const markupCasing = '#ffffff';
+
+/** What a click passes through: the tool's own marks, section helpers and presentation batches. */
+const unpickableTags = new Set<SceneTagKey>([
   sceneTag.measurementUi,
   sceneTag.sectionViewHelper,
   sceneTag.gltfSurfacePresentation,
 ]);
-const up = new THREE.Vector3(0, 1, 0);
 
-type SurfaceHit = {
-  point: THREE.Vector3;
-  normal: THREE.Vector3;
-  componentId: string | undefined;
+const yAxis = new THREE.Vector3(0, 1, 0);
+const scratch = {
+  point: new THREE.Vector3(),
+  head: new THREE.Vector3(),
+  normal: new THREE.Vector3(),
+  ndc: new THREE.Vector2(),
+  raycaster: new THREE.Raycaster(),
 };
 
-/** World units per CSS pixel at `point` for the active camera. */
-function worldPerPixel(camera: THREE.Camera, point: THREE.Vector3, heightPx: number): number {
+const selectGraphicsContext = (graphics: GraphicsActorRef) => graphics.getSnapshot().context;
+
+/** World units per CSS pixel at `point` for the camera. */
+const worldPerPixel = (camera: THREE.Camera, point: THREE.Vector3, height: number): number => {
   if (camera instanceof THREE.OrthographicCamera) {
-    return (camera.top - camera.bottom) / camera.zoom / heightPx;
+    return (camera.top - camera.bottom) / camera.zoom / height;
   }
-  const perspective = camera as THREE.PerspectiveCamera;
-  const distance = camera.position.distanceTo(point);
-  return (2 * distance * Math.tan(THREE.MathUtils.degToRad(perspective.fov) / 2)) / perspective.zoom / heightPx;
-}
+  if (camera instanceof THREE.PerspectiveCamera) {
+    const distance = camera.position.distanceTo(point);
+    return (2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / camera.zoom / height;
+  }
+  return 1;
+};
 
-/** The vertical field of view in degrees with the camera's zoom folded in. */
-function effectiveFieldOfView(camera: THREE.PerspectiveCamera): number {
-  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / camera.zoom));
-}
+type PinResources = Readonly<{
+  foot: THREE.CylinderGeometry;
+  footInk: THREE.CylinderGeometry;
+  stemCasing: THREE.CylinderGeometry;
+  stem: THREE.CylinderGeometry;
+  /** Per pass: drawn through the model (faint), then against it (solid). */
+  passes: ReadonlyArray<Readonly<{ casing: THREE.MeshBasicMaterial; ink: THREE.MeshBasicMaterial; order: number }>>;
+  dispose: () => void;
+}>;
 
-function PinMarker({
-  pin,
-  number,
-  variant,
-}: {
-  readonly pin: Pick<CommentPin, 'id' | 'renderPoint' | 'renderNormal'>;
-  readonly number: number;
-  readonly variant: 'draft' | 'ghost' | 'history';
-}): React.JSX.Element {
-  const groupRef = useRef<THREE.Group>(null);
-  const size = useThree((state) => state.size);
-  const point = useMemo(() => new THREE.Vector3(...pin.renderPoint), [pin.renderPoint]);
-  const normal = useMemo(() => new THREE.Vector3(...pin.renderNormal).normalize(), [pin.renderNormal]);
-  const quaternion = useMemo(() => new THREE.Quaternion().setFromUnitVectors(up, normal), [normal]);
-  const scratch = useMemo(() => ({ head: new THREE.Vector3(), ray: new THREE.Raycaster() }), []);
-  const opacity = variant === 'draft' ? 1 : 0.55;
-
-  useFrame(({ camera, scene }) => {
-    const group = groupRef.current;
-    if (!group) {
-      return;
-    }
-    const scale = worldPerPixel(camera, point, size.height);
-    group.scale.setScalar(scale);
-    if (variant === 'ghost') {
-      return;
-    }
-    // The head: the stem's far end, projected to the viewer surface for the DOM button.
-    scratch.head.copy(point).addScaledVector(normal, stemLengthPx * scale);
-    const projected = scratch.head.clone().project(camera);
-    // Occlusion: something nearer than the surface point along the eye ray hides the pin's foot.
-    const toPoint = point.clone().project(camera);
-    setRaycasterFromCamera(scratch.ray, new THREE.Vector2(toPoint.x, toPoint.y), camera);
-    const meshes: THREE.Mesh[] = [];
-    scene.traverseVisible((object) => {
-      if (object instanceof THREE.Mesh && !isFatLineMesh(object) && getModelComponentIdInHierarchy(object)) {
-        meshes.push(object as THREE.Mesh);
-      }
-    });
-    const { hit } = raycastFirstVisibleMeshHit({ raycaster: scratch.ray, meshes });
-    const distance = scratch.ray.ray.origin.distanceTo(point);
-    const isOccluded = hit !== undefined && hit.distance < distance - Math.max(1e-6, distance * 1e-4);
-    commentPinsStore.placeHead(pin.id, {
-      x: ((projected.x + 1) / 2) * size.width,
-      y: ((1 - projected.y) / 2) * size.height,
-      footX: ((toPoint.x + 1) / 2) * size.width,
-      footY: ((1 - toPoint.y) / 2) * size.height,
-      isOccluded,
-      isBehindCamera: projected.z > 1 || projected.z < -1,
-    });
-    void number;
-  });
-
-  // Two passes: a solid one the model can hide, and a faint one drawn through it so a pin is never lost.
+const createPinResources = (opacity: number): PinResources => {
+  const material = (color: string, alpha: number, depthTest: boolean): THREE.MeshBasicMaterial =>
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: alpha, depthTest, depthWrite: false });
+  const foot = new THREE.CylinderGeometry(footRadius, footRadius, 0.8, 32);
+  const footInk = new THREE.CylinderGeometry(footRadius - 1.5, footRadius - 1.5, 0.8, 32);
+  const stemCasing = new THREE.CylinderGeometry(stemRadius + 1, stemRadius + 1, stemLength, 12);
+  const stem = new THREE.CylinderGeometry(stemRadius, stemRadius, stemLength, 12);
   const passes = [
-    { key: 'through', depthTest: false, alpha: 0.28 * opacity, renderOrder: 20 },
-    { key: 'solid', depthTest: true, alpha: opacity, renderOrder: 21 },
-  ] as const;
-  return (
-    <group ref={groupRef} position={point} quaternion={quaternion} userData={sceneTagData(sceneTag.measurementUi)}>
-      {passes.map((pass) => (
-        <group key={pass.key} renderOrder={pass.renderOrder}>
-          {/* Foot: a disc lying in the surface, so the pin reads as planted and shows the surface's tilt. */}
-          <mesh position={[0, 0.4, 0]} renderOrder={pass.renderOrder}>
-            <cylinderGeometry args={[baseRadiusPx, baseRadiusPx, 0.8, 32]} />
-            {/* oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js material colour; charter maps to the markup token */}
-            <meshBasicMaterial
-              transparent
-              color='#ffffff'
-              opacity={pass.alpha}
-              depthTest={pass.depthTest}
-              depthWrite={false}
-            />
-          </mesh>
-          <mesh position={[0, 0.9, 0]} renderOrder={pass.renderOrder + 1}>
-            <cylinderGeometry args={[baseRadiusPx - 1.5, baseRadiusPx - 1.5, 0.8, 32]} />
-            {/* oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js material colour */}
-            <meshBasicMaterial
-              transparent
-              color='#d6249f'
-              opacity={pass.alpha}
-              depthTest={pass.depthTest}
-              depthWrite={false}
-            />
-          </mesh>
-          {/* Stem: along the surface normal. White casing under the ink keeps it legible on any material. */}
-          <mesh position={[0, stemLengthPx / 2, 0]} renderOrder={pass.renderOrder}>
-            <cylinderGeometry args={[stemRadiusPx + 1, stemRadiusPx + 1, stemLengthPx, 12]} />
-            {/* oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js material colour */}
-            <meshBasicMaterial
-              transparent
-              color='#ffffff'
-              opacity={pass.alpha}
-              depthTest={pass.depthTest}
-              depthWrite={false}
-            />
-          </mesh>
-          <mesh position={[0, stemLengthPx / 2, 0]} renderOrder={pass.renderOrder + 1}>
-            <cylinderGeometry args={[stemRadiusPx, stemRadiusPx, stemLengthPx, 12]} />
-            {/* oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js material colour */}
-            <meshBasicMaterial
-              transparent
-              color='#d6249f'
-              opacity={pass.alpha}
-              depthTest={pass.depthTest}
-              depthWrite={false}
-            />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-/**
- * SPIKE bridge: lets a host capture the live canvas and pick along a ray, standing in for the nanoraster capture and
- * the capture-camera lift the charter specifies.
- *
- * @returns Nothing.
- */
-export function CommentSceneBridge(): undefined {
-  const { camera, gl, scene, size, invalidate } = useThree();
-  const bridgeGeometryKey = useGraphicsSelector(selectPresentedGeometryKey);
-  const controls = useThree((state) => state.controls);
-  const renderFrame = useRenderFrame();
-  const graphicsActor = useGraphics();
-  const unitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
-  const manifest = useModelInteractionSelector((state) =>
-    unitId ? getModelInteractionUnitState(state.context, unitId).manifest : undefined,
-  );
-  useEffect(() => {
-    const toPhysical = (point: THREE.Vector3): [number, number, number] =>
-      fromThreeRenderPoint({ renderFrame, point }) as [number, number, number];
-    const view = (): CommentPinView & { aspect: number } => {
-      const target = new THREE.Vector3();
-      if (controls instanceof CameraControlsImpl) {
-        controls.getTarget(target);
+    { alpha: 0.28 * opacity, depthTest: false, order: 20 },
+    { alpha: opacity, depthTest: true, order: 22 },
+  ].map(({ alpha, depthTest, order }) => ({
+    casing: material(markupCasing, alpha, depthTest),
+    ink: material(markupInk, alpha, depthTest),
+    order,
+  }));
+  return {
+    foot,
+    footInk,
+    stemCasing,
+    stem,
+    passes,
+    dispose() {
+      for (const geometry of [foot, footInk, stemCasing, stem]) {
+        geometry.dispose();
       }
-      const isOrthographic = camera instanceof THREE.OrthographicCamera;
-      return {
-        position: toPhysical(camera.position),
-        target: toPhysical(target),
-        up: [camera.up.x, camera.up.y, camera.up.z],
-        projection: isOrthographic ? 'orthographic' : 'perspective',
-        vertical: isOrthographic
-          ? ((camera.top - camera.bottom) / camera.zoom) * renderFrame.metersPerRenderUnit
-          : effectiveFieldOfView(camera as THREE.PerspectiveCamera),
-        aspect: size.width / size.height,
-      };
-    };
-    commentPinsStore.bridge = {
-      view,
-      async capture(from) {
-        const hidden: THREE.Object3D[] = [];
-        scene.traverse((object) => {
-          if (object.visible && object.userData[sceneTag.measurementUi]) {
-            hidden.push(object);
-            object.visible = false;
-          }
-        });
-        const saved = { position: camera.position.clone(), quaternion: camera.quaternion.clone() };
-        if (from) {
-          camera.position.copy(toThreeRenderPoint({ renderFrame, pointMeters: from.position }));
-          camera.up.set(...from.up);
-          camera.lookAt(toThreeRenderPoint({ renderFrame, pointMeters: from.target }));
-          camera.updateMatrixWorld(true);
-        }
-        const captured = from ? { ...from, aspect: size.width / size.height } : view();
-        // The viewer's own frame, read back right after it is drawn, over an opaque backdrop.
-        const dataUrl = await new Promise<string>((resolve) => {
-          const stop = addAfterEffect(() => {
-            stop();
-            const flat = document.createElement('canvas');
-            flat.width = gl.domElement.width;
-            flat.height = gl.domElement.height;
-            const context = flat.getContext('2d')!;
-            context.fillStyle = document.documentElement.classList.contains('dark') ? '#171717' : '#ffffff';
-            context.fillRect(0, 0, flat.width, flat.height);
-            context.drawImage(gl.domElement, 0, 0);
-            resolve(flat.toDataURL('image/png'));
-          });
-          invalidate();
-        });
-        camera.position.copy(saved.position);
-        camera.quaternion.copy(saved.quaternion);
-        camera.updateMatrixWorld(true);
-        for (const object of hidden) {
-          object.visible = true;
-        }
-        invalidate();
-        return { dataUrl, width: gl.domElement.width, height: gl.domElement.height, view: captured };
-      },
-      pickRay(origin, direction) {
-        return pickWith(
-          new THREE.Raycaster(
-            toThreeRenderPoint({ renderFrame, pointMeters: origin }),
-            new THREE.Vector3(...direction).normalize(),
-          ),
-        );
-      },
-      pickScreen(x, y) {
-        const raycaster = new THREE.Raycaster();
-        setRaycasterFromCamera(
-          raycaster,
-          new THREE.Vector2((x / size.width) * 2 - 1, -(y / size.height) * 2 + 1),
-          camera,
-        );
-        return pickWith(raycaster);
-      },
-    };
-    function pickWith(raycaster: THREE.Raycaster): CommentSurfacePick | undefined {
-      {
-        const meshes: THREE.Mesh[] = [];
-        scene.traverseVisible((object) => {
-          if (
-            object instanceof THREE.Mesh &&
-            !isFatLineMesh(object) &&
-            !hasSceneTagInHierarchy(object, blockingTags) &&
-            object.userData['measurementFeatures']?.kind !== 'line'
-          ) {
-            meshes.push(object as THREE.Mesh);
-          }
-        });
-        const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
-        const { hit } = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
-        if (!hit) {
-          return undefined;
-        }
-        const componentId = getModelComponentIdInHierarchy(hit.object);
-        const normal = hit.face
-          ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-          : raycaster.ray.direction.clone().negate();
-        if (normal.dot(raycaster.ray.direction) > 0) {
-          normal.negate();
-        }
-        return {
-          point: toPhysical(hit.point),
-          normal: [normal.x, normal.y, normal.z],
-          renderPoint: [hit.point.x, hit.point.y, hit.point.z],
-          geometryKey: bridgeGeometryKey ?? '',
-          componentId,
-          componentLabel: componentId ? (manifest?.nodesById[componentId]?.name ?? componentId) : undefined,
-        };
+      for (const pass of passes) {
+        pass.casing.dispose();
+        pass.ink.dispose();
       }
-    }
-    return () => {
-      commentPinsStore.bridge = undefined;
-    };
-  }, [bridgeGeometryKey, camera, controls, gl, graphicsActor, invalidate, manifest, renderFrame, scene, size]);
-  return undefined;
-}
-
-/**
- * The comment tool's scene half: places pins on click while the tool is on, and draws every pin while any exist.
- *
- * @returns The pins.
- */
-export function CommentPins(): React.JSX.Element {
-  const { camera, gl, scene, invalidate, size } = useThree();
-  const controls = useThree((state) => state.controls);
-  const events = useThree((state) => state.events) as EventManager<HTMLElement>;
-  const pointerTarget: HTMLElement = events.connected ?? gl.domElement;
-  const graphicsActor = useGraphics();
-  const renderFrame = useRenderFrame();
-  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
-  const unitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
-  const manifest = useModelInteractionSelector((state) =>
-    unitId ? getModelInteractionUnitState(state.context, unitId).manifest : undefined,
-  );
-  const isActive = useCommentPins((state) => state.isActive);
-  const scope = useCommentPins((state) => state.scope);
-  const allPins = useCommentPins((state) => state.pins);
-  const allHistoryPins = useCommentPins((state) => state.historyPins);
-  // Only the pins of the model this viewer shows are drawn; an earlier message replaces the draft while it shows.
-  const pins = useMemo(() => pinsInScope(allPins, scope), [allPins, scope]);
-  const historyPins = useMemo(() => pinsInScope(allHistoryPins, scope), [allHistoryPins, scope]);
-  const isHistoryShown = allHistoryPins.length > 0;
-  const movingPinId = useCommentPins((state) => state.movingPinId);
-  const [ghost, setGhost] = useState<SurfaceHit>();
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-
-  const pick = useCallback(
-    (clientX: number, clientY: number): SurfaceHit | undefined => {
-      const rect = gl.domElement.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      setRaycasterFromCamera(raycaster, ndc, camera);
-      const meshes: THREE.Mesh[] = [];
-      scene.traverseVisible((object) => {
-        if (
-          object instanceof THREE.Mesh &&
-          !isFatLineMesh(object) &&
-          getGltfOccurrenceLayers(object).test(camera.layers) &&
-          !hasSceneTagInHierarchy(object, blockingTags) &&
-          object.userData['measurementFeatures']?.kind !== 'line'
-        ) {
-          meshes.push(object as THREE.Mesh);
-        }
-      });
-      const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
-      const { hit } = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
-      if (!hit?.face) {
-        return undefined;
-      }
-      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-      // A back face (inside a section cut) still gets a pin that stands toward the viewer.
-      if (normal.dot(raycaster.ray.direction) > 0) {
-        normal.negate();
-      }
-      return { point: hit.point.clone(), normal, componentId: getModelComponentIdInHierarchy(hit.object) };
     },
-    [camera, gl, graphicsActor, raycaster, renderFrame, scene],
-  );
+  };
+};
 
-  const readView = useCallback((): CommentPinView => {
-    const target = new THREE.Vector3();
-    if (controls instanceof CameraControlsImpl) {
-      controls.getTarget(target);
-    }
-    const toPhysical = (point: THREE.Vector3): [number, number, number] =>
-      fromThreeRenderPoint({ renderFrame, point }) as [number, number, number];
-    const isOrthographic = camera instanceof THREE.OrthographicCamera;
-    return {
-      position: toPhysical(camera.position),
-      target: toPhysical(target),
-      up: [camera.up.x, camera.up.y, camera.up.z],
-      projection: isOrthographic ? 'orthographic' : 'perspective',
-      vertical: isOrthographic
-        ? ((camera.top - camera.bottom) / camera.zoom) * renderFrame.metersPerRenderUnit
-        : effectiveFieldOfView(camera as THREE.PerspectiveCamera),
-    };
-  }, [camera, controls, renderFrame]);
-
-  // Placing: a primary press that ends where it began is a pin; a drag stays an orbit.
-  useEffect(() => {
-    if (!isActive && !movingPinId) {
-      setGhost(undefined);
-      return undefined;
-    }
-    let press: { x: number; y: number; id: number } | undefined;
-    // Pin heads, comment cards and the bar sit over the same surface: a press on them is theirs.
-    const isOverUi = (event: PointerEvent): boolean =>
-      event.target instanceof Element && event.target.closest('[data-comment-ui]') !== null;
-    const onDown = (event: PointerEvent): void => {
-      if (event.button === 0 && !isOverUi(event)) {
-        press = { x: event.clientX, y: event.clientY, id: event.pointerId };
-      }
-    };
-    const onMove = (event: PointerEvent): void => {
-      if (event.pointerType === 'mouse' && event.buttons === 0) {
-        setGhost(isOverUi(event) ? undefined : pick(event.clientX, event.clientY));
-        invalidate();
-      }
-    };
-    const onUp = (event: PointerEvent): void => {
-      const start = press;
-      press = undefined;
-      if (!start || start.id !== event.pointerId) {
-        return;
-      }
-      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > clickSlopPx) {
-        return;
-      }
-      const hit = pick(event.clientX, event.clientY);
-      if (!hit) {
-        // A click off the model closes the open card; a move in progress keeps waiting for a surface.
-        if (!movingPinId) {
-          commentPinsStore.openPin(undefined);
-        }
-        return;
-      }
-      const toTuple = (vector: THREE.Vector3): [number, number, number] => [vector.x, vector.y, vector.z];
-      if (movingPinId) {
-        commentPinsStore.movePin(
-          movingPinId,
-          {
-            point: fromThreeRenderPoint({ renderFrame, point: hit.point }) as [number, number, number],
-            normal: toTuple(hit.normal),
-            renderPoint: toTuple(hit.point),
-            renderNormal: toTuple(hit.normal),
-            componentId: hit.componentId,
-            componentLabel: hit.componentId
-              ? (manifest?.nodesById[hit.componentId]?.name ?? hit.componentId)
-              : undefined,
-            geometryKey,
-          },
-          readView(),
-        );
-        commentPinsStore.setMoving(undefined);
-        commentPinsStore.openPin(undefined);
-        setGhost(undefined);
-        invalidate();
-        return;
-      }
-      commentPinsStore.addPin({
-        id: `pin_${Math.random().toString(36).slice(2, 10)}`,
-        comment: '',
-        point: fromThreeRenderPoint({ renderFrame, point: hit.point }) as [number, number, number],
-        normal: toTuple(hit.normal),
-        renderPoint: toTuple(hit.point),
-        renderNormal: toTuple(hit.normal),
-        componentId: hit.componentId,
-        componentLabel: hit.componentId ? (manifest?.nodesById[hit.componentId]?.name ?? hit.componentId) : undefined,
-        geometryKey,
-        view: readView(),
-      });
-      setGhost(undefined);
-      invalidate();
-    };
-    const onLeave = (): void => {
-      setGhost(undefined);
-      invalidate();
-    };
-    pointerTarget.addEventListener('pointerdown', onDown);
-    pointerTarget.addEventListener('pointermove', onMove);
-    pointerTarget.addEventListener('pointerup', onUp);
-    pointerTarget.addEventListener('pointerleave', onLeave);
-    const previousCursor = pointerTarget.style.cursor;
-    pointerTarget.style.cursor = 'crosshair';
-    return () => {
-      pointerTarget.removeEventListener('pointerdown', onDown);
-      pointerTarget.removeEventListener('pointermove', onMove);
-      pointerTarget.removeEventListener('pointerup', onUp);
-      pointerTarget.removeEventListener('pointerleave', onLeave);
-      pointerTarget.style.cursor = previousCursor;
-    };
-  }, [geometryKey, invalidate, isActive, manifest, movingPinId, pick, pointerTarget, readView]);
-
-  // Returning to a pin's recorded view.
-  useEffect(
-    () =>
-      commentPinsStore.onViewRequest((view) => {
-        if (!(controls instanceof CameraControlsImpl)) {
-          return;
-        }
-        const position = toThreeRenderPoint({ renderFrame, pointMeters: view.position });
-        const target = toThreeRenderPoint({ renderFrame, pointMeters: view.target });
-        void controls.setLookAt(position.x, position.y, position.z, target.x, target.y, target.z, true);
-        invalidate();
-      }),
-    [controls, invalidate, renderFrame],
-  );
-
-  useEffect(() => {
-    invalidate();
-  }, [invalidate, pins, historyPins, size]);
-
+/** One pin's meshes, in pixels along +Y: the group that holds them is scaled to the screen and turned to the normal. */
+function PinMeshes({ resources }: { readonly resources: PinResources }): React.JSX.Element {
   return (
     <>
-      {/* An earlier message's pins replace the draft's while they are shown: one set of numbers at a time. */}
-      {(isHistoryShown ? [] : pins).map((pin, index) => (
-        <PinMarker key={pin.id} pin={pin} number={index + 1} variant='draft' />
+      {resources.passes.map((pass) => (
+        <group key={pass.order}>
+          {/* Foot: a disc lying in the surface, so the pin reads as planted and shows the surface's tilt. */}
+          <mesh
+            dispose={null}
+            geometry={resources.foot}
+            material={pass.casing}
+            position={[0, 0.4, 0]}
+            renderOrder={pass.order}
+          />
+          <mesh
+            dispose={null}
+            geometry={resources.footInk}
+            material={pass.ink}
+            position={[0, 0.9, 0]}
+            renderOrder={pass.order + 1}
+          />
+          {/* Stem: along the surface normal, cased so it stays legible on any material. */}
+          <mesh
+            dispose={null}
+            geometry={resources.stemCasing}
+            material={pass.casing}
+            position={[0, stemLength / 2, 0]}
+            renderOrder={pass.order}
+          />
+          <mesh
+            dispose={null}
+            geometry={resources.stem}
+            material={pass.ink}
+            position={[0, stemLength / 2, 0]}
+            renderOrder={pass.order + 1}
+          />
+        </group>
       ))}
-      {historyPins.map((pin, index) => (
-        <PinMarker key={pin.id} pin={pin} number={index + 1} variant='history' />
-      ))}
-      {ghost && (isActive || movingPinId) ? (
-        <PinMarker
-          pin={{
-            id: 'ghost',
-            renderPoint: [ghost.point.x, ghost.point.y, ghost.point.z],
-            renderNormal: [ghost.normal.x, ghost.normal.y, ghost.normal.z],
+    </>
+  );
+}
+
+type SurfaceHit = Readonly<{ point: THREE.Vector3; normal: THREE.Vector3; componentId: string | undefined }>;
+type PickResult = Readonly<{ hit?: SurfaceHit; whenReady?: Promise<void> }>;
+
+/**
+ * The Comment tool's session for one surface: the comment input and the DOM adapter it invokes.
+ *
+ * @param props - The surface, the view's graphics actor and the scene's host functions.
+ * @returns Nothing: the session renders nothing itself.
+ */
+function CommentSession({
+  surface,
+  graphics,
+  host,
+}: Readonly<{
+  surface: HTMLElement;
+  graphics: GraphicsActorRef;
+  host: Readonly<{ current: CommentSceneHost | undefined }>;
+}>): React.ReactNode {
+  const logic = useMemo(
+    () =>
+      commentInputMachine.provide({ actors: { pointer: createCommentPointerAdapter({ surface, graphics, host }) } }),
+    [graphics, host, surface],
+  );
+  useActorRef(logic);
+  return null;
+}
+
+/**
+ * Draws the host's comment pins, and takes clicks while the Comment tool is on.
+ *
+ * @returns The pins, or nothing when the viewer has no Comment tool.
+ */
+export function CommentPins(): React.JSX.Element | undefined {
+  const comments = useCommentPins();
+  const { gl, scene, invalidate } = useThree();
+  const getRootState = useThree((state) => state.get);
+  const events = useThree((state) => state.events) as EventManager<HTMLElement>;
+  // R3F binds pointer events to `eventSource` (the viewer region), which covers the canvas.
+  const surface: HTMLElement = events.connected ?? gl.domElement;
+  const graphics = useGraphics();
+  const renderFrame = useRenderFrame();
+  const isActive = useGraphicsSelector((state) => state.context.isCommentActive);
+  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
+  const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
+  const committedSectionCuts = useGraphicsSelector((state) => state.context.committedSectionCuts);
+  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
+  const unitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
+  const manifest = useModelInteractionSelector((state) =>
+    unitId ? getModelInteractionUnitState(state.context, unitId).manifest : undefined,
+  );
+  const displayRevision = useModelInteractionSelector((state) => state.context.displayRevision);
+
+  const pins = comments?.pins;
+  const resources = useMemo(() => ({ pin: createPinResources(1), ghost: createPinResources(0.55) }), []);
+  useLayoutEffect(
+    () => () => {
+      resources.pin.dispose();
+      resources.ghost.dispose();
+    },
+    [resources],
+  );
+
+  /** Each pin's place in the render frame: where its group stands and how it is turned. */
+  const placed = useMemo(
+    () =>
+      (pins ?? []).map((pin) => ({
+        pin,
+        position: toThreeRenderPoint({ renderFrame, pointMeters: [...pin.point] }),
+        normal: new THREE.Vector3(...pin.normal).normalize(),
+        quaternion: new THREE.Quaternion().setFromUnitVectors(yAxis, new THREE.Vector3(...pin.normal).normalize()),
+      })),
+    [pins, renderFrame],
+  );
+  const groups = useRef(new Map<string, THREE.Group>());
+  const ghost = useRef<THREE.Group>(null);
+  const occluded = useRef(new Map<string, boolean>());
+
+  /** The surface meshes a ray can meet, listed again when the model's meshes change. */
+  const meshes = useRef<{ key: string; list: THREE.Mesh[] }>({ key: '', list: [] });
+  const pickable = (): THREE.Mesh[] => {
+    const key = `${geometryKey}:${pickableMeshesVersion}`;
+    if (meshes.current.key !== key) {
+      const list: THREE.Mesh[] = [];
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh && !isFatLineMesh(object) && !hasSceneTagInHierarchy(object, unpickableTags)) {
+          list.push(object as THREE.Mesh);
+        }
+      });
+      meshes.current = { key, list };
+    }
+    return meshes.current.list;
+  };
+
+  const clipping = (): ReturnType<typeof resolveSectionViewRaycastClip> =>
+    resolveSectionViewRaycastClip(selectGraphicsContext(graphics), renderFrame);
+
+  /** The first visible surface under a point of the page. */
+  const pickAt = (at: CommentPointerAt): PickResult => {
+    const { camera } = getRootState();
+    const rect = gl.domElement.getBoundingClientRect();
+    scratch.ndc.set(((at.x - rect.left) / rect.width) * 2 - 1, -((at.y - rect.top) / rect.height) * 2 + 1);
+    const { raycaster } = scratch;
+    raycaster.layers.mask = camera.layers.mask;
+    setRaycasterFromCamera(raycaster, scratch.ndc, camera);
+    const { hit, pending, whenReady } = raycastFirstVisibleMeshHit({
+      raycaster,
+      meshes: pickable(),
+      clipping: clipping(),
+    });
+    if (pending) {
+      // A mesh's pick tree is still building: not known yet, never a miss.
+      return whenReady ? { whenReady } : {};
+    }
+    if (!hit?.face) {
+      return {};
+    }
+    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+    // A back face (inside a section cut) still gets a pin that stands toward the viewer.
+    if (normal.dot(raycaster.ray.direction) > 0) {
+      normal.negate();
+    }
+    return { hit: { point: hit.point.clone(), normal, componentId: getModelComponentIdInHierarchy(hit.object) } };
+  };
+
+  const toPick = (hit: SurfaceHit): CommentSurfacePick | undefined => {
+    const camera = getGraphicsCameraState(graphics);
+    if (!camera) {
+      return undefined;
+    }
+    const point = fromThreeRenderPoint({ renderFrame, point: hit.point });
+    const label = hit.componentId ? (manifest?.nodesById[hit.componentId]?.name ?? hit.componentId) : undefined;
+    return {
+      point: [point[0], point[1], point[2]],
+      normal: [hit.normal.x, hit.normal.y, hit.normal.z],
+      ...(hit.componentId === undefined ? {} : { componentId: hit.componentId }),
+      ...(label === undefined ? {} : { componentLabel: label }),
+      geometryKey,
+      camera,
+    };
+  };
+
+  const hostRef = useRef<CommentSceneHost | undefined>(undefined);
+  const host: CommentSceneHost = {
+    hover(at) {
+      const group = ghost.current;
+      if (!group) {
+        return;
+      }
+      const hit = at === undefined ? undefined : pickAt(at).hit;
+      if (hit === undefined) {
+        if (group.visible) {
+          group.visible = false;
+          invalidate();
+        }
+        return;
+      }
+      const { camera, size } = getRootState();
+      group.position.copy(hit.point);
+      group.quaternion.setFromUnitVectors(yAxis, hit.normal);
+      group.scale.setScalar(worldPerPixel(camera, hit.point, size.height));
+      group.visible = true;
+      invalidate();
+    },
+    click(at) {
+      const deliver = (result: PickResult): void => {
+        const pick = result.hit === undefined ? undefined : toPick(result.hit);
+        if (pick) {
+          comments?.onPlace(pick);
+        } else {
+          comments?.onMiss?.();
+        }
+      };
+      const first = pickAt(at);
+      if (first.whenReady === undefined) {
+        deliver(first);
+        return;
+      }
+      const { camera } = getRootState();
+      const world = camera.matrixWorld.clone();
+      const projection = camera.projectionMatrix.clone();
+      // async-iife: bootstrap -- a pointer handler cannot await a pick tree still being built off the main thread.
+      void (async (): Promise<void> => {
+        await first.whenReady;
+        const live = getRootState().camera;
+        // Moved while it waited: the click's screen position is somewhere else on the model now.
+        if (hostRef.current && live.matrixWorld.equals(world) && live.projectionMatrix.equals(projection)) {
+          deliver(pickAt(at));
+        }
+      })();
+    },
+  };
+  useLayoutEffect(() => {
+    hostRef.current = host;
+    return () => {
+      hostRef.current = undefined;
+    };
+  });
+
+  /** What the last frame step drew for: the step returns early while every one of these is unchanged. */
+  const drawn = useRef({
+    camera: undefined as THREE.Camera | undefined,
+    world: new THREE.Matrix4(),
+    projection: new THREE.Matrix4(),
+    width: 0,
+    height: 0,
+    placed: undefined as typeof placed | undefined,
+    sceneKey: '',
+    isOcclusionDue: false,
+  });
+  const cutsKey = useRef({ cuts: committedSectionCuts, version: 0 });
+  if (cutsKey.current.cuts !== committedSectionCuts) {
+    cutsKey.current = { cuts: committedSectionCuts, version: cutsKey.current.version + 1 };
+  }
+  const sceneKey = `${geometryKey}:${pickableMeshesVersion}:${displayRevision}:${isSectionViewActive}:${cutsKey.current.version}`;
+
+  useFrame(({ camera, size }) => {
+    const heads = comments?.heads;
+    if (!heads || placed.length === 0) {
+      return;
+    }
+    const last = drawn.current;
+    const isUnchanged =
+      last.camera === camera &&
+      last.width === size.width &&
+      last.height === size.height &&
+      last.placed === placed &&
+      last.sceneKey === sceneKey &&
+      last.world.equals(camera.matrixWorld) &&
+      last.projection.equals(camera.projectionMatrix);
+    if (isUnchanged && !last.isOcclusionDue) {
+      return;
+    }
+    // Occlusion is a raycast per pin: taken once the camera rests, in the frame after the last one that moved it.
+    const isResting = isUnchanged;
+    if (isResting) {
+      last.isOcclusionDue = false;
+      const list = pickable();
+      const clip = clipping();
+      const { raycaster } = scratch;
+      raycaster.layers.mask = camera.layers.mask;
+      for (const { pin, position } of placed) {
+        scratch.point.copy(position).project(camera);
+        scratch.ndc.set(scratch.point.x, scratch.point.y);
+        setRaycasterFromCamera(raycaster, scratch.ndc, camera);
+        const { hit } = raycastFirstVisibleMeshHit({ raycaster, meshes: list, clipping: clip });
+        const distance = raycaster.ray.origin.distanceTo(position);
+        occluded.current.set(pin.id, hit !== undefined && hit.distance < distance - Math.max(1e-6, distance * 1e-3));
+      }
+    } else {
+      last.camera = camera;
+      last.world.copy(camera.matrixWorld);
+      last.projection.copy(camera.projectionMatrix);
+      last.width = size.width;
+      last.height = size.height;
+      last.placed = placed;
+      last.sceneKey = sceneKey;
+      last.isOcclusionDue = true;
+      invalidate();
+    }
+    for (const { pin, position, normal } of placed) {
+      const scale = worldPerPixel(camera, position, size.height);
+      groups.current.get(pin.id)?.scale.setScalar(scale);
+      // The head: the stem's far end, projected to the viewer surface for the host's DOM element.
+      scratch.head
+        .copy(position)
+        .addScaledVector(normal, stemLength * scale)
+        .project(camera);
+      heads.place(pin.id, {
+        x: ((scratch.head.x + 1) / 2) * size.width,
+        y: ((1 - scratch.head.y) / 2) * size.height,
+        isOccluded: occluded.current.get(pin.id) ?? false,
+        isOffscreen: scratch.head.z > 1 || scratch.head.z < -1,
+      });
+    }
+  });
+
+  if (!comments) {
+    return undefined;
+  }
+  return (
+    <>
+      {placed.map(({ pin, position, quaternion }) => (
+        <group
+          key={pin.id}
+          ref={(group) => {
+            if (group) {
+              groups.current.set(pin.id, group);
+            } else {
+              groups.current.delete(pin.id);
+            }
           }}
-          number={pins.length + 1}
-          variant='ghost'
-        />
-      ) : null}
+          position={position}
+          quaternion={quaternion}
+          userData={sceneTagData(sceneTag.measurementUi)}
+        >
+          <PinMeshes resources={resources.pin} />
+        </group>
+      ))}
+      <group ref={ghost} visible={false} userData={sceneTagData(sceneTag.measurementUi)}>
+        <PinMeshes resources={resources.ghost} />
+      </group>
+      {isActive ? <CommentSession surface={surface} graphics={graphics} host={hostRef} /> : null}
     </>
   );
 }

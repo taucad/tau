@@ -4,7 +4,7 @@ import { viewerTouchContext, useViewerControlSize } from '#cad/viewer-control-si
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FlipHorizontal, MessageSquarePlus, Ruler } from 'lucide-react';
 import { CommentControl, CommentOptions } from '#cad/comment-control.jsx';
-import { commentPinsStore, useCommentPins } from '#cad/comment-pins.store.js';
+import { useCommentPins } from '#cad/comment-pins.jsx';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { Separator } from '@taucad/ui/components/separator';
 import { Button } from '@taucad/ui/components/button';
@@ -308,7 +308,9 @@ function ViewerControlsBody({
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   const isMeasureInputReady = useGraphicsSelector((state) => state.context.isMeasureInputReady);
   const measurementCount = useGraphicsSelector((state) => state.context.measurements.length);
-  const isCommentActive = useCommentPins((state) => state.isActive);
+  // The Comment tool exists only where a host gives the viewer its pins.
+  const hasCommentTool = useCommentPins() !== undefined;
+  const isCommentActive = useGraphicsSelector((state) => hasCommentTool && state.context.isCommentActive);
   const [measurementsExpanded, setMeasurementsExpanded] = useState(false);
   // Counted, so a phrase said twice in a row is a new node and is announced again.
   const [announcement, setAnnouncement] = useState({ phrase: '', count: 0 });
@@ -381,7 +383,7 @@ function ViewerControlsBody({
               name='Commenting'
               icon={<MessageSquarePlus className='size-4 text-viewer-tool-active' />}
               onDone={() => {
-                commentPinsStore.setActive(false);
+                graphicsRef.send({ type: 'setCommentActive', payload: false });
               }}
             >
               <CommentOptions />
@@ -416,7 +418,7 @@ function ViewerControlsBody({
             <>
               <SectionViewControl shortcut={keys.section} onStart={focusSectionRow} />
               <MeasureControl shortcut={keys.measure} onStart={focusMeasureRow} />
-              <CommentControl shortcut='C' />
+              {hasCommentTool ? <CommentControl /> : null}
               <Hairline />
             </>
           )}

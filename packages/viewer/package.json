@@ -36,7 +36,7 @@
   },
   "exports": {
     "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
-    "./cad/comment-pins.store": "./src/cad/comment-pins.store.ts",
+    "./cad/comment-pins": "./src/cad/comment-pins.tsx",
     "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
     "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
@@ -137,6 +137,11 @@
         "types": "./dist/cad/cad-viewer.d.mts",
         "import": "./dist/cad/cad-viewer.mjs",
         "default": "./dist/cad/cad-viewer.mjs"
+      },
+      "./cad/comment-pins": {
+        "types": "./dist/cad/comment-pins.d.mts",
+        "import": "./dist/cad/comment-pins.mjs",
+        "default": "./dist/cad/comment-pins.mjs"
       },
       "./cad/fit-view-control": {
         "types": "./dist/cad/fit-view-control.d.mts",

@@ -519,22 +519,39 @@ const recentScheduledRuns = async (
 /** The most pages of ledger runs read for one day: a run per CI run, most of them skipped pull-request runs. */
 const maximumLedgerPages = 20;
 
-/** The ledger job's completed runs of the last 24 hours, any event, every page; the judge picks the red ones. */
-const recentLedgerRuns = async (repository: string, token: string, now: Date): Promise<LedgerRun[]> => {
-  const since = `${new Date(now.getTime() - recentWindow).toISOString().slice(0, 19)}Z`;
+/** One page of a workflow's runs, as the Actions API lists it. */
+export type LedgerRunPage = { readonly total_count: number; readonly workflow_runs: readonly LedgerRun[] };
+
+/**
+ * Every run a listing holds, page by page. A listing that ends before its `total_count` (the API returns at most
+ * 1,000 results for a filtered query) or runs past {@link maximumLedgerPages} throws: a partial list could hide a red
+ * run, so it fails closed.
+ */
+export const readAllRuns = async (getPage: (page: number) => Promise<LedgerRunPage>): Promise<LedgerRun[]> => {
   const runs: LedgerRun[] = [];
   for (let page = 1; page <= maximumLedgerPages; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until the count is reached
-    const body = await githubGet<{ readonly total_count: number; readonly workflow_runs: readonly LedgerRun[] }>(
-      `repos/${repository}/actions/workflows/${ledgerWorkflow.file}/runs?status=completed&created=${encodeURIComponent(`>=${since}`)}&per_page=100&page=${page}`,
-      token,
-    );
+    const body = await getPage(page);
     runs.push(...body.workflow_runs);
-    if (body.workflow_runs.length === 0 || runs.length >= body.total_count) {
+    if (runs.length >= body.total_count) {
       return runs;
+    }
+    if (body.workflow_runs.length === 0) {
+      throw new Error(`the listing ended at ${runs.length} of ${body.total_count} runs; not read in part`);
     }
   }
   throw new Error(`more than ${maximumLedgerPages * 100} ledger runs in a day; not read in part`);
+};
+
+/** The ledger job's completed runs of the last 24 hours, any event; the judge picks the red ones. */
+const recentLedgerRuns = async (repository: string, token: string, now: Date): Promise<LedgerRun[]> => {
+  const since = `${new Date(now.getTime() - recentWindow).toISOString().slice(0, 19)}Z`;
+  return readAllRuns(async (page) =>
+    githubGet<LedgerRunPage>(
+      `repos/${repository}/actions/workflows/${ledgerWorkflow.file}/runs?status=completed&created=${encodeURIComponent(`>=${since}`)}&per_page=100&page=${page}`,
+      token,
+    ),
+  );
 };
 
 /**

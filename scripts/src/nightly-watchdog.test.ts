@@ -9,6 +9,7 @@ import {
   judgeDebt,
   judgeLedgerJob,
   ledgerJobVerdict,
+  readAllRuns,
   judgeNeverQuarantine,
   judgeQuarantine,
   judgeRuns,
@@ -353,6 +354,21 @@ describe('nightly watchdog', () => {
       });
       const read = await ledgerJobVerdict(async () => [ledgerRun('2026-11-08T12:00:00Z', 'success')], now);
       expect(read.state).toBe('ok');
+    });
+
+    it('should read every page of the ledger runs, and fail closed when a listing stops short of its count', async () => {
+      const page = (count: number, total: number): { total_count: number; workflow_runs: LedgerRun[] } => ({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+        total_count: total,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
+        workflow_runs: Array.from({ length: count }, () => ledgerRun('2026-11-08T12:00:00Z', 'success')),
+      });
+      expect(await readAllRuns(async (number) => page(number === 1 ? 100 : 20, 120))).toHaveLength(120);
+      expect(await readAllRuns(async () => page(0, 0))).toEqual([]);
+      // The API returns at most 1,000 results for a filtered listing: pages end before the count.
+      await expect(readAllRuns(async (number) => page(number <= 10 ? 100 : 0, 1500))).rejects.toThrow(
+        'the listing ended at 1000 of 1500 runs',
+      );
     });
   });
 

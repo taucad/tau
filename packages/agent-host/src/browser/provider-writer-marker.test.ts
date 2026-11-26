@@ -22,13 +22,25 @@ const row = (recordedAt: number): string =>
     state: 'admitted',
   })}\n`;
 
+/** Holds the next read of the marker: it reads the bytes there now and answers once `release` resolves. */
+type MarkerReadHold = { armed?: PromiseWithResolvers<void> };
+
 /** A `webaccess`-like provider: `stat` answers `File.lastModified` as `mtimeMs`. */
-const createFileSystem = (files: Map<string, Uint8Array<ArrayBuffer>>, mtimes: Map<string, number>) => ({
+const createFileSystem = (
+  files: Map<string, Uint8Array<ArrayBuffer>>,
+  mtimes: Map<string, number>,
+  hold: MarkerReadHold = {},
+) => ({
   exists: async (path: string) => files.has(path),
   readFile: async (path: string) => {
     const bytes = files.get(path);
     if (bytes === undefined) {
       throw Object.assign(new Error(`Missing ${path}`), { code: 'ENOENT' });
+    }
+    const { armed } = hold;
+    if (armed !== undefined && path === lockPath) {
+      hold.armed = undefined;
+      await armed.promise;
     }
     return new Uint8Array(bytes);
   },
@@ -55,13 +67,17 @@ const createFileSystem = (files: Map<string, Uint8Array<ArrayBuffer>>, mtimes: M
   },
 });
 
-const open = async (files: Map<string, Uint8Array<ArrayBuffer>>, mtimes: Map<string, number>) =>
+const open = async (
+  files: Map<string, Uint8Array<ArrayBuffer>>,
+  mtimes: Map<string, number>,
+  hold: MarkerReadHold = {},
+) =>
   chatStoreBinding(
     createBrowserChatStore({
       projectId: 'project',
       tabId: 'tab',
       build: 'build',
-      log: { kind: 'provider', fileSystem: createFileSystem(files, mtimes) },
+      log: { kind: 'provider', fileSystem: createFileSystem(files, mtimes, hold) },
     }),
   ).openWriter('chat');
 
@@ -156,9 +172,15 @@ describe('provider open and a Node writer marker (HA-I10)', () => {
 
   it('never writes its marker back once closed, even when a touch races the close', async () => {
     const files = new Map<string, Uint8Array<ArrayBuffer>>();
-    const writer = await open(files, new Map());
+    const hold: MarkerReadHold = {};
+    const writer = await open(files, new Map(), hold);
+    /* The touch reads its own marker, then waits; the close removes it meanwhile; then the touch's read answers. */
+    const release = Promise.withResolvers<void>();
+    hold.armed = release;
     const touching = writer.touch?.();
     await writer.close();
+    expect(files.has(lockPath)).toBe(false);
+    release.resolve();
     await touching;
     expect(files.has(lockPath)).toBe(false);
   });

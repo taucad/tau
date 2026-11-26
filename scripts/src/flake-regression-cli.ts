@@ -9,7 +9,7 @@
  * one candidate per invocation, the oldest whose onset has no bisect yet: the first flaky commit is the commit of the
  * onset's failing run, the last stable commit the last push to `main` the CI ran before it, and each probe is a
  * `flake-repro.yml` dispatch at one commit (that workflow's gate holds it to three runs at once and 3,000
- * runner-minutes a week; `bisectLimits` holds one bisect to 10 probes and 300 runner-minutes, refused and unfinished
+ * runner-minutes a week; `bisectLimits` holds one bisect to 10 dispatches and 300 runner-minutes, refused and unfinished
  * dispatches included). An onset on a merge-queue commit that is not on `main` is not bisected automatically: the
  * issue asks the operator for `--bad`. The result, a provisional culprit or the range it narrowed to, is a comment on
  * the issue. It changes no ledger or quarantine state. Bisect state markers count only from the workflow's own
@@ -322,10 +322,18 @@ export const reproProber =
   async (request) => {
     const { github, identity } = deps;
     let minutes = 0;
-    for (let attempt = 0; attempt <= gateRetries; attempt += 1) {
+    let dispatches = 0;
+    const allowed = Math.min(gateRetries + 1, request.dispatches);
+    while (dispatches < allowed) {
       const cap = Math.floor(request.minutes - minutes);
       if (cap < minimumDispatchMinutes) {
-        return { sha: request.sha, rows: [], minutes, error: "refused dispatches spent the probe's minutes" };
+        return {
+          sha: request.sha,
+          rows: [],
+          minutes,
+          dispatches,
+          error: "refused dispatches spent the probe's minutes",
+        };
       }
       const since = new Date(deps.now().getTime() - 60_000).toISOString();
       // oxlint-disable-next-line no-await-in-loop -- one dispatch at a time
@@ -340,10 +348,13 @@ export const reproProber =
         seed: '1',
         minutes: String(cap),
       });
+      dispatches += 1;
       // oxlint-disable-next-line no-await-in-loop -- as above
       const id = await locateRun(deps, { id: dispatched, sha: request.sha, since });
       if (id === undefined) {
-        return { sha: request.sha, rows: [], minutes, error: 'the dispatched run was not found' };
+        /* The run may exist and still be going: it is charged its whole cap. */
+        minutes += cap;
+        return { sha: request.sha, rows: [], minutes, dispatches, error: 'the dispatched run was not found' };
       }
       const url = `https://github.com/${github.repository}/actions/runs/${id}`;
       const deadline = deps.now().getTime() + (cap + queueSlackMinutes) * 60_000;
@@ -359,7 +370,14 @@ export const reproProber =
       }
       if (run.status !== 'completed') {
         minutes += Math.max(runMinutes(run), cap);
-        return { sha: request.sha, rows: [], minutes, run: { id, url }, error: 'the run did not finish in time' };
+        return {
+          sha: request.sha,
+          rows: [],
+          minutes,
+          dispatches,
+          run: { id, url },
+          error: 'the run did not finish in time',
+        };
       }
       minutes += runMinutes(run);
       // oxlint-disable-next-line no-await-in-loop -- a refused probe waits for a slot
@@ -378,6 +396,7 @@ export const reproProber =
           sha: request.sha,
           rows: [],
           minutes,
+          dispatches,
           run: { id, url },
           error: `no report (${run.conclusion ?? 'unknown'})`,
         };
@@ -390,11 +409,18 @@ export const reproProber =
         sha: request.sha,
         rows,
         minutes,
+        dispatches,
         run: { id, url },
         ...(rows.length === 0 ? { error: 'an empty report' } : {}),
       };
     }
-    return { sha: request.sha, rows: [], minutes, error: `the repro gate refused ${gateRetries + 1} dispatches` };
+    return {
+      sha: request.sha,
+      rows: [],
+      minutes,
+      dispatches,
+      error: `the repro gate refused ${dispatches} dispatches`,
+    };
   };
 
 /** The dispatch API call, asking for the run id (`return_run_details`); a 204 leaves the run to be found by listing. */
@@ -503,7 +529,7 @@ const manualCandidate = (id: string, identity: IdentityState): RegressionCandida
 
 /** Bisect one candidate between its last stable and first flaky commits, and name the result on its issue. */
 const bisectCandidate = async (
-  chosen: { readonly candidate: RegressionCandidate; readonly issue: number },
+  chosen: { readonly candidate: RegressionCandidate; readonly issue: number; readonly inconclusive: number },
   options: InvocationOptions,
   deps: InvocationDeps,
 ): Promise<{ result: BisectResult; comment: string }> => {
@@ -537,13 +563,19 @@ const bisectCandidate = async (
       `--good ${options.good} is not among the ${history.shas.length - 1} commits of main before --bad ${bad}`,
     );
   }
+  /* An automatic bound the API did not give, or one older than the window, falls back to the window's oldest commit. */
+  const lower = history.shas[Math.max(0, goodIndex)] ?? '';
+  const fallback =
+    goodIndex === -1
+      ? ` (a fallback: ${good === undefined ? 'no push to main before the onset was found' : `the last stable push ${good} is not among the ${history.shas.length} commits read back from the flaky one`}, so the bisect starts from the oldest of them)`
+      : '';
   let result: BisectResult = { outcome: 'inconclusive', candidates: 0, introduced: false, probes: [], minutes: 0 };
   if (identity) {
     await comment(
       github,
       issue,
       `${bisectMarker(candidate.onset.failedRun, 'started', deps.now().toISOString())}\n\nBisecting under stress between ` +
-        `${good ?? 'the oldest commit of the window'} and ${bad} (at most ${bisectLimits.probes} \`flake-repro.yml\` probes and ${bisectLimits.minutes} runner-minutes).\n`,
+        `${lower}${fallback} and ${bad} (at most ${bisectLimits.probes} \`flake-repro.yml\` dispatches and ${bisectLimits.minutes} runner-minutes).\n`,
     );
     result = await bisectRegression({
       history: history.shas,
@@ -560,6 +592,7 @@ const bisectCandidate = async (
     culprit: result.culprit === undefined ? undefined : (history.info.get(result.culprit) ?? { sha: result.culprit }),
     repository: github.repository,
     now: deps.now(),
+    inconclusive: chosen.inconclusive,
   });
   await comment(github, issue, body);
   return { result, comment: body };
@@ -602,8 +635,9 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
     return { candidates, issues, markdown: `${lines.join('\n')}\n` };
   }
 
-  /* Candidates whose bisect is done or running are skipped before the cap, so they never crowd out pending ones. */
-  let chosen: { candidate: RegressionCandidate; issue: number } | undefined;
+  /* Candidates whose bisect is done, running or waiting for its retry are skipped before the cap, so they never crowd
+     out pending ones. */
+  let chosen: { candidate: RegressionCandidate; issue: number; inconclusive: number } | undefined;
   for (const candidate of candidates) {
     if (issues.size >= maximumIssues) {
       break;
@@ -613,14 +647,14 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
     // oxlint-disable-next-line no-await-in-loop -- as above
     const markers = existing === undefined ? [] : await automationComments(github, existing);
     const recorded = bisectRecorded(markers, candidate.onset.failedRun, deps.now());
-    if (recorded !== undefined && options.id === undefined) {
-      log(`${candidate.id}: bisect ${recorded} on #${existing ?? '?'}`);
+    if (recorded.state !== undefined && options.id === undefined) {
+      log(`${candidate.id}: bisect ${recorded.state} on #${existing ?? '?'}`);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- as above
     const issue = await flagIssue(github, candidate, existing);
     issues.set(candidate.id, issue);
-    chosen ??= { candidate, issue };
+    chosen ??= { candidate, issue, inconclusive: recorded.inconclusive };
   }
   if (!chosen) {
     lines.push('', 'No candidate waits for a bisect.');

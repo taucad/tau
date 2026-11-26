@@ -87,6 +87,8 @@ type Setup = {
   /** The event of the onset's CI run, and the compare API's status of its commit against `main`. */
   readonly runEvent?: string;
   readonly compareStatus?: string;
+  /** The commit the last push to `main` before the onset reports, instead of the push before it. */
+  readonly lastStable?: string;
   readonly stub?: StubOptions;
 };
 
@@ -112,7 +114,7 @@ const repository = (setup: Setup = {}) =>
       const runs = Array.from({ length: 340 }, (_, index) => 340 - index)
         .filter((n) => runAt(n) < before)
         .slice(0, 20);
-      return { workflow_runs: runs.map((n) => ({ id: n, head_sha: commitSha(n) })) };
+      return { workflow_runs: runs.map((n) => ({ id: n, head_sha: setup.lastStable ?? commitSha(n) })) };
     }
     if (method === 'GET' && path.includes('/commits?sha=')) {
       return commitsPage(path);
@@ -319,6 +321,45 @@ describe('flake regression invocation', () => {
     await expect(invoke({ id: 'scripts › src/none.test.ts > none' })).rejects.toThrow('no identity');
   });
 
+  it('should name the oldest commit of the window when the last stable push is outside it', async () => {
+    const { result, calls } = await invoke({}, { lastStable: commitSha(5) });
+    const started = bodyOf(calls.find((call) => call.method === 'POST' && call.path.endsWith('/comments')));
+    expect(started).toContain(
+      `between ${commitSha(74)} (a fallback: the last stable push ${commitSha(5)} is not among`,
+    );
+    expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
+  });
+
+  it('should retry a first probe that ran nothing once, a day later, then hand it to the operator', async () => {
+    const broken: StubOptions = { culprit: culpritCommit, rates: {}, broken: [323] };
+    const first = await invoke({}, { existing: true, stub: broken });
+    expect(first.result.bisected?.result.outcome).toBe('not-run');
+    expect(first.result.bisected?.comment).toContain(bisectMarker(323, 'inconclusive', '2026-11-20T00:00:00.000Z'));
+
+    const soon = await invoke(
+      {},
+      {
+        existing: true,
+        stub: broken,
+        comments: [{ body: bisectMarker(323, 'inconclusive', '2026-11-19T12:00:00.000Z') }],
+      },
+    );
+    expect(soon.result.bisected).toBeUndefined();
+    expect(soon.requests).toEqual([]);
+
+    const later = await invoke(
+      {},
+      {
+        existing: true,
+        stub: broken,
+        comments: [{ body: bisectMarker(323, 'inconclusive', '2026-11-18T12:00:00.000Z') }],
+      },
+    );
+    expect(later.requests).toHaveLength(1);
+    expect(later.result.bisected?.comment).toContain(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'));
+    expect(later.result.bisected?.comment).toContain('needs an operator dispatch');
+  });
+
   it('should keep the regression onset of an identity the operator names', async () => {
     const { result, requests, calls } = await invoke({ id: regressedId });
     expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
@@ -456,7 +497,13 @@ describe('the flake-repro prober', () => {
 
   it('should dispatch flake-repro.yml at the commit, wait for the run and read its report', async () => {
     const { value, dispatched, sleeps } = deps([run('in_progress', undefined), run('completed', 'success')]);
-    const result = await reproProber(value)({ sha: commitSha(9), modes: 'repeat,cpu', attempts: 30, minutes: 120 });
+    const result = await reproProber(value)({
+      sha: commitSha(9),
+      modes: 'repeat,cpu',
+      attempts: 30,
+      minutes: 120,
+      dispatches: 10,
+    });
     expect(dispatched).toEqual([
       {
         ref: commitSha(9),
@@ -473,6 +520,7 @@ describe('the flake-repro prober', () => {
     expect(result).toEqual({
       sha: commitSha(9),
       minutes: 30,
+      dispatches: 1,
       run: { id: 41, url: 'https://github.com/taucad/tau/actions/runs/41' },
       rows: [
         { key: 'repeat:alone', outcomes: { passed: 18, failed: 2, missing: 0 } },
@@ -484,16 +532,53 @@ describe('the flake-repro prober', () => {
 
   it('should wait for a slot and dispatch again when the gate refuses, within a bound', async () => {
     const refused = deps([run('completed', 'failure', '2026-11-20T00:02:00.000Z')], { refused: true });
-    const result = await reproProber(refused.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 });
+    const result = await reproProber(refused.value)({
+      sha: commitSha(9),
+      modes: 'repeat',
+      attempts: 30,
+      minutes: 60,
+      dispatches: 10,
+    });
     expect(refused.dispatched).toHaveLength(7);
     expect(result.error).toBe('the repro gate refused 7 dispatches');
     expect(result.rows).toEqual([]);
     expect(result.minutes).toBe(7);
   });
 
+  it('should dispatch no more often than the bisect allows', async () => {
+    const refused = deps([run('completed', 'failure', '2026-11-20T00:02:00.000Z')], { refused: true });
+    const result = await reproProber(refused.value)({
+      sha: commitSha(9),
+      modes: 'repeat',
+      attempts: 30,
+      minutes: 60,
+      dispatches: 3,
+    });
+    expect(refused.dispatched).toHaveLength(3);
+    expect(result).toMatchObject({ dispatches: 3, error: 'the repro gate refused 3 dispatches' });
+  });
+
+  it('should charge a dispatch whose run it cannot find its whole cap', async () => {
+    const lost = deps([run('completed', 'success')]);
+    const result = await reproProber(lost.value)({
+      sha: commitSha(8),
+      modes: 'repeat',
+      attempts: 30,
+      minutes: 60,
+      dispatches: 10,
+    });
+    expect(result).toMatchObject({ minutes: 60, dispatches: 1, rows: [], error: 'the dispatched run was not found' });
+  });
+
   it('should spend one probe budget on every dispatch, refused ones included', async () => {
     const refused = deps([run('completed', 'failure')], { refused: true });
-    const result = await reproProber(refused.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 });
+    const result = await reproProber(refused.value)({
+      sha: commitSha(9),
+      modes: 'repeat',
+      attempts: 30,
+      minutes: 60,
+      dispatches: 10,
+    });
     // Each refused run took 30 minutes: the retry gets the 30 left, and nothing is dispatched after that.
     expect(refused.dispatched.map((inputs) => inputs['minutes'])).toEqual(['60', '30']);
     expect(result).toMatchObject({ minutes: 60, rows: [], error: "refused dispatches spent the probe's minutes" });
@@ -502,7 +587,13 @@ describe('the flake-repro prober', () => {
   it('should report a run without a report, or one that never finished, as no verdict', async () => {
     const missing = deps([run('completed', 'failure')], { artifact: false });
     expect(
-      await reproProber(missing.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 }),
+      await reproProber(missing.value)({
+        sha: commitSha(9),
+        modes: 'repeat',
+        attempts: 30,
+        minutes: 60,
+        dispatches: 10,
+      }),
     ).toMatchObject({
       rows: [],
       error: 'no report (failure)',
@@ -517,7 +608,7 @@ describe('the flake-repro prober', () => {
       },
     };
     expect(
-      await reproProber(stuck.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 }),
+      await reproProber(stuck.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60, dispatches: 10 }),
     ).toMatchObject({
       rows: [],
       // A run still going may use its whole cap: it is charged the cap, not the 30 minutes seen so far.

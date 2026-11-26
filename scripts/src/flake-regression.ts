@@ -21,13 +21,15 @@
  * `flake-repro.yml` at one commit, so the harness's own gate holds it to three runs at once, 3,000 runner-minutes a
  * week and its per-dispatch cap of 120 minutes. The first probe, at the flaky commit, runs the requested modes and
  * keeps the variant with the highest failure rate; every later probe runs only that variant. A commit is clean after
- * n straight passes, n from the 95 % lower bound of that rate ({@link cleanAttempts}). Assuming attempts are
- * independent and the culprit's rate holds on every later commit, a flaky commit passes n straight attempts at most 5 %
- * of the time; the culprit is provisional on that assumption. A last stable commit that reproduces moves the clean
+ * n straight passes ({@link cleanAttempts}). n is chosen so that, if the commit's true failure rate is at least the
+ * 95 % lower confidence bound from the first probe, it passes all n attempts at most 5 % of the time (attempts
+ * assumed independent); the bound is not adjusted for picking the highest-rate mode, so the culprit is provisional.
+ * A first probe in which no variant ran the test is retried once, no sooner than a day later. A last stable commit that reproduces moves the clean
  * end back by doubling the distance. A commit where the test does not exist yet is clean, and a culprit whose parent
  * lacks the test introduced it.
  *
- * **Bounds** ({@link bisectLimits}): at most 10 probes and 300 runner-minutes for one bisect, every dispatch counted,
+ * **Bounds** ({@link bisectLimits}): at most 10 dispatches and 300 runner-minutes for one bisect, every dispatch
+ * counted (a refused one, and one whose run could not be found, included),
  * and a history window of 250 commits; one bisect runs at a time. Whatever the bounds cut short is reported with the
  * range it narrowed to, for the operator.
  */
@@ -186,34 +188,51 @@ export const detectRegressions = (state: LedgerState): RegressionCandidate[] =>
 export const identityMarker = (id: string): string =>
   `<!-- flake-identity: ${createHash('sha256').update(id).digest('hex').slice(0, 16)} -->`;
 
-/** The hidden line of a bisect comment: the onset it answers and whether it finished. */
-export const bisectMarker = (onsetRun: number, status: 'started' | 'done', at: string): string =>
+/**
+ * The state a bisect comment records: `started`; `done`; or `inconclusive`, a first probe in which no variant ran the
+ * test (a broken build, a crash, no runnable variant), which is retried once.
+ */
+export type BisectStatus = 'started' | 'done' | 'inconclusive';
+
+/** The hidden line of a bisect comment: the onset it answers and its state. */
+export const bisectMarker = (onsetRun: number, status: BisectStatus, at: string): string =>
   `<!-- flake-regression-bisect onset=${onsetRun} status=${status} at=${at} -->`;
 
 /** A started bisect with no result after this long died with its job (the job's limit is six hours). */
 const staleBisectHours = 7;
+/** An `inconclusive` first probe is retried once, no sooner than this. */
+export const inconclusiveRetryHours = 24;
 
-/** A bisect of this onset that finished, or one started less than seven hours ago and presumably still running. */
+/**
+ * What the comments record for this onset: `done` (finished, or inconclusive twice), `running` (started under seven
+ * hours ago), `waiting` (inconclusive once, under a day ago), or undefined (bisect now). `inconclusive` counts the
+ * earlier inconclusive first probes.
+ */
 export const bisectRecorded = (
   comments: readonly string[],
   onsetRun: number,
   now: Date,
-): 'done' | 'running' | undefined => {
+): { readonly state: 'done' | 'running' | 'waiting' | undefined; readonly inconclusive: number } => {
   const pattern = new RegExp(
-    String.raw`<!-- flake-regression-bisect onset=${onsetRun} status=(started|done) at=(\S+) -->`,
+    String.raw`<!-- flake-regression-bisect onset=${onsetRun} status=(started|done|inconclusive) at=(\S+) -->`,
     'u',
   );
-  let running = false;
-  for (const body of comments) {
+  const hoursSince = (at: string | undefined): number => (now.getTime() - Date.parse(at ?? '')) / 3_600_000;
+  const matches = comments.flatMap((body) => {
     const match = pattern.exec(body);
-    if (match?.[1] === 'done') {
-      return 'done';
-    }
-    if (match?.[1] === 'started' && now.getTime() - Date.parse(match[2] ?? '') < staleBisectHours * 3_600_000) {
-      running = true;
-    }
+    return match ? [{ status: match[1], at: match[2] }] : [];
+  });
+  const inconclusive = matches.filter((match) => match.status === 'inconclusive');
+  if (matches.some((match) => match.status === 'done') || inconclusive.length >= 2) {
+    return { state: 'done', inconclusive: inconclusive.length };
   }
-  return running ? 'running' : undefined;
+  if (matches.some((match) => match.status === 'started' && hoursSince(match.at) < staleBisectHours)) {
+    return { state: 'running', inconclusive: inconclusive.length };
+  }
+  if (inconclusive.some((match) => hoursSince(match.at) < inconclusiveRetryHours)) {
+    return { state: 'waiting', inconclusive: inconclusive.length };
+  }
+  return { state: undefined, inconclusive: inconclusive.length };
 };
 
 /** What `flake-repro.yml` needs to run one test. */
@@ -275,6 +294,8 @@ export type ProbeReport = {
   readonly run?: { readonly id: number; readonly url: string } | undefined;
   /** Why there is no report. */
   readonly error?: string | undefined;
+  /** `flake-repro.yml` dispatches it took, refused ones included; 1 when absent. */
+  readonly dispatches?: number | undefined;
 };
 
 export type ProbeRequest = {
@@ -283,8 +304,10 @@ export type ProbeRequest = {
   readonly modes: string;
   /** Attempts per variant. */
   readonly attempts: number;
-  /** The dispatch's minute cap. */
+  /** The probe's minute cap, for all its dispatches together. */
   readonly minutes: number;
+  /** The most `flake-repro.yml` dispatches the probe may make, refused ones included. */
+  readonly dispatches: number;
 };
 
 /** Runs one probe: in CI a `flake-repro.yml` dispatch; in tests a stub. */
@@ -353,7 +376,9 @@ export type BisectOutcome =
   /** The probe or minute budget ran out. */
   | 'budget'
   /** A probe gave no usable verdict (no report, cut short, or the variant could not run). */
-  | 'inconclusive';
+  | 'inconclusive'
+  /** The first probe ran the test in no variant (no report, a broken build, a crash, nothing runnable): retried once. */
+  | 'not-run';
 
 export type BisectResult = {
   readonly outcome: BisectOutcome;
@@ -375,6 +400,8 @@ export type BisectResult = {
   readonly required?: number | undefined;
   readonly probes: readonly ProbeLog[];
   readonly minutes: number;
+  /** `flake-repro.yml` dispatches, refused ones included. */
+  readonly dispatches?: number | undefined;
 };
 
 export type BisectInput = {
@@ -399,6 +426,7 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
   const bad = history.length - 1;
   const probes: ProbeLog[] = [];
   let minutes = 0;
+  let dispatches = 0;
   let required = 0;
   /** The variant the first probe chose, and what it reproduced there. */
   const chosen: { mode?: string; failures?: number; attempts?: number } = {};
@@ -431,6 +459,7 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     required: chosen.mode === undefined ? undefined : required,
     probes,
     minutes,
+    dispatches,
     ...extra,
   });
   /** Run one probe at `index`, or report that the budget does not allow it. */
@@ -439,7 +468,7 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     request: { modes: string; attempts: number },
   ): Promise<ProbeReport | 'budget'> => {
     const left = bounds.minutes - minutes;
-    if (probes.length >= bounds.probes || left < bounds.minimumProbeMinutes) {
+    if (dispatches >= bounds.probes || left < bounds.minimumProbeMinutes) {
       return 'budget';
     }
     const sha = history[index] ?? '';
@@ -448,8 +477,10 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
       modes: request.modes,
       attempts: request.attempts,
       minutes: Math.floor(Math.min(bounds.dispatchMinutes, left)),
+      dispatches: bounds.probes - dispatches,
     });
     minutes += report.minutes;
+    dispatches += Math.max(1, report.dispatches ?? 1);
     return report;
   };
   const log = (report: ProbeReport, row: ProbeRow | undefined, verdict: Verdict): void => {
@@ -494,7 +525,7 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     /* No failure is evidence only from a variant that ran the test; build errors and unavailable variants are not. */
     const ran = first.rows.some((row) => row.unavailable === undefined && ranOf(row) > 0);
     log(first, first.rows[0], ran ? 'clean' : 'inconclusive');
-    return finish(ran ? 'not-reproduced' : 'inconclusive');
+    return finish(ran ? 'not-reproduced' : 'not-run');
   }
   log(first, best, 'flaky');
   verdicts.set(bad, 'flaky');
@@ -610,6 +641,7 @@ const outcomeText: Record<BisectOutcome, string> = {
   unbracketed: 'every commit of the window reproduced; the culprit is older',
   budget: 'the probe or minute budget ran out',
   inconclusive: 'a probe gave no usable verdict',
+  'not-run': 'the first probe ran the test in no variant',
 };
 
 /** The comment that reports a finished bisect on the identity's issue. */
@@ -619,11 +651,14 @@ export const renderBisectComment = (input: {
   readonly culprit?: CommitInfo | undefined;
   readonly repository: string;
   readonly now: Date;
+  /** Earlier inconclusive first probes of this onset: a `not-run` result after one is final. */
+  readonly inconclusive?: number | undefined;
 }): string => {
   const { result, culprit, repository } = input;
   const commitLink = (sha: string | undefined): string =>
     sha === undefined ? 'unknown' : `[${short(sha)}](https://github.com/${repository}/commit/${sha})`;
-  const lines = [bisectMarker(input.onsetRun, 'done', input.now.toISOString()), ''];
+  const retry = result.outcome === 'not-run' && (input.inconclusive ?? 0) === 0;
+  const lines = [bisectMarker(input.onsetRun, retry ? 'inconclusive' : 'done', input.now.toISOString()), ''];
   if (result.outcome === 'culprit' && culprit) {
     const pull = pullNumber(culprit.title);
     lines.push(
@@ -649,14 +684,20 @@ export const renderBisectComment = (input: {
         : `The culprit is one of the ${result.candidates} commits after ${commitLink(result.clean)} up to and including ` +
             `${commitLink(result.flaky)}.`,
       '',
-      `The operator decides the next step. ${quarantineNote}`,
+      result.outcome === 'not-run'
+        ? retry
+          ? `The bisect runs this onset once more, no sooner than ${inconclusiveRetryHours} hours from now. ${quarantineNote}`
+          : 'The first probe ran the test in no variant twice, so the bisect stops here: it needs an operator dispatch of ' +
+            `\`flake-regression.yml\` with this identity (and \`good\` and \`bad\` if the build broke). ${quarantineNote}`
+        : `The operator decides the next step. ${quarantineNote}`,
     );
   }
   lines.push(
     '',
     `Mode ${result.mode ? code(result.mode) : 'none'}: ${result.failures ?? 0} failures in ${result.attempts ?? 0} attempts ` +
       `at the first flaky commit; a commit is clean after ${result.required ?? '—'} straight passes ((1 − p)ⁿ ≤ 5 % at the 95 % lower bound p of its rate). ` +
-      `${result.probes.length} probes, ${Math.round(result.minutes)} runner-minutes (limits ${bisectLimits.probes} and ${bisectLimits.minutes}).`,
+      `${result.probes.length} probes in ${result.dispatches ?? result.probes.length} dispatches, ${Math.round(result.minutes)} runner-minutes ` +
+      `(limits ${bisectLimits.probes} dispatches and ${bisectLimits.minutes} minutes).`,
     '',
     '| Commit | Verdict | Failures / attempts | Minutes | Run |',
     '| --- | --- | --- | --- | --- |',

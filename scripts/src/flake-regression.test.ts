@@ -29,6 +29,7 @@ import {
   cleanAttempts,
   detectRegressions,
   identityMarker,
+  inconclusiveRetryHours,
   isFlakyRegression,
   latestEvent,
   quarantineNote,
@@ -40,6 +41,7 @@ import {
   stableExecutions,
   verdictOf,
 } from '#flake-regression.js';
+import type { BisectResult } from '#flake-regression.js';
 
 /** Commits 1 to `last` of the synthetic `main`, oldest first. */
 const historyTo = (last: number, first = 1): string[] =>
@@ -197,12 +199,21 @@ describe('flaky-regression detection', () => {
     expect(identityMarker(regressedId)).toMatch(/^<!-- flake-identity: [\da-f]{16} -->$/u);
     expect(identityMarker(regressedId)).not.toBe(identityMarker(ordinaryId));
     const now = new Date('2026-11-20T12:00:00.000Z');
-    expect(bisectRecorded([bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z')], 323, now)).toBe('done');
-    expect(bisectRecorded([bisectMarker(323, 'started', '2026-11-20T10:00:00.000Z')], 323, now)).toBe('running');
-    expect(bisectRecorded([bisectMarker(323, 'started', '2026-11-20T01:00:00.000Z')], 323, now)).toBeUndefined();
-    expect(
-      bisectRecorded([bisectMarker(400, 'done', '2026-11-19T00:00:00.000Z'), 'unrelated'], 323, now),
-    ).toBeUndefined();
+    const state = (...markers: string[]) => bisectRecorded(markers, 323, now).state;
+    expect(state(bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z'))).toBe('done');
+    expect(state(bisectMarker(323, 'started', '2026-11-20T10:00:00.000Z'))).toBe('running');
+    expect(state(bisectMarker(323, 'started', '2026-11-20T01:00:00.000Z'))).toBeUndefined();
+    expect(state(bisectMarker(400, 'done', '2026-11-19T00:00:00.000Z'), 'unrelated')).toBeUndefined();
+  });
+
+  it('should retry an onset whose first probe ran nothing once, no sooner than a day later, then stop', () => {
+    const now = new Date('2026-11-20T12:00:00.000Z');
+    const recent = bisectMarker(323, 'inconclusive', '2026-11-20T00:00:00.000Z');
+    const old = bisectMarker(323, 'inconclusive', '2026-11-19T11:00:00.000Z');
+    expect(bisectRecorded([recent], 323, now)).toEqual({ state: 'waiting', inconclusive: 1 });
+    expect(bisectRecorded([old], 323, now)).toEqual({ state: undefined, inconclusive: 1 });
+    expect(bisectRecorded([old, recent], 323, now)).toEqual({ state: 'done', inconclusive: 2 });
+    expect(inconclusiveRetryHours).toBe(24);
   });
 });
 
@@ -281,6 +292,14 @@ describe('the bisect under stress', () => {
     expect(result).toMatchObject({ outcome: 'unbracketed', flaky: commitSha(5), clean: undefined });
   });
 
+  it('should count every dispatch against the cap, refused ones included', async () => {
+    const { prober, requests } = stubProber({ culprit: culpritCommit, rates: { 'repeat:alone': 0.5 } });
+    const thrice: typeof prober = async (request) => ({ ...(await prober(request)), dispatches: 3 });
+    const result = await bisectRegression({ history: historyTo(330, 81), good: 0, modes: 'repeat', prober: thrice });
+    expect(requests.map((request) => request.dispatches)).toEqual([10, 7, 4, 1]);
+    expect(result).toMatchObject({ outcome: 'budget', dispatches: 12 });
+  });
+
   it('should stop at the probe cap and report the narrowed range', async () => {
     const { prober, requests } = stubProber({ culprit: culpritCommit, rates: { 'repeat:alone': 0.5 } });
     const result = await bisectRegression({
@@ -321,7 +340,7 @@ describe('the bisect under stress', () => {
       modes: 'repeat',
       prober: empty.prober,
     });
-    expect(noReport.outcome).toBe('inconclusive');
+    expect(noReport.outcome).toBe('not-run');
   });
 
   it('should call a first probe that never ran the test inconclusive, not unreproduced', async () => {
@@ -338,7 +357,7 @@ describe('the bisect under stress', () => {
         ],
       }),
     });
-    expect(result.outcome).toBe('inconclusive');
+    expect(result.outcome).toBe('not-run');
     expect(result.probes).toMatchObject([{ verdict: 'inconclusive' }]);
   });
 
@@ -412,5 +431,23 @@ describe('the issue text', () => {
     });
     expect(comment).toContain('no culprit (the probe or minute budget ran out)');
     expect(comment).toContain('one of the 40 commits after');
+    // A budget or rate-too-low result is final, even after an earlier inconclusive probe: retrying cannot change it.
+    expect(comment.startsWith(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'))).toBe(true);
+  });
+
+  it('should mark a first probe that ran nothing inconclusive once, and hand it to the operator the second time', () => {
+    const notRun: BisectResult = { outcome: 'not-run', candidates: 0, introduced: false, probes: [], minutes: 12 };
+    const render = (inconclusive: number) =>
+      renderBisectComment({
+        result: notRun,
+        onsetRun: 323,
+        repository: 'taucad/tau',
+        now: new Date('2026-11-20T00:00:00.000Z'),
+        inconclusive,
+      });
+    expect(render(0).startsWith(bisectMarker(323, 'inconclusive', '2026-11-20T00:00:00.000Z'))).toBe(true);
+    expect(render(0)).toContain('once more, no sooner than 24 hours from now');
+    expect(render(1).startsWith(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'))).toBe(true);
+    expect(render(1)).toContain('needs an operator dispatch');
   });
 });

@@ -46,7 +46,7 @@ describe('generated ignore file', () => {
     for (const entry of generatedIgnoreEntries(tauRevisionPolicy)) {
       expect(content).toContain(entry);
     }
-    expect(content).toContain('/.tau/cache/');
+    expect(content).toContain('/.tau/*');
     expect(content).toContain('node_modules/');
     /* Git needs its own control files in the tree (D24), so the generated
      * ignore file no longer excludes itself. */
@@ -54,20 +54,19 @@ describe('generated ignore file', () => {
     expect(content).not.toContain('/.gitattributes');
   });
 
-  /* The ignore file is derived from the path registry, so the records rows
-   * appear and the deleted Jujutsu configuration does not (W1 pin b). */
-  it('lists the records rows and no engine configuration', () => {
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/.tau/workbench/');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/.tau/runs/');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/exports/');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).not.toContain('/.tau/jj-config.toml');
+  /* Project Git policy rule 2: the `/.tau/*` head already excludes every
+   * root-only `.tau` row, so none of them repeats as a line of its own. */
+  it('should name no row the reserved head already covers', () => {
+    const entries = generatedIgnoreEntries(tauRevisionPolicy);
+
+    expect(entries.filter((entry) => entry.startsWith('/.tau/') && entry !== '/.tau/*')).toStrictEqual([]);
+    expect(entries).toContain('/exports/');
   });
 
-  /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
-   * when the generated block excludes it, and excluded as far as the row
-   * matches. A row that classifies by segment must be excluded wherever it
-   * appears, or a nested `.git` would be hidden from every view and captured
-   * into the revision anyway.
+  /* PP5: `versioned` agrees with what stock Git tracks, through the fewest
+   * lines (project Git policy). A row has a line of its own exactly when it is
+   * unversioned, Git would not leave it untracked by itself, and the reserved
+   * head does not already exclude it; a segment row's line matches at any depth.
    *
    * PP5 is stated over the rows, not over every spelling of them: `classify`
    * compares each row folded (G0b-8), so on a case-sensitive disk `Exports/x.step`
@@ -76,19 +75,17 @@ describe('generated ignore file', () => {
    * folded spelling would put Tau's case rules into the person's own ignore file;
    * the capture's own `exclude` (`!classify(path).versioned`) is what keeps such a
    * path out of every tree, and that is the half PP5 exists to protect. */
-  it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
+  it('should give a line only to an unversioned row nothing else excludes', () => {
+    const entries = generatedIgnoreEntries(tauRevisionPolicy);
     for (const row of pathRegistry) {
-      const anywhere = generatedIgnoreEntries(tauRevisionPolicy).some(
-        (entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`,
-      );
-      const atRoot = generatedIgnoreEntries(tauRevisionPolicy).some(
-        (entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`,
+      const covered = row.match === 'root' && row.prefix.startsWith('.tau/');
+      const line = entries.some((entry) =>
+        [`/${row.prefix}`, row.prefix, `**/${row.prefix}`].includes(entry.replace(/\/$/u, '')),
       );
 
-      expect({ prefix: row.prefix, anywhere, atRoot }).toStrictEqual({
+      expect({ prefix: row.prefix, line }).toStrictEqual({
         prefix: row.prefix,
-        anywhere: !row.versioned && row.match === 'segment',
-        atRoot: !row.versioned && row.match === 'root',
+        line: !row.versioned && row.selfIgnored !== true && !covered,
       });
     }
   });
@@ -109,22 +106,24 @@ describe('generated ignore file', () => {
 
     await assert(
       asyncProperty(oneof(rowPath, authoredPath, reservedPath), async (path) => {
+        /* A self-ignored store is Git's own business; the stock-Git case below covers it. */
+        if (pathRegistry.some((row) => row.selfIgnored === true && `/${path}/`.includes(`/${row.prefix}/`))) {
+          return;
+        }
         const excluded = await isIgnored({ fs, dir: ignoreRoot, filepath: path });
         expect(tauPathPolicy.classify(path).versioned).toBe(!excluded);
       }),
     );
   });
 
-  /* G0-8: a trailing `/` restricts a gitignore pattern to directories, and a
-   * control-plane row also covers the one-line `.git` a worktree or submodule
-   * leaves behind — a path `classify` calls unversioned, which a directory-only
-   * pattern would not exclude. `node_modules` keeps its slash: a file of that
-   * name is not the cache. */
-  it('should exclude a control-plane pointer file as well as its directory', () => {
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/.git');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/.jj');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).not.toContain('**/.git/');
-    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/node_modules/');
+  /* Git never walks into `.git` and Jujutsu ignores its own store, so neither
+   * takes a line; `node_modules` keeps its slash (a file of that name is not the
+   * cache) and needs no `**\/`, since a bare name matches at any depth. */
+  it('should leave self-ignored stores to Git and spell node_modules bare', () => {
+    const entries = generatedIgnoreEntries(tauRevisionPolicy);
+
+    expect(entries.filter((entry) => entry.includes('.git') || entry.includes('.jj'))).toStrictEqual([]);
+    expect(entries).toContain('node_modules/');
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their
@@ -138,27 +137,9 @@ describe('generated ignore file', () => {
 !/.tau/machines
 !/.tau/skills
 !/.tau/AGENTS.md
-**/.tau/binding.json
-**/.jj
-**/.git
-**/.tau-staging
-/.tau/types/
-/.tau/tsconfig.generated.json
-/.tau/lockfile.json
-/.tau/workbench/
-/.tau/chats/
-/.tau/runs/
-/.tau/export/
-/.tau/artifacts/
-/.tau/tool-results/
-/.tau/offloaded-tool-results/
-/.tau/project.json
-/.tau/library.json
 /exports/
 /thumbnail.webp
-/.tau/index/
-/.tau/cache/
-**/node_modules/
+node_modules/
 # END Tau generated
 `,
     );
@@ -189,7 +170,7 @@ describe('generated ignore file', () => {
   /* Stock Git is the reader PP5 protects, so the block is checked with the real
    * binary rather than only with isomorphic-git's matcher (R8 / F9). */
   it.runIf(gitToolchainOnPath)(
-    'should ignore unlisted .tau members for stock git and keep the authored controls',
+    'should leave every unversioned path untracked for stock git and keep the authored controls',
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'tau-generated-ignore-git-'));
       // A person's global `core.excludesFile` must not decide a verdict.
@@ -207,6 +188,17 @@ describe('generated ignore file', () => {
           '.tau/revisions/objects/ab/cdef': true,
           /* eslint-enable no-restricted-syntax -- the pin is back on below. */
           '.tau/skills/a/.git/HEAD': true,
+          '.tau/binding.json': true,
+          '.tau/staging/import-x/intent.json': true,
+          '.tau/chats/c.jsonl': true,
+          'vendor/dep/.git': true,
+          '.jj/.gitignore': true,
+          '.jj/repo/store/x': true,
+          'vendor/.jj/.gitignore': true,
+          'vendor/.jj/working_copy/x': true,
+          'exports/part.step': true,
+          'thumbnail.webp': true,
+          'lib/node_modules/dep/index.js': true,
           '.tau/parameters/x.json': false,
           '.tau/machines/printer.json': false,
           '.tau/skills/a/SKILL.md': false,
@@ -217,25 +209,22 @@ describe('generated ignore file', () => {
         await Promise.all(
           Object.keys(paths).map(async (path) => {
             await mkdir(join(root, path, '..'), { recursive: true });
-            await writeFile(join(root, path), '');
+            /* Jujutsu writes `/*` into every store's own `.gitignore`. */
+            await writeFile(join(root, path), path.endsWith('.jj/.gitignore') ? '/*\n' : '');
           }),
         );
-        /* `-v -n` lists every path with the pattern that decided it; a blank
-         * pattern, or a `!` one, means not ignored. */
-        const verdicts = execFileSync('git', ['check-ignore', '--no-index', '-v', '-n', ...Object.keys(paths)], {
-          cwd: root,
-          env,
-        })
-          .toString('utf8')
-          .trim()
-          .split('\n')
-          .map((line) => {
-            const [source, path] = line.split('\t');
-            const pattern = (source ?? '').split(':').slice(2).join(':');
-            return [path, pattern !== '' && !pattern.startsWith('!')] as const;
-          });
+        /* What `git add -A` would track is the verdict PP5 protects: it sees the
+         * block and nested ignore files as check-ignore does, and also Git's own
+         * refusal to walk into `.git`, which no ignore line expresses. */
+        const tracked = new Set(
+          execFileSync('git', ['add', '-A', '--dry-run'], { cwd: root, env })
+            .toString('utf8')
+            .split('\n')
+            .filter((line) => line.startsWith('add '))
+            .map((line) => line.slice("add '".length, -1)),
+        );
 
-        expect(Object.fromEntries(verdicts)).toStrictEqual(paths);
+        expect(Object.fromEntries(Object.keys(paths).map((path) => [path, !tracked.has(path)]))).toStrictEqual(paths);
       } finally {
         await rm(root, { recursive: true, force: true });
       }

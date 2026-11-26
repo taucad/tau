@@ -164,8 +164,9 @@ export const latestEvent = (identity: IdentityState): RegressionOnset | undefine
     .toSorted((a, b) => b.onset.at.localeCompare(a.onset.at))[0];
 
 /**
- * Whether an identity is a flaky-regression candidate: quarantine entry automation refuses such a test, which goes to
- * the operator with its culprit instead of being quarantined as an ordinary flake.
+ * Whether an identity is a flaky-regression candidate. It is the check for quarantine entry automation: once that
+ * automation lands with it (#2864), such a test goes to the operator with its culprit instead of being quarantined as
+ * an ordinary flake. Until then nothing calls it, and a flaky regression can still be quarantined.
  */
 export const isFlakyRegression = (identity: IdentityState): boolean => regressionOnset(identity) !== undefined;
 

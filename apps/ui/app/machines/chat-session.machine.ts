@@ -172,7 +172,8 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
   /**
    * The person stopped a queued send before it was dispatched: abandon its admission. Nothing was placed, because the
-   * host places only a dispatched turn (V4), so the chat holds nothing afterwards.
+   * host places only a dispatched turn (V4), so the chat holds nothing afterwards. A dispatched send its host refused
+   * with a wait, applying nothing, is abandoned the same way (PERF-5).
    */
   | { readonly type: 'withdrawTurn'; readonly queueId: string }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
@@ -404,7 +405,8 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  * The (state, event) pairs this machine ignores (MC-R17).
  *
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
- * - `withdrawTurn` outside `queued.admitting`: a Stop that found no admission of its send in flight.
+ * - `withdrawTurn` outside `queued.admitting` and `queued.dispatched`: a Stop that found no admission or waiting
+ *   dispatch of its send.
  * - `adoptRun` in the states that hold a turn or a live run.
  * - `autoResumeWithdrawn` with no wait in hand.
  * - `requestTurn` in `autoResume.resuming`: the store's own resume, or a gesture over it; the run region owns both.
@@ -423,7 +425,11 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
       runStates.failed,
       runStates.stopped,
     ],
-    ['turnAdmitted', 'withdrawTurn'],
+    ['turnAdmitted'],
+  ),
+  ...pairs(
+    [runStates.idle, runStates.observing, runStates.running, runStates.done, runStates.failed, runStates.stopped],
+    ['withdrawTurn'],
   ),
   ...pairs([runStates.queued, runStates.running], ['adoptRun']),
   ['autoResume.idle', 'autoResumeWithdrawn'],
@@ -463,7 +469,7 @@ export const chatSessionMachine = setup({
   },
 }).createMachine({
   id: 'chat-session',
-  version: '5',
+  version: '6',
   /* A fault no transition modelled is recorded and the chat keeps answering, so a render never throws (MC-R12). */
   onError: ({ event }) => ({ context: { fault: failureMessage(event.error, 'chat-session fault') } }),
   context: ({ input }) => ({
@@ -578,7 +584,21 @@ export const chatSessionMachine = setup({
              * is over a live turn exactly as one made in `running` is — the
              * transport reports `running` only once bytes flow. */
             dispatched: {
-              on: { requestTurn: holdGesture },
+              on: {
+                requestTurn: holdGesture,
+                /* The host refused the send with a wait and applied nothing, and the person stopped it before a
+                 * re-send was taken (PERF-5): nothing was placed, so the chat holds nothing afterwards. */
+                withdrawTurn: ({ context, event }, enq) => {
+                  const request = context.turn?.request;
+                  if (request?.kind !== 'send' || request.queueId !== event.queueId) {
+                    return {};
+                  }
+                  announce(context, enq);
+                  return context.pendingGesture === undefined
+                    ? { target: '#chat-session.run.idle', context: { turn: undefined, ...clearRunDetail } }
+                    : { target: '#chat-session.run.queued.admitting', reenter: true, context: { turn: undefined } };
+                },
+              },
             },
           },
         },

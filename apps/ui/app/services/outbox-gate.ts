@@ -26,6 +26,7 @@ export type OutboxHold =
   | 'command-in-flight'
   | 'admitting'
   | 'chat-loading'
+  | 'host-wait'
   | 'unrelated-live-run'
   | 'after-run-unseen'
   | 'machine-live'
@@ -47,6 +48,8 @@ export type OutboxReadiness = Readonly<{
   admitting: boolean;
   /** The chat's persisted record is loading. */
   chatLoading: boolean;
+  /** The host refused the head with a wait and its backoff has not run out (PERF-5). */
+  hostWaiting: boolean;
 }>;
 
 /** Everything the outbox's gate reads: the facts the MessageQueue model's `Ready` refines, plus this page's readiness. @public */
@@ -113,6 +116,7 @@ export const selectOutboxGate = (facts: OutboxGateFacts): OutboxGate => {
         [!readiness.commandInFlight, 'command-in-flight'],
         [!readiness.admitting, 'admitting'],
         [!readiness.chatLoading, 'chat-loading'],
+        [!readiness.hostWaiting, 'host-wait'],
       ] satisfies ReadonlyArray<readonly [boolean, OutboxHold]>
     ).find(([ready]) => !ready)?.[1];
     if (notReady !== undefined) {

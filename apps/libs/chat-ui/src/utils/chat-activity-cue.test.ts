@@ -34,6 +34,13 @@ describe('selectChatActivityCue', () => {
       'Planning next moves…',
     );
   });
+  it('should say a send that waits for its host is queued, and why, over the turn it will start (PERF-5)', () => {
+    const queued = 'Queued. Your message is sent as soon as this chat can take it.';
+    expect(selectChatActivityCue({ runState: 'done', chatStatus: 'submitted', sending: true, queued })).toEqual({
+      kind: 'waiting',
+      sentence: queued,
+    });
+  });
   it('should not describe the previous turn’s parts while a new turn starts', () => {
     expect(
       selectChatActivityCue({

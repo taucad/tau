@@ -42,7 +42,8 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
-import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { ownerWaitOf, sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import type { CommandRefusal } from '#chat-clients/_internal/host-command.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
@@ -132,6 +133,7 @@ import type {
   ChatMessageQueueRecord,
   ChatMessageQueueStore,
   QueuedChatMessage,
+  QueuedStartCommand,
   QueueLock,
 } from '@taucad/chat-ui/db/chat-message-queue-store';
 import { createChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
@@ -427,6 +429,9 @@ const chatMessagesThrottle = 50;
 /** How often, and from how long a first wait, a taken-back request asks the outbox again before the person is told. */
 const takeBackRetries = 3;
 const takeBackRetryDelay = 250;
+/** A send the host refused with an owner wait is sent again after 250 ms, doubling to 30 s (RH-R17, PERF-5). */
+const hostWaitFirstDelay = 250;
+const hostWaitLongestDelay = 30_000;
 
 /** Approximate retained representation weight, bounded at retirement rather than during streaming. */
 const projectionWeight = (projection: ChatProjection): number => {
@@ -644,6 +649,8 @@ type InternalSession = ChatSession & {
   takeBackRunId: string | undefined;
   /** The stopped or refused send being offered back to the composer: it is no longer queued, so the strip omits it. */
   offering: string | undefined;
+  /** The prepared send the host last refused with an owner wait, sent again by its key once its backoff runs out. */
+  hostWait: HostWait | undefined;
   /** The live run this page saw before it had model text, so its first text can be timed (T10). */
   presentationWatch: string | undefined;
   /** The newest live run whose first model text this page has timed, or found already showing (T10). */
@@ -695,6 +702,10 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
+/** What a message says and carries, comparable whatever order its parts were built in. */
+const compositionOf = (message: MyUIMessage): string =>
+  JSON.stringify([composedText(message), message.parts.flatMap((part) => (part.type === 'file' ? [part.url] : []))]);
+
 /**
  * Park a send after the person's Stop: it leaves only by their Send now. A steer it carried was this send's own way out
  * and is spent, so the gate never reads it as Send now.
@@ -706,6 +717,35 @@ const parkSend = (item: QueuedChatMessage): QueuedChatMessage => {
   const { steer: _spent, ...rest } = item;
   return { ...rest, held: true };
 };
+
+/** A send taken back before any host applied its command: the command is dropped, and a later send mints its own. */
+const unprepared = (item: QueuedChatMessage): QueuedChatMessage => {
+  const { command: _refused, commandPlacement: _placement, ...rest } = item;
+  return rest;
+};
+
+/**
+ * A prepared send the chat's host refused with an owner wait (PERF-5): nothing was applied, its command stays in the
+ * outbox, and it is sent again by the same key once `due`.
+ */
+type HostWait = Readonly<{
+  queueId: string;
+  commandId: string;
+  runId: string;
+  /** Refusals of this command in a row, which set the next backoff. */
+  attempt: number;
+  /** The backoff ran out, so the outbox may send it again. */
+  due: boolean;
+  /** What the chat says while the send waits. */
+  sentence: string;
+  timer: ReturnType<typeof setTimeout>;
+}>;
+
+/** What a send that waits for its host reads as: queued, with why and when it goes (PERF-5). */
+const hostWaitSentence = (refusal: CommandRefusal): string =>
+  refusal.code === 'WRITER_LOCKED' || refusal.code === 'LEADER_VERSION_MISMATCH'
+    ? 'Queued. Another tab still has this chat open for writing. Your message is sent when that tab resumes or closes.'
+    : 'Queued. Your message is sent as soon as this chat can take it.';
 
 /**
  * A Stop this page is carrying out, from the press until nothing is left to wait for. One value, so letting go of it
@@ -2199,6 +2239,17 @@ export class ChatSessionStore {
   }
 
   /**
+   * What the chat says while a send waits for its host (PERF-5): queued, why, and when it goes.
+   *
+   * @param chatId - The chat.
+   * @returns The sentence, or `undefined` when no send waits.
+   * @public
+   */
+  public hostWaitOf(chatId: string): string | undefined {
+    return this.#sessions.get(chatId)?.hostWait?.sentence;
+  }
+
+  /**
    * Hear each time a stopped send's message is put back in this chat's composer, so the composer can take focus.
    *
    * @param chatId - The chat.
@@ -2233,6 +2284,11 @@ export class ChatSessionStore {
     /* Only the person's own Stop takes a send back; closing a chat or a project, or a new turn, lets it go out. */
     const personal = origin === 'stop-button' || origin === 'stop-shortcut';
     if (personal && !session.commandInFlight && this.#withdrawDepartingSend(session, origin)) {
+      return;
+    }
+    /* A send its host refused with a wait never ran: Stop takes it back between its re-sends. */
+    if (personal && !session.commandInFlight && session.hostWait !== undefined) {
+      void this.#takeBackWaitingSend(session, origin);
       return;
     }
     /* The run to end: the command awaiting its host answer, or a send prepared or handed over but not yet a live run
@@ -2586,6 +2642,7 @@ export class ChatSessionStore {
         commandInFlight: session.commandInFlight,
         admitting: this.#isAdmittingTurn(session),
         chatLoading: session.persistenceActorRef.getSnapshot().context.isLoadingChat,
+        hostWaiting: session.hostWait !== undefined && !session.hostWait.due,
       });
       /* The gate names why it holds (`no-host` included) before a missing host is read as nothing to do. */
       if (gate.kind === 'hold') {
@@ -2609,6 +2666,11 @@ export class ChatSessionStore {
             item.command,
             { signal },
           );
+          const wait = ownerWaitOf(answer);
+          if (wait !== undefined) {
+            this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
+            return this.#holdQueue(session, record.items, 'host-wait');
+          }
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
           }
@@ -2631,6 +2693,7 @@ export class ChatSessionStore {
           };
           this.#presentTranscript(session, this.#projectionContext(session.chatId));
         }
+        this.#endHostWait(session);
         const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
         this.#handOff(session, { queueId: item.id, message: item.message, runId: item.command.payload.runId });
         this.#loadOutbox(session, after, false);
@@ -2673,6 +2736,9 @@ export class ChatSessionStore {
       await this.#currentDispatch(session);
       const after = await session.messageQueueStore.read();
       this.#loadOutbox(session, after, false);
+      if (session.hostWait?.queueId === item.id) {
+        return this.#holdQueue(session, after.items, 'host-wait');
+      }
       return after.items.some((entry) => entry.id === item.id)
         ? {
             items: after.items,
@@ -2693,6 +2759,14 @@ export class ChatSessionStore {
    */
   #loadOutbox(session: InternalSession, record: ChatMessageQueueRecord, keepSending = true): void {
     session.outboxRecord = record;
+    const wait = session.hostWait;
+    if (
+      wait !== undefined &&
+      !record.items.some((entry) => entry.id === wait.queueId && entry.command?.commandId === wait.commandId)
+    ) {
+      /* Delivered, acknowledged or taken back elsewhere: nothing is left to send again. */
+      this.#endHostWait(session);
+    }
     const { sendingId } = session.messageQueueRef.getSnapshot().context;
     const sending =
       keepSending && sendingId !== undefined && record.items.some((entry) => entry.id === sendingId)
@@ -2753,6 +2827,76 @@ export class ChatSessionStore {
     }
     session.queueHold = hold;
     return { items, status: 'waiting' };
+  }
+
+  /**
+   * The host refused a prepared send with an owner wait (PERF-5, RH-R17): its writer is a paused tab, is changing
+   * hands, or its host is closing. Nothing was applied, so the outbox keeps the command and sends it again by its key,
+   * 250 ms later and doubling to 30 s, for as long as the wait lasts. Meanwhile the chat reads as queued, says why,
+   * and offers Stop, which takes the send back ({@link ChatSessionStore.#takeBackWaitingSend}).
+   */
+  #holdForHost(
+    session: InternalSession,
+    { queueId, command, refusal }: Readonly<{ queueId: string; command: QueuedStartCommand; refusal: CommandRefusal }>,
+  ): void {
+    const previous = session.hostWait;
+    const attempt = previous?.commandId === command.commandId ? previous.attempt + 1 : 0;
+    clearTimeout(previous?.timer);
+    const timer = setTimeout(
+      () => {
+        this.#hostWaitRanOut(session, timer);
+      },
+      Math.min(hostWaitFirstDelay * 2 ** attempt, hostWaitLongestDelay),
+    );
+    session.hostWait = {
+      queueId,
+      commandId: command.commandId,
+      runId: command.payload.runId,
+      attempt,
+      due: false,
+      sentence: hostWaitSentence(refusal),
+      timer,
+    };
+    if (previous?.commandId !== command.commandId || previous.sentence !== session.hostWait.sentence) {
+      logFacts('info', '[ChatSessionStore] send waits for its host', {
+        chatId: session.chatId,
+        queueId,
+        code: refusal.code,
+      });
+      this.#chatTopics.get(session.chatId)?.emit();
+    }
+    this.#refreshStatus(session);
+    const { stop } = session;
+    if (stop?.target === command.payload.runId && stop.withdrawing === undefined) {
+      /* A Stop pressed while the send was out: nothing ran, so the person's own Stop takes it back. */
+      if (stop.origin === 'stop-button' || stop.origin === 'stop-shortcut') {
+        void this.#takeBackWaitingSend(session, stop.origin);
+      } else {
+        this.#releaseStop(session);
+      }
+    }
+  }
+
+  /** A waiting send's backoff ran out: the outbox may send it again. */
+  #hostWaitRanOut(session: InternalSession, timer: ReturnType<typeof setTimeout>): void {
+    const current = session.hostWait;
+    if (this.#sessions.get(session.chatId) !== session || current?.timer !== timer) {
+      return;
+    }
+    session.hostWait = { ...current, due: true };
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /** The send no longer waits for its host: delivered, acknowledged, taken back or gone. */
+  #endHostWait(session: InternalSession): void {
+    const wait = session.hostWait;
+    if (wait === undefined) {
+      return;
+    }
+    clearTimeout(wait.timer);
+    session.hostWait = undefined;
+    this.#refreshStatus(session);
+    this.#chatTopics.get(session.chatId)?.emit();
   }
 
   /**
@@ -3054,23 +3198,78 @@ export class ChatSessionStore {
   }
 
   /**
+   * Whether an outbox entry was never handed to a host, so a Stop may take it back. A steered send counts: the gate
+   * delivers it only after its steer's run ended. So does a prepared send whose every answer was an owner wait, read
+   * under the delivery lock, where no re-send of it is out, while the log holds no run of it (PERF-5).
+   */
+  #unsent(session: InternalSession, item: QueuedChatMessage, waited: HostWait | undefined): boolean {
+    if (item.command === undefined) {
+      return true;
+    }
+    if (waited === undefined) {
+      return false;
+    }
+    return (
+      item.command.commandId === waited.commandId &&
+      session.hostWait?.commandId === waited.commandId &&
+      this.#projectionContext(session.chatId)?.ledger.runs[waited.runId] === undefined
+    );
+  }
+
+  /** The turn a taken-back waiting send held ends with nothing placed: the chat holds nothing afterwards. */
+  #letGoOfWaitingTurn(session: InternalSession, waited: HostWait): void {
+    this.#endHostWait(session);
+    session.stateActorRef.send({ type: 'withdrawTurn', queueId: waited.queueId });
+    if (session.activeCommand?.type === 'start' && session.activeCommand.payload.runId === waited.runId) {
+      session.activeCommand = undefined;
+      session.watchedRunId = undefined;
+    }
+    this.#refreshStatus(session);
+    this.#scheduleRunReleaseIfTerminal(session);
+  }
+
+  /**
+   * Take back a send that waits for its host (PERF-5). Every answer so far applied nothing, and under the delivery
+   * lock no re-send is out, so the command is dropped and the send is offered to the composer, as a send stopped
+   * during admission is ({@link ChatSessionStore.#finishWithdrawal}). The thread and the strip leave it out meanwhile.
+   */
+  async #takeBackWaitingSend(session: InternalSession, origin: StopOrigin): Promise<void> {
+    const wait = session.hostWait;
+    const entry = session.outboxRecord?.items.find((item) => item.id === wait?.queueId);
+    if (wait === undefined || entry === undefined) {
+      this.#releaseStop(session);
+      return;
+    }
+    logFacts('info', '[ChatSessionStore] waiting send withdrawn', {
+      chatId: session.chatId,
+      messageId: entry.id,
+      origin,
+    });
+    session.stop = { origin, withdrawing: entry.id, target: wait.runId, sent: undefined, cancelId: undefined };
+    this.#refreshDeparting(session);
+    this.#chatTopics.get(session.chatId)?.emit();
+    await this.#finishWithdrawal(session, entry, wait);
+  }
+
+  /**
    * Offer a withdrawn send back to the composer. Under the delivery lock, so no page is handing it over meanwhile, it
    * stays at the head of the outbox, held, and so does the work queued behind it: as behind a stopped run, that goes
    * out only with Send now. Then the composer is offered it ({@link ChatSessionStore.#offerToComposer}).
    */
-  async #finishWithdrawal(session: InternalSession, departing: QueuedChatMessage): Promise<void> {
+  async #finishWithdrawal(session: InternalSession, departing: QueuedChatMessage, waited?: HostWait): Promise<void> {
     let record: ChatMessageQueueRecord;
     try {
       record = await session.messageQueueStore.exclusive(async () =>
         session.messageQueueStore.update((current) =>
-          /* Never handed to a host. A steered send counts: the gate delivers it only after its steer's run ended. */
-          current.items.some((item) => item.id === departing.id && item.command === undefined)
+          current.items.some((item) => item.id === departing.id && this.#unsent(session, item, waited))
             ? {
                 ...current,
                 items: current.items.map((item) =>
-                  item.id === departing.id || (item.command === undefined && item.steer === undefined)
-                    ? parkSend(item)
-                    : item,
+                  item.id === departing.id
+                    ? parkSend(unprepared(item))
+                    : item.command === undefined && item.steer === undefined
+                      ? parkSend(item)
+                      : item,
                 ),
               }
             : current,
@@ -3088,6 +3287,9 @@ export class ChatSessionStore {
     }
     const kept = record.items.find((item) => item.id === departing.id);
     if (kept?.held === true && kept.command === undefined) {
+      if (waited !== undefined) {
+        this.#letGoOfWaitingTurn(session, waited);
+      }
       await this.#offerToComposer(session, kept);
       this.#releaseStop(session);
     } else if (kept !== undefined || record.afterRunId === departing.requestId) {
@@ -3772,6 +3974,46 @@ export class ChatSessionStore {
     }
   }
 
+  /**
+   * Let go of a restored draft the outbox already holds (PERF-8).
+   *
+   * A send writes two files: the outbox first, so a reload can never lose it, and then the composer's cleared draft.
+   * A reload between the two restores the composer with the very message the strip shows as queued, and the next
+   * thing typed is appended to it. The restored draft is let go when an outbox entry composes the same text and
+   * attachments and the person has not touched the composer since it was restored. A draft whose send was already
+   * delivered is kept: the outbox no longer names it, and the composer keeping a copy loses nothing. So is one equal to
+   * a held entry, which may be on its way into the composer ({@link ChatSessionStore.#transferToComposer}): letting
+   * the draft go then could lose both copies, where keeping it only shows the message twice.
+   *
+   * @param session - The chat whose composer was restored.
+   * @param draft - The draft its record held.
+   */
+  async #dropQueuedDraft(session: InternalSession, draft: MyUIMessage): Promise<void> {
+    let outbox: ChatMessageQueueRecord;
+    try {
+      outbox = await session.messageQueueStore.read();
+    } catch (error) {
+      console.warn('[ChatSessionStore] the outbox could not be read to settle a restored draft', session.chatId, error);
+      return;
+    }
+    const restored = session.draftActorRef.getSnapshot().context;
+    const composed = compositionOf(buildDraftMessage(restored.draftText, restored.draftAttachments));
+    if (
+      this.#sessions.get(session.chatId) !== session ||
+      restored.touched.draft ||
+      composed !== compositionOf(draft) ||
+      !outbox.items.some((entry) => entry.held !== true && compositionOf(entry.message) === composed)
+    ) {
+      return;
+    }
+    session.draftActorRef.send({ type: 'clearDraft' });
+    try {
+      await this.releaseDraftAttachments(session.chatId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] draft attachments could not be released', error);
+    }
+  }
+
   /** Put a message in the composer wholesale: it replaces the draft's text and attachments rather than adding to them. */
   #loadDraft(session: InternalSession, message: MyUIMessage): void {
     session.draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft: message });
@@ -4058,6 +4300,12 @@ export class ChatSessionStore {
       }
       session.commandInFlight = false;
       this.#refreshStatus(session);
+      const wait = ownerWaitOf(answer);
+      if (request.queueId !== undefined && command.type === 'start' && wait !== undefined) {
+        /* Its command stays in the outbox, which sends it again by its key: the chat holds the turn meanwhile. */
+        this.#holdForHost(session, { queueId: request.queueId, command, refusal: wait });
+        return;
+      }
       if (answer.status === 'refused') {
         throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
       }
@@ -4067,6 +4315,7 @@ export class ChatSessionStore {
         return;
       }
       accepted = true;
+      this.#endHostWait(session);
       if (command.type === 'start' && request.kind !== 'continue') {
         session.acceptedGesture = { runId: command.payload.runId, request };
         this.#presentTranscript(session, this.#projectionContext(session.chatId));
@@ -5178,6 +5427,9 @@ export class ChatSessionStore {
     // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
     const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
       draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
+      if (record !== 'absent' && record.draft !== undefined && record.draft.parts.length > 0) {
+        void this.#dropQueuedDraft(session, record.draft);
+      }
     });
 
     persistenceActorRef.start();
@@ -5315,6 +5567,7 @@ export class ChatSessionStore {
       refreshDeferred: false,
       takeBackRunId: undefined,
       offering: undefined,
+      hostWait: undefined,
       presentationWatch: undefined,
       presentedRunId: undefined,
       status: 'ready',
@@ -5335,6 +5588,7 @@ export class ChatSessionStore {
         session.turnSubscriptions = [];
         recordLoadedSubscription.unsubscribe();
         session.commandAbort?.abort();
+        clearTimeout(session.hostWait?.timer);
         clearTimeout(session.announceTimer);
         session.announceTimer = undefined;
         lifecycleSubscription?.unsubscribe();
@@ -5378,7 +5632,8 @@ export class ChatSessionStore {
    */
   #awaitsRun(session: InternalSession): boolean {
     const command = session.activeCommand;
-    if (session.commandInFlight) {
+    /* A send waiting for its host reads as on its way, with Stop to take it back. */
+    if (session.commandInFlight || session.hostWait !== undefined) {
       return true;
     }
     /* A refused read folds nothing more, so the run a command waits for would never arrive. */

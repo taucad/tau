@@ -22,6 +22,8 @@ export type ChatActivityFacts = Readonly<{
   parts?: readonly MyMessagePart[];
   /** A send is leaving for its own turn, before the chat's machine has admitted it. */
   sending?: boolean;
+  /** A send waits for its host, which will take it later: what the chat says meanwhile (PERF-5). */
+  queued?: string;
 }>;
 
 /** Select an honest current action without cycling through invented progress. */
@@ -30,9 +32,14 @@ export const selectChatActivityCue = ({
   chatStatus,
   parts = [],
   sending = false,
+  queued,
 }: ChatActivityFacts): ChatActivityCue | undefined => {
   if (runState === 'reconnecting') {
     return { kind: 'reconnecting', sentence: 'Reconnecting…' };
+  }
+  /* Nothing runs for it yet, and it goes on its own once the host can take it: the send is queued, and says why. */
+  if (queued !== undefined) {
+    return { kind: 'waiting', sentence: queued };
   }
   if (runState === 'approval') {
     return { kind: 'waiting', sentence: 'Waiting for approval' };

@@ -241,6 +241,12 @@
 \* action or verdict changes.
 \* Chat UX second automated review: the return to the composer moves under the delivery lock and leaves the outbox
 \* only once the composer's record holds it; `Withdraw`'s two outcomes already cover both. No action or verdict changes.
+\* PERF-5 (2026-11-26): an owner `wait` refusal (WRITER_LOCKED, LOG_FENCED, HOST_CLOSED and kin) of a prepared send is
+\* no longer a failure. The delivery lets go of the lock and keeps the command (`Yield`), and the outbox sends it again
+\* by its key after a backoff of 250 ms doubling to 30 s (`Recover`, `Deliver`). Stop meanwhile takes it back: a
+\* prepared send no delivery holds and the host never accepted may now be withdrawn, dropping its command.
+\* PERF-8 (2026-11-26): a reload between a send's outbox write and its composer clear restored the queued message
+\* as a draft. The composer lets go of a restored draft that an outbox entry composes; no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -370,14 +376,17 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                      !.counts[s.prepared] = 0, !.held = @ \ {s.prepared},
                      !.target = IF s.steerItem = s.prepared THEN None ELSE @,
                      !.steerItem = IF s.steerItem = s.prepared THEN None ELSE @]
+\* A prepared send no delivery holds, which the host refused with a wait and never accepted, is withdrawn the same
+\* way, and its command is dropped (PERF-5).
 \* Withdrawing a send that was never prepared or accepted parks it, and every other unprepared, unsteered send
 \* still queued, until the person sends it now; its spent steer is dropped. Then either an empty composer takes it,
 \* and it leaves the queue, its saved copy and the submitted set with its per-message facts (the person may submit
 \* it again), or the composer holds new text and it stays queued, parked. The store holds it first and removes it
 \* only once the composer has it; the model takes both writes as one step.
 Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
-                  /\ m # s.prepared /\ m \notin Accepted
+                  /\ (m # s.prepared \/ s.owner = None) /\ m \notin Accepted
                   /\ \/ s' = [s EXCEPT !.queue = Remove(@, m),
+                          !.prepared = IF @ = m THEN None ELSE @,
                           !.steerItem = IF @ = m THEN None ELSE @,
                           !.target = IF s.steerItem = m THEN None ELSE @,
                           !.saved = IF Durable THEN Remove(@, m) ELSE @,
@@ -386,6 +395,7 @@ Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
                           !.composer = @ \cup {m},
                           !.held = (@ \ {m}) \cup (Members(s.queue) \ {m, s.prepared, s.steerItem})]
                      \/ s' = [s EXCEPT !.steerItem = IF @ = m THEN None ELSE @,
+                          !.prepared = IF @ = m THEN None ELSE @, !.counts[m] = IF s.prepared = m THEN 0 ELSE @,
                           !.target = IF s.steerItem = m THEN None ELSE @,
                           !.held = @ \cup {m} \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 \* The host takes back an accepted turn it had not kept: the run is cancelled and its request goes back to the
@@ -398,6 +408,10 @@ TakeBack(m) == /\ m \in Accepted /\ m = s.active /\ Live(s.phase[m]) /\ m \notin
                     !.held = @ \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
+\* PERF-5: a delivery the host refused with an owner wait (RH-R17) lets go of the delivery lock and keeps the command;
+\* Recover sends it again by the same key after the backoff.
+Yield(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \notin Accepted /\ s.counts[s.prepared] > 0
+            /\ s' = [s EXCEPT !.owner = None]
 \* The finite crash scenario begins only after a queue save has answered.
 Crash(t) == /\ t \in s.alive /\ s.pending = None
             /\ s' = [s EXCEPT !.alive = @ \ {t},
@@ -407,7 +421,7 @@ Crash(t) == /\ t \in s.alive /\ s.pending = None
 Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
-             \/ Acknowledge(t) \/ LoseAck(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
+             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
              \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))

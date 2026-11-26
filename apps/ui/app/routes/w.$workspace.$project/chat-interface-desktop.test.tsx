@@ -71,6 +71,9 @@ vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
   WorkbenchDockview: () => <div data-testid='workbench-lane' />,
   getWorkbenchTabIcon: () => undefined,
 }));
+vi.mock('#components/panes/dockview-styles.js', () => ({
+  DockviewStyles: () => <span data-testid='dockview-styles' />,
+}));
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
@@ -493,6 +496,17 @@ describe('ChatInterfaceDesktop', () => {
 
     await user.click(closedToggle);
     expect(setWorkbenchOpen).toHaveBeenLastCalledWith(true);
+  });
+
+  it('loads the docks’ stylesheet with the layout, not inside a lane', async () => {
+    /* A stylesheet with a precedence suspends its nearest boundary until it loads. Inside a lane that boundary is the
+     * split view's per-pane one, whose fallback replaced the frame's lanes with bare spinners (Progressive Loading
+     * Policy rule 15). The layout loads it itself, so the sheet holds the layout's boundary, where the frame shows. */
+    renderDesktop();
+    await screen.findByTestId('viewer-lane');
+
+    const sheet = screen.getByTestId('dockview-styles');
+    expect(sheet.closest('[data-pane]')).toBeNull();
   });
 
   it('does not render a workspace-global Files toggle', async () => {

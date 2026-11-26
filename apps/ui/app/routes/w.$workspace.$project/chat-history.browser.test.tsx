@@ -360,3 +360,42 @@ describe('chat composer across the transcript load', () => {
     expect(after.composer).toBe(screen.getByTestId('chat-textarea').getBoundingClientRect().height);
   });
 });
+
+describe('transcript shape while the transcript loads', () => {
+  /* QA on an iPhone 13: in the chat sheet (279 px tall) the transcript's bars hung below the header at their own height
+   * and ran behind the composer. The bars belong to the feed, above the composer region (Progressive Loading Policy
+   * rule 15). */
+  it('keeps every bar above the composer in a short lane', async () => {
+    await page.viewport(390, 664);
+    publishChatSession({
+      messages: [],
+      transcript: 'loading',
+      todoList: { kind: 'loading' },
+      rememberedComposerTrays: [],
+    });
+    render(
+      <TooltipProvider>
+        <div style={{ display: 'flex', height: 279 }}>
+          <ChatHistory />
+        </div>
+      </TooltipProvider>,
+    );
+
+    const composerTop = screen.getByRole('region', { name: 'Chat composer' }).getBoundingClientRect().top;
+    const bars = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="project-wait-skeleton"] [data-slot="skeleton"]'),
+    ];
+    expect(bars.length).toBeGreaterThan(0);
+    /* A bar the feed clips is not drawn; every bar drawn ends above the composer. */
+    const drawn = bars.filter((bar) => {
+      const box = bar.getBoundingClientRect();
+      const clip = bar.closest<HTMLElement>('[data-slot="project-wait"]')!.getBoundingClientRect();
+      return box.top < clip.bottom;
+    });
+    expect(drawn.length).toBeGreaterThan(0);
+    for (const bar of drawn) {
+      const clip = bar.closest<HTMLElement>('[data-slot="project-wait"]')!.getBoundingClientRect();
+      expect(Math.min(bar.getBoundingClientRect().bottom, clip.bottom)).toBeLessThanOrEqual(composerTop);
+    }
+  });
+});

@@ -97,6 +97,10 @@ export const selectOutboxGate = (facts: OutboxGateFacts): OutboxGate => {
     return { kind: 'empty' };
   }
   const hold = (reason: OutboxHold): OutboxGate => ({ kind: 'hold', item, reason });
+  /* A send a Stop is taking back is neither delivered nor shown as sent, whatever else holds it. */
+  if (facts.withdrawing === item.id) {
+    return hold('withdrawing');
+  }
   if (!facts.caughtUp) {
     return hold('log-not-caught-up');
   }
@@ -131,9 +135,6 @@ export const selectOutboxGate = (facts: OutboxGateFacts): OutboxGate => {
   const { steer } = item;
   if (steer !== undefined && retainsLiveRun(phase) && run?.runId === steer.payload.runId) {
     return { kind: 'steer', item };
-  }
-  if (facts.withdrawing === item.id) {
-    return hold('withdrawing');
   }
   if (item.held === true && steer === undefined) {
     return hold('held');

@@ -118,6 +118,11 @@ describe('selectOutboxGate', () => {
       expected: { kind: 'hold', reason: 'withdrawing' },
     },
     {
+      name: 'a send being taken back while the log catches up',
+      overrides: { withdrawing: 'a', caughtUp: false, readiness: { ...ready, host: false } },
+      expected: { kind: 'hold', reason: 'withdrawing' },
+    },
+    {
       name: 'a send held behind a taken-back one',
       overrides: { items: [entry('a', { held: true })] },
       expected: { kind: 'hold', reason: 'held' },
@@ -197,6 +202,12 @@ describe('selectDepartingSend', () => {
     const behind = selectOutboxGate(facts({ items, live: true, readiness: undefined }));
     expect(selectDepartingSend(queue(items, 'a'), behind)?.id).toBe('a');
     expect(selectDepartingSend(queue(items, undefined, 'failed'), selectOutboxGate(facts({ items })))).toBeUndefined();
+  });
+
+  it('should never show a send being taken back, even while it is still being delivered', () => {
+    const items = [entry('a')];
+    const gate = selectOutboxGate(facts({ items, caughtUp: false, withdrawing: 'a', readiness: undefined }));
+    expect(selectDepartingSend(queue(items, 'a'), gate)).toBeUndefined();
   });
 });
 

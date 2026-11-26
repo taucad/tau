@@ -239,6 +239,8 @@
 \* changes.
 \* Chat UX F1/F2 with T4: the departing send is appended to the throttled transcript, so it shows at once. No
 \* action or verdict changes.
+\* Chat UX second automated review: the return to the composer moves under the delivery lock and leaves the outbox
+\* only once the composer's record holds it; `Withdraw`'s two outcomes already cover both. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

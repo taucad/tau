@@ -424,6 +424,9 @@ const inactiveProjectionLimit = 4;
 const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
 /** Milliseconds between chat message notifications while a stream writes (D-UI-10). */
 const chatMessagesThrottle = 50;
+/** How often, and from how long a first wait, a taken-back request asks the outbox again before the person is told. */
+const takeBackRetries = 3;
+const takeBackRetryDelay = 250;
 
 /** Approximate retained representation weight, bounded at retirement rather than during streaming. */
 const projectionWeight = (projection: ChatProjection): number => {
@@ -2619,10 +2622,17 @@ export class ChatSessionStore {
           }
           throw error;
         }
-        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
         if (session.departing?.id === item.id) {
-          session.handedOff = { message: item.message, runId: item.command.payload.runId };
+          /* Accepted: the thread keeps the request through the accepted gesture until its run folds, as a dispatch
+           * does, so it never leaves both the thread and the strip while its turn starts. */
+          session.acceptedGesture = {
+            runId: item.command.payload.runId,
+            request: { kind: 'send', message: item.message, queueId: item.id },
+          };
+          this.#presentTranscript(session, this.#projectionContext(session.chatId));
         }
+        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
+        this.#handOff(session, { queueId: item.id, message: item.message, runId: item.command.payload.runId });
         this.#loadOutbox(session, after, false);
         return { items: after.items, status: 'changed' };
       }
@@ -2747,10 +2757,11 @@ export class ChatSessionStore {
 
   /**
    * An admission refused this send (credits, a model it cannot reach, a missing host), so nothing was sent. The chat's
-   * banner says why. A lone send is held and offered back to the composer, as a refused send always has been (I5), so a
-   * retry is the person's own Send and never a second copy of the same request; a composer that took new text keeps
-   * it, and the send stays held. A send with others queued behind it keeps its place, so the queue's order never
-   * changes, and the strip offers Retry with the reason.
+   * banner says why. A lone send with an empty composer is held and offered back to it, as a refused send always has
+   * been (I5), so a retry is the person's own Send and never a second copy of the same request; if the composer takes
+   * new text before the offer lands, the composer keeps it and the send stays held. A send the composer cannot take
+   * because it already holds new text, or one with others queued behind it, keeps its place, blocked: the queue's
+   * order never changes, and the strip offers Retry with the reason, which a held row would not show.
    */
   async #refuseQueuedSend(session: InternalSession, item: QueuedChatMessage): Promise<QueueAdvanceResult> {
     const reason = session.stateActorRef.getSnapshot().context.failureReason;
@@ -3103,7 +3114,7 @@ export class ChatSessionStore {
    * @param session - The chat.
    * @param message - The request the host took back.
    */
-  async #returnTakenBack(session: InternalSession, message: MyUIMessage): Promise<void> {
+  async #returnTakenBack(session: InternalSession, message: MyUIMessage, attempt = 0): Promise<void> {
     const id = generatePrefixedId(idPrefix.message);
     const entry: QueuedChatMessage = {
       id,
@@ -3125,11 +3136,25 @@ export class ChatSessionStore {
         this.#loadOutbox(session, record);
       }
     } catch (error) {
-      /* It cannot be kept: the composer is the one place left for it. */
+      /* It cannot be kept: an empty composer takes it directly. One that holds new text keeps it, and the outbox is
+       * asked again before the person is told, since the thread no longer shows the request. */
       console.warn('[ChatSessionStore] a taken-back send could not be kept in the outbox', session.chatId, error);
       if (await this.#restoreStoppedDraft(session, message)) {
         this.#draftReturnTopics.get(session.chatId)?.emit();
+        return;
       }
+      if (attempt < takeBackRetries && this.#sessions.get(session.chatId) === session) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, takeBackRetryDelay * 2 ** attempt);
+        });
+        await this.#returnTakenBack(session, message, attempt + 1);
+        return;
+      }
+      const text = message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: parseErrorForPersistence(new Error(`The stopped message could not be saved. It read: ${text}`)),
+      });
       return;
     }
     await this.#offerToComposer(session, entry);
@@ -3152,8 +3177,51 @@ export class ChatSessionStore {
     }
     session.offering = entry.id;
     this.#chatTopics.get(session.chatId)?.emit();
+    const transfer = this.#transferToComposer(session, entry);
+    session.composerWork.add(transfer);
     try {
-      if (!(await this.#restoreStoppedDraft(session, entry.message))) {
+      const taken = await transfer;
+      if (taken) {
+        this.#draftReturnTopics.get(session.chatId)?.emit();
+      }
+      return taken;
+    } catch (error) {
+      console.warn('[ChatSessionStore] a returned send could not reach the composer', session.chatId, error);
+      return false;
+    } finally {
+      session.composerWork.delete(transfer);
+      if (session.offering === entry.id) {
+        session.offering = undefined;
+        this.#chatTopics.get(session.chatId)?.emit();
+      }
+    }
+  }
+
+  /**
+   * Move a parked send into the composer. Its bytes are copied first, outside the delivery lock: a copy is idempotent,
+   * and a send whose bytes did not all copy stays parked, where the chat's own copies still serve its Send now. Then,
+   * under the lock that delivery and Send now take, so no page sends it meanwhile, only a send still parked here comes
+   * back, and the outbox lets go of it only once the composer's own record holds it.
+   *
+   * @returns Whether the composer took it.
+   */
+  async #transferToComposer(session: InternalSession, entry: QueuedChatMessage): Promise<boolean> {
+    if (!(await this.#retainAttachments(session, entry.message))) {
+      return false;
+    }
+    return session.messageQueueStore.exclusive(async () => {
+      const current = await session.messageQueueStore.read();
+      const parked = current.items.find((item) => item.id === entry.id);
+      if (
+        parked?.held !== true ||
+        parked.command !== undefined ||
+        parked.steer !== undefined ||
+        this.#sessions.get(session.chatId) !== session ||
+        !isComposerEmpty(session)
+      ) {
+        return false;
+      }
+      if (!(await this.#writeDraft(session, parked.message))) {
         return false;
       }
       try {
@@ -3168,13 +3236,25 @@ export class ChatSessionStore {
         /* The composer has it, and the outbox still holds it until Send now: the person sees it twice, never zero. */
         console.warn('[ChatSessionStore] a returned send could not leave the outbox', session.chatId, error);
       }
-      this.#draftReturnTopics.get(session.chatId)?.emit();
       return true;
-    } finally {
-      if (session.offering === entry.id) {
-        session.offering = undefined;
-        this.#chatTopics.get(session.chatId)?.emit();
-      }
+    });
+  }
+
+  /**
+   * The departing send is the host's from here: it has a turn of its own. The log may already have folded its request,
+   * or even its end, while the acknowledgement was written, so the handoff is reconciled with it at once.
+   */
+  #handOff(
+    session: InternalSession,
+    { queueId, message, runId }: Readonly<{ queueId: string; message: MyUIMessage; runId: string }>,
+  ): void {
+    if (session.departing?.id !== queueId) {
+      return;
+    }
+    session.handedOff = { message, runId };
+    const projection = this.#projectionContext(session.chatId);
+    if (projection !== undefined) {
+      this.#settleHandedOff(session, projection);
     }
   }
 
@@ -3266,6 +3346,11 @@ export class ChatSessionStore {
     try {
       let answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
       if (answer.status === 'refused' && answer.code === 'COMMAND_UNREADABLE' && 'withdraw' in command.payload) {
+        if (!this.#ownsLiveAttempt(session, { cancelId: command.commandId, runId, attempt: entry?.attempt })) {
+          /* The Stop settled, or its run ended and resumed, while the host refused: the retry is no longer the
+           * person's, and it must not stop an attempt nobody asked to stop. */
+          return;
+        }
         /* A host older than `withdraw` refuses the field and applies nothing: the same cancel without it still stops
          * the run, which then keeps its request in the thread. */
         answer = await sendHostCommand(async () => connector.connect(session.chatId), {
@@ -3297,6 +3382,24 @@ export class ChatSessionStore {
       session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
       this.#releaseStop(session);
     }
+  }
+
+  /** Whether the cancel `cancelId` is still the pending Stop's, and the attempt it aimed at is still the live one. */
+  #ownsLiveAttempt(
+    session: InternalSession,
+    { cancelId, runId, attempt }: Readonly<{ cancelId: string; runId: string; attempt: number | undefined }>,
+  ): boolean {
+    if (sentCancel(session) !== cancelId) {
+      return false;
+    }
+    const entry = this.#projectionContext(session.chatId)?.ledger.runs[runId];
+    return (
+      entry === undefined ||
+      ((attempt === undefined || entry.attempt === attempt) &&
+        entry.lifecycle !== 'completed' &&
+        entry.lifecycle !== 'failed' &&
+        entry.lifecycle !== 'cancelled')
+    );
   }
 
   /** A Stop that has nothing left to wait for: the composer leaves `stopping`. */
@@ -3628,38 +3731,67 @@ export class ChatSessionStore {
    * @param onlyIfEmpty - Do not overwrite text the person entered while a Stop was settling.
    */
   async #restoreDraftMessage(session: InternalSession, message: MyUIMessage, onlyIfEmpty = false): Promise<boolean> {
-    const attachments = message.parts.flatMap((part) =>
-      part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
-    );
-    if (attachments.length > 0) {
-      try {
-        const binding = await session.composer;
-        await Promise.allSettled(
-          attachments.map(async (attachment) => {
-            if (await binding.record.attachments.has(attachment)) {
-              return;
-            }
-            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
-          }),
-        );
-      } catch (error) {
-        /* The chips come back either way; the person can re-attach what the
-         * composer cannot read. Losing the text as well would be worse. */
-        console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained', error);
-      }
+    if (!(await this.#retainAttachments(session, message))) {
+      /* The chips come back either way; the person can re-attach what the
+       * composer cannot read. Losing the text as well would be worse. */
+      console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained');
     }
     if (onlyIfEmpty && !isComposerEmpty(session)) {
       return false;
     }
-    /* Wholesale: this replaces the displacing send's text and attachments
-     * rather than clearing and then restoring over the top of it. */
+    this.#loadDraft(session, message);
+    return true;
+  }
+
+  /**
+   * Re-retain a returning message's attachments from the chat's directory into the composer's (I5).
+   *
+   * @returns Whether every one of them is the composer's now.
+   */
+  async #retainAttachments(session: InternalSession, message: MyUIMessage): Promise<boolean> {
+    const attachments = message.parts.flatMap((part) =>
+      part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
+    );
+    if (attachments.length === 0) {
+      return true;
+    }
+    try {
+      const binding = await session.composer;
+      const copies = await Promise.allSettled(
+        attachments.map(async (attachment) => {
+          if (await binding.record.attachments.has(attachment)) {
+            return;
+          }
+          await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
+        }),
+      );
+      return copies.every((copy) => copy.status === 'fulfilled');
+    } catch (error) {
+      console.warn('[ChatSessionStore] the composer could not be reached for returned attachments', error);
+      return false;
+    }
+  }
+
+  /** Put a message in the composer wholesale: it replaces the draft's text and attachments rather than adding to them. */
+  #loadDraft(session: InternalSession, message: MyUIMessage): void {
     session.draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft: message });
     const draft = session.draftActorRef.getSnapshot().context;
     session.composerRecordRef.send({
       type: 'patch',
       fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments) },
     });
-    return true;
+  }
+
+  /**
+   * Put a message in the composer and wait for the composer's record to hold it.
+   *
+   * @returns Whether the record's write landed; a failed one keeps retrying on its own curve.
+   */
+  async #writeDraft(session: InternalSession, message: MyUIMessage): Promise<boolean> {
+    this.#loadDraft(session, message);
+    await flushRecord(session.composerRecordRef);
+    const written = session.composerRecordRef.getSnapshot();
+    return written.status === 'active' && written.matches({ writes: 'idle' }) && written.context.attempt === 0;
   }
 
   /**
@@ -3945,8 +4077,8 @@ export class ChatSessionStore {
           return;
         }
         abort.signal.throwIfAborted();
-        if (request.kind === 'send' && session.departing?.id === request.queueId) {
-          session.handedOff = { message: request.message, runId: command.payload.runId };
+        if (request.kind === 'send') {
+          this.#handOff(session, { queueId: request.queueId, message: request.message, runId: command.payload.runId });
         }
       }
       const { seedRequestId } = session;

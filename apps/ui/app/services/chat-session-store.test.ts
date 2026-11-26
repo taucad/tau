@@ -6114,6 +6114,219 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      /* The host's take-back, for each way a return to the composer can fail. */
+      const takenBackRows = (parts: ReadonlyArray<Record<string, unknown>>) => [
+        ...runningRows('taken'),
+        logRow(2, {
+          runId: 'taken',
+          type: 'message.appended',
+          message: { id: 'msg_taken', role: 'user', content: parts },
+        }),
+      ];
+      const takenBackEnd = logRow(3, {
+        runId: 'taken',
+        type: 'run.lifecycle',
+        state: 'cancelled',
+        attempt: 1,
+        detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+      });
+
+      it('should ask the outbox again for a request the host took back while the composer holds new text', async () => {
+        const chatId = 'withdrawn_write_retried';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const write = deps.client.writeFile.bind(deps.client);
+        let failures = 1;
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            failures > 0 &&
+            path === chatMessageQueuePath(projectId, chatId) &&
+            new TextDecoder().decode(bytes).includes('Take me back')
+          ) {
+            failures -= 1;
+            throw new Error('EIO');
+          }
+          await write(path, bytes);
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, takenBackRows([{ type: 'text', text: 'Take me back' }]));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ held: true, message: { parts: [{ type: 'text', text: 'Take me back' }] } }],
+            });
+          });
+          expect(failures).toBe(0);
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a taken-back request parked when its attachment cannot be copied to the composer', async () => {
+        const chatId = 'withdrawn_copy_failed';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        /* The chat's copy of the image is missing, so the composer cannot take its own. */
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(
+            store,
+            chatId,
+            takenBackRows([
+              { type: 'text', text: 'Keep my image' },
+              { type: 'file-ref', path: pngUrl, mimeType: 'image/png' },
+            ]),
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              items: [{ held: true, message: { parts: [{ type: 'text', text: 'Keep my image' }, { type: 'file' }] } }],
+            });
+            expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          });
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a taken-back request parked until the composer record holds it', async () => {
+        const chatId = 'withdrawn_draft_unsaved';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (path === composerPath(projectId, chatId)) {
+            throw new Error('EIO');
+          }
+          await write(path, bytes);
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          publishLogRows(store, chatId, takenBackRows([{ type: 'text', text: 'Take me back' }]));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          await vi.waitFor(() => {
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('Take me back');
+            expect(store.unqueuedSendOf(chatId)).toBeUndefined();
+          });
+          /* The composer shows it but could not save it: the outbox keeps its durable copy, held for Send now. */
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ held: true, message: { parts: [{ type: 'text', text: 'Take me back' }] } }],
+          });
+        } finally {
+          warn.mockRestore();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should leave a parked send queued when another page sends it while it returns to the composer', async () => {
+        const chatId = 'withdrawn_sent_elsewhere';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
+        const copying = pending<undefined>();
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (path.startsWith(draftAttachmentsDirectory(projectId, chatId))) {
+            await copying.promise;
+          }
+          await write(path, bytes);
+        });
+        try {
+          publishLogRows(
+            store,
+            chatId,
+            takenBackRows([
+              { type: 'text', text: 'Send me from there' },
+              { type: 'file-ref', path: pngUrl, mimeType: 'image/png' },
+            ]),
+          );
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          publishLogRows(store, chatId, [takenBackEnd], 3);
+          const parked = await vi.waitFor(() => {
+            const [entry] = session.messageQueueRef.getSnapshot().context.items;
+            expect(entry?.held).toBe(true);
+            return entry!;
+          });
+          /* Send now, as another page would press it, while this page still copies the image. */
+          await store.steerQueuedMessage(chatId, parked.id);
+          copying.resolve(undefined);
+          await vi.waitFor(() => {
+            expect(deps.client.files.has(`${draftAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toBe(true);
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          /* It went out from there, so it does not come back here as well. */
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: parked.id, steer: { type: 'cancel' } }],
+          });
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should not send a Stop again without `withdraw` once that Stop has settled', async () => {
+        const chatId = 'stop_older_host_settled';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalledOnce();
+          });
+          /* The run ends, and the Stop with it, before the older host's refusal arrives. */
+          publishLogRows(store, chatId, [lifecycleRow(2, 'cancelled', 'live')], 2);
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          answer.resolve({
+            commandId: hostCommand.mock.calls[0]![0].commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'COMMAND_UNREADABLE',
+            message: 'Unrecognized key: "withdraw"',
+          });
+          await Promise.resolve();
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should stop calling a handed-over send departing once the log has its request', async () => {
         const chatId = 'departing_logged';
         const { store, session, unpublish } = await open(chatId, 'departing_project');
@@ -6400,16 +6613,79 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      it('should not call a send departing when the log ended its run while its acceptance was written', async () => {
+        const chatId = 'handoff_ended_during_ack';
+        const projectId = 'departing_project';
+        const { store, deps, unpublish } = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        const acknowledging = pending<undefined>();
+        const written = pending<undefined>();
+        const write = deps.client.writeFile.bind(deps.client);
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            path === chatMessageQueuePath(projectId, chatId) &&
+            new TextDecoder().decode(bytes).includes('"afterRunId":"req_first"')
+          ) {
+            written.resolve(undefined);
+            await acknowledging.promise;
+          }
+          await write(path, bytes);
+        });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('first'));
+          await written.promise;
+          publishLogRows(
+            store,
+            chatId,
+            [
+              lifecycleRow(3, 'admitted', 'req_first'),
+              lifecycleRow(4, 'running', 'req_first'),
+              logRow(5, {
+                runId: 'req_first',
+                type: 'message.appended',
+                message: { id: 'first', role: 'user', content: [{ type: 'text', text: 'first' }] },
+              }),
+              lifecycleRow(6, 'completed', 'req_first'),
+            ],
+            3,
+          );
+          acknowledging.resolve(undefined);
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(store.departingSendOf(chatId)).toBeUndefined();
+          });
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should still stop a run the host accepted when this page could not record the acceptance', async () => {
         const chatId = 'stop_ack_failed';
-        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        const { store, deps, hostCommand, unpublish } = await open(chatId, 'departing_project');
         const answer = pending<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
         hostCommand.mockImplementationOnce(async () => answer.promise);
         const unadmit = queueAdmission(chatId);
-        const { messageQueueStore } = session as unknown as {
-          messageQueueStore: { acknowledge: (id: string, commandId: string) => Promise<unknown> };
-        };
-        vi.spyOn(messageQueueStore, 'acknowledge').mockRejectedValueOnce(new Error('Disk full'));
+        /* The acknowledgement's write, which hands the run over and lets go of the entry, fails once. */
+        const write = deps.client.writeFile.bind(deps.client);
+        let failures = 1;
+        vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
+          if (
+            failures > 0 &&
+            path === chatMessageQueuePath('departing_project', chatId) &&
+            new TextDecoder().decode(bytes).includes('"afterRunId":"req_first"')
+          ) {
+            failures -= 1;
+            throw new Error('Disk full');
+          }
+          await write(path, bytes);
+        });
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('first'));
@@ -6431,6 +6707,56 @@ describe('ChatSessionStore', () => {
         } finally {
           unadmit();
           unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should keep a replayed send in the thread from its acceptance until the log has it', async () => {
+        const chatId = 'replay_accepted_shown';
+        const projectId = 'departing_project';
+        const first = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        first.hostCommand.mockRejectedValueOnce(new Error('Acknowledgement lost'));
+        publishLogRows(first.store, chatId, []);
+        await first.store.requestTurn(chatId, queuedGesture('replayed'));
+        await vi.waitFor(() => {
+          expect(first.session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        first.unpublish();
+        first.store.release(chatId);
+        const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+        store.setDependencies(first.deps);
+        const session = store.acquire(chatId, projectId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        const unadmitReopened = queueAdmission(chatId);
+        const replay = vi.fn<AgentHostClient['hostCommand']>(async () => ({
+          commandId: 'req_replayed',
+          generation: 2,
+          status: 'applied',
+          effect: 'durable',
+          cursor: 1,
+        }));
+        const client = mock<AgentHostClient>({
+          catchUp: writerOwnedCatchUp,
+          hostCommand: replay,
+          close: vi.fn(async () => undefined),
+        });
+        const disconnect = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          publishLogRows(store, chatId, []);
+          store.refreshMessageQueue(chatId);
+          /* Accepted, and out of the outbox, before the log has its rows: the thread still shows it. */
+          await vi.waitFor(() => {
+            expect(replay).toHaveBeenCalledOnce();
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(session.messages.filter((message) => message.id === 'replayed')).toHaveLength(1);
+        } finally {
+          disconnect();
+          unadmitReopened();
+          unadmit();
           store.release(chatId);
         }
       });

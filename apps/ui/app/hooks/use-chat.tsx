@@ -147,6 +147,11 @@ export type CombinedChatState = {
   agentInvocations: string;
   /** The transcript's load state (I21): the lane draws no empty-chat state while it is `loading`. */
   transcript: ChatTranscriptState;
+  /**
+   * The newest request in `messages` while it is still on its way to the host: shown as sent, but not yet a turn of
+   * the transcript, so it cannot be edited or rated yet.
+   */
+  departingMessageId: string | undefined;
   /** The composer trays whose height the lane reserves while their reads are pending (U10). */
   rememberedComposerTrays: readonly ComposerTray[];
   /** The run phase, else the command in flight (T3). */
@@ -255,6 +260,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
         return store.getMessagePresentation(activeChatId).agentInvocations;
       },
       transcript: selectChatTranscript(session),
+      departingMessageId: store.departingSendOf(activeChatId),
       rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
       status,
       persistedError: persistenceContext?.persistedError,

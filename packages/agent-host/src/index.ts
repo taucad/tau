@@ -51,7 +51,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost, pausedRunHoldMilliseconds, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
-export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+export { isResumableRun, isResumableRunFailure, isUserStoppedRun, turnWithdrawnCode } from '#log/resumable.js';
 export {
   emptyChatLedger,
   foldChatLedger,

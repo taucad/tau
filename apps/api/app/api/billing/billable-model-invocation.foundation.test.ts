@@ -166,10 +166,10 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
   const suffix = randomUUID();
   const environment = 'development';
   const authUserId = `invocation-${suffix}`;
-  /* The gateway routes and the name generator bill different models, so the fixture funds both. A tiered
+  /* The gateway routes and the name generator bill the same model, so the fixture funds it once. A tiered
    * route funds one meter contract per pinned tariff, so a body whose proved input bound reaches the
    * premium threshold resolves the `:long-context` sibling instead of the base sku. */
-  const fundedModels = ['openai-gpt-5.6-luna', 'openai-gpt-6-luna'].map((model) => ({
+  const fundedModels = ['openai-gpt-6-luna'].map((model) => ({
     model,
     meterContractId: `model-meter-v1:${model}`,
     sku: `model:${model}`,
@@ -357,7 +357,7 @@ const gatewayCode = (error: unknown): string | undefined =>
 const pauseRoute = async (reason: string): Promise<string> => {
   const [row] = await database
     .insert(schema.billingRoutePause)
-    .values({ environment: 'development', sku: 'model:openai-gpt-5.6-luna', actor: 'foundation-operator', reason })
+    .values({ environment: 'development', sku: 'model:openai-gpt-6-luna', actor: 'foundation-operator', reason })
     .returning({ id: schema.billingRoutePause.id });
   return row!.id;
 };
@@ -383,7 +383,7 @@ const invoke = async (input: {
     attempt: { version: 1, key: input.attemptKey },
     providerWire: 'openai-responses',
     body: {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       stream: true,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI Responses wire field
       max_output_tokens: 1,
@@ -809,7 +809,7 @@ describe('funded invocation HTTP boundary', () => {
         response.flushHeaders();
         /* eslint-disable @typescript-eslint/naming-convention -- exact native Responses fixture */
         const events = [
-          { type: 'response.created', response: { id: 'response-fixture', model: 'gpt-5.6-luna', created_at: 1 } },
+          { type: 'response.created', response: { id: 'response-fixture', model: 'gpt-6-luna', created_at: 1 } },
           {
             type: 'response.output_item.added',
             output_index: 0,
@@ -837,7 +837,7 @@ describe('funded invocation HTTP boundary', () => {
             type: 'response.completed',
             response: {
               id: 'response-fixture',
-              model: 'gpt-5.6-luna',
+              model: 'gpt-6-luna',
               created_at: 1,
               status: 'completed',
               usage: {
@@ -882,8 +882,8 @@ describe('funded invocation HTTP boundary', () => {
           60_000,
           exactCount
             ? new Map(
-                // The gateway routes and the name generator bill different models; both count exactly.
-                ['openai-gpt-5.6-luna', 'openai-gpt-6-luna'].map((model) => [
+                // The gateway routes and the name generator bill the same model; it counts exactly.
+                ['openai-gpt-6-luna'].map((model) => [
                   model,
                   {
                     qualification: 'controlled-local-zero',
@@ -1002,7 +1002,7 @@ describe('funded invocation HTTP boundary', () => {
           ],
         };
         const gatewayBody = {
-          model: 'openai-gpt-5.6-luna',
+          model: 'openai-gpt-6-luna',
           stream: true,
           max_output_tokens: 1,
           input: 'fixture',
@@ -1029,7 +1029,7 @@ describe('funded invocation HTTP boundary', () => {
         const malformed = await fetch(`${base}/v1/llm/openai/v1/responses`, {
           method: 'POST',
           headers: { ...headers, 'x-tau-attempt-id': `malformed-${randomUUID()}` },
-          body: JSON.stringify({ model: 'openai-gpt-5.6-luna', stream: true, input: 'missing bounded output' }),
+          body: JSON.stringify({ model: 'openai-gpt-6-luna', stream: true, input: 'missing bounded output' }),
         });
         expect(malformed.status).toBe(400);
         expect(requests).toBe(0);
@@ -1054,8 +1054,8 @@ describe('funded invocation HTTP boundary', () => {
         });
         expect(countedOperation?.invocation?.inputCount?.inputTokens).toBe(exactCount ? '1' : undefined);
         if (exactCount) {
-          expect(countBodies).toEqual([{ model: 'gpt-5.6-luna', ...countedFields }]);
-          expect(JSON.parse(providerBodies[0]!)).toEqual({ ...gatewayBody, model: 'gpt-5.6-luna' });
+          expect(countBodies).toEqual([{ model: 'gpt-6-luna', ...countedFields }]);
+          expect(JSON.parse(providerBodies[0]!)).toEqual({ ...gatewayBody, model: 'gpt-6-luna' });
           expect(countedOperation?.authorizedAtoms).toBe(2n);
         }
 
@@ -1238,13 +1238,13 @@ describe('funded invocation HTTP boundary', () => {
 /* The pinned tariff follows the request's own proved input bound: only a body that can reach the
  * premium threshold is held, valued and charged at it, so each sample carries the body its tier needs. */
 it.each([
-  // One input at $0.2/million plus one output at $1.2/million.
-  { input: 1, cacheKnown: true, supplierCostPicoUsd: 1_400_000n, longContextMinimum: null },
+  // One input at $0.1/million plus one output at $0.5/million.
+  { input: 1, cacheKnown: true, supplierCostPicoUsd: 600_000n, longContextMinimum: null },
   {
-    // 272,001 input at the premium $0.4/million plus one output at $1.8/million.
+    // 272,001 input at the premium $0.2/million plus one output at $0.75/million.
     input: 272_001,
     cacheKnown: true,
-    supplierCostPicoUsd: 108_802_200_000n,
+    supplierCostPicoUsd: 54_400_950_000n,
     longContextMinimum: '272001',
     body: 'a'.repeat(268_000),
   },
@@ -1299,7 +1299,7 @@ it.each([
               attempt: { version: 1, key: `unqualified-${randomUUID()}` },
               providerWire: 'openai-responses',
               // eslint-disable-next-line @typescript-eslint/naming-convention -- native OpenAI ceiling field
-              body: { model: 'openai-gpt-5.6-luna', stream: true, max_output_tokens: 1, input: 'fixture', ...extra },
+              body: { model: 'openai-gpt-6-luna', stream: true, max_output_tokens: 1, input: 'fixture', ...extra },
               priceHeaders: {},
               activity: 'agent',
               signal: new AbortController().signal,
@@ -1326,7 +1326,7 @@ it.each([
       // A base pin proves the premium tier unreachable, so its valuation carries the base schedule alone.
       expect(operation?.invocation?.supplierValuation?.longContextMinimumInputTokens).toBe(sample.longContextMinimum);
       expect(operation?.sku).toBe(
-        sample.longContextMinimum === null ? 'model:openai-gpt-5.6-luna' : 'model:openai-gpt-5.6-luna:long-context',
+        sample.longContextMinimum === null ? 'model:openai-gpt-6-luna' : 'model:openai-gpt-6-luna:long-context',
       );
       if (sample.cacheKnown) {
         expect(operation).toMatchObject({
@@ -1430,7 +1430,7 @@ it('settles a long-context pin at the base tariff when the observed input never 
 
     const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
     // The hold stays where the proof put it: the bound could have reached the premium threshold.
-    expect(operation?.sku).toBe('model:openai-gpt-5.6-luna:long-context');
+    expect(operation?.sku).toBe('model:openai-gpt-6-luna:long-context');
     expect(operation?.invocation?.supplierValuation?.longContextMinimumInputTokens).toBe('272001');
     // 70,000 input + 1 output at the base schedule, not 140,002 at the premium one.
     expect(operation?.chargedAtoms).toBe(70_001n);
@@ -1499,7 +1499,7 @@ it('should settle a retail overrun at the authorization, record customer_bound a
     await result.completion;
 
     const [operation] = await database.select().from(creditOperation).where(eq(creditOperation.id, result.operationId));
-    expect(operation?.sku).toBe('model:openai-gpt-5.6-luna:long-context');
+    expect(operation?.sku).toBe('model:openai-gpt-6-luna:long-context');
     expect(operation).toMatchObject({ customerState: 'settled', chargedAtoms: operation?.authorizedAtoms });
     const exceptions = await database
       .select()
@@ -1599,7 +1599,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     const url = `http://127.0.0.1:${address.port}`;
     const counters = new Map<string, InputCountCapability | undefined>([
       [
-        'openai-gpt-5.6-luna',
+        'openai-gpt-6-luna',
         {
           qualification: 'controlled-local-zero',
           environment: 'development',
@@ -1653,7 +1653,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
         attempt: { version: 1, key: randomUUID() },
         providerWire: 'openai-responses',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- exact native Responses field
-        body: { model: 'openai-gpt-5.6-luna', input: 'fixture', max_output_tokens: 2, stream: true },
+        body: { model: 'openai-gpt-6-luna', input: 'fixture', max_output_tokens: 2, stream: true },
         priceHeaders: {},
         activity: 'agent',
         signal: new AbortController().signal,
@@ -1668,7 +1668,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
       await resumeRoute(pause);
     }
     expect(counts).toBe(0);
-    const unavailableOwner = createOwner(url, 60_000, new Map([['openai-gpt-5.6-luna', undefined]]));
+    const unavailableOwner = createOwner(url, 60_000, new Map([['openai-gpt-6-luna', undefined]]));
     await expect(
       invoke({ owner: unavailableOwner, authUserId: fixture.authUserId, attemptKey: randomUUID() }),
     ).rejects.toThrow();
@@ -2075,7 +2075,7 @@ describe('funded admission reads no supplier state', () => {
           error: {
             type: 'MODEL_ROUTE_PAUSED',
             message: "This model route is paused by Tau's operators.",
-            details: { routeId: 'openai-gpt-5.6-luna' },
+            details: { routeId: 'openai-gpt-6-luna' },
           },
         });
         expect(metrics.billingFundedOperationDenials.add).toHaveBeenCalledWith(1, {
@@ -2096,7 +2096,7 @@ describe('funded admission reads no supplier state', () => {
             attempt: { version: 1, key: `other-route-${randomUUID()}` },
             providerWire: 'openai-responses',
             // eslint-disable-next-line @typescript-eslint/naming-convention -- native OpenAI ceiling field
-            body: { model: 'openai-gpt-5.5', stream: true, max_output_tokens: 1, input: 'fixture' },
+            body: { model: 'openai-gpt-6-sol', stream: true, max_output_tokens: 1, input: 'fixture' },
             priceHeaders: {},
             activity: 'agent',
             signal: new AbortController().signal,

@@ -918,6 +918,67 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(transcript.filter((message) => message.role === 'user')).toHaveLength(2);
   });
 
+  /* Chat UX F2: only the host's record of a take-back leaves a request out; any other cancel keeps it in place. */
+  it.each([
+    {
+      name: 'a take-back',
+      detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+      output: false,
+      kept: false,
+    },
+    { name: 'a steer or close cancel', detail: undefined, output: false, kept: true },
+    {
+      name: 'a kept turn',
+      detail: { code: 'USER_STOPPED', message: 'You stopped this turn.' },
+      output: false,
+      kept: true,
+    },
+    {
+      name: 'a take-back after output',
+      detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+      output: true,
+      kept: true,
+    },
+  ])('should keep the request of $name in the transcript: $kept', ({ detail, output, kept }) => {
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running', 'r1'),
+      ...(output
+        ? [logRow(3, { runId: 'r1', type: 'message.appended', message: { id: 'a1', role: 'assistant', content: 'y' } })]
+        : [lifecycleRow(3, 'running', 'r1')]),
+      logRow(4, {
+        runId: 'r1',
+        type: 'run.lifecycle',
+        state: 'cancelled',
+        attempt: 1,
+        ...(detail === undefined ? {} : { detail }),
+      }),
+    ];
+    const projection = project(rows, 1);
+    expect(projection.views['r1']?.withdrawn).toBe(detail?.code === 'TURN_WITHDRAWN' ? true : undefined);
+    expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(kept ? ['r1'] : []);
+    /* A seed check still sees every request the log holds. */
+    expect(selectTranscriptSource(projection, { withRetracted: true }).map((run) => run.runId)).toEqual(['r1']);
+  });
+
+  it('should leave out a request another device took back', () => {
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      logRow(2, {
+        runId: 'r1',
+        type: 'run.lifecycle',
+        state: 'cancelled',
+        attempt: 1,
+        detail: { code: 'TURN_WITHDRAWN', message: 'You took this request back.' },
+      }),
+    ];
+    const foreign = project(rows, 3);
+    const projection: ChatProjection = { ...initialChatProjection, remote: { digest: 'd', views: foreign.views } };
+    expect(selectTranscriptSource(projection)).toEqual([]);
+  });
+
   it('should trim only the messages a rewind dropped from a run that keeps its user turn', async () => {
     const user = (id: string) => ({ id, role: 'user', content: 'x' });
     const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });

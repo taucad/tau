@@ -11,15 +11,15 @@
   "variants": {
     "adaptive": {
       "project": {
-        "brotliBytes": 1992509,
-        "requests": 311,
-        "largestChunkBrotliBytes": 167234,
+        "brotliBytes": 1990795,
+        "requests": 287,
+        "largestChunkBrotliBytes": 167542,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1275412,
-        "requests": 228,
-        "largestChunkBrotliBytes": 143390,
+        "brotliBytes": 1279327,
+        "requests": 203,
+        "largestChunkBrotliBytes": 127248,
         "knownHeavy": {}
       }
     }

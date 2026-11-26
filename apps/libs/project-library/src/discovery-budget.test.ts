@@ -424,6 +424,25 @@ describe('a copy delete proves the other copy from disk', () => {
     expect(begin.mock.calls.map((call) => call[2])).toEqual([{ copy: true }]);
   });
 
+  /* Review B1: a copy no route binds is proven from storage, never from the index, which may still list a gone copy. */
+  it('should ask for the Trash when the index lists an unbound copy that is gone from disk', async () => {
+    const harness = await startLibrary();
+    const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');
+    /* The pass lists the folder copy no route binds; the disk no longer holds it, and no evidence says so. */
+    harness.profile.removeDirectory('workspace', 'copy-000');
+    harness.profile.reset();
+
+    await act(async () => {
+      await expect(harness.library.commands.permanentlyDeleteProject(homeId(0))).rejects.toThrow(
+        'Permanent delete is available only for trashed projects',
+      );
+      await settle(harness);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
+    expect(harness.profile.counts()).toMatchObject({ scans: 0, sweeps: 1 });
+  });
+
   it('should journal a copy delete whose other copy vanished without copy, so the Trash check applies', async () => {
     const harness = await startLibrary();
     const begin = vi.spyOn(harness.profile.worker, 'beginPermanentDeleteProject');

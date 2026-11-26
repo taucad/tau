@@ -33,14 +33,18 @@ function RemoveCommentButton({
 }
 
 /**
- * The new-message draft's comments, in the composer: each can be reworded or removed without the viewer.
+ * A draft's comments, in its composer: each can be reworded or removed without the viewer.
  *
+ * @param props - Which draft: the new message's, or the open edit's.
  * @returns The list, or nothing for a draft without comments.
  */
-export function DraftCommentList(): React.JSX.Element | undefined {
-  const annotations = useDraftSelector((state) => state.draftAnnotations);
-  const attachments = useDraftSelector((state) => state.draftAttachments);
-  const { setDraftAnnotations, removeDraftAttachment } = useDraftActions();
+export function DraftCommentList({ mode }: { readonly mode: 'main' | 'edit' }): React.JSX.Element | undefined {
+  const isEdit = mode === 'edit';
+  const annotations = useDraftSelector((state) => (isEdit ? state.editDraftAnnotations : state.draftAnnotations));
+  const attachments = useDraftSelector((state) => (isEdit ? state.editDraftAttachments : state.draftAttachments));
+  const actions = useDraftActions();
+  const setDraftAnnotations = isEdit ? actions.setEditDraftAnnotations : actions.setDraftAnnotations;
+  const removeDraftAttachment = isEdit ? actions.removeEditDraftAttachment : actions.removeDraftAttachment;
   if (!annotations || annotations.comments.length === 0) {
     return undefined;
   }

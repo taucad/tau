@@ -609,9 +609,9 @@ export const ChatTextarea = memo(function ({
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
         comments={
-          mode === 'main' && logic.hasDraftComments ? (
+          logic.hasDraftComments ? (
             <Suspense fallback={null}>
-              <DraftCommentList />
+              <DraftCommentList mode={mode} />
             </Suspense>
           ) : undefined
         }

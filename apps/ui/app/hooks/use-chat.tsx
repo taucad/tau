@@ -185,6 +185,8 @@ export type CombinedChatState = {
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
 };
 
 function shallowEqual<T>(a: T, b: T): boolean {
@@ -286,6 +288,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
       editDraftAttachments: draftContext.editDraftAttachments,
+      editDraftAnnotations: draftContext.editDraftAnnotations,
     };
     const next = selector(state);
     const cached = cacheRef.current;
@@ -335,6 +338,8 @@ export type DraftState = {
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
   /** An attachment for the main draft is still resizing or storing, so it is not in `draftAttachments` yet. */
   attachingMain: boolean;
   /** The same for the open edit. */
@@ -381,6 +386,7 @@ const draftStateOf = (context: DraftContext): DraftState => {
     activeEditMessageId,
     editDraftText: context.editDraftText,
     editDraftAttachments: context.editDraftAttachments,
+    editDraftAnnotations: context.editDraftAnnotations,
     attachingMain: attachmentQueue.some((entry) => entry.target === 'main'),
     attachingEdit: attachmentQueue.some((entry) => entry.target === 'edit'),
     pendingMain: pending.main,
@@ -453,6 +459,8 @@ export type DraftActions = {
    */
   addEditDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeEditDraftAttachment: (index: number) => void;
+  /** Replace the open edit's comments and annotated pictures; a record over a limit is refused. */
+  setEditDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   clearMessageEdit: (messageId: string) => void;
 };
 
@@ -498,6 +506,9 @@ export function useDraftActions(): DraftActions {
       removeEditDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeEditDraftAttachment', index });
       },
+      setEditDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setEditDraftAnnotations', annotations });
+      },
       clearMessageEdit(messageId: string) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
       },
@@ -537,7 +548,11 @@ export type ChatActions = DraftActions & {
   editMessage: (
     messageId: string,
     content: string,
-    options?: { attachments?: readonly StoredAttachmentRef[]; references?: readonly CadReference[] },
+    options?: {
+      attachments?: readonly StoredAttachmentRef[];
+      references?: readonly CadReference[];
+      annotations?: MessageAnnotations;
+    },
   ) => void;
 };
 
@@ -652,6 +667,7 @@ export function useChatActions(chatId?: string): ChatActions {
           text: content,
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
           ...(options?.references === undefined ? {} : { references: options.references }),
+          ...(options?.annotations === undefined ? {} : { annotations: options.annotations }),
         });
       },
     };

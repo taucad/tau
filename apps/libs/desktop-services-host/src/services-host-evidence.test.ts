@@ -122,15 +122,15 @@ describe('desktopChatObserver', () => {
       fetch: fetchMock,
     })(noRows);
 
-    /* One read for the summaries' grant and one for the ratings'. */
+    /* One read serves the summaries' grant and the ratings' (chat performance plan WP-02). */
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
     /* A refused grant purges the queue files; settle those writes before the directory is removed. */
     await Promise.all([observer.reporter.refresh(), observer.feedback?.refresh()]);
     observer.close();
 
-    for (const [url, init] of fetchMock.mock.calls.slice(0, 2)) {
+    for (const [url, init] of fetchMock.mock.calls) {
       expect(url).toBe('https://api.test/v1/telemetry-purposes?projectId=project-1');
       expect(new Headers(init?.headers).get('authorization')).toBe('Bearer session-token');
     }
